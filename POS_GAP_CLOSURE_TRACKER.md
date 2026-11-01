@@ -25,8 +25,8 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 3 Payments | Sale payment webhooks / reconciliation / settlement | Missing | **1** | ❌ | ❌ | ❌ | ❌ | — |
 | 3 Payments | bKash / Nagad / ShurjoPay providers | Missing | **1** | ❌ | ❌ | ❌ | ❌ | Per official provider docs |
 | 3 Payments | Payment reference uniqueness | **Defective** → **fixed** | **1** ✅ | ✅ ConflictError mapping updated | — | ✅ 0016 composite unique | integration | — |
-| 4 Tax | Configurable tax engine (rates, product assignment, inclusive pricing) | Missing | **1** | ❌ (sale-level manual VAT only) | ❌ | ❌ | ❌ | `tax_rates` + `product_taxes`, server-side calc |
-| 4 Tax | Historical tax preservation | Partial | 1 | ✅ snapshot on sale | ✅ | ✅ | — | Retain rule reference |
+| 4 Tax | Configurable tax engine (rates, product assignment, inclusive pricing) | Missing → **Partial** | **1** 🔄 | ✅ rules engine (exclusive/inclusive/exempt, effective dates, location scope, server-side calc) | ❌ settings UI pending | ✅ 0019 | integration 10/10 | Frontend settings + product-tax UI; customer-specific treatment (future) |
+| 4 Tax | Historical tax preservation | Partial → **Complete (backend)** | 1 ✅ | ✅ per-line snapshot (id/name/rate/mode/amount) | receipt carries breakdown | ✅ tax_detail | integration | — |
 | 5 Returns | Full / partial returns, reasons, dispositions | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 5 Returns | Exchanges | Missing | **1** | ❌ | ❌ | ❌ | ❌ | Exchange tx type + difference settlement |
 | 5 Returns | Refund methods (store credit, provider refund) | Missing | **1** | ❌ | ❌ | ❌ | ❌ | Depends on Ph1 payments |
@@ -88,3 +88,10 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Manual cashier payment rows remain a separate unchanged flow — verified electronic payments layer on top, per Module 3's separation requirement.
   - Verification: tsc clean; full suite 247/266 (same 19 pre-existing, zero regressions incl. the SSLCommerz refactor); new `saleIntents.integration.test.ts` 9/9 — capture, replay, double-verify, over-amount, gateway-invalid, cross-tenant 404, cancel semantics, IPN capture, unknown-tran IPN; audit_log shows 16 captures / 32 created / 4 failed / 4 cancelled from the run.
   - Remaining for Module 3: POS payment-dialog UI wiring, provider config admin UI, reconciliation report, bKash/Nagad adapters.
+- **2026-11-01** — Phase 1 slice 6 (tax engine, backend) complete:
+  - Migration `0019`: `tax_rates` (percent with exclusive/inclusive mode, optional location scope, effective dates, soft-deactivation only) + `product_taxes` (many-to-many assignment) + `sale_items.tax_amount` / `tax_detail` historical snapshots. New `taxes.view`/`taxes.manage` permissions (manager: both; cashier: view).
+  - Rules engine in `cartPricing.ts` (`getCartTotalsWithTaxRules`): pro-rata cart-discount allocation, exclusive tax added on top, inclusive tax extracted (combined-rate split), per-rule amounts. When ANY line has rules, the legacy cart-wide `vatPercent` is not applied (mixing would double-tax); unassigned products are exempt; no rules anywhere → legacy fallback unchanged.
+  - `resolveTaxRulesForSale` resolves active rates by location + effective date at transaction time; snapshots (id, name, rate, mode, amount) written per line — editing/deactivating a rate never rewrites history (verified by test).
+  - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
+  - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
+  - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.

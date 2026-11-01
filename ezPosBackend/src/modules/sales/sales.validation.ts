@@ -176,11 +176,11 @@ export function validatePayments(
   );
 
   if (duePoisha > 0 && customerId === null) {
-    throw new NotFoundError("Due payment requires a customer.");
+    throw new BadRequestError("Due payment requires a customer.");
   }
 
   if (paidPoisha + duePoisha !== toPoisha(finalTotal)) {
-    throw new NotFoundError(
+    throw new BadRequestError(
       "Received payments plus due must equal the final total.",
     );
   }

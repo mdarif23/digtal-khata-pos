@@ -1,4 +1,16 @@
-import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { products } from "../../db/schema/products.js";
 import { categories } from "../../db/schema/categories.js";
@@ -48,7 +60,14 @@ import {
 } from "./sales.validation.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 import { recordCashSaleInTx } from "../cashRegisters/cashRegisters.service.js";
-import { getCartTotals, getLinePricing } from "./utils/cartPricing.js";
+import {
+  getCartTotals,
+  getCartTotalsWithTaxRules,
+  getLinePricing,
+  type TaxRuleSnapshot,
+} from "./utils/cartPricing.js";
+import { taxRates } from "../../db/schema/taxRates.js";
+import { productTaxes } from "../../db/schema/productTaxes.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { pushRefundStatusAfterCommit } from "../../modules/integrations/integrations.service.js";
 import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
@@ -373,6 +392,8 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
       unitPrice: saleItems.sellingPrice,
       discount: saleItems.discount,
       lineTotal: saleItems.lineTotal,
+      taxAmount: saleItems.taxAmount,
+      taxDetail: saleItems.taxDetail,
     })
     .from(saleItems)
     .innerJoin(productVariants, eq(saleItems.variantId, productVariants.id))
@@ -460,6 +481,8 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
         unitPrice: Number(item.unitPrice),
         discount: Number(item.discount),
         lineTotal: Number(item.lineTotal),
+        taxAmount: Number(item.taxAmount),
+        taxDetail: item.taxDetail,
       };
     }),
     subtotal: Number(sale.subtotal ?? 0),
@@ -534,6 +557,59 @@ async function findSaleByIdempotencyKey(
   };
 }
 
+/**
+ * Resolves the tax rules in effect for each variant at transaction time:
+ * product assignments → active rates whose location scope and effective
+ * dates (matched against saleDate) qualify. The result drives server-side
+ * tax computation AND the per-line historical snapshot — the live
+ * tax_rates rows are never consulted for money math after this point.
+ */
+async function resolveTaxRulesForSale(
+  tx: DbTransaction,
+  businessId: number,
+  locationId: number,
+  saleDate: Date,
+  variantIds: number[],
+): Promise<Map<number, TaxRuleSnapshot[]>> {
+  const map = new Map<number, TaxRuleSnapshot[]>();
+  if (variantIds.length === 0) return map;
+  const saleDateStr = saleDate.toISOString().slice(0, 10);
+  const rows = await tx
+    .select({
+      variantId: productVariants.id,
+      taxRateId: taxRates.id,
+      name: taxRates.name,
+      rate: taxRates.rate,
+      isInclusive: taxRates.isInclusive,
+    })
+    .from(productVariants)
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .innerJoin(productTaxes, eq(productTaxes.productId, products.id))
+    .innerJoin(taxRates, eq(taxRates.id, productTaxes.taxRateId))
+    .where(
+      and(
+        eq(productVariants.businessId, businessId),
+        inArray(productVariants.id, variantIds),
+        eq(taxRates.businessId, businessId),
+        eq(taxRates.isActive, true),
+        or(isNull(taxRates.locationId), eq(taxRates.locationId, locationId)),
+        or(isNull(taxRates.validFrom), lte(taxRates.validFrom, saleDateStr)),
+        or(isNull(taxRates.validTo), gte(taxRates.validTo, saleDateStr)),
+      ),
+    );
+  for (const row of rows) {
+    const list = map.get(row.variantId) ?? [];
+    list.push({
+      taxRateId: row.taxRateId,
+      name: row.name,
+      rate: Number(row.rate),
+      isInclusive: row.isInclusive,
+    });
+    map.set(row.variantId, list);
+  }
+  return map;
+}
+
 export async function createSale(
   businessId: number,
   locationId: number,
@@ -587,12 +663,24 @@ export async function createSale(
       })
       .sort((a, b) => a.variantId - b.variantId); // same lock order for every cashier
 
-    // 5. Calculate every total from the same trusted items.
-    const totals = getCartTotals(
-      trustedItems,
-      discount,
-      Number(vatPercent ?? 0),
+    // 5. Calculate every total from the same trusted items. When any line's
+    // product carries tax rules, VAT comes from those rules (server-side,
+    // snapshotted per line) and the legacy cart-wide vatPercent is not
+    // applied at all — mixing the two semantics would double-tax.
+    const taxRulesByVariant = await resolveTaxRulesForSale(
+      tx,
+      businessId,
+      locationId,
+      new Date(saleDate),
+      trustedItems.map((i) => i.variantId),
     );
+    const usesTaxRules = [...taxRulesByVariant.values()].some(
+      (rules) => rules.length > 0,
+    );
+    const totals = usesTaxRules
+      ? getCartTotalsWithTaxRules(trustedItems, discount, taxRulesByVariant)
+      : getCartTotals(trustedItems, discount, Number(vatPercent ?? 0));
+    const lineTaxes = "perLine" in totals ? totals.perLine : null;
 
     const totalDiscount = roundMoney(
       totals.itemDiscount + totals.cartDiscountAmount,
@@ -666,9 +754,12 @@ export async function createSale(
 
     const saleId = newSale.id;
 
-    // 9. Insert sale items with price and cost snapshots.
-    for (const item of trustedItems) {
+    // 9. Insert sale items with price, cost, and tax snapshots. perLine is
+    // index-aligned with trustedItems (both derive from the same list; unit
+    // prices are pre-validated so no line is skipped in the totals pass).
+    for (const [itemIndex, item] of trustedItems.entries()) {
       const line = getLinePricing(item.unitPrice, item.quantity, item.discount);
+      const lineTax = lineTaxes?.[itemIndex];
 
       let cost: { totalCost: number; costAtSale: number; serialIds?: number[] };
 
@@ -708,6 +799,8 @@ export async function createSale(
           costAtSale: cost.costAtSale,
           lineTotal: line.total,
           discount: line.discountAmount,
+          taxAmount: lineTax?.taxAmount ?? 0,
+          taxDetail: lineTax?.detail ?? [],
         })
         .returning({ id: saleItems.id });
       if (!saleItem) throw new Error("Failed to create sale item.");
