@@ -6,6 +6,7 @@ import express, {
 import cors from "cors";
 import productRouter from "./modules/products/products.routes.js";
 import salesRouter from "./modules/sales/sales.routes.js";
+import saleIntentsRouter from "./modules/sales/saleIntents.routes.js";
 import customersRouter from "./modules/customers/customers.routes.js";
 import expenseRouter from "./modules/expenses/expenses.routes.js";
 import purchasesRouter from "./modules/purchases/purchases.routes.js";
@@ -98,6 +99,8 @@ export function buildApp() {
 
   app.use("/", productRouter);
   app.use("/", salesRouter);
+  // Payment-intent IPN is public and must match before generic sale routes.
+  app.use("/", saleIntentsRouter);
   app.use("/", customersRouter);
   app.use("/", expenseRouter);
   app.use("/", purchasesRouter);
