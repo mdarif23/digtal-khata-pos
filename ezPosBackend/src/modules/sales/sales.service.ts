@@ -481,6 +481,58 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
   };
 }
 
+/**
+ * Resolves an idempotent checkout replay: rebuilds the same response shape
+ * as a fresh createSale from the already-committed sale. `paidAmount` and
+ * `change` are re-derived from the stored payment rows so the response is
+ * truthful about what was actually recorded.
+ */
+async function findSaleByIdempotencyKey(
+  tx: DbTransaction,
+  businessId: number,
+  idempotencyKey: string,
+) {
+  const [sale] = await tx
+    .select({
+      id: sales.id,
+      invoiceNumber: sales.invoiceNumber,
+      subtotal: sales.subtotal,
+      discount: sales.discount,
+      vat: sales.vat,
+      finalTotal: sales.finalTotal,
+      dueAmount: sales.dueAmount,
+      paymentStatus: sales.paymentStatus,
+    })
+    .from(sales)
+    .where(
+      and(
+        eq(sales.businessId, businessId),
+        eq(sales.idempotencyKey, idempotencyKey),
+      ),
+    )
+    .limit(1);
+  if (!sale) return null;
+  const payments = await tx
+    .select({ amount: salePayments.amount })
+    .from(salePayments)
+    .where(
+      and(
+        eq(salePayments.saleId, sale.id),
+        eq(salePayments.businessId, businessId),
+      ),
+    );
+  const paidAmount = payments.reduce(
+    (sum, p) => sum + Number(p.amount ?? 0),
+    0,
+  );
+  return {
+    sale,
+    change: roundMoney(Math.max(0, paidAmount - Number(sale.finalTotal))),
+    paidAmount: roundMoney(paidAmount),
+    dueAmount: Number(sale.dueAmount),
+  };
+}
+
 export async function createSale(
   businessId: number,
   locationId: number,
@@ -488,8 +540,23 @@ export async function createSale(
   data: CreateSalePayload,
 ) {
   const { customerId, items, discount, vatPercent, payments, saleDate } = data;
+  const idempotencyKey = data.idempotencyKey?.trim() || null;
 
   const result = await db.transaction(async (tx) => {
+    // 0. Idempotent checkout: a retried submission with the same key returns
+    // the original sale instead of creating a duplicate. The composite
+    // (business_id, idempotency_key) unique constraint backstops the race
+    // the pre-check cannot cover — a losing concurrent insert conflicts,
+    // and the caller below refetches and replays the winner.
+    if (idempotencyKey) {
+      const replay = await findSaleByIdempotencyKey(
+        tx,
+        businessId,
+        idempotencyKey,
+      );
+      if (replay) return replay;
+    }
+
     // 1. Validate customer (same business only).
     await customerValidation(tx, businessId, customerId);
 
@@ -547,7 +614,9 @@ export async function createSale(
       await nextDocumentNumber(tx, businessId, "sale_invoice"),
     );
 
-    // 8. Insert the sale header.
+    // 8. Insert the sale header. onConflictDoNothing covers the case where a
+    // concurrent request with the same idempotency key committed first; the
+    // refetch below then replays that winner.
     const [newSale] = await tx
       .insert(sales)
       .values({
@@ -563,6 +632,10 @@ export async function createSale(
         dueAmount,
         paymentStatus,
         status: "completed",
+        idempotencyKey,
+      })
+      .onConflictDoNothing({
+        target: [sales.businessId, sales.idempotencyKey],
       })
       .returning({
         id: sales.id,
@@ -576,7 +649,18 @@ export async function createSale(
       });
 
     if (!newSale) {
-      throw new Error("Failed to create sale.");
+      if (!idempotencyKey) {
+        throw new ConflictError("Sale insert returned no row.");
+      }
+      const replay = await findSaleByIdempotencyKey(
+        tx,
+        businessId,
+        idempotencyKey,
+      );
+      if (!replay) {
+        throw new ConflictError("Sale insert returned no row.");
+      }
+      return replay;
     }
 
     const saleId = newSale.id;

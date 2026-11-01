@@ -12,8 +12,9 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 1 Checkout | Product search / SKU / barcode | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 1 Checkout | Cart, variants, discounts, checkout | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 1 Checkout | Held sales (retrieve/share) | F→B incomplete | 2 | ❌ localStorage only | ✅ | ❌ | ❌ | Server `held_sales` table + APIs; cross-register sharing |
-| 1 Checkout | Duplicate-submission prevention | B→F incomplete | **1** | ✅ `sales.idempotency_key` UNIQUE | ❌ key never sent | ✅ | ❌ | POS checkout sends idempotency key, retry-safe |
+| 1 Checkout | Duplicate-submission prevention | B→F incomplete → **fixed** | **1** ✅ | ✅ replay + `onConflictDoNothing` | ✅ key sent, retry-safe | ✅ composite unique (0015) | unit 61/61, integration (see log) | — |
 | 1 Checkout | Cart expiry / cleanup, cart audit | Missing | 2 | ❌ | ❌ | ❌ | ❌ | — |
+| 1 Checkout | Active-cart recovery after refresh | **Defective** (audit correction: only held carts persist) | 2 | n/a | ❌ main cart store not persisted | n/a | ❌ | Persist cart store (with Phase 2 offline work) |
 | 2 Inventory | Adjustments / transfers / receiving | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 2 Inventory | Batch & serial tracking | Complete | — | ✅ FEFO locking | ✅ | ✅ | integration | — |
 | 2 Inventory | Barcode stocktaking + cycle counts | Missing | 3 | ❌ | ❌ | ❌ | ❌ | `stock_count_sessions/lines`, approval flow |
@@ -49,7 +50,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | Security | RBAC + tenant isolation, encrypted credentials, webhook HMAC | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | Security | General audit log (beyond saasAdmin) | Missing | **1** | ❌ | ❌ | ❌ | ❌ | `audit_log` table + service |
 | Security | Secrets in git history | **Defective** | 0.5 | — | — | — | — | Untracked in 0.5; history purge needs maintainer decision |
-| Reliability | Concurrent idempotent replay returns 500 | **Defective** | **1** | ❌ no conflict handling on insert | — | migration | ❌ | `onConflictDoNothing` + refetch |
+| Reliability | Concurrent idempotent replay returns 500 | **Defective** → **fixed** | **1** ✅ | ✅ `onConflictDoNothing` + refetch in both insert paths | — | ✅ 0015 | integration | — |
 
 ## Phase plan (adjusted after audit)
 
@@ -66,3 +67,11 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 ## Progress log
 
 - **2026-11-01** — Phase 0 audit complete (see conversation report). Branch `refactor/pos-gap` created. Tracker initialized.
+- **2026-11-01** — Phase 0.5 complete: untracked `.env` + `node_modules` (5,073 files), rotated `AUTH_JWT_SECRET` locally. History purge deferred (needs coordinated force-push decision).
+- **2026-11-01** — Phase 1 slice 1 (idempotent checkout) complete:
+  - Migration `0015`: global `sales.idempotency_key` unique → composite `(business_id, idempotency_key)` (per-tenant keys no longer collide).
+  - `sales.service.createSale`: accepts optional `idempotencyKey`, pre-check replay, `onConflictDoNothing` + refetch for the concurrent race; replay responses re-derive `paidAmount`/`change` from stored payments.
+  - `orders.service.createOnlineOrder`: same conflict handling — concurrent duplicate now returns the original order instead of a 500.
+  - POS frontend: `useCartStore.beginCheckout()` claims a UUID per checkout; retries reuse it; `resetCart()` clears it; `PosPage` sends the key on every submit.
+  - Verification: backend tsc clean, unit 61/61, integration 227/246 — the 19 failures are pre-existing (reproduced without these changes; all in saas-admin/support/portal/storefront-subscription areas, none in sales/checkout). POS tsc clean, `vite build` green. Migration applied to local `ezPos` + `ezpos_test`.
+  - Audit correction: active-cart recovery does NOT exist — only held carts persist to localStorage; the main cart store is memory-only. Tracked above, slated for Phase 2.

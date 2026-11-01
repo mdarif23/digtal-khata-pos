@@ -40,6 +40,11 @@ export const createSalePayloadSchema = z.object({
     .nullable(),
   vatPercent: z.number().nullable(),
 
+  // Client-generated key (UUID) that makes checkout retries idempotent:
+  // resubmitting the same key returns the original sale instead of
+  // creating a duplicate. Scoped per business at the database level.
+  idempotencyKey: z.string().trim().min(8).max(120).optional(),
+
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),
 });
