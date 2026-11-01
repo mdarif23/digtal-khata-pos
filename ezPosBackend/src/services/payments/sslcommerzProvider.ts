@@ -68,6 +68,7 @@ export function sslcommerzProviderFor(
 ): PaymentProvider {
   return {
     name: "sslcommerz",
+    supportsRefund: true,
 
     async initiateSession(input: GatewaySessionInput): Promise<GatewaySession> {
       assertConfigured(creds);
@@ -159,6 +160,47 @@ export function sslcommerzProviderFor(
         currency: result.currency ?? null,
         transactionId: result.val_id ?? null,
         raw: result as Record<string, unknown>,
+      };
+    },
+
+    /**
+     * SSLCommerz Merchant Refund API (documented public API):
+     * POST /validator/api/merchantRefundAPI.php with store credentials,
+     * bank_tran_id (our stored provider transaction id), refund_amount and
+     * refund_remarks. The response carries a refund_ref (reference id) and
+     * status; only ACCEPTED-ish statuses count as accepted.
+     */
+    async refundPayment(input) {
+      assertConfigured(creds);
+      const form = new URLSearchParams({
+        store_id: creds.storeId,
+        store_passwd: creds.storePassword,
+        refund_amount: input.amount.toFixed(2),
+        refund_remarks: (input.reason ?? "ezPos refund").slice(0, 255),
+        bank_tran_id: input.transactionId,
+      });
+      const response = await fetch(
+        `${baseUrl(creds.sandbox)}/validator/api/merchantRefundAPI.php`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: form.toString(),
+        },
+      );
+      const body = (await response.json().catch(() => null)) as
+        | { status?: string; refund_ref?: string; errorReason?: string }
+        | null;
+      const status = body?.status ?? "UNREACHABLE";
+      const accepted =
+        status === "success" ||
+        status === "refunded" ||
+        status === "processing" ||
+        status === "Validation-Created";
+      return {
+        accepted,
+        refundId: body?.refund_ref ?? null,
+        status,
+        raw: (body ?? {}) as Record<string, unknown>,
       };
     },
   };

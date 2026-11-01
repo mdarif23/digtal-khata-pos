@@ -64,6 +64,14 @@ export const saleRefundRequestSchema = z.object({
   ]),
   notes: z.string().trim().max(500).optional(),
   disposition: z.enum(["restock", "inspection", "damaged"]),
+  /**
+   * How the money goes back. 'cash' = counter/drawer payout;
+   * 'original_payment' = provider refund to the original instrument
+   * (requires a captured payment intent for the sale and a provider with
+   * refund support — the payout fires after the ledger commits and is
+   * retryable; provider_refund_id stays NULL until it succeeds).
+   */
+  refundMethod: z.enum(["cash", "original_payment"]).optional(),
 });
 
 // 3. Export the TypeScript type for your payload

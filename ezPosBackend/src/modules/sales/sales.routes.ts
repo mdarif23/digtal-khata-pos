@@ -1,5 +1,6 @@
 import express from "express";
 import * as salesController from "./sales.controller.js";
+import * as salesExchangeController from "./salesExchange.controller.js";
 import { requireAuth } from "../../middleware/auth.js";
 import {
   requireBusinessContext,
@@ -48,6 +49,14 @@ router.post(
   ...write,
   requirePermission("sales.return"),
   salesController.createMultipleRefunds,
+);
+// Exchange: refund of returned items + linked replacement sale + difference
+// settlement, atomically. Serial-tracked replacements are rejected (v1).
+router.post(
+  "/api/sales/:id/exchange",
+  ...write,
+  requirePermission("sales.return"),
+  salesExchangeController.createExchange,
 );
 router.get(
   "/api/dashboard_summary",

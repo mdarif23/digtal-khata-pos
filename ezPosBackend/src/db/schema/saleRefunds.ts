@@ -29,6 +29,14 @@ export const saleRefunds = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     status: varchar({ length: 20 }),
     refundTotal: numeric("refund_total", { mode: "number" }),
+    /**
+     * How the money went back: 'cash' (drawer/counter) or
+     * 'original_payment' (provider refund — provider_refund_id carries the
+     * gateway reference). NULL = legacy rows / informational refunds where
+     * the return reduced dues instead of paying out.
+     */
+    refundMethod: varchar("refund_method", { length: 20 }),
+    providerRefundId: varchar("provider_refund_id", { length: 120 }),
   },
   (table) => [
     foreignKey({

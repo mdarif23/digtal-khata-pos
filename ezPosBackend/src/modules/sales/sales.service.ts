@@ -22,6 +22,7 @@ import { variantValues } from "../../db/schema/variantValues.js";
 import type { saleDataInput } from "../../types/sales-types.js";
 import { salePayments } from "../../db/schema/salePayments.js";
 import {
+  BadRequestError,
   ConflictError,
   NotFoundError,
 } from "../../utils/handleError.js";
@@ -50,7 +51,9 @@ import {
 import type { CreateSalePayload } from "./schemas/sales.schema.js";
 import type { SaleRefundRequest } from "./schemas/sales.schema.js";
 import { customers } from "../../db/schema/customers.js";
-import { recordAuditInTx } from "../../services/audit.js";
+import { recordAuditInTx, recordAudit } from "../../services/audit.js";
+import { salePaymentIntents } from "../../db/schema/salePaymentIntents.js";
+import { resolveIntentProvider } from "../../services/payments/saleProviders.js";
 import {
   customerValidation,
   validatePayments,
@@ -1024,6 +1027,9 @@ async function applySaleRefund(
       reason,
       status: options.disposition,
       refundTotal,
+      refundMethod: options.refundMethod ?? null,
+      // provider_refund_id is filled after commit when the provider payout
+      // succeeds; NULL until then (retryable — see the callers).
     })
     .returning({ id: saleRefunds.id });
   if (!refund) throw new NotFoundError("Could not create refund record");
@@ -1196,7 +1202,7 @@ async function applySaleRefund(
       .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)));
   }
 
-  return refund.id;
+  return { refundId: refund.id, refundTotal };
 }
 
 export async function createSingleRefund(
@@ -1205,7 +1211,7 @@ export async function createSingleRefund(
   options: SaleRefundRequest,
   actorUserId: number | null = null,
 ) {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [saleItem] = await tx
       .select()
       .from(saleItems)
@@ -1240,7 +1246,7 @@ export async function createSingleRefund(
       throw new ConflictError("This sale item has already been returned");
     }
 
-    const refundId = await applySaleRefund(
+    const { refundId, refundTotal } = await applySaleRefund(
       tx,
       businessId,
       saleItem.saleId,
@@ -1255,14 +1261,35 @@ export async function createSingleRefund(
       entityId: saleItem.saleId,
       metadata: {
         refundId,
+        refundTotal,
         saleItemId: saleItem.id,
         reason: options.reason,
         disposition: options.disposition,
+        refundMethod: options.refundMethod ?? "cash",
       },
     });
     await pushRefundStatusAfterCommit(businessId, saleItem.saleId);
-    return { message: "Refund created successfully", refundId };
+    return {
+      message: "Refund created successfully",
+      refundId,
+      refundTotal,
+      saleItemSaleId: saleItem.saleId,
+    };
   });
+
+  // Provider payout fires after the ledger commits (ledger-first; retryable).
+  let providerPayout: Awaited<
+    ReturnType<typeof settleProviderRefundAfterCommit>
+  > | null = null;
+  if (options.refundMethod === "original_payment") {
+    providerPayout = await settleProviderRefundAfterCommit(
+      businessId,
+      result.saleItemSaleId,
+      result.refundId,
+      result.refundTotal,
+    );
+  }
+  return { ...result, providerPayout };
 }
 
 export async function createMultipleRefunds(
@@ -1271,7 +1298,7 @@ export async function createMultipleRefunds(
   options: SaleRefundRequest,
   actorUserId: number | null = null,
 ) {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [sale] = await tx
       .select({ id: sales.id, status: sales.status })
       .from(sales)
@@ -1313,7 +1340,7 @@ export async function createMultipleRefunds(
       throw new ConflictError("All items in this sale have already been returned");
     }
 
-    const refundId = await applySaleRefund(
+    const { refundId, refundTotal } = await applySaleRefund(
       tx,
       businessId,
       id,
@@ -1328,14 +1355,29 @@ export async function createMultipleRefunds(
       entityId: id,
       metadata: {
         refundId,
+        refundTotal,
         itemCount: refundableItems.length,
         reason: options.reason,
         disposition: options.disposition,
+        refundMethod: options.refundMethod ?? "cash",
       },
     });
     await pushRefundStatusAfterCommit(businessId, id);
-    return { message: "Refund created successfully", refundId };
+    return { message: "Refund created successfully", refundId, refundTotal };
   });
+
+  let providerPayout: Awaited<
+    ReturnType<typeof settleProviderRefundAfterCommit>
+  > | null = null;
+  if (options.refundMethod === "original_payment") {
+    providerPayout = await settleProviderRefundAfterCommit(
+      businessId,
+      id,
+      result.refundId,
+      result.refundTotal,
+    );
+  }
+  return { ...result, providerPayout };
 }
 export async function getDashboardSummary(
   businessId: number,
@@ -1448,4 +1490,498 @@ export async function updateAvailableSerial(
   } catch (err: unknown) {
     throw new ConflictError("Serial number is already in use");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Exchanges (Module 5). An exchange = refund of the returned items + a new
+// replacement sale linked via sales.exchange_of_sale_id + settlement of the
+// difference — all in ONE transaction, so stock, financials and the refund
+// ledger can never drift apart.
+// ---------------------------------------------------------------------------
+
+export interface ExchangePayload {
+  /** Full-item returns (the existing refund model is per sale item). */
+  returns: { saleItemId: number }[];
+  replacements: {
+    variantId: number;
+    quantity: number;
+    discount?: { type: "percentage" | "fixed"; value: number } | null | undefined;
+  }[];
+  /** Required when the replacement is worth more than the returned value. */
+  additionalPayments?: {
+    method: "cash" | "bangla_qr" | "card";
+    amount: number;
+    reference?: string | null | undefined;
+    tendered?: number | null | undefined;
+  }[] | undefined;
+  /** How a surplus (returned value > replacement) goes back to the customer. */
+  refundMethod?: "cash" | "original_payment" | undefined;
+  reason: "customer_request" | "wrong_item" | "damaged" | "quality_issue" | "other";
+  notes?: string | undefined;
+  disposition: "restock" | "inspection" | "damaged";
+  idempotencyKey?: string | undefined;
+}
+
+/**
+ * Resolves the provider payout for an original_payment refund AFTER the
+ * ledger transaction has committed. Ledger-first: the refund row is valid
+ * regardless; provider_refund_id is filled only on a successful payout and
+ * stays NULL (retryable) otherwise. Never throws to the caller of the
+ * refund — the outcome is returned and audited.
+ */
+export async function settleProviderRefundAfterCommit(
+  businessId: number,
+  saleId: number,
+  refundId: number,
+  refundTotal: number,
+): Promise<{ paid: boolean; providerRefundId: string | null; status: string; reason?: string }> {
+  let intent: { provider: string; providerTxnId: string | null } | undefined;
+  try {
+    [intent] = await db
+      .select({
+        provider: salePaymentIntents.provider,
+        providerTxnId: salePaymentIntents.providerTxnId,
+      })
+      .from(salePaymentIntents)
+      .where(
+        and(
+          eq(salePaymentIntents.saleId, saleId),
+          eq(salePaymentIntents.businessId, businessId),
+          eq(salePaymentIntents.status, "captured"),
+        ),
+      )
+      .orderBy(desc(salePaymentIntents.id))
+      .limit(1);
+  } catch {
+    intent = undefined;
+  }
+  if (!intent?.providerTxnId) {
+    return {
+      paid: false,
+      providerRefundId: null,
+      status: "NO_CAPTURED_PAYMENT",
+      reason:
+        "No verified electronic payment exists on this sale — use a cash refund instead.",
+    };
+  }
+  const resolved = await resolveIntentProvider(businessId, intent.provider);
+  if ("error" in resolved) {
+    return { paid: false, providerRefundId: null, status: "CONFIG_ERROR", reason: resolved.error };
+  }
+  if (!resolved.provider.supportsRefund || !resolved.provider.refundPayment) {
+    return {
+      paid: false,
+      providerRefundId: null,
+      status: "PROVIDER_UNSUPPORTED",
+      reason: `The ${intent.provider} adapter does not support refunds — settle externally.`,
+    };
+  }
+  try {
+    const outcome = await resolved.provider.refundPayment({
+      transactionId: intent.providerTxnId,
+      amount: refundTotal,
+      reason: "ezPos sale refund",
+    });
+    if (!outcome.accepted) {
+      await recordAudit({
+        businessId,
+        actorUserId: null,
+        action: "sale.refund.provider_rejected",
+        entityType: "sale_refund",
+        entityId: refundId,
+        metadata: { provider: intent.provider, status: outcome.status, amount: refundTotal },
+      });
+      return {
+        paid: false,
+        providerRefundId: null,
+        status: outcome.status,
+        reason:
+          "The provider rejected the refund. The refund is recorded in the ledger; retry the payout later.",
+      };
+    }
+    await db
+      .update(saleRefunds)
+      .set({ providerRefundId: outcome.refundId })
+      .where(and(eq(saleRefunds.id, refundId), eq(saleRefunds.businessId, businessId)));
+    await recordAudit({
+      businessId,
+      actorUserId: null,
+      action: "sale.refund.provider_paid",
+      entityType: "sale_refund",
+      entityId: refundId,
+      metadata: {
+        provider: intent.provider,
+        providerRefundId: outcome.refundId,
+        amount: refundTotal,
+      },
+    });
+    return { paid: true, providerRefundId: outcome.refundId, status: outcome.status };
+  } catch (err) {
+    await recordAudit({
+      businessId,
+      actorUserId: null,
+      action: "sale.refund.provider_error",
+      entityType: "sale_refund",
+      entityId: refundId,
+      metadata: {
+        provider: intent.provider,
+        amount: refundTotal,
+        error: err instanceof Error ? err.message : "unknown",
+      },
+    });
+    return {
+      paid: false,
+      providerRefundId: null,
+      status: "PROVIDER_ERROR",
+      reason:
+        "The provider could not be reached. The refund is recorded in the ledger; retry the payout later.",
+    };
+  }
+}
+
+export async function createSaleExchange(
+  businessId: number,
+  saleId: number,
+  actorUserId: number | null,
+  payload: ExchangePayload,
+) {
+  const idempotencyKey = payload.idempotencyKey?.trim() || null;
+  if (payload.returns.length === 0) {
+    throw new BadRequestError("An exchange requires at least one returned item.");
+  }
+  if (payload.replacements.length === 0) {
+    throw new BadRequestError("An exchange requires at least one replacement item.");
+  }
+
+  const result = await db.transaction(async (tx) => {
+    // 0. Idempotent replay: the replacement sale carries the key.
+    if (idempotencyKey) {
+      const replay = await findSaleByIdempotencyKey(tx, businessId, idempotencyKey);
+      if (replay) return { replayed: true as const, ...replay };
+    }
+
+    // 1. The original sale: completed only (refunded sales have nothing
+    // left to return; pending sales are not refundable either).
+    const [original] = await tx
+      .select({
+        id: sales.id,
+        customerId: sales.customerId,
+        locationId: sales.locationId,
+        paymentStatus: sales.paymentStatus,
+        status: sales.status,
+      })
+      .from(sales)
+      .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
+      .for("update");
+    if (!original) throw new NotFoundError("Sale not found.");
+    if (original.status !== "completed") {
+      throw new ConflictError(
+        `Only completed sales can be exchanged (this one is ${original.status}).`,
+      );
+    }
+    const exchangeLocationId = original.locationId;
+    if (exchangeLocationId === null) {
+      throw new ConflictError("The original sale has no location recorded.");
+    }
+
+    // 2. Returned items must belong to this sale and not be refunded yet.
+    const returnIds = payload.returns.map((r) => r.saleItemId);
+    const returnable = await tx
+      .select()
+      .from(saleItems)
+      .where(
+        and(
+          eq(saleItems.saleId, saleId),
+          eq(saleItems.businessId, businessId),
+          inArray(saleItems.id, returnIds),
+        ),
+      );
+    if (returnable.length !== new Set(returnIds).size) {
+      throw new NotFoundError(
+        "One or more returned items do not belong to this sale.",
+      );
+    }
+    const alreadyRefunded = await tx
+      .select({ saleItemId: saleRefundItems.saleItemId })
+      .from(saleRefundItems)
+      .innerJoin(saleRefunds, eq(saleRefundItems.refundId, saleRefunds.id))
+      .where(
+        and(
+          eq(saleRefunds.saleId, saleId),
+          eq(saleRefunds.businessId, businessId),
+          inArray(saleRefundItems.saleItemId, returnIds),
+        ),
+      );
+    if (alreadyRefunded.length > 0) {
+      throw new ConflictError(
+        "One or more returned items have already been refunded.",
+      );
+    }
+
+    // 3. Refund side: the SAME allocation, ceiling, restock and serial
+    // machinery as normal returns — one code path, no drift.
+    const { refundId, refundTotal } = await applySaleRefund(
+      tx,
+      businessId,
+      saleId,
+      returnable,
+      {
+        reason: payload.reason,
+        notes: payload.notes,
+        disposition: payload.disposition,
+        refundMethod: payload.refundMethod,
+      },
+    );
+
+    // 4. Replacement side: trusted prices from the database, serial-tracked
+    // replacements rejected (serial selection is a POS workflow — v1).
+    const replacementItems = payload.replacements.map((r) => ({
+      variantId: r.variantId,
+      quantity: r.quantity,
+      unitPrice: 0, // replaced by the DB price below
+      discount: r.discount ?? null,
+    }));
+    const { variantIds, existingVariants } = await validateVariants(
+      tx,
+      businessId,
+      replacementItems,
+    );
+    const variantMap = new Map(existingVariants.map((v) => [v.id, v]));
+    for (const variant of existingVariants) {
+      if (variant.trackingType === "serial") {
+        throw new BadRequestError(
+          "Serial-tracked products cannot be exchanged automatically yet — sell the replacement as a normal sale.",
+        );
+      }
+    }
+    const trustedReplacements = replacementItems
+      .map((item) => {
+        const variant = variantMap.get(item.variantId);
+        const unitPrice = Number(variant?.sellingPrice);
+        if (!variant || !Number.isFinite(unitPrice) || unitPrice < 0) {
+          throw new NotFoundError(
+            `Valid selling price not found for variant ${item.variantId}.`,
+          );
+        }
+        return { ...item, unitPrice, trackingType: variant.trackingType };
+      })
+      .sort((a, b) => a.variantId - b.variantId);
+
+    await validateStock(tx, businessId, exchangeLocationId, variantIds, trustedReplacements);
+
+    // 5. Totals with the tax engine (same rules resolution as createSale).
+    const taxRulesByVariant = await resolveTaxRulesForSale(
+      tx,
+      businessId,
+      exchangeLocationId,
+      new Date(),
+      trustedReplacements.map((i) => i.variantId),
+    );
+    const usesTaxRules = [...taxRulesByVariant.values()].some(
+      (rules) => rules.length > 0,
+    );
+    const totals = usesTaxRules
+      ? getCartTotalsWithTaxRules(trustedReplacements, null, taxRulesByVariant)
+      : getCartTotals(trustedReplacements, null, 0);
+    const lineTaxes = "perLine" in totals ? totals.perLine : null;
+
+    // 6. Difference settlement. Both directions must be fully settled:
+    // exchanges never create dues.
+    const replacementTotal = totals.finalTotal;
+    const difference = roundMoney(replacementTotal - refundTotal);
+    const additionalPayments = payload.additionalPayments ?? [];
+    let cashAmount = 0;
+    if (difference > 0.01) {
+      const paidSum = roundMoney(
+        additionalPayments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0),
+      );
+      if (additionalPayments.length === 0 || Math.abs(paidSum - difference) > 0.01) {
+        throw new BadRequestError(
+          `The replacement costs ${difference.toFixed(2)} more than the returned value — collect exactly that amount.`,
+        );
+      }
+      for (const payment of additionalPayments) {
+        if (!["cash", "bangla_qr", "card"].includes(payment.method)) {
+          throw new BadRequestError("Exchanges settle immediately — due is not allowed.");
+        }
+        if (payment.method === "cash") {
+          cashAmount = roundMoney(cashAmount + Number(payment.amount ?? 0));
+        }
+      }
+    } else if (difference < -0.01 && !payload.refundMethod) {
+      throw new BadRequestError(
+        `The returned value exceeds the replacement by ${(-difference).toFixed(2)} — choose how to refund the difference.`,
+      );
+    }
+
+    // 7. The replacement sale.
+    const invoiceNumber = formatSaleInvoiceNumber(
+      new Date().getFullYear(),
+      await nextDocumentNumber(tx, businessId, "sale_invoice"),
+    );
+    const [exchangeSale] = await tx
+      .insert(sales)
+      .values({
+        businessId,
+        locationId: exchangeLocationId,
+        invoiceNumber,
+        saleDate: new Date(),
+        customerId: original.customerId,
+        subtotal: totals.itemsBase,
+        discount: roundMoney(totals.itemDiscount + totals.cartDiscountAmount),
+        vat: totals.vat,
+        finalTotal: replacementTotal,
+        dueAmount: 0,
+        paymentStatus: "paid",
+        status: "completed",
+        exchangeOfSaleId: saleId,
+        idempotencyKey,
+        note: payload.notes ?? null,
+      })
+      .onConflictDoNothing({
+        target: [sales.businessId, sales.idempotencyKey],
+      })
+      .returning({
+        id: sales.id,
+        invoiceNumber: sales.invoiceNumber,
+        subtotal: sales.subtotal,
+        discount: sales.discount,
+        vat: sales.vat,
+        finalTotal: sales.finalTotal,
+        dueAmount: sales.dueAmount,
+        paymentStatus: sales.paymentStatus,
+      });
+    if (!exchangeSale) {
+      if (!idempotencyKey) {
+        throw new ConflictError("Exchange sale insert returned no row.");
+      }
+      const replay = await findSaleByIdempotencyKey(tx, businessId, idempotencyKey);
+      if (!replay) throw new ConflictError("Exchange sale insert returned no row.");
+      return { replayed: true as const, ...replay };
+    }
+
+    // Items: stock consumption + tax snapshots (same machinery as createSale).
+    for (const [itemIndex, item] of trustedReplacements.entries()) {
+      const line = getLinePricing(item.unitPrice, item.quantity, item.discount);
+      const cost = await consumeStockFifo(
+        tx,
+        businessId,
+        exchangeLocationId,
+        item.variantId,
+        item.quantity,
+      );
+      if (!Number.isFinite(cost.costAtSale) || cost.costAtSale < 0) {
+        throw new Error(`Invalid inventory cost for variant ${item.variantId}.`);
+      }
+      const lineTax = lineTaxes?.[itemIndex];
+      const [saleItem] = await tx
+        .insert(saleItems)
+        .values({
+          businessId,
+          saleId: exchangeSale.id,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          sellingPrice: item.unitPrice,
+          costAtSale: cost.costAtSale,
+          lineTotal: line.total,
+          discount: line.discountAmount,
+          taxAmount: lineTax?.taxAmount ?? 0,
+          taxDetail: lineTax?.detail ?? [],
+        })
+        .returning({ id: saleItems.id });
+      if (!saleItem) throw new Error("Failed to create exchange sale item.");
+    }
+
+    // Additional payments land as normal payment rows on the replacement
+    // sale; the cash portion is attributed to the open register session.
+    if (difference > 0.01 && additionalPayments.length > 0) {
+      try {
+        await tx.insert(salePayments).values(
+          additionalPayments.map((payment) => ({
+            businessId,
+            saleId: exchangeSale.id,
+            customerId: original.customerId,
+            amount: roundMoney(Number(payment.amount)),
+            paymentMethod: payment.method,
+            reference:
+              payment.method === "cash"
+                ? null
+                : payment.reference?.trim() || null,
+            tendered:
+              payment.method === "cash" ? (payment.tendered ?? null) : null,
+          })),
+        );
+      } catch (error: unknown) {
+        if (isDuplicatePaymentReferenceError(error)) {
+          throw new ConflictError(
+            "This transaction reference has already been used for this payment method.",
+          );
+        }
+        throw error;
+      }
+      if (cashAmount > 0) {
+        await recordCashSaleInTx(
+          tx,
+          businessId,
+          actorUserId ?? 0,
+          exchangeLocationId,
+          cashAmount,
+          exchangeSale.id,
+        );
+      }
+    }
+
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId,
+      action: "sale.exchange",
+      entityType: "sale",
+      entityId: saleId,
+      metadata: {
+        exchangeSaleId: exchangeSale.id,
+        exchangeInvoiceNumber: exchangeSale.invoiceNumber,
+        refundId,
+        refundTotal,
+        replacementTotal,
+        difference,
+        refundMethod: payload.refundMethod ?? (difference < -0.01 ? "cash" : null),
+        disposition: payload.disposition,
+      },
+    });
+
+    return {
+      replayed: false as const,
+      sale: exchangeSale,
+      refundId,
+      refundTotal,
+      replacementTotal,
+      difference,
+      change: 0,
+      paidAmount: difference > 0.01 ? difference : 0,
+      dueAmount: 0,
+    };
+  });
+
+  if (result.replayed) {
+    const receipt = await getSaleReceipt(businessId, result.sale.id);
+    return { ...result, receipt, providerPayout: null };
+  }
+
+  // 8. Surplus payout to the original instrument, after commit (ledger-first).
+  let providerPayout: { paid: boolean; status: string; reason?: string } | null = null;
+  if (
+    result.difference < -0.01 &&
+    payload.refundMethod === "original_payment"
+  ) {
+    const surplus = roundMoney(-result.difference);
+    providerPayout = await settleProviderRefundAfterCommit(
+      businessId,
+      saleId,
+      result.refundId,
+      surplus,
+    );
+  }
+
+  const receipt = await getSaleReceipt(businessId, result.sale.id);
+  return { ...result, receipt, providerPayout };
 }
