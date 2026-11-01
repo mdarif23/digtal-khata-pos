@@ -196,6 +196,9 @@ export function Sales() {
     SaleRefundRequest["disposition"] | null
   >(null);
   const [refundNotes, setRefundNotes] = useState("");
+  const [refundMethod, setRefundMethod] = useState<
+    "cash" | "store_credit" | "original_payment"
+  >("cash");
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<SaleReceiptData | null>(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
@@ -275,6 +278,7 @@ export function Sales() {
         reason,
         disposition,
         ...(refundNotes.trim() ? { notes: refundNotes.trim() } : {}),
+        refundMethod,
       };
       if (refundTarget.type === "sale") {
         await returnProducts(refundTarget.sale.id, options);
@@ -639,6 +643,36 @@ export function Sales() {
                         {REFUND_DISPOSITION_LABELS[disposition]}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="refund-method">
+                  Refund method
+                </label>
+                <Select
+                  value={refundMethod}
+                  onValueChange={(value) => {
+                    if (
+                      value === "cash" ||
+                      value === "store_credit" ||
+                      value === "original_payment"
+                    ) {
+                      setRefundMethod(value);
+                    }
+                  }}
+                >
+                  <SelectTrigger id="refund-method" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash (counter payout)</SelectItem>
+                    <SelectItem value="store_credit">
+                      Store credit (customer account)
+                    </SelectItem>
+                    <SelectItem value="original_payment">
+                      Original payment (provider refund)
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>

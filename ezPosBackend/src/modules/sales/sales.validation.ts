@@ -120,7 +120,7 @@ export async function validateStock(
   return stockMap;
 }
 type Payments = {
-  method: "cash" | "bangla_qr" | "card" | "due";
+  method: "cash" | "bangla_qr" | "card" | "due" | "store_credit";
   amount?: number | undefined;
   tendered?: number | undefined;
   reference?: string | undefined;
@@ -177,6 +177,13 @@ export function validatePayments(
 
   if (duePoisha > 0 && customerId === null) {
     throw new BadRequestError("Due payment requires a customer.");
+  }
+
+  // Store credit is per-customer money — the spend must land on an account.
+  if (methods.includes("store_credit") && customerId === null) {
+    throw new BadRequestError(
+      "Store credit payments require a customer on the sale.",
+    );
   }
 
   if (paidPoisha + duePoisha !== toPoisha(finalTotal)) {

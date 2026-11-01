@@ -4,6 +4,7 @@ export const PAYMENT_ROW_METHODS = [
   "bangla_qr",
   "card",
   "due",
+  "store_credit",
 ] as const;
 
 export const paymentSchema = z.object({
@@ -71,7 +72,7 @@ export const saleRefundRequestSchema = z.object({
    * refund support — the payout fires after the ledger commits and is
    * retryable; provider_refund_id stays NULL until it succeeds).
    */
-  refundMethod: z.enum(["cash", "original_payment"]).optional(),
+  refundMethod: z.enum(["cash", "original_payment", "store_credit"]).optional(),
 });
 
 // 3. Export the TypeScript type for your payload

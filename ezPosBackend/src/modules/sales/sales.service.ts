@@ -55,6 +55,10 @@ import { recordAuditInTx, recordAudit } from "../../services/audit.js";
 import { salePaymentIntents } from "../../db/schema/salePaymentIntents.js";
 import { resolveIntentProvider } from "../../services/payments/saleProviders.js";
 import {
+  consumeStoreCreditInTx,
+  grantStoreCreditInTx,
+} from "../../services/storeCredit.js";
+import {
   customerValidation,
   validatePayments,
   validateStock,
@@ -894,6 +898,26 @@ export async function createSale(
           }),
         );
 
+        // Store credit spends: locked against the customer's ledger inside
+        // this transaction — insufficient balance aborts the whole sale.
+        for (const payment of receivedPayments) {
+          if (payment.method !== "store_credit") continue;
+          if (customerId === null) {
+            throw new BadRequestError(
+              "Store credit payments require a customer on the sale.",
+            );
+          }
+          await consumeStoreCreditInTx(tx, {
+            businessId,
+            customerId,
+            amount: Number(payment.amount),
+            sourceType: "sale_payment",
+            sourceId: saleId,
+            actorUserId: cashierUserId,
+            note: `Sale ${invoiceNumber}`,
+          });
+        }
+
         // Cash drawer attribution: the cash portion lands in the seller's
         // open register session (same transaction; no-op without a session).
         const cashAmount = receivedPayments
@@ -969,11 +993,17 @@ async function applySaleRefund(
       dueAmount: sales.dueAmount,
       paymentStatus: sales.paymentStatus,
       locationId: sales.locationId,
+      customerId: sales.customerId,
     })
     .from(sales)
     .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
     .for("update");
   if (!sale) throw new NotFoundError("Sale not found");
+  if (options.refundMethod === "store_credit" && sale.customerId === null) {
+    throw new BadRequestError(
+      "Store credit refunds require the sale to have a customer.",
+    );
+  }
 
   const allItems = await tx
     .select({ lineTotal: saleItems.lineTotal })
@@ -1034,6 +1064,20 @@ async function applySaleRefund(
     })
     .returning({ id: saleRefunds.id });
   if (!refund) throw new NotFoundError("Could not create refund record");
+
+  // Store credit settlement: the refund value becomes spendable customer
+  // balance, recorded transactionally in the ledger (balances reconcile by
+  // construction). Exchanges net out against replacement value upstream.
+  if (options.refundMethod === "store_credit") {
+    await grantStoreCreditInTx(tx, {
+      businessId,
+      customerId: sale.customerId!,
+      amount: refundTotal,
+      sourceType: "refund",
+      sourceId: refund.id,
+      note: `Refund credit (sale #${saleId})`,
+    });
+  }
 
   for (const item of items) {
     const [variant] = await tx
