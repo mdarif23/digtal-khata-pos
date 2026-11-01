@@ -67,6 +67,7 @@ import {
   getCartTotals,
   getCartTotalsWithTaxRules,
   getLinePricing,
+  type DiscountInput,
   type TaxRuleSnapshot,
 } from "./utils/cartPricing.js";
 import { taxRates } from "../../db/schema/taxRates.js";
@@ -1984,4 +1985,90 @@ export async function createSaleExchange(
 
   const receipt = await getSaleReceipt(businessId, result.sale.id);
   return { ...result, receipt, providerPayout };
+}
+
+// ---------------------------------------------------------------------------
+// Server-authoritative cart quote (checkout consistency). The POS displays
+// totals from this endpoint so the cashier always sees what createSale will
+// charge — including rules-based taxes that the client cannot compute.
+// ---------------------------------------------------------------------------
+
+export interface SaleQuotePayload {
+  items: {
+    variantId: number;
+    quantity: number;
+    discount?: DiscountInput | null | undefined;
+  }[];
+  cartDiscount?: DiscountInput | null | undefined;
+  vatPercent?: number | null | undefined;
+}
+
+export async function quoteSaleTotals(
+  businessId: number,
+  locationId: number,
+  payload: SaleQuotePayload,
+) {
+  if (payload.items.length === 0) {
+    throw new BadRequestError("A quote requires at least one item.");
+  }
+  return db.transaction(async (tx) => {
+    const variantIds = [...new Set(payload.items.map((i) => i.variantId))];
+    const variants = await tx
+      .select({
+        id: productVariants.id,
+        sellingPrice: productVariants.sellingPrice,
+      })
+      .from(productVariants)
+      .where(
+        and(
+          eq(productVariants.businessId, businessId),
+          inArray(productVariants.id, variantIds),
+        ),
+      );
+    const priceById = new Map(
+      variants.map((v) => [v.id, Number(v.sellingPrice)]),
+    );
+    const trustedItems = payload.items.map((item) => {
+      const unitPrice = priceById.get(item.variantId);
+      if (unitPrice === undefined || !Number.isFinite(unitPrice) || unitPrice < 0) {
+        throw new NotFoundError(
+          `Valid selling price not found for variant ${item.variantId}.`,
+        );
+      }
+      return {
+        variantId: item.variantId,
+        quantity: item.quantity,
+        unitPrice,
+        discount: item.discount ?? null,
+      };
+    });
+
+    const taxRulesByVariant = await resolveTaxRulesForSale(
+      tx,
+      businessId,
+      locationId,
+      new Date(),
+      variantIds,
+    );
+    const usesTaxRules = [...taxRulesByVariant.values()].some(
+      (rules) => rules.length > 0,
+    );
+    const totals = usesTaxRules
+      ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant)
+      : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0));
+
+    const perLine = "perLine" in totals ? totals.perLine : [];
+    return {
+      itemsBase: totals.itemsBase,
+      itemDiscount: totals.itemDiscount,
+      itemsTotal: totals.itemsTotal,
+      cartDiscountAmount: totals.cartDiscountAmount,
+      afterDiscount: totals.afterDiscount,
+      vatPercent: "vatPercent" in totals ? totals.vatPercent : 0,
+      vat: totals.vat,
+      finalTotal: totals.finalTotal,
+      usesTaxRules,
+      perLine,
+    };
+  });
 }

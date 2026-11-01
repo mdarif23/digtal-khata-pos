@@ -42,6 +42,15 @@ router.post(
   saleIntentsController.createIntent,
 );
 
+// Verify by gateway tran_id — the provider redirect carries val_id +
+// tran_id but not our intent id (used by the POS return-handler page).
+router.post(
+  "/api/sales/payment-intents/verify",
+  ...write,
+  requirePermission("pos.create_sale"),
+  saleIntentsController.verifyIntentByTranId,
+);
+
 router.post(
   "/api/sales/payment-intents/:id/verify",
   ...write,

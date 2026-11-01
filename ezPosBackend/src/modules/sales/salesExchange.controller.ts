@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import * as salesService from "./sales.service.js";
 import { getBusinessId } from "../../middleware/business.js";
+import { getLocationId } from "../../middleware/location.js";
 import { sendSafeError } from "../../utils/safeError.js";
 
 const exchangeSchema = z.object({
@@ -74,5 +75,53 @@ export async function createExchange(req: Request, res: Response) {
       .json({ success: true, data: result });
   } catch (err) {
     return sendSafeError(res, err, "Unable to create the exchange.");
+  }
+}
+
+const quoteSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        variantId: z.number().int().positive(),
+        quantity: z.number().int().positive(),
+        discount: z
+          .object({
+            type: z.enum(["percentage", "fixed"]),
+            value: z.number().min(0),
+          })
+          .nullable()
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(200),
+  cartDiscount: z
+    .object({
+      type: z.enum(["percentage", "fixed"]),
+      value: z.number().min(0),
+    })
+    .nullable()
+    .optional(),
+  vatPercent: z.number().min(0).max(100).nullable().optional(),
+});
+
+export async function quote(req: Request, res: Response) {
+  try {
+    const parsed = quoteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid quote data.",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const totals = await salesService.quoteSaleTotals(
+      getBusinessId(req),
+      getLocationId(req),
+      parsed.data,
+    );
+    return res.status(200).json({ success: true, data: totals });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to quote the cart.");
   }
 }

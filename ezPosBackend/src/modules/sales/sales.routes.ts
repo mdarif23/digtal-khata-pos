@@ -31,6 +31,14 @@ router.post(
   requirePermission("pos.create_sale"),
   salesController.createSale,
 );
+// Server-authoritative cart totals (incl. rules-based taxes) so the
+// checkout display always matches what createSale will charge.
+router.post(
+  "/api/sales/quote",
+  ...read,
+  requirePermission("pos.view"),
+  salesExchangeController.quote,
+);
 router.get(
   "/api/sales/:id/receipt",
   ...read,

@@ -13,6 +13,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 1 Checkout | Cart, variants, discounts, checkout | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 1 Checkout | Held sales (retrieve/share) | F→B incomplete | 2 | ❌ localStorage only | ✅ | ❌ | ❌ | Server `held_sales` table + APIs; cross-register sharing |
 | 1 Checkout | Duplicate-submission prevention | B→F incomplete → **fixed** | **1** ✅ | ✅ replay + `onConflictDoNothing` | ✅ key sent, retry-safe | ✅ composite unique (0015) | unit 61/61, integration (see log) | — |
+| 1 Checkout | Server-authoritative checkout totals (tax consistency) | Missing → **Complete** | **1** ✅ | ✅ `POST /sales/quote` | ✅ quote-backed totals hook, local fallback | — | integration | — |
 | 1 Checkout | Cart expiry / cleanup, cart audit | Missing | 2 | ❌ | ❌ | ❌ | ❌ | — |
 | 1 Checkout | Active-cart recovery after refresh | **Defective** (audit correction: only held carts persist) | 2 | n/a | ❌ main cart store not persisted | n/a | ❌ | Persist cart store (with Phase 2 offline work) |
 | 2 Inventory | Adjustments / transfers / receiving | Complete | — | ✅ | ✅ | ✅ | integration | — |
@@ -21,14 +22,14 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 2 Inventory | Replenishment / reorder suggestions | Missing | 3 | ❌ | ❌ | ❌ | ❌ | min/max/reorder config, suggestion engine |
 | 2 Inventory | Aging, dead-stock, valuation reports | Partial | 3 | ❌ | 4 stock reports exist | — | ❌ | aging/dead-stock reports |
 | 3 Payments | Manual methods (cash/card/bKash-QR), split, dues | Complete | — | ✅ | ✅ | ✅ | integration | — |
-| 3 Payments | Provider architecture for **sale** payments | Missing → **Partial** | **1** 🔄 | ✅ intent layer + per-business configs + SSLCommerz adapter + verify/IPN + reconciliation fields | ❌ POS UI pending | ✅ 0018 | integration 9/9 | Provider admin UI; bKash/Nagad adapters (blocked on official docs + merchant credentials) |
+| 3 Payments | Provider architecture for **sale** payments | Missing → **Partial** | **1** 🔄 | ✅ intent layer + per-business configs + SSLCommerz adapter + verify/IPN + reconciliation fields | ✅ due collection via QR/Card (gateway redirect → server-verified return) | ✅ 0018 | integration 10/9→10 | Provider admin UI; bKash/Nagad adapters (blocked on official docs + merchant credentials) |
 | 3 Payments | Sale payment webhooks / reconciliation / settlement | Missing | **1** | ❌ | ❌ | ❌ | ❌ | — |
 | 3 Payments | bKash / Nagad / ShurjoPay providers | Missing | **1** | ❌ | ❌ | ❌ | ❌ | Per official provider docs |
 | 3 Payments | Payment reference uniqueness | **Defective** → **fixed** | **1** ✅ | ✅ ConflictError mapping updated | — | ✅ 0016 composite unique | integration | — |
-| 4 Tax | Configurable tax engine (rates, product assignment, inclusive pricing) | Missing → **Partial** | **1** 🔄 | ✅ rules engine (exclusive/inclusive/exempt, effective dates, location scope, server-side calc) | ❌ settings UI pending | ✅ 0019 | integration 10/10 | Frontend settings + product-tax UI; customer-specific treatment (future) |
+| 4 Tax | Configurable tax engine (rates, product assignment, inclusive pricing) | Missing → **Partial** | **1** 🔄 | ✅ rules engine (exclusive/inclusive/exempt, effective dates, location scope, server-side calc) | ✅ checkout shows server-quoted totals + per-line tax on receipts | ✅ 0019 | integration 10/10 | Tax-rate settings UI + product-tax assignment UI; customer-specific treatment (future) |
 | 4 Tax | Historical tax preservation | Partial → **Complete (backend)** | 1 ✅ | ✅ per-line snapshot (id/name/rate/mode/amount) | receipt carries breakdown | ✅ tax_detail | integration | — |
 | 5 Returns | Full / partial returns, reasons, dispositions | Complete | — | ✅ | ✅ | ✅ | integration | — |
-| 5 Returns | Exchanges | Missing → **Complete (backend)** | **1** ✅ | ✅ atomic refund + linked replacement sale + difference settlement | ❌ POS UI pending | ✅ 0020 | integration 8/8 | POS exchange UI; serial-tracked replacements (v1 rejects) |
+| 5 Returns | Exchanges | Missing → **Complete** | **1** ✅ | ✅ atomic refund + linked replacement sale + difference settlement | ✅ exchange dialog (returns + replacement picker + live difference via quote) | ✅ 0020 | integration 8/8 | Serial-tracked replacements (v1 rejects) |
 | 5 Returns | Refund methods (cash, provider refund) | Missing → **Partial** | **1** 🔄 | ✅ cash + original_payment (ledger-first, retryable payout; mock + SSLCommerz documented API) | ❌ UI pending | ✅ refund_method/provider_refund_id | integration | Store credit + customer balance (credit ledger — follow-up slice) |
 | 6 Promotions | Sale-level fixed / % discounts | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 6 Promotions | Coupons, scheduled promos, BOGO, stacking, groups | Missing | 4 | ❌ | ❌ | ❌ | ❌ | — |
@@ -95,6 +96,13 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-01** — Phase 1 slice 8 (POS frontend wiring) complete:
+  - Backend support: `POST /api/sales/quote` — server-authoritative cart totals (trusted prices + tax rules, read-only, pos.view) and `POST /api/sales/payment-intents/verify` (verify by gateway tran_id — the provider redirect carries val_id + tran_id but not our intent id).
+  - **Checkout taxes:** the POS totals hook now displays the server quote (debounced 250ms) with instant local-math fallback — the cashier always sees exactly what createSale will charge, including product tax rules; the VAT line labels rules-mode vs percent-mode.
+  - **Receipts:** per-line tax amount + rule names rendered on the receipt template (historical snapshot from the backend).
+  - **Exchanges:** `ExchangeDialog` on the sale-details screen — pick returnable items, search-add replacements, live difference estimate via the quote endpoint; backend settles exact numbers and any mismatch is surfaced. Store/API plumbing added.
+  - **Due collection via QR/Card:** `PaymentIntentDialog` (amount ≤ due, method, provider) → gateway redirect → `/payment/return` page verifies server-side by tran_id before anything is recorded; cancel/fail paths say so explicitly.
+  - Verification: backend tsc clean, full suite 266/285 (same 19 pre-existing; +1 verify-by-tran test green); POS tsc clean, `vite build` green.
 - **2026-11-01** — Phase 1 slice 7 (exchanges + refund methods, backend) complete — Phase 1 backend DONE:
   - Migration `0020`: `sales.exchange_of_sale_id` (composite FK to the original sale — tenant-safe link) + `sale_refunds.refund_method` / `provider_refund_id`.
   - Exchange (`POST /api/sales/:id/exchange`, `sales.return` permission): in ONE transaction — `applySaleRefund` (same allocation/ceiling/serial/restock machinery as returns), replacement sale with trusted DB prices + tax-engine snapshots + stock consumption at the original's location, and difference settlement: up-exchange requires additional payments to exactly cover the difference (cash portion attributed to the register session); down-exchange refunds the surplus (cash, or original_payment via the provider); even exchange settles against itself. Idempotent via the replacement sale's idempotency key. Serial-tracked replacements rejected in v1. Audited (`sale.exchange`).

@@ -456,6 +456,46 @@ describe("sale payment intents integration", { skip: !runIntegration }, () => {
     assert.equal(intent.status, "captured");
   });
 
+  it("verifies by tran_id (the provider redirect path used by the POS return page)", async () => {
+    const saleId = await createDueSale(token, businessId, "Intent Product I", 45);
+    const key = uniqueKey("tran");
+    const created = await createIntent(token, businessId, saleId, 45, key);
+    assert.equal(created.status, 201);
+
+    const verifyRes = await api(
+      token,
+      businessId,
+      "POST",
+      "/api/sales/payment-intents/verify",
+      { tranId: key, valId: "MOCK-VALID-45" },
+    );
+    assert.equal(verifyRes.status, 200);
+    const outcome = (await verifyRes.json()) as {
+      data: { verified: boolean; alreadyCaptured: boolean };
+    };
+    assert.equal(outcome.data.verified, true);
+    assert.equal(outcome.data.alreadyCaptured, false);
+
+    const sale = await saleRow(saleId);
+    assert.equal(Number(sale.due_amount), 0);
+    assert.equal(sale.payment_status, "paid");
+
+    // Replay by tranId is idempotent.
+    const replay = await api(
+      token,
+      businessId,
+      "POST",
+      "/api/sales/payment-intents/verify",
+      { tranId: key, valId: "MOCK-VALID-45" },
+    );
+    assert.equal(replay.status, 200);
+    const replayBody = (await replay.json()) as {
+      data: { verified: boolean; alreadyCaptured: boolean };
+    };
+    assert.equal(replayBody.data.verified, true);
+    assert.equal(replayBody.data.alreadyCaptured, true);
+  });
+
   it("an unknown tran_id in the IPN does not error the gateway", async () => {
     const ipnRes = await fetch(`${baseUrl}/api/sales/payment-intents/ipn`, {
       method: "POST",

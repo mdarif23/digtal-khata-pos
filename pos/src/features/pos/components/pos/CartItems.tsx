@@ -19,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card.js";
 import { Input } from "@/components/ui/input.js";
 import { Switch } from "@/components/ui/switch.js";
 import { getCartTotals, getLinePricing } from "../../cartPricing.js";
+import { quoteSaleApi, type QuoteTotals } from "../../quote.api.js";
 import { SerialPickerDialog } from "./SerialPickerDialog.js";
 import { toast } from "@/components/ui/toast.js";
 import { Button } from "@/components/ui/button.js";
@@ -32,16 +33,64 @@ type CartItem = ReturnType<typeof useCartStore.getState>["cart"][number];
 const tk = (n: number) => `৳${n.toFixed(2)}`;
 
 // ---------- shared totals (used by every cart component) ----------
+// Server-authoritative: the backend computes the same totals createSale will
+// charge, including product tax rules the client cannot know. Local math
+// fills the gap instantly and keeps working offline / on quote failure.
 function useCartTotals(form: ShowCustomerInfoProps["form"]) {
   const cart = useCartStore((state) => state.cart);
   const discount = useWatch({ control: form.control, name: "discount" });
   const vatPercent =
     useWatch({ control: form.control, name: "vatPercent" }) ?? 0;
 
-  return useMemo(
+  const localTotals = useMemo(
     () => getCartTotals(cart, discount, Number(vatPercent)),
     [cart, discount, vatPercent],
   );
+
+  const [quoted, setQuoted] = useState<QuoteTotals | null>(null);
+
+  useEffect(() => {
+    if (cart.length === 0) {
+      setQuoted(null);
+      return;
+    }
+    let ignore = false;
+    const timer = setTimeout(() => {
+      quoteSaleApi({
+        items: cart.map((item) => ({
+          variantId: item.variants[0]?.id ?? 0,
+          quantity: item.quantity,
+          discount: item.discount ?? null,
+        })),
+        cartDiscount: discount,
+        vatPercent: vatPercent === null ? null : Number(vatPercent),
+      })
+        .then((totals) => {
+          if (!ignore) setQuoted(totals);
+        })
+        .catch(() => {
+          if (!ignore) setQuoted(null); // fall back to local math
+        });
+    }, 250);
+    return () => {
+      ignore = true;
+      clearTimeout(timer);
+    };
+  }, [cart, discount, vatPercent]);
+
+  if (quoted === null) return localTotals;
+  // Trust the server quote for every money field; keep the client shape.
+  return {
+    itemsBase: quoted.itemsBase,
+    itemDiscount: quoted.itemDiscount,
+    itemsTotal: quoted.itemsTotal,
+    cartDiscountAmount: quoted.cartDiscountAmount,
+    afterDiscount: quoted.afterDiscount,
+    vatPercent: quoted.usesTaxRules ? 0 : quoted.vatPercent,
+    vat: quoted.vat,
+    finalTotal: quoted.finalTotal,
+    usesTaxRules: quoted.usesTaxRules,
+  };
 }
 
 // ---------- customer info ----------
@@ -336,9 +385,13 @@ function CartTextModal({
           <span>-{tk(totals.cartDiscountAmount)}</span>
         </div>
       )}
-      {totals.vatPercent > 0 && (
+      {totals.vat > 0 && (
         <div className="flex justify-between py-1.5 text-sm">
-          <span>VAT: {totals.vatPercent}%</span>
+          <span>
+            {"usesTaxRules" in totals && totals.usesTaxRules
+              ? "VAT / Tax (product rules)"
+              : `VAT: ${totals.vatPercent}%`}
+          </span>
           <span>{tk(totals.vat)}</span>
         </div>
       )}

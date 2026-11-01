@@ -118,3 +118,37 @@ export async function paymentIpn(req: Request, res: Response) {
     return res.status(200).json({ success: false });
   }
 }
+
+const verifyByTranIdSchema = z.object({
+  tranId: z.string().trim().min(8).max(120),
+  valId: z.string().trim().min(1).max(200),
+});
+
+/**
+ * Verify by the intent's idempotency key (the gateway tran_id). The
+ * provider's redirect carries val_id + tran_id but NOT our intent id, so
+ * the return handler page authenticates and verifies through this route.
+ */
+export async function verifyIntentByTranId(req: Request, res: Response) {
+  try {
+    const parsed = verifyByTranIdSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "A transaction id and gateway validation id are required.",
+      });
+    }
+    const outcome = await saleIntentsService.verifySalePaymentIntent(
+      { businessId: getBusinessId(req), tranId: parsed.data.tranId },
+      parsed.data.valId,
+    );
+    return res.status(outcome.verified ? 200 : 409).json({
+      success: outcome.verified,
+      data: outcome,
+      message:
+        outcome.reason ?? (outcome.verified ? "Payment verified." : "Payment not verified."),
+    });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to verify the payment.");
+  }
+}
