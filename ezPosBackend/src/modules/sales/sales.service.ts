@@ -38,6 +38,7 @@ import {
 import type { CreateSalePayload } from "./schemas/sales.schema.js";
 import type { SaleRefundRequest } from "./schemas/sales.schema.js";
 import { customers } from "../../db/schema/customers.js";
+import { recordAuditInTx } from "../../services/audit.js";
 import {
   customerValidation,
   validatePayments,
@@ -72,7 +73,7 @@ function isDuplicatePaymentReferenceError(error: unknown): boolean {
     "code" in cause &&
     cause.code === "23505" &&
     "constraint" in cause &&
-    cause.constraint === "sale_payments_method_reference_unique"
+    cause.constraint === "sale_payments_business_method_reference_unique"
   );
 }
 
@@ -818,7 +819,21 @@ export async function createSale(
         throw error;
       }
     }
-    // 11. Return receipt data; transaction commits on success.
+    // 11. Audit the sale transactionally, then return receipt data.
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId: cashierUserId,
+      action: "sale.create",
+      entityType: "sale",
+      entityId: saleId,
+      metadata: {
+        invoiceNumber: newSale.invoiceNumber,
+        finalTotal: Number(newSale.finalTotal),
+        dueAmount: Number(newSale.dueAmount),
+        paymentStatus: newSale.paymentStatus,
+        itemCount: items.length,
+      },
+    });
     return {
       sale: newSale,
       change,
@@ -1095,6 +1110,7 @@ export async function createSingleRefund(
   businessId: number,
   id: number,
   options: SaleRefundRequest,
+  actorUserId: number | null = null,
 ) {
   return db.transaction(async (tx) => {
     const [saleItem] = await tx
@@ -1138,6 +1154,19 @@ export async function createSingleRefund(
       [saleItem],
       options,
     );
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId,
+      action: "sale.refund_item",
+      entityType: "sale",
+      entityId: saleItem.saleId,
+      metadata: {
+        refundId,
+        saleItemId: saleItem.id,
+        reason: options.reason,
+        disposition: options.disposition,
+      },
+    });
     await pushRefundStatusAfterCommit(businessId, saleItem.saleId);
     return { message: "Refund created successfully", refundId };
   });
@@ -1147,6 +1176,7 @@ export async function createMultipleRefunds(
   businessId: number,
   id: number,
   options: SaleRefundRequest,
+  actorUserId: number | null = null,
 ) {
   return db.transaction(async (tx) => {
     const [sale] = await tx
@@ -1197,6 +1227,19 @@ export async function createMultipleRefunds(
       refundableItems,
       options,
     );
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId,
+      action: "sale.refund_sale",
+      entityType: "sale",
+      entityId: id,
+      metadata: {
+        refundId,
+        itemCount: refundableItems.length,
+        reason: options.reason,
+        disposition: options.disposition,
+      },
+    });
     await pushRefundStatusAfterCommit(businessId, id);
     return { message: "Refund created successfully", refundId };
   });

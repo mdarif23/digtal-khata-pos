@@ -92,6 +92,7 @@ export async function createSingleRefund(req: Request, res: Response) {
       getBusinessId(req),
       id,
       result.data,
+      req.user?.id ?? null,
     );
     res.status(200).json({ message, refundId });
   } catch (err) {
@@ -115,6 +116,7 @@ export async function createMultipleRefunds(req: Request, res: Response) {
       getBusinessId(req),
       id,
       result.data,
+      req.user?.id ?? null,
     );
     res.status(200).json({ message, refundId });
   } catch (err) {

@@ -24,7 +24,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 3 Payments | Provider architecture for **sale** payments | Missing | **1** | ⚠️ exists for subscriptions only | ❌ | ❌ | ❌ | Generalize `PaymentProvider` layer to sales |
 | 3 Payments | Sale payment webhooks / reconciliation / settlement | Missing | **1** | ❌ | ❌ | ❌ | ❌ | — |
 | 3 Payments | bKash / Nagad / ShurjoPay providers | Missing | **1** | ❌ | ❌ | ❌ | ❌ | Per official provider docs |
-| 3 Payments | Payment reference uniqueness | **Defective** | **1** | ⚠️ global UNIQUE across tenants | — | migration | ❌ | Composite `(business_id, method, reference)` |
+| 3 Payments | Payment reference uniqueness | **Defective** → **fixed** | **1** ✅ | ✅ ConflictError mapping updated | — | ✅ 0016 composite unique | integration | — |
 | 4 Tax | Configurable tax engine (rates, product assignment, inclusive pricing) | Missing | **1** | ❌ (sale-level manual VAT only) | ❌ | ❌ | ❌ | `tax_rates` + `product_taxes`, server-side calc |
 | 4 Tax | Historical tax preservation | Partial | 1 | ✅ snapshot on sale | ✅ | ✅ | — | Retain rule reference |
 | 5 Returns | Full / partial returns, reasons, dispositions | Complete | — | ✅ | ✅ | ✅ | integration | — |
@@ -42,13 +42,13 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 11 Multi-loc | Real-time register sync, health monitoring | Missing | 2 | ❌ (no WS/SSE) | ❌ | ❌ | ❌ | — |
 | 12 Omnichannel | Catalog, reservations, order sync, webhooks, entitlements | Complete (Ph9) | — | ✅ | ✅ | ✅ | integration | Customer sync pending |
 | 12 Omnichannel | Shopify adapter | Missing | 6+ | ❌ | n/a | ❌ | ❌ | Adapter interface ready |
-| 12 Omnichannel | Store URL validation (SSRF) | **Defective** | **1** | ❌ user-supplied URL unvalidated | — | — | ❌ | https-only + private-range block |
+| 12 Omnichannel | Store URL validation (SSRF) | **Defective** → **fixed** | **1** ✅ | ✅ `assertPublicStoreUrl` at connect (https-required in prod, private-range + DNS checks) | — | — | unit | — |
 | 13 Restaurant | Menus, modifiers, tables, KDS | Missing | 7 | ❌ | ❌ | ❌ | ❌ | Greenfield module |
 | 14 Notifications | Notification center | Missing | 5 | ❌ | ❌ | ❌ | ❌ | Event-driven generation |
 | 15 Reports | 20 report pages incl. profit/tax/regr | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 15 Reports | Forecasting, CLV, channel reports, exports | Missing/Partial | 8 | ❌ | partial | — | ❌ | CSV/Excel export to verify |
 | Security | RBAC + tenant isolation, encrypted credentials, webhook HMAC | Complete | — | ✅ | ✅ | ✅ | integration | — |
-| Security | General audit log (beyond saasAdmin) | Missing | **1** | ❌ | ❌ | ❌ | ❌ | `audit_log` table + service |
+| Security | General audit log (beyond saasAdmin) | Missing → **Partial** | **1** 🔄 | ✅ `audit_log` + `services/audit.ts`; wired: sale.create, sale.refund_item, sale.refund_sale, subscription.payment.verified | ❌ no viewer UI yet | ✅ 0017 | integration (22 entries in test run) | Wire register close, stock adjustments, integration changes; portal viewer |
 | Security | Secrets in git history | **Defective** | 0.5 | — | — | — | — | Untracked in 0.5; history purge needs maintainer decision |
 | Reliability | Concurrent idempotent replay returns 500 | **Defective** → **fixed** | **1** ✅ | ✅ `onConflictDoNothing` + refetch in both insert paths | — | ✅ 0015 | integration | — |
 
@@ -75,3 +75,8 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - POS frontend: `useCartStore.beginCheckout()` claims a UUID per checkout; retries reuse it; `resetCart()` clears it; `PosPage` sends the key on every submit.
   - Verification: backend tsc clean, unit 61/61, integration 227/246 — the 19 failures are pre-existing (reproduced without these changes; all in saas-admin/support/portal/storefront-subscription areas, none in sales/checkout). POS tsc clean, `vite build` green. Migration applied to local `ezPos` + `ezpos_test`.
   - Audit correction: active-cart recovery does NOT exist — only held carts persist to localStorage; the main cart store is memory-only. Tracked above, slated for Phase 2.
+- **2026-11-01** — Phase 1 slices 2-4 complete:
+  - **Slice 2 — payment references per business** (migration `0016`): global `UNIQUE(payment_method, reference)` on `sale_payments` → composite `(business_id, payment_method, reference)`. Resolves the pending policy decision documented in the schema: two tenants recording the same gateway reference is legitimate (their own merchant accounts); duplicates within a business are still rejected. `isDuplicatePaymentReferenceError` updated to the new constraint name.
+  - **Slice 3 — SSRF guard** (`utils/validateStoreUrl.ts` + tests): WooCommerce `storeUrl` validated at connect — http/https only, https required in production, private/loopback/link-local IP literals rejected, hostnames resolved and every address must be public. Harness bypass only when `INTEGRATION_TESTS=1` (mock stores on loopback; the suite fail-closes on the `ezpos_test` DB).
+  - **Slice 4 — audit log foundation** (migration `0017` + `services/audit.ts`): general `audit_log` table written transactionally with the operation it describes. Wired into `sale.create`, `sale.refund_item`, `sale.refund_sale`, `subscription.payment.verified`. Metadata is non-sensitive (no references/secrets). Refund services now accept `actorUserId` from the controllers.
+  - Verification: backend tsc clean; full suite 238/257 (same 19 pre-existing failures, none new; +11 new SSRF unit tests all green); audit_log verified populated in the integration run; migrations applied to `ezPos` + `ezpos_test`.

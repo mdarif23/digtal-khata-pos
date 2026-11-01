@@ -113,6 +113,20 @@
       "when": 1793546125785,
       "tag": "0015_sale_idempotency_business_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793546952374,
+      "tag": "0016_sale_payment_reference_business_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793547302056,
+      "tag": "0017_audit_log",
+      "breakpoints": true
     }
   ]
 }
