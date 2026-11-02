@@ -21,7 +21,7 @@ export function HoldDropdownMenu() {
   }
   const resetCart = useCartStore((state) => state.resetCart);
   const cart = useCartStore((state) => state.cart);
-  const { addHoldCart } = useHoldCartStore();
+  const { holdCart } = useHoldCartStore();
   return (
     <>
       <DropdownMenu>
@@ -37,8 +37,13 @@ export function HoldDropdownMenu() {
             disabled={cart.length === 0}
             variant="destructive"
             onClick={() => {
-              addHoldCart(cart);
-              resetCart();
+              // Server-backed holds (Module 1): only clear the register
+              // once the hold is safely stored — the cart is never lost.
+              void holdCart(cart).then((held) => {
+                if (held) {
+                  resetCart();
+                }
+              });
             }}
           >
             Hold

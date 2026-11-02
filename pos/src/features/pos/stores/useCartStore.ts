@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CartStore, CartType } from "../types/cart.types.js";
 import { HoldCartItems } from "@/features/pos/types/cart.types.js";
+import { useProductStore } from "@/features/products/usedashboardProductStore.js";
 
 // export const useCartStore = create(
 //   persist(
@@ -232,42 +233,142 @@ export const useCartStore = create<CartStore>((set, get) => ({
 
 interface HoldCartStore {
   holdCartItems: HoldCartItems[];
-  addHoldCart: (cart: CartType[]) => void;
-  removeHoldCart: (id: number) => void;
-  clearHoldCarts: () => void;
+  /** Server-backed: any authorized register at this location can retrieve. */
+  holdCart: (items: CartType[]) => Promise<boolean>;
+  removeHoldCart: (id: number) => Promise<void>;
+  clearHoldCarts: () => Promise<void>;
+  refreshHolds: () => Promise<void>;
 }
 
-export const useHoldCartStore = create<HoldCartStore>()(
-  persist(
-    (set) => ({
-      holdCartItems: [],
+/** Slim, serializable hold snapshot sent to the server. */
+interface HeldItemPayload {
+  variantId: number;
+  quantity: number;
+  discount?: { type: "percentage" | "fixed"; value: number } | null;
+  serialNumbers?: string[];
+  productName: string;
+}
 
-      // 1. Add a new held cart
-      addHoldCart: (cartItems) =>
-        set((state) => {
-          const nextNumber = state.holdCartItems.length + 1;
-          const newHeldCart = {
-            id: Date.now(),
-            name: `Hold ${nextNumber}`,
-            time: new Date().toLocaleTimeString(),
-            items: cartItems,
-          };
-          return { holdCartItems: [...state.holdCartItems, newHeldCart] };
-        }),
+interface HeldSaleRow {
+  id: number;
+  name: string;
+  items: HeldItemPayload[];
+  createdAt: string;
+  heldByName: string | null;
+}
 
-      // 2. Remove a cart by ID (Perfectly safe filtering)
-      removeHoldCart: (id) =>
-        set((state) => ({
-          holdCartItems: state.holdCartItems.filter(
-            (c) => String(c.id) !== String(id),
-          ),
+async function fetchHeldRows(): Promise<HeldSaleRow[]> {
+  const res = await axios.get<{ data: HeldSaleRow[] }>("/held-sales");
+  return res.data.data ?? [];
+}
+
+/**
+ * Shared held sales (Module 1 / Module 11): holds live on the SERVER per
+ * business+location, so any authorized cashier at any register can retrieve
+ * them — the old localStorage holds were invisible across devices. Prices
+ * and stock are re-validated at sale time; on resume the cart is rebuilt
+ * from LIVE catalog data (stale/deleted products are reported, never
+ * silently dropped).
+ */
+export const useHoldCartStore = create<HoldCartStore>()((set, get) => ({
+  holdCartItems: [],
+
+  refreshHolds: async () => {
+    try {
+      const rows = await fetchHeldRows();
+      set({
+        holdCartItems: rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          time: `${new Date(row.createdAt).toLocaleTimeString()}${
+            row.heldByName ? ` · ${row.heldByName}` : ""
+          }`,
+          // items are the slim payloads; reconstruction happens on resume.
+          items: row.items.map((item) => ({
+            ...item,
+            variants: [],
+            quantity: item.quantity,
+            serialNumbers: item.serialNumbers ?? [],
+          })) as unknown as CartType[],
         })),
+      });
+    } catch {
+      // Network down — keep whatever is displayed; retry on next open.
+    }
+  },
 
-      // 3. Clear all held carts
-      clearHoldCarts: () => set({ holdCartItems: [] }),
-    }),
-    {
-      name: "hold-cart-storage", // This is the localStorage key!
-    },
-  ),
-);
+  holdCart: async (items) => {
+    if (items.length === 0) return false;
+    const payload = {
+      items: items.map((item) => ({
+        variantId: item.variants[0]?.id ?? 0,
+        quantity: item.quantity,
+        discount: item.discount ?? null,
+        serialNumbers: item.serialNumbers ?? undefined,
+        productName: item.name,
+      })),
+    };
+    try {
+      await axios.post("/held-sales", payload);
+      await get().refreshHolds();
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  removeHoldCart: async (id) => {
+    try {
+      await axios.delete(`/held-sales/${id}`);
+      set((state) => ({
+        holdCartItems: state.holdCartItems.filter((c) => c.id !== id),
+      }));
+    } catch {
+      // Refresh will reconcile on next open.
+    }
+  },
+
+  clearHoldCarts: async () => {
+    const ids = get().holdCartItems.map((c) => c.id);
+    await Promise.all(ids.map((id) => axios.delete(`/held-sales/${id}`).catch(() => null)));
+    await get().refreshHolds();
+  },
+}));
+
+/**
+ * Rebuilds resumable cart lines from a held sale's slim snapshot using LIVE
+ * product data. Returns the lines plus any product names that could not be
+ * resolved (deleted/unavailable) — the caller reports them instead of
+ * silently dropping money.
+ */
+export function resumeHeldItems(
+  slimItems: {
+    variantId: number;
+    quantity: number;
+    discount?: { type: "percentage" | "fixed"; value: number } | null;
+    serialNumbers?: string[];
+    productName: string;
+  }[],
+): { lines: CartType[]; missing: string[] } {
+  const products = useProductStore.getState().products;
+  const lines: CartType[] = [];
+  const missing: string[] = [];
+  for (const item of slimItems) {
+    const product = products.find((p) =>
+      p.variants.some((v) => v.id === item.variantId),
+    );
+    if (!product) {
+      missing.push(item.productName);
+      continue;
+    }
+    const variant = product.variants.find((v) => v.id === item.variantId)!;
+    lines.push({
+      ...product,
+      variants: [variant],
+      quantity: item.quantity,
+      discount: item.discount ?? null,
+      serialNumbers: item.serialNumbers ?? [],
+    });
+  }
+  return { lines, missing };
+}

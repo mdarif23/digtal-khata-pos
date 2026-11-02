@@ -67,12 +67,20 @@ export async function sweepExpiredReservations(
 
 export async function runCommerceSweeps(
   now: Date = new Date(),
-): Promise<{ reservationsExpired: number }> {
-  const results = { reservationsExpired: 0 };
+): Promise<{ reservationsExpired: number; heldSalesExpired: number }> {
+  const results = { reservationsExpired: 0, heldSalesExpired: 0 };
   try {
     results.reservationsExpired = await sweepExpiredReservations(now);
   } catch (err) {
     console.error("Reservation expiry sweep failed:", err);
+  }
+  try {
+    const { expireHeldSales } = await import(
+      "../modules/heldSales/heldSales.service.js"
+    );
+    results.heldSalesExpired = await expireHeldSales();
+  } catch (err) {
+    console.error("Held-sale expiry sweep failed:", err);
   }
   return results;
 }
