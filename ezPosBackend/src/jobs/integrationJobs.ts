@@ -3,6 +3,7 @@ import { db } from "../db/schema/index.js";
 import { integrations } from "../db/schema/integrations.js";
 import {
   processSyncJobs,
+  pushCustomerUpdates,
   pushStockLevels,
 } from "../modules/integrations/integrations.service.js";
 
@@ -15,8 +16,14 @@ export async function runIntegrationSweeps(now: Date = new Date()): Promise<{
   processedJobs: number;
   failedJobs: number;
   stockPushes: number;
+  customerPushes: number;
 }> {
-  const results = { processedJobs: 0, failedJobs: 0, stockPushes: 0 };
+  const results = {
+    processedJobs: 0,
+    failedJobs: 0,
+    stockPushes: 0,
+    customerPushes: 0,
+  };
 
   try {
     const jobs = await processSyncJobs(now);
@@ -48,6 +55,33 @@ export async function runIntegrationSweeps(now: Date = new Date()): Promise<{
     }
   } catch (err) {
     console.error("Stock push sweep failed:", err);
+  }
+
+  try {
+    // Customer sync (Module 12): push customers created/updated since the
+    // last watermark to connected WooCommerce stores (hourly pacing).
+    const due = await db
+      .select({ id: integrations.id })
+      .from(integrations)
+      .where(
+        sql`${integrations.customerSyncEnabled} and ${integrations.status} = 'connected'
+        and (${integrations.customerSyncedAt} is null or ${integrations.customerSyncedAt} < ${new Date(
+          now.getTime() - 60 * 60_000,
+        ).toISOString()})`,
+      )
+      .limit(20);
+    for (const integration of due) {
+      try {
+        results.customerPushes += await pushCustomerUpdates(integration.id);
+      } catch (err) {
+        console.error(
+          `Customer push failed for integration ${integration.id}:`,
+          err,
+        );
+      }
+    }
+  } catch (err) {
+    console.error("Customer push sweep failed:", err);
   }
 
   return results;

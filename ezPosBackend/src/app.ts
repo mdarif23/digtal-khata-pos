@@ -6,6 +6,18 @@ import express, {
 import cors from "cors";
 import productRouter from "./modules/products/products.routes.js";
 import salesRouter from "./modules/sales/sales.routes.js";
+import saleIntentsRouter from "./modules/sales/saleIntents.routes.js";
+import taxRatesRouter from "./modules/taxRates/taxRates.routes.js";
+import heldSalesRouter from "./modules/heldSales/heldSales.routes.js";
+import realtimeRouter from "./modules/realtime/realtime.routes.js";
+import stockCountRouter from "./modules/stockCount/stockCount.routes.js";
+import reorderRouter from "./modules/reorder/reorder.routes.js";
+import loyaltyRouter from "./modules/loyalty/loyalty.routes.js";
+import giftCardsRouter from "./modules/giftCards/giftCards.routes.js";
+import promotionsRouter from "./modules/promotions/promotions.routes.js";
+import attendanceRouter from "./modules/attendance/attendance.routes.js";
+import notificationsRouter from "./modules/notifications/notifications.routes.js";
+import hardwareRouter from "./modules/hardware/hardware.routes.js";
 import customersRouter from "./modules/customers/customers.routes.js";
 import expenseRouter from "./modules/expenses/expenses.routes.js";
 import purchasesRouter from "./modules/purchases/purchases.routes.js";
@@ -98,6 +110,19 @@ export function buildApp() {
 
   app.use("/", productRouter);
   app.use("/", salesRouter);
+  // Payment-intent IPN is public and must match before generic sale routes.
+  app.use("/", saleIntentsRouter);
+  app.use("/", taxRatesRouter);
+  app.use("/", heldSalesRouter);
+  app.use("/", realtimeRouter);
+  app.use("/", stockCountRouter);
+  app.use("/", reorderRouter);
+  app.use("/", loyaltyRouter);
+  app.use("/", giftCardsRouter);
+  app.use("/", promotionsRouter);
+  app.use("/", attendanceRouter);
+  app.use("/", notificationsRouter);
+  app.use("/", hardwareRouter);
   app.use("/", customersRouter);
   app.use("/", expenseRouter);
   app.use("/", purchasesRouter);

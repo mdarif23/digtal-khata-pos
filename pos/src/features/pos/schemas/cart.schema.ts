@@ -5,6 +5,9 @@ export const PAYMENT_ROW_METHODS = [
   "bangla_qr",
   "card",
   "due",
+  "store_credit",
+  "loyalty_points",
+  "gift_card",
 ] as const;
 
 export const paymentSchema = z.object({
@@ -81,6 +84,10 @@ export const createSalePayloadSchema = z.object({
     })
     .nullable(),
   vatPercent: z.number().nullable(),
+  couponCode: z.string().trim().max(60).optional(),
+
+  // Client-generated key making checkout retries idempotent (see useCartStore).
+  idempotencyKey: z.string().min(8).max(120).optional(),
 
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),

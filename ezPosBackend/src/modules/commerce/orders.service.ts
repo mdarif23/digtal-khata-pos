@@ -159,7 +159,26 @@ async function resolveCustomerId(
       ),
     )
     .limit(1);
-  if (existing) return existing.id;
+  if (existing) {
+    // Backfill missing contact details from the order (Module 12 sync):
+    // the matched record keeps its identity, gains what it lacked.
+    if (email || customer.address) {
+      await tx
+        .update(customers)
+        .set({
+          ...(email ? { email } : {}),
+          ...(customer.address ? { address: customer.address } : {}),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(customers.id, existing.id),
+            eq(customers.businessId, businessId),
+          ),
+        );
+    }
+    return existing.id;
+  }
 
   const [created] = await tx
     .insert(customers)
@@ -318,11 +337,42 @@ export async function createOnlineOrder(
           input.note ??
           (input.paymentMethod ? `Payment method: ${input.paymentMethod}` : null),
       })
+      // A concurrent duplicate (same business + idempotency key) that
+      // committed first makes this insert a no-op; the refetch below then
+      // returns the winner's order instead of a 500 on the unique violation.
+      .onConflictDoNothing({
+        target: [sales.businessId, sales.idempotencyKey],
+      })
       .returning({
         id: sales.id,
         invoiceNumber: sales.invoiceNumber,
       });
-    if (!sale) throw new Error("Sale insert returned no row.");
+    if (!sale) {
+      const [replay] = await tx
+        .select({
+          id: sales.id,
+          invoiceNumber: sales.invoiceNumber,
+          status: sales.status,
+          finalTotal: sales.finalTotal,
+        })
+        .from(sales)
+        .where(
+          and(
+            eq(sales.businessId, input.businessId),
+            eq(sales.idempotencyKey, input.idempotencyKey),
+          ),
+        )
+        .limit(1);
+      if (!replay) throw new Error("Sale insert returned no row.");
+      return {
+        saleId: replay.id,
+        invoiceNumber: replay.invoiceNumber,
+        status: replay.status as OnlineOrderResult["status"],
+        total: Number(replay.finalTotal ?? 0),
+        currency: "BDT" as const,
+        duplicated: true,
+      };
+    }
 
     for (const line of input.lines) {
       await tx.insert(saleItems).values({

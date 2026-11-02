@@ -302,3 +302,99 @@ export async function getLocationComparison(req: Request, res: Response) {
 function sendSafe(err: unknown, res: Response) {
   sendSafeError(res, err, "Unable to generate this report right now.");
 }
+
+export async function getInventoryAging(req: Request, res: Response) {
+  try {
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getInventoryAgingReport(
+      getBusinessId(req),
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}
+
+export async function getDeadStock(req: Request, res: Response) {
+  try {
+    const locationId = await resolveReportLocation(req);
+    const days = Number(req.query.days ?? 60);
+    const windowDays = Number.isFinite(days) && days >= 1 && days <= 365 ? Math.floor(days) : 60;
+    const data = await reportsService.getDeadStockReport(
+      getBusinessId(req),
+      windowDays,
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}
+
+export async function getChannelPerformance(req: Request, res: Response) {
+  try {
+    const params = getValidatedParams(req);
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getChannelPerformanceReport(
+      getBusinessId(req),
+      params,
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}
+
+export async function getCustomerLifetimeValue(req: Request, res: Response) {
+  try {
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getCustomerLifetimeValueReport(
+      getBusinessId(req),
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}
+
+export async function getCustomerRetention(req: Request, res: Response) {
+  try {
+    const data = await reportsService.getCustomerRetentionReport(
+      getBusinessId(req),
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}
+
+export async function getStaffPerformance(req: Request, res: Response) {
+  try {
+    const params = getValidatedParams(req);
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getStaffPerformanceReport(
+      getBusinessId(req),
+      params,
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}
+
+export async function getSalesForecast(req: Request, res: Response) {
+  try {
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getSalesForecastReport(
+      getBusinessId(req),
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}

@@ -25,6 +25,13 @@ import { UsersPage } from "@/features/users/pages/UsersPage";
 import { LocationsPage } from "@/features/locations/pages/LocationsPage";
 import { StockTransfersPage } from "@/features/stockTransfers/pages/StockTransfersPage";
 import { RolesPage } from "@/features/roles/pages/RolesPage";
+import { PaymentIntentReturn } from "@/features/pos/pages/PaymentIntentReturn";
+import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
+import { StockCountPage } from "@/features/products/pages/StockCountPage";
+import { ReorderPage } from "@/features/purchases/pages/ReorderPage";
+import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
+import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
+import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -36,6 +43,12 @@ const REPORTS_PERMISSIONS = [
 ];
 
 const router = createBrowserRouter([
+  {
+    // Gateway return handler — the provider redirects here with val_id +
+    // tran_id; verification happens server-side before anything is recorded.
+    path: "/payment/return",
+    element: <PaymentIntentReturn />,
+  },
   {
     path: "/",
     element: (
@@ -206,6 +219,54 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="users.view">
             <UsersPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/attendance",
+        element: (
+          <RequirePermission permission="attendance.view">
+            <AttendancePage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/coupons",
+        element: (
+          <RequirePermission permission="promotions.view">
+            <CouponsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/gift-cards",
+        element: (
+          <RequirePermission permission="pos.view">
+            <GiftCardsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/reorder",
+        element: (
+          <RequirePermission permission="purchases.view">
+            <ReorderPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/stock-counts",
+        element: (
+          <RequirePermission permission="inventory.adjust">
+            <StockCountPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/tax-rates",
+        element: (
+          <RequirePermission permission="taxes.view">
+            <TaxRatesPage />
           </RequirePermission>
         ),
       },

@@ -96,6 +96,42 @@ export interface RegisterSessionReportData {
 }
 
 export const reportsApi = {
+  getChannelPerformance: (filters: Partial<ReportFilters> = {}) =>
+    api.get<{ success: boolean; data: ChannelPerformanceRow[] }>(
+      "/reports/analytics/channels",
+      { params: buildParams(filters) },
+    ),
+
+  getCustomerLifetimeValue: () =>
+    api.get<{ success: boolean; data: ClvRow[] }>("/reports/analytics/clv"),
+
+  getCustomerRetention: () =>
+    api.get<{ success: boolean; data: RetentionRow[] }>(
+      "/reports/analytics/retention",
+    ),
+
+  getStaffPerformance: (filters: Partial<ReportFilters> = {}) =>
+    api.get<{ success: boolean; data: StaffPerformanceRow[] }>(
+      "/reports/analytics/staff",
+      { params: buildParams(filters) },
+    ),
+
+  getSalesForecast: () =>
+    api.get<{ success: boolean; data: SalesForecastData }>(
+      "/reports/analytics/forecast",
+    ),
+
+  getInventoryAging: () =>
+    api.get<{ success: boolean; data: InventoryAgingData }>(
+      "/reports/inventory/aging",
+    ),
+
+  getDeadStock: (days = 60) =>
+    api.get<{ success: boolean; data: DeadStockRow[] }>(
+      "/reports/inventory/dead-stock",
+      { params: { days } },
+    ),
+
   getLocationComparison: (filters: Partial<ReportFilters> = {}) =>
     api.get<{ success: boolean; data: LocationComparisonData }>(
       "/reports/locations/comparison",
@@ -200,3 +236,80 @@ export const reportsApi = {
   getSupplierPayables: () =>
     api.get<{ success: boolean; data: SupplierPayablesReportData }>("/reports/purchases/payables"),
 };
+
+// --- inventory intelligence (Module 2D) -------------------------------------
+
+export interface InventoryAgingRow {
+  batchId: number;
+  variantId: number;
+  productName: string;
+  sku: string | null;
+  batchNumber: string;
+  quantityRemaining: number;
+  unitCost: number;
+  stockValue: number;
+  ageDays: number;
+  bucket: "0-30" | "31-60" | "61-90" | "90+";
+}
+
+export interface InventoryAgingData {
+  rows: InventoryAgingRow[];
+  buckets: Record<string, { quantity: number; value: number }>;
+}
+
+export interface DeadStockRow {
+  variantId: number;
+  productId: number;
+  productName: string;
+  sku: string | null;
+  currentStock: number;
+  stockValue: number;
+  lastSoldAt: string | null;
+  daysSinceLastSale: number | null;
+  daysOnShelf: number | null;
+}
+
+// --- advanced analytics (Module 15) ------------------------------------------
+
+export interface ChannelPerformanceRow {
+  channel: string;
+  orders: number;
+  revenue: number;
+  avgOrderValue: number;
+}
+
+export interface ClvRow {
+  customerId: number;
+  customerName: string;
+  phone: string | null;
+  orders: number;
+  totalSpent: number;
+  avgOrderValue: number;
+  firstPurchase: string | null;
+  lastPurchase: string | null;
+}
+
+export interface RetentionRow {
+  month: string;
+  newCustomers: number;
+  returningCustomers: number;
+  totalActive: number;
+}
+
+export interface StaffPerformanceRow {
+  cashierUserId: number;
+  cashierName: string;
+  orders: number;
+  revenue: number;
+  avgBasket: number;
+}
+
+export interface SalesForecastData {
+  history: {
+    date: string;
+    actualRevenue: number | null;
+    projectedRevenue: number;
+  }[];
+  projection: { next7DaysTotal: number; dailyAverage: number; trendPerDay: number };
+  method: string;
+}

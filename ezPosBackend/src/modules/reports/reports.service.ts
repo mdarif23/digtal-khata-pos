@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { roundMoney } from "../../utils/roundMoney.js";
 import { db } from "../../db/schema/index.js";
 import type { DateRangeQuery } from "./reports.validation.js";
 
@@ -1502,4 +1503,422 @@ export async function getLocationComparisonReport(
   );
 
   return { rows, totals, periodBounds: { start, end } };
+}
+
+
+// ---------------------------------------------------------------------------
+// Inventory aging + dead stock (Module 2D, Phase 3).
+// ---------------------------------------------------------------------------
+
+export interface InventoryAgingRow {
+  batchId: number;
+  variantId: number;
+  productName: string;
+  sku: string | null;
+  batchNumber: string;
+  locationId: number;
+  quantityRemaining: number;
+  unitCost: number;
+  stockValue: number;
+  ageDays: number;
+  bucket: "0-30" | "31-60" | "61-90" | "90+";
+}
+
+/**
+ * Batch-level inventory aging: remaining quantities bucketed by how long
+ * ago each batch was received, valued at the batch's own cost (the same
+ * batch-wise cost tracking COGS uses).
+ */
+export async function getInventoryAgingReport(
+  businessId: number,
+  locationId?: number,
+): Promise<{ rows: InventoryAgingRow[]; buckets: Record<string, { quantity: number; value: number }> }> {
+  const result = await db.execute(sql`
+    SELECT b.id AS "batchId", b.variant_id AS "variantId", p.name AS "productName",
+           v.sku AS "sku", b.batch_number AS "batchNumber",
+           b.location_id AS "locationId",
+           b.quantity_remaining AS "quantityRemaining",
+           b.purchase_price AS "unitCost",
+           (b.quantity_remaining * b.purchase_price)::numeric AS "stockValue",
+           EXTRACT(DAY FROM now() - COALESCE(
+             (SELECT pu.purchase_date FROM purchase_items pi
+              JOIN purchases pu ON pu.id = pi.purchase_id
+              WHERE pi.id = b.purchase_item_id),
+             b.created_at, now()))::int AS "ageDays"
+    FROM inventory_batches b
+    JOIN product_variants v ON v.id = b.variant_id
+    JOIN products p ON p.id = v.product_id
+    WHERE b.business_id = ${businessId}
+      AND b.quantity_remaining > 0
+      ${locationId !== undefined ? sql`AND b.location_id = ${locationId}` : sql``}
+    ORDER BY b.created_at ASC
+  `);
+  const rows = (result.rows as Record<string, unknown>[]).map((row) => {
+    const ageDays = Number(row.ageDays ?? 0);
+    const bucket: InventoryAgingRow["bucket"] =
+      ageDays <= 30 ? "0-30" : ageDays <= 60 ? "31-60" : ageDays <= 90 ? "61-90" : "90+";
+    return {
+      batchId: Number(row.batchId),
+      variantId: Number(row.variantId),
+      productName: String(row.productName ?? ""),
+      sku: (row.sku as string | null) ?? null,
+      batchNumber: String(row.batchNumber ?? ""),
+      locationId: Number(row.locationId),
+      quantityRemaining: Number(row.quantityRemaining ?? 0),
+      unitCost: Number(row.unitCost ?? 0),
+      stockValue: Number(row.stockValue ?? 0),
+      ageDays,
+      bucket,
+    };
+  });
+  const buckets: Record<string, { quantity: number; value: number }> = {};
+  for (const row of rows) {
+    const bucket = buckets[row.bucket] ?? { quantity: 0, value: 0 };
+    bucket.quantity += row.quantityRemaining;
+    bucket.value = Number((bucket.value + row.stockValue).toFixed(2));
+    buckets[row.bucket] = bucket;
+  }
+  return { rows, buckets };
+}
+
+export interface DeadStockRow {
+  variantId: number;
+  productId: number;
+  productName: string;
+  sku: string | null;
+  currentStock: number;
+  stockValue: number;
+  lastSoldAt: string | null;
+  daysSinceLastSale: number | null;
+  daysOnShelf: number;
+}
+
+/**
+ * Dead stock: stocked variants with no sales in the given window (or never
+ * sold), valued at batch cost — capital sitting on the shelf.
+ */
+export async function getDeadStockReport(
+  businessId: number,
+  days: number,
+  locationId?: number,
+): Promise<DeadStockRow[]> {
+  const result = await db.execute(sql`
+    SELECT st.variant_id AS "variantId", p.id AS "productId", p.name AS "productName",
+           v.sku AS "sku",
+           st.quantity AS "currentStock",
+           COALESCE((SELECT SUM(b.quantity_remaining * b.purchase_price)
+             FROM inventory_batches b
+             WHERE b.variant_id = st.variant_id AND b.business_id = ${businessId}
+               AND b.quantity_remaining > 0
+               ${locationId !== undefined ? sql`AND b.location_id = ${locationId}` : sql``}
+           ), 0)::numeric AS "stockValue",
+           last_sale.last_sold_at AS "lastSoldAt",
+           NULL::int AS "daysOnShelf"
+    FROM inventory_stock st
+    JOIN product_variants v ON v.id = st.variant_id
+    JOIN products p ON p.id = v.product_id
+    LEFT JOIN (
+      SELECT si.variant_id, MAX(s.purchase_date) AS last_sold_at
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id AND s.business_id = si.business_id
+      WHERE s.business_id = ${businessId}
+        AND s.status IN ('completed', 'refunded')
+      GROUP BY si.variant_id
+    ) last_sale ON last_sale.variant_id = st.variant_id
+    WHERE st.business_id = ${businessId}
+      AND st.quantity > 0
+      ${locationId !== undefined ? sql`AND st.location_id = ${locationId}` : sql``}
+      AND (last_sale.last_sold_at IS NULL
+           OR last_sale.last_sold_at < now() - (${days} || ' days')::interval)
+    ORDER BY "stockValue" DESC
+  `);
+  return (result.rows as Record<string, unknown>[]).map((row) => {
+    const lastSoldAt = row.lastSoldAt ? new Date(row.lastSoldAt as string).toISOString() : null;
+    return {
+      variantId: Number(row.variantId),
+      productId: Number(row.productId),
+      productName: String(row.productName ?? ""),
+      sku: (row.sku as string | null) ?? null,
+      currentStock: Number(row.currentStock ?? 0),
+      stockValue: Number(row.stockValue ?? 0),
+      lastSoldAt,
+      daysSinceLastSale: lastSoldAt
+        ? Math.floor((Date.now() - new Date(lastSoldAt).getTime()) / 86_400_000)
+        : null,
+      daysOnShelf: Number(row.daysOnShelf ?? 0),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Advanced analytics (Module 15, Phase 8). Statistical baselines only —
+// projections are labeled as trend estimates, never guarantees.
+// ---------------------------------------------------------------------------
+
+export interface ChannelPerformanceRow {
+  channel: string;
+  orders: number;
+  revenue: number;
+  avgOrderValue: number;
+}
+
+export async function getChannelPerformanceReport(
+  businessId: number,
+  params: DateRangeQuery,
+  locationId?: number,
+): Promise<ChannelPerformanceRow[]> {
+  const result = await db.execute(sql`
+    SELECT s.channel::text AS channel,
+           COUNT(*)::int AS orders,
+           SUM(s.final_total)::numeric AS revenue
+    FROM sales s
+    WHERE s.business_id = ${businessId}
+      AND s.status IN ('completed', 'refunded')
+      AND s.purchase_date >= ${params.startDate}
+      AND s.purchase_date <= ${params.endDate}
+      ${locationId !== undefined ? sql`AND s.location_id = ${locationId}` : sql``}
+    GROUP BY s.channel
+    ORDER BY revenue DESC
+  `);
+  return (result.rows as Record<string, unknown>[]).map((row) => {
+    const orders = Number(row.orders ?? 0);
+    const revenue = Number(row.revenue ?? 0);
+    return {
+      channel: String(row.channel ?? "pos"),
+      orders,
+      revenue,
+      avgOrderValue: orders > 0 ? roundMoney(revenue / orders) : 0,
+    };
+  });
+}
+
+export interface ClvRow {
+  customerId: number;
+  customerName: string;
+  phone: string | null;
+  orders: number;
+  totalSpent: number;
+  avgOrderValue: number;
+  firstPurchase: string | null;
+  lastPurchase: string | null;
+}
+
+export async function getCustomerLifetimeValueReport(
+  businessId: number,
+  locationId?: number,
+): Promise<ClvRow[]> {
+  const result = await db.execute(sql`
+    SELECT c.id AS "customerId", c.name AS "customerName", c.phone AS "phone",
+           COUNT(s.id)::int AS orders,
+           COALESCE(SUM(s.final_total), 0)::numeric AS "totalSpent",
+           MIN(s.purchase_date)::text AS "firstPurchase",
+           MAX(s.purchase_date)::text AS "lastPurchase"
+    FROM customers c
+    JOIN sales s ON s.customer_id = c.id AND s.business_id = c.business_id
+    WHERE c.business_id = ${businessId}
+      AND s.status IN ('completed', 'refunded')
+      ${locationId !== undefined ? sql`AND s.location_id = ${locationId}` : sql``}
+    GROUP BY c.id, c.name, c.phone
+    ORDER BY "totalSpent" DESC
+    LIMIT 200
+  `);
+  return (result.rows as Record<string, unknown>[]).map((row) => {
+    const orders = Number(row.orders ?? 0);
+    const totalSpent = Number(row.totalSpent ?? 0);
+    return {
+      customerId: Number(row.customerId),
+      customerName: String(row.customerName ?? ""),
+      phone: (row.phone as string | null) ?? null,
+      orders,
+      totalSpent,
+      avgOrderValue: orders > 0 ? roundMoney(totalSpent / orders) : 0,
+      firstPurchase: (row.firstPurchase as string | null) ?? null,
+      lastPurchase: (row.lastPurchase as string | null) ?? null,
+    };
+  });
+}
+
+export interface RetentionRow {
+  month: string;
+  newCustomers: number;
+  returningCustomers: number;
+  totalActive: number;
+}
+
+export async function getCustomerRetentionReport(
+  businessId: number,
+  months = 6,
+): Promise<RetentionRow[]> {
+  const result = await db.execute(sql`
+    WITH monthly AS (
+      SELECT date_trunc('month', s.purchase_date) AS month,
+             s.customer_id
+      FROM sales s
+      WHERE s.business_id = ${businessId}
+        AND s.status IN ('completed', 'refunded')
+        AND s.customer_id IS NOT NULL
+        AND s.purchase_date >= date_trunc('month', now()) - ((${months} || ' months')::interval)
+      GROUP BY 1, 2
+    )
+    SELECT to_char(month, 'YYYY-MM') AS month,
+           COUNT(*)::int AS "totalActive",
+           COUNT(*) FILTER (
+             WHERE NOT EXISTS (
+               SELECT 1 FROM monthly prior
+               WHERE prior.customer_id = monthly.customer_id
+                 AND prior.month < monthly.month
+             )
+           )::int AS "newCustomers",
+           COUNT(*) FILTER (
+             WHERE EXISTS (
+               SELECT 1 FROM monthly prior
+               WHERE prior.customer_id = monthly.customer_id
+                 AND prior.month < monthly.month
+             )
+           )::int AS "returningCustomers"
+    FROM monthly
+    GROUP BY month
+    ORDER BY month
+  `);
+  return (result.rows as Record<string, unknown>[]).map((row) => ({
+    month: String(row.month ?? ""),
+    newCustomers: Number(row.newCustomers ?? 0),
+    returningCustomers: Number(row.returningCustomers ?? 0),
+    totalActive: Number(row.totalActive ?? 0),
+  }));
+}
+
+export interface StaffPerformanceRow {
+  cashierUserId: number;
+  cashierName: string;
+  orders: number;
+  revenue: number;
+  avgBasket: number;
+}
+
+export async function getStaffPerformanceReport(
+  businessId: number,
+  params: DateRangeQuery,
+  locationId?: number,
+): Promise<StaffPerformanceRow[]> {
+  const result = await db.execute(sql`
+    SELECT s.cashier_user_id AS "cashierUserId", u.full_name AS "cashierName",
+           COUNT(*)::int AS orders,
+           SUM(s.final_total)::numeric AS revenue
+    FROM sales s
+    JOIN users u ON u.id = s.cashier_user_id
+    WHERE s.business_id = ${businessId}
+      AND s.status IN ('completed', 'refunded')
+      AND s.cashier_user_id IS NOT NULL
+      AND s.purchase_date >= ${params.startDate}
+      AND s.purchase_date <= ${params.endDate}
+      ${locationId !== undefined ? sql`AND s.location_id = ${locationId}` : sql``}
+    GROUP BY s.cashier_user_id, u.full_name
+    ORDER BY revenue DESC
+  `);
+  return (result.rows as Record<string, unknown>[]).map((row) => {
+    const orders = Number(row.orders ?? 0);
+    const revenue = Number(row.revenue ?? 0);
+    return {
+      cashierUserId: Number(row.cashierUserId),
+      cashierName: String(row.cashierName ?? ""),
+      orders,
+      revenue,
+      avgBasket: orders > 0 ? roundMoney(revenue / orders) : 0,
+    };
+  });
+}
+
+export interface ForecastPoint {
+  date: string;
+  actualRevenue: number | null;
+  projectedRevenue: number;
+}
+
+export interface SalesForecast {
+  history: ForecastPoint[];
+  projection: { next7DaysTotal: number; dailyAverage: number; trendPerDay: number };
+  method: string;
+}
+
+/**
+ * Sales trend projection: least-squares linear regression over the last 90
+ * days of daily revenue, extended 7 days forward. A statistical baseline —
+ * explicitly labeled as an estimate; seasonal effects are out of scope.
+ */
+export async function getSalesForecastReport(
+  businessId: number,
+  locationId?: number,
+): Promise<SalesForecast> {
+  const result = await db.execute(sql`
+    SELECT d::date::text AS day,
+           COALESCE(SUM(s.final_total), 0)::numeric AS revenue
+    FROM generate_series(
+      date_trunc('day', now()) - INTERVAL '89 days',
+      date_trunc('day', now()),
+      INTERVAL '1 day'
+    ) d
+    LEFT JOIN sales s
+      ON date_trunc('day', s.purchase_date) = d
+      AND s.business_id = ${businessId}
+      AND s.status IN ('completed', 'refunded')
+      ${locationId !== undefined ? sql`AND s.location_id = ${locationId}` : sql``}
+    GROUP BY d
+    ORDER BY d
+  `);
+  const history = (result.rows as Record<string, unknown>[]).map((row) => ({
+    date: String(row.day),
+    actualRevenue: Number(row.revenue ?? 0),
+    projectedRevenue: 0,
+  }));
+
+  // Least squares on x = day index.
+  const n = history.length;
+  if (n < 7) {
+    return {
+      history,
+      projection: { next7DaysTotal: 0, dailyAverage: 0, trendPerDay: 0 },
+      method: "insufficient history",
+    };
+  }
+  let sumX = 0;
+  let sumY = 0;
+  let sumXY = 0;
+  let sumXX = 0;
+  history.forEach((point, index) => {
+    sumX += index;
+    sumY += point.actualRevenue ?? 0;
+    sumXY += index * (point.actualRevenue ?? 0);
+    sumXX += index * index;
+  });
+  const denominator = n * sumXX - sumX * sumX;
+  const slope = denominator === 0 ? 0 : (n * sumXY - sumX * sumY) / denominator;
+  const intercept = (sumY - slope * sumX) / n;
+
+  for (let index = 0; index < n; index += 1) {
+    history[index]!.projectedRevenue = roundMoney(
+      Math.max(0, intercept + slope * index),
+    );
+  }
+  const projection: ForecastPoint[] = [];
+  for (let day = 1; day <= 7; day += 1) {
+    projection.push({
+      date: new Date(Date.now() + day * 86_400_000).toISOString().slice(0, 10),
+      actualRevenue: null,
+      projectedRevenue: roundMoney(Math.max(0, intercept + slope * (n - 1 + day))),
+    });
+  }
+  const next7DaysTotal = roundMoney(
+    projection.reduce((sum, point) => sum + point.projectedRevenue, 0),
+  );
+  return {
+    history: [...history, ...projection],
+    projection: {
+      next7DaysTotal,
+      dailyAverage: roundMoney(next7DaysTotal / 7),
+      trendPerDay: roundMoney(slope),
+    },
+    method:
+      "least-squares linear trend over the last 90 days of daily revenue — a statistical estimate, not a guarantee",
+  };
 }

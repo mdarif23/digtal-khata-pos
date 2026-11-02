@@ -155,6 +155,11 @@ export const ReceiptTemplate = React.forwardRef<
                       (Disc: -৳{money(item.discount)})
                     </div>
                   )}
+                  {item.taxAmount > 0 && (
+                    <div className="text-[9px] text-zinc-600">
+                      {"(VAT: ৳" + money(item.taxAmount) + taxDetailLabel(item.taxDetail) + ")"}
+                    </div>
+                  )}
                 </td>
                 <td className="py-1 px-1 text-center font-mono">
                   {item.quantity}
@@ -300,3 +305,13 @@ export const ReceiptTemplate = React.forwardRef<
   );
 });
 
+
+function taxDetailLabel(
+  detail: { name: string; isInclusive: boolean }[],
+): string {
+  if (detail.length === 0) return "";
+  return (
+    " — " +
+    detail.map((t) => `${t.name}${t.isInclusive ? " incl" : ""}`).join(", ")
+  );
+}

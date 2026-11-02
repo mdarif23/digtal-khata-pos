@@ -12,7 +12,7 @@ export async function getCustomers(req: Request, res: Response) {
 }
 export async function createCustomer(req: Request, res: Response) {
   try {
-    const { name, phone, address } = req.body;
+    const { name, phone, address, email } = req.body;
     if (!name || !phone) {
       return res.status(400).json({
         error: "Name and phone are required",
@@ -23,6 +23,9 @@ export async function createCustomer(req: Request, res: Response) {
       name,
       phone,
       address,
+      typeof email === "string" && email.trim() !== ""
+        ? email.trim().toLowerCase()
+        : null,
     );
     res.status(201).json(customer);
   } catch (err) {
@@ -37,5 +40,21 @@ export async function getCustomerDueSummary(req: Request, res: Response) {
     res.status(200).json(result);
   } catch (err) {
     sendSafeError(res, err, "Unable to load the dues summary.");
+  }
+}
+
+export async function getStoreCredit(req: Request, res: Response) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid customer ID." });
+    }
+    const balance = await customersService.getCustomerStoreCredit(
+      getBusinessId(req),
+      id,
+    );
+    return res.status(200).json({ success: true, data: { balance } });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to read the store credit balance.");
   }
 }

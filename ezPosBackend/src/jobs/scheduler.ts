@@ -35,8 +35,11 @@ export function startScheduler(): void {
           sub.renewalReminders +
           sub.graceSuspensions +
           commerce.reservationsExpired +
+          commerce.heldSalesExpired +
+          commerce.expiryNotifications +
           integrations.processedJobs +
           integrations.stockPushes +
+          integrations.customerPushes +
           deliveries.delivered +
           deliveries.failed;
         if (total > 0) {

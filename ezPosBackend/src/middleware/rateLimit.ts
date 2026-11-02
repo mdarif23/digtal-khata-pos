@@ -47,3 +47,16 @@ export const contactRateLimit = rateLimit({
     "Too many messages sent. Please try again in an hour.",
   ),
 });
+
+/**
+ * Gateway IPN callbacks (server-to-server, no auth by design — payloads
+ * are verified with the provider). Generous ceiling for legit retries,
+ * tight enough to not be a public write amplifier. Keyed by IP.
+ */
+export const ipnRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: jsonMessage("Too many requests."),
+});
