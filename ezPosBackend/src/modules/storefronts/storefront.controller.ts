@@ -70,6 +70,24 @@ function parseId(raw: string | string[] | undefined, label: string): number {
 }
 
 // ---------------------------------------------------------------------------
+// Theme catalog (portal template gallery)
+// ---------------------------------------------------------------------------
+
+export async function listThemes(_req: Request, res: Response) {
+  const { THEMES } = await import("./themes.catalog.js");
+  res.status(200).json({
+    success: true,
+    data: THEMES.map((theme) => ({
+      id: theme.id,
+      name: theme.name,
+      category: theme.category,
+      description: theme.description,
+      premium: theme.premium,
+    })),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Storefronts
 // ---------------------------------------------------------------------------
 

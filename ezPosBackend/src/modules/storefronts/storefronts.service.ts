@@ -203,6 +203,15 @@ export async function listStorefronts(businessId: number) {
 
 export async function getStorefrontDetail(businessId: number, storefrontId: number) {
   const storefront = await requireStorefront(businessId, storefrontId);
+  const [productCountRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(storefrontProductVisibility)
+    .where(
+      and(
+        eq(storefrontProductVisibility.storefrontId, storefrontId),
+        eq(storefrontProductVisibility.published, true),
+      ),
+    );
   const [domains, version] = await Promise.all([
     db
       .select({
@@ -231,6 +240,7 @@ export async function getStorefrontDetail(businessId: number, storefrontId: numb
     ...storefront,
     domains,
     publishedVersionNumber: version[0]?.versionNumber ?? null,
+    publishedProductCount: productCountRow?.count ?? 0,
   };
 }
 

@@ -33,6 +33,9 @@ const write = [
 
 const sf = "/api/businesses/:businessId/storefronts";
 
+// Theme gallery (authenticated portal users).
+router.get("/api/storefront-themes", requireAuth, controller.listThemes);
+
 // Storefronts (register literal segments before :storefrontId).
 router.post(`${sf}`, ...write, controller.createStorefront);
 router.get(`${sf}`, ...read, controller.listStorefronts);

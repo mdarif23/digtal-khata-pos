@@ -7,6 +7,7 @@ import {
   Bell,
   Building2,
   CreditCard,
+  Globe,
   LayoutDashboard,
   LifeBuoy,
   Package,
@@ -28,6 +29,7 @@ import {
 const NAV = [
   { href: "/account", label: "Overview", icon: Store },
   { href: "/account/orders", label: "Orders", icon: Package },
+  { href: "/account/online-store", label: "Online store", icon: Globe },
   { href: "/dashboard", label: "Business dashboard", icon: LayoutDashboard, external: true },
   { href: "/account/subscription", label: "Subscription", icon: CreditCard },
   { href: "/account/billing", label: "Billing", icon: Receipt },

@@ -177,10 +177,27 @@ export const storefrontSectionSchema = z.discriminatedUnion("type", [
   newsletterSchema,
 ]);
 
+/**
+ * Storefront navigation links. href is an app path (/products, /pages/about)
+ * or an absolute https URL; arbitrary JavaScript is impossible by schema.
+ */
+const navLinkSchema = z.object({
+  label: z.string().trim().min(1).max(60),
+  href: urlOrPath,
+});
+
+export const storefrontNavigationSchema = z
+  .object({
+    header: z.array(navLinkSchema).max(8).default([]),
+    footer: z.array(navLinkSchema).max(12).default([]),
+  })
+  .prefault({});
+
 export const storefrontThemeConfigSchema = z
   .object({
     tokens: storefrontTokensSchema.prefault({}),
     sections: z.array(storefrontSectionSchema).max(MAX_SECTIONS).default([]),
+    navigation: storefrontNavigationSchema.optional(),
   })
   .superRefine((config, ctx) => {
     const seen = new Set<string>();
