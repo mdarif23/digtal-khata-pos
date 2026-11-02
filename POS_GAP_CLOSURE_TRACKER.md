@@ -42,7 +42,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 10 Offline | Offline checkout + sync outbox | Missing → **Partial** | 2 🔄 | ✅ idempotent replay (no changes needed) | ✅ IndexedDB outbox + catalog cache + sync engine + status UI (cash/due only) | n/a | integration 3/3 | Service worker/background sync (optional); offline product search UX polish |
 | 11 Multi-loc | Locations, transfers, registers, location RBAC/reports | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 11 Multi-loc | Real-time register sync, activity monitoring | Missing → **Partial** | 2 🔄 | ✅ SSE streams (ticket auth, heartbeats, location-scoped publishes; sale/hold/register events) | ✅ EventSource client → revision-counter refreshes (stock, holds) | n/a | integration 3/3 | Register health dashboard UI; cross-location inventory overview |
-| 12 Omnichannel | Catalog, reservations, order sync, webhooks, entitlements | Complete (Ph9) | — | ✅ | ✅ | ✅ | integration | Customer sync pending |
+| 12 Omnichannel | Catalog, reservations, order sync, webhooks, entitlements, customer sync | Complete | — | ✅ (+ customer push: Woo upsert by email, watermark sweep; inbound backfill) | ✅ | ✅ 0031 | integration 2/2 | Shopify adapter (future) |
 | 12 Omnichannel | Shopify adapter | Missing | 6+ | ❌ | n/a | ❌ | ❌ | Adapter interface ready |
 | 12 Omnichannel | Store URL validation (SSRF) | **Defective** → **fixed** | **1** ✅ | ✅ `assertPublicStoreUrl` at connect (https-required in prod, private-range + DNS checks) | — | — | unit | — |
 | 13 Restaurant | Menus, modifiers, tables, KDS | Missing | 7 | ❌ | ❌ | ❌ | ❌ | Greenfield module |
@@ -97,6 +97,13 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-03** — Phase 6 (omnichannel remainder: customer sync) complete:
+  - Migration `0031`: `customers.updated_at` (sync watermark) + `integrations.customer_sync_enabled` (default on for new connects) + `customer_synced_at`.
+  - Inbound: online-order customer resolution already matched by phone; it now BACKFILLS missing email/address from the order's billing data onto the matched record (identity preserved, no duplicates).
+  - Outbound: `pushCustomerUpdates(integrationId)` — customers created/updated since the watermark, upserted to WooCommerce by email (adapter method: lookup → PUT or POST), batch 50, entitlement-gated, sync-logged, watermark advanced. Wired into the hourly integration sweep.
+  - Real gap found and fixed: `POST /api/customers` silently dropped the `email` field — customer creation now accepts and stores it (the outbound sync depends on it).
+  - Verification: backend tsc clean, full suite 324/343 (same 19 pre-existing; +2 customer-sync tests green: backfill without duplicates, upsert-by-email push with watermark). POS untouched.
+  - Sweep-crowding note: never-synced stale integrations can occupy the hourly sweep's LIMIT 20 — observed in tests, harmless in single-tenant practice; pagination is a future refinement.
 - **2026-11-03** — Phase 5 slice 2 (hardware abstraction layer) complete:
   - `pos/src/hardware/`: capability interfaces with permanent fallbacks — browser printing stays the always-available path; ESC/POS encoder (standard byte sequences: init/align/emphasis/double-size/feed/cut + drawer-pin kick) and a WebUSB printer connection (device class 7, endpoint discovery, claim + bulk transfer).
   - Device manager: mode (browser/USB), connection status, and every action RESOLVES a result — USB failures auto-degrade to browser printing so device problems can never lose a receipt or corrupt a sale (master prompt acceptance criterion).

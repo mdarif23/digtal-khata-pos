@@ -1,5 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { and, asc, eq, lte, sql, or } from "drizzle-orm";
+import { and, asc, eq, isNotNull, lte, sql, or } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { integrationCredentials } from "../../db/schema/integrationSync.js";
 import {
@@ -14,6 +14,7 @@ import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { sales } from "../../db/schema/sales.js";
 import { products } from "../../db/schema/products.js";
+import { customers } from "../../db/schema/customers.js";
 import { locations } from "../../db/schema/locations.js";
 import { decryptSecret, encryptSecret } from "../../utils/encryption.js";
 import { assertPublicStoreUrl } from "../../utils/validateStoreUrl.js";
@@ -485,6 +486,94 @@ export async function pushProducts(integrationId: number): Promise<number> {
 }
 
 /** Pushes current online availability for every mapped variant. */
+export async function pushCustomerUpdates(integrationId: number): Promise<number> {
+  const [integration] = await db
+    .select({
+      businessId: integrations.businessId,
+      customerSyncEnabled: integrations.customerSyncEnabled,
+      customerSyncedAt: integrations.customerSyncedAt,
+    })
+    .from(integrations)
+    .where(eq(integrations.id, integrationId));
+  if (!integration) throw new NotFoundError("Integration not found.");
+  if (!integration.customerSyncEnabled) return 0;
+  const businessId = integration.businessId;
+
+  const entitlements = await getEntitlements(businessId);
+  if (!planHasFeature(entitlements, "woocommerceIntegration")) {
+    await logSync(integrationId, businessId, {
+      jobType: "customer_push",
+      direction: "push",
+      status: "error",
+      message: "Plan no longer includes WooCommerce integration — sync paused.",
+    });
+    return 0;
+  }
+
+  const creds = await credentialsFor(integrationId);
+  const client = new WoocommerceClient(creds);
+
+  const watermark = integration.customerSyncedAt ?? new Date(0);
+  const batch = await db
+    .select({
+      id: customers.id,
+      name: customers.name,
+      phone: customers.phone,
+      email: customers.email,
+    })
+    .from(customers)
+    .where(
+      and(
+        eq(customers.businessId, businessId),
+        isNotNull(customers.email),
+        sql`${customers.updatedAt} > ${watermark.toISOString()}`,
+      ),
+    )
+    .orderBy(asc(customers.id))
+    .limit(50);
+  if (batch.length === 0) {
+    await db
+      .update(integrations)
+      .set({ customerSyncedAt: new Date() })
+      .where(eq(integrations.id, integrationId));
+    return 0;
+  }
+
+  let pushed = 0;
+  for (const customer of batch) {
+    if (!customer.email) continue;
+    const [firstName, ...rest] = customer.name.split(" ");
+    try {
+      await client.upsertCustomerByEmail({
+        email: customer.email,
+        firstName: firstName || "Customer",
+        lastName: rest.join(" "),
+        phone: customer.phone,
+      });
+      pushed += 1;
+    } catch (err) {
+      await logSync(integrationId, businessId, {
+        jobType: "customer_push",
+        direction: "push",
+        status: "error",
+        message: `Customer ${customer.id}: ${(err as Error).message}`,
+      });
+    }
+  }
+
+  await db
+    .update(integrations)
+    .set({ customerSyncedAt: new Date() })
+    .where(eq(integrations.id, integrationId));
+  await logSync(integrationId, businessId, {
+    jobType: "customer_push",
+    direction: "push",
+    status: "success",
+    message: `Pushed ${pushed}/${batch.length} customer(s)`,
+  });
+  return pushed;
+}
+
 export async function pushStockLevels(integrationId: number): Promise<number> {
   const [integration] = await db
     .select({

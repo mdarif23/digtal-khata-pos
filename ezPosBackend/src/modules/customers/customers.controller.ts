@@ -12,7 +12,7 @@ export async function getCustomers(req: Request, res: Response) {
 }
 export async function createCustomer(req: Request, res: Response) {
   try {
-    const { name, phone, address } = req.body;
+    const { name, phone, address, email } = req.body;
     if (!name || !phone) {
       return res.status(400).json({
         error: "Name and phone are required",
@@ -23,6 +23,9 @@ export async function createCustomer(req: Request, res: Response) {
       name,
       phone,
       address,
+      typeof email === "string" && email.trim() !== ""
+        ? email.trim().toLowerCase()
+        : null,
     );
     res.status(201).json(customer);
   } catch (err) {

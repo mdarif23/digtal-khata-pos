@@ -17,10 +17,11 @@ export async function createCustomer(
   name: string,
   phone: string,
   address: string,
+  email: string | null = null,
 ) {
   const [customer] = await db
     .insert(customers)
-    .values({ businessId, name, phone, address })
+    .values({ businessId, name, phone, address, email })
     .returning();
   return customer;
 }

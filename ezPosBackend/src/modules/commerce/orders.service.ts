@@ -159,7 +159,26 @@ async function resolveCustomerId(
       ),
     )
     .limit(1);
-  if (existing) return existing.id;
+  if (existing) {
+    // Backfill missing contact details from the order (Module 12 sync):
+    // the matched record keeps its identity, gains what it lacked.
+    if (email || customer.address) {
+      await tx
+        .update(customers)
+        .set({
+          ...(email ? { email } : {}),
+          ...(customer.address ? { address: customer.address } : {}),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(customers.id, existing.id),
+            eq(customers.businessId, businessId),
+          ),
+        );
+    }
+    return existing.id;
+  }
 
   const [created] = await tx
     .insert(customers)

@@ -39,6 +39,7 @@ export function startScheduler(): void {
           commerce.expiryNotifications +
           integrations.processedJobs +
           integrations.stockPushes +
+          integrations.customerPushes +
           deliveries.delivered +
           deliveries.failed;
         if (total > 0) {
