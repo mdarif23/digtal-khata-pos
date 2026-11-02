@@ -11,6 +11,9 @@ import { locations } from "../db/schema/locations.js";
 import { products } from "../db/schema/products.js";
 import { integrations } from "../db/schema/integrations.js";
 import { webhookEndpoints } from "../db/schema/webhooks.js";
+import { storefronts } from "../db/schema/storefronts.js";
+import { storefrontDomains } from "../db/schema/storefrontDomains.js";
+import { storefrontMedia } from "../db/schema/storefrontMedia.js";
 import { ForbiddenError } from "../utils/handleError.js";
 
 /**
@@ -300,6 +303,98 @@ export function assertWithinWebhookLimit(
   if (currentCount >= limit) {
     throw new ForbiddenError(
       `Your plan allows up to ${limit} webhook endpoint${limit === 1 ? "" : "s"}. Upgrade your plan to add more.`,
+      "PLAN_LIMIT_REACHED",
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Hosted storefront platform (website platform stage 1)
+// ---------------------------------------------------------------------------
+
+/** Active (non-archived) hosted storefronts. */
+export async function countStorefronts(businessId: number): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(storefronts)
+    .where(
+      and(
+        eq(storefronts.businessId, businessId),
+        sql`${storefronts.status} <> 'archived'`,
+      ),
+    );
+  return row?.count ?? 0;
+}
+
+export async function countCustomDomains(
+  businessId: number,
+): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(storefrontDomains)
+    .innerJoin(storefronts, eq(storefronts.id, storefrontDomains.storefrontId))
+    .where(
+      and(
+        eq(storefronts.businessId, businessId),
+        eq(storefrontDomains.kind, "custom"),
+        sql`${storefrontDomains.status} <> 'removed'`,
+      ),
+    );
+  return row?.count ?? 0;
+}
+
+/** Total bytes of object storage used by the business's storefront media. */
+export async function getMediaStorageBytes(
+  businessId: number,
+): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`coalesce(sum(${storefrontMedia.bytes}), 0)::bigint` })
+    .from(storefrontMedia)
+    .where(eq(storefrontMedia.businessId, businessId));
+  return Number(row?.total ?? 0);
+}
+
+export function assertWithinStorefrontLimit(
+  entitlements: Entitlements,
+  currentCount: number,
+): void {
+  const limit = entitlements.plan?.limits?.maxStorefronts;
+  if (limit === undefined || limit === null) return;
+  if (currentCount >= limit) {
+    throw new ForbiddenError(
+      `Your plan allows up to ${limit} online store${limit === 1 ? "" : "s"}. Upgrade your plan to create more.`,
+      "PLAN_LIMIT_REACHED",
+    );
+  }
+}
+
+export function assertWithinCustomDomainLimit(
+  entitlements: Entitlements,
+  currentCount: number,
+): void {
+  const limit = entitlements.plan?.limits?.maxCustomDomains;
+  if (limit === undefined || limit === null) return;
+  if (currentCount >= limit) {
+    throw new ForbiddenError(
+      `Your plan allows up to ${limit} custom domain${limit === 1 ? "" : "s"}. Upgrade your plan to connect more.`,
+      "PLAN_LIMIT_REACHED",
+    );
+  }
+}
+
+const BYTES_PER_MB = 1024 * 1024;
+
+/** Throws when registering `incomingBytes` would exceed the storage quota. */
+export function assertWithinMediaQuota(
+  entitlements: Entitlements,
+  currentBytes: number,
+  incomingBytes: number,
+): void {
+  const limitMb = entitlements.plan?.limits?.maxMediaStorageMb;
+  if (limitMb === undefined || limitMb === null) return;
+  if (currentBytes + incomingBytes > limitMb * BYTES_PER_MB) {
+    throw new ForbiddenError(
+      `Your plan includes ${limitMb} MB of image storage. Remove unused images or upgrade your plan.`,
       "PLAN_LIMIT_REACHED",
     );
   }

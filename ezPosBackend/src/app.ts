@@ -32,6 +32,8 @@ import integrationsRouter from "./modules/integrations/integrations.routes.js";
 import webhooksRouter from "./modules/webhooks/webhookEndpoints.routes.js";
 import ordersAdminRouter from "./modules/commerce/ordersAdmin.routes.js";
 import notificationsRouter from "./modules/notifications/notifications.routes.js";
+import storefrontsRouter from "./modules/storefronts/storefronts.routes.js";
+import internalRouter from "./modules/internal/internal.routes.js";
 import {
   BadRequestError,
   ConflictError,
@@ -125,6 +127,8 @@ export function buildApp() {
   app.use("/", webhooksRouter);
   app.use("/", ordersAdminRouter);
   app.use("/", notificationsRouter);
+  app.use("/", storefrontsRouter);
+  app.use("/", internalRouter);
 
   // error handling
   app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {

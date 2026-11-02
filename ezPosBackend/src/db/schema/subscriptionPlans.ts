@@ -32,6 +32,14 @@ export interface PlanFeatures {
   multipleOnlineStores?: boolean | undefined;
   /** Outbound webhook endpoints (Phase 9.4). */
   advancedWebhooks?: boolean | undefined;
+  /** Hosted storefront builder sites (website platform stage 1). */
+  hostedStorefront?: boolean | undefined;
+  /** Connecting custom domains to hosted storefronts. */
+  storefrontCustomDomains?: boolean | undefined;
+  /** Premium (non-core) storefront templates. */
+  premiumThemes?: boolean | undefined;
+  /** Storefront analytics dashboard. */
+  storefrontAnalytics?: boolean | undefined;
 }
 
 export interface PlanLimits {
@@ -42,6 +50,12 @@ export interface PlanLimits {
   maxConnectedStores?: number | undefined;
   /** Registered outbound webhook endpoints. */
   maxWebhookEndpoints?: number | undefined;
+  /** Hosted storefronts the business may create. */
+  maxStorefronts?: number | undefined;
+  /** Custom domains across the business's storefronts. */
+  maxCustomDomains?: number | undefined;
+  /** Object-storage quota for storefront media, in megabytes. */
+  maxMediaStorageMb?: number | undefined;
 }
 
 export const subscriptionPlans = pgTable("subscription_plans", {

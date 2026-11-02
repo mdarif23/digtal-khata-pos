@@ -94,6 +94,10 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   // Locations
   { key: "locations.view", module: "settings", description: "View business locations" },
   { key: "locations.manage", module: "settings", description: "Create, edit and deactivate locations" },
+
+  // Online Store (hosted storefront platform)
+  { key: "storefront.view", module: "storefront", description: "View the online store, its settings and orders" },
+  { key: "storefront.manage", module: "storefront", description: "Create and manage the online store, domains and publishing" },
 ];
 
 export const ALL_PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((p) => p.key);
@@ -150,6 +154,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "reports.sales.view",
     "reports.purchase.view",
     "reports.inventory.view",
+    "storefront.view",
+    "storefront.manage",
   ],
 
   cashier: [

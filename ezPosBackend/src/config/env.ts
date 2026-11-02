@@ -118,4 +118,39 @@ export const env = {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean),
+  // ---------------------------------------------------------------------------
+  // Hosted storefront platform (website platform stage 1)
+  // ---------------------------------------------------------------------------
+  /** Base domain tenant subdomains live under (storefronts.<this>). */
+  storefrontBaseDomain: (
+    process.env.STOREFRONT_BASE_DOMAIN?.trim() || "ezpos.store"
+  ).toLowerCase(),
+  /**
+   * Shared secret for internal renderer/edge endpoints
+   * (/api/internal/*). Required in production; deterministic dev fallback.
+   */
+  internalApiToken: (() => {
+    const token = process.env.STOREFRONT_RENDERER_TOKEN?.trim();
+    if (token) return token;
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "Missing required environment variable STOREFRONT_RENDERER_TOKEN. Generate one with: openssl rand -base64 48",
+      );
+    }
+    return "ezpos-local-development-internal-token";
+  })(),
+  /** S3-compatible object storage (MinIO locally, R2/S3 in production). */
+  s3Endpoint: process.env.S3_ENDPOINT?.trim() || "http://localhost:9000",
+  s3Region: process.env.S3_REGION?.trim() || "us-east-1",
+  s3Bucket: process.env.S3_BUCKET?.trim() || "ezpos-media",
+  s3AccessKeyId: process.env.S3_ACCESS_KEY_ID?.trim() || "",
+  s3SecretAccessKey: process.env.S3_SECRET_ACCESS_KEY?.trim() || "",
+  /** Public base URL media is served from (CDN host in production). */
+  s3PublicBaseUrl:
+    process.env.S3_PUBLIC_BASE_URL?.trim() ||
+    `${process.env.S3_ENDPOINT?.trim() || "http://localhost:9000"}/${
+      process.env.S3_BUCKET?.trim() || "ezpos-media"
+    }`,
+  /** Per-file upload cap in megabytes. */
+  mediaMaxUploadMb: optionalInt("MEDIA_MAX_UPLOAD_MB", 10),
 } as const;

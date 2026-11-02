@@ -120,6 +120,13 @@
       "when": 1793637348223,
       "tag": "0016_approval_batch_1",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793643443977,
+      "tag": "0017_storefront_platform",
+      "breakpoints": true
     }
   ]
 }

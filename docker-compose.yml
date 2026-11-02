@@ -40,7 +40,47 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
       JOBS_ENABLED: ${JOBS_ENABLED:-true}
+      # Hosted storefront platform
+      STOREFRONT_BASE_DOMAIN: ${STOREFRONT_BASE_DOMAIN:-ezpos.store}
+      STOREFRONT_RENDERER_TOKEN: ${STOREFRONT_RENDERER_TOKEN:?set STOREFRONT_RENDERER_TOKEN in .env}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-ezpos-media}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-https://cdn.ezpos.store}
+      MEDIA_MAX_UPLOAD_MB: ${MEDIA_MAX_UPLOAD_MB:-10}
     # Migrations run once via: docker compose run --rm backend npm run db:migrate
+
+  # S3-compatible object storage for storefront media. Swappable for
+  # Cloudflare R2 / AWS S3 later by pointing S3_* env vars at the provider.
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ezpos}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - minio-data:/data
+    # Not exposed publicly by default; media is served via the edge/CDN host
+    # or presigned URLs (stage 4 wires the cdn.<domain> route in Caddy).
+
+  # One-shot bucket bootstrap (creates the media bucket if missing).
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until (mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD) do sleep 2; done;
+      mc mb --ignore-existing local/$${S3_BUCKET:-ezpos-media};
+      mc anonymous set download local/$${S3_BUCKET:-ezpos-media} || true;
+      exit 0"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ezpos}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      S3_BUCKET: ${S3_BUCKET:-ezpos-media}
 
   website:
     build:
@@ -81,3 +121,4 @@ volumes:
   pgdata:
   certbot-webroot:
   certbot-certs:
+  minio-data:
