@@ -33,7 +33,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 5 Returns | Refund methods (cash, provider refund, store credit) | Missing → **Complete** | **1** ✅ | ✅ cash + original_payment (ledger-first payout) + store_credit (credit ledger) | ✅ refund-method select | ✅ 0020+0021 | integration 7/7 | — |
 | 6 Promotions | Sale-level fixed / % discounts | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 6 Promotions | Coupons, scheduled promos, BOGO, stacking, groups | Missing | 4 | ❌ | ❌ | ❌ | ❌ | — |
-| 7 Loyalty | Points / gift cards | Missing | 4 | ❌ | ❌ | ❌ | ❌ | Ledger tables; transactional balances |
+| 7 Loyalty | Points | Missing → **Complete** | 4 ✅ | ✅ ledger (earn on cash-equivalent paid, redeem with FOR UPDATE, refund clawback) + program config + history | ✅ payment method + balance in cart card | ✅ 0026 | integration 6/6 | Points expiry (FIFO sweep — future refinement); optional tiers |
 | 8 Staff | Users / roles / permissions | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 8 Staff | Timeclock / attendance / shifts | Missing | 4 | ❌ | ❌ | ❌ | ❌ | — |
 | 9 Hardware | Browser printing + receipt settings | Complete | — | n/a | ✅ | n/a | ❌ | Fallback path done |
@@ -96,6 +96,15 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-03** — Phase 4 slice 1 (loyalty points) complete:
+  - Migration `0026`: `loyalty_programs` (earn rate = points per currency paid, redeem value = currency per point, opt-in per business — no silent defaults) + `loyalty_ledger` (same pure-ledger pattern as store credit; balance = SUM, reconciles by construction).
+  - Earn: on the CASH-EQUIVALENT paid amount only — dues earn nothing, and points/store-credit-funded portions do not earn points on themselves (a circularity the tests caught and the engine now excludes).
+  - Redeem: `loyalty_points` payment method; ledger locked FOR UPDATE inside the sale transaction — overdraft aborts the whole sale.
+  - Clawback: refunds reverse points earned on refunded value (balance may go negative when points were already spent — recorded honestly; redemption still cannot overdraw).
+  - Endpoints: GET/PUT `/api/loyalty/program` (loyalty.manage — manager role), GET `/api/customers/:id/loyalty` (balance + history, customers.view). New permissions loyalty.view/manage auto-seeded.
+  - Frontend: Loyalty points payment method (customer required) + live loyalty/store-credit balances on the cart's customer card.
+  - Expiration deliberately NOT implemented (per-lot FIFO expiry is a sweep feature; a dead config field would violate the no-fake-implementations rule) — tracked as a future refinement.
+  - Verification: backend tsc clean, full suite 299/318 (same 19 pre-existing; +6 loyalty tests green: config gating, earn/due distinction, redeem + overdraft rollback, clawback, ledger reconciliation); POS tsc + build green.
 - **2026-11-02** — Phase 3 slice 3 (inventory aging + dead stock) complete — **Module 2 DONE**:
   - `GET /api/reports/inventory/aging`: batch-level aging bucketed 0-30/31-60/61-90/90+ days, valued at each batch's own cost; age sourced from the linked purchase receipt date (fallback: batch created_at).
   - `GET /api/reports/inventory/dead-stock?days=N`: stocked variants with no sales in the window (never-sold included), valued at remaining batch cost, sorted by value at rest.

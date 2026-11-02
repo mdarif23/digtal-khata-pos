@@ -5,6 +5,7 @@ export const PAYMENT_ROW_METHODS = [
   "card",
   "due",
   "store_credit",
+  "loyalty_points",
 ] as const;
 
 export const paymentSchema = z.object({

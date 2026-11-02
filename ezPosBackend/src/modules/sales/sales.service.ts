@@ -58,6 +58,11 @@ import {
   consumeStoreCreditInTx,
   grantStoreCreditInTx,
 } from "../../services/storeCredit.js";
+import {
+  earnLoyaltyPointsInTx,
+  redeemLoyaltyPointsInTx,
+  reverseLoyaltyPointsInTx,
+} from "../../services/loyalty.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
 import {
   customerValidation,
@@ -919,6 +924,23 @@ export async function createSale(
           });
         }
 
+        // Loyalty redemption: same ledger-lock pattern (Module 7).
+        for (const payment of receivedPayments) {
+          if (payment.method !== "loyalty_points") continue;
+          if (customerId === null) {
+            throw new BadRequestError(
+              "Loyalty payments require a customer on the sale.",
+            );
+          }
+          await redeemLoyaltyPointsInTx(tx, {
+            businessId,
+            customerId,
+            amount: Number(payment.amount),
+            sourceId: saleId,
+            actorUserId: cashierUserId,
+          });
+        }
+
         // Cash drawer attribution: the cash portion lands in the seller's
         // open register session (same transaction; no-op without a session).
         const cashAmount = receivedPayments
@@ -956,6 +978,29 @@ export async function createSale(
         itemCount: items.length,
       },
     });
+
+    // Loyalty earn on the cash-equivalent amount paid (Module 7): dues
+    // earn nothing, and points/store-credit-funded portions do not earn
+    // points on themselves.
+    if (customerId !== null && paidAmount > 0) {
+      const fundedByAccount = receivedPayments
+        .filter(
+          (payment) =>
+            payment.method === "loyalty_points" ||
+            payment.method === "store_credit",
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
+      const earnBase = roundMoney(paidAmount - fundedByAccount);
+      if (earnBase > 0) {
+        await earnLoyaltyPointsInTx(tx, {
+          businessId,
+          customerId,
+          paidAmount: earnBase,
+          sourceId: saleId,
+          actorUserId: cashierUserId,
+        });
+      }
+    }
     return {
       sale: newSale,
       change,
@@ -1085,6 +1130,18 @@ async function applySaleRefund(
       sourceType: "refund",
       sourceId: refund.id,
       note: `Refund credit (sale #${saleId})`,
+    });
+  }
+
+  // Loyalty clawback: points earned on refunded value are reversed
+  // transactionally (Module 7). The balance may go negative when points
+  // were already spent — recorded honestly; redemption cannot overdraw.
+  if (sale.customerId !== null) {
+    await reverseLoyaltyPointsInTx(tx, {
+      businessId,
+      customerId: sale.customerId,
+      refundedAmount: refundTotal,
+      sourceId: saleId,
     });
   }
 

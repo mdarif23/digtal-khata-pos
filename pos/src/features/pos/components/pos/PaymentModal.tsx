@@ -40,6 +40,8 @@ function buildPayments(
       return [{ method, amount: finalTotal, reference: "" }];
     case "store_credit":
       return [{ method: "store_credit", amount: finalTotal }];
+    case "loyalty_points":
+      return [{ method: "loyalty_points", amount: finalTotal }];
     case "due":
       return [{ method: "due", amount: finalTotal }];
     case "split":
@@ -220,6 +222,7 @@ function PaymentMethod({
     { label: "Bangla QR", value: "bangla_qr" },
     { label: "Card", value: "card" },
     { label: "Store credit", value: "store_credit" },
+    { label: "Loyalty points", value: "loyalty_points" },
     { label: "Due", value: "due" },
     { label: "Split", value: "split" },
   ];
@@ -245,7 +248,9 @@ function PaymentMethod({
             value={m.value}
             disabled={
               customerId == null &&
-              (m.value === "due" || m.value === "store_credit")
+              (m.value === "due" ||
+                m.value === "store_credit" ||
+                m.value === "loyalty_points")
             }
             className="col-span-1 data-pressed:bg-primary data-pressed:text-primary-foreground"
           >

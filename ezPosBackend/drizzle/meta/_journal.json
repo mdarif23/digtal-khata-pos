@@ -183,6 +183,13 @@
       "when": 1793641051921,
       "tag": "0025_inventory_batches_created_at",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793641919001,
+      "tag": "0026_loyalty_program",
+      "breakpoints": true
     }
   ]
 }

@@ -51,6 +51,8 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "inventory.transfer", module: "inventory", description: "Transfer stock between locations" },
   { key: "taxes.view", module: "taxes", description: "View tax rates and product tax assignments" },
   { key: "taxes.manage", module: "taxes", description: "Manage tax rates and product tax assignments" },
+  { key: "loyalty.view", module: "loyalty", description: "View customer loyalty balances and history" },
+  { key: "loyalty.manage", module: "loyalty", description: "Configure the loyalty program (earn/redeem rates)" },
 
   // Customers
   { key: "customers.view", module: "customers", description: "View customers" },
@@ -142,6 +144,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "inventory.transfer",
     "taxes.view",
     "taxes.manage",
+    "loyalty.view",
+    "loyalty.manage",
     "customers.view",
     "customers.create",
     "customers.edit",

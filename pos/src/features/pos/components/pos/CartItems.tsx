@@ -99,6 +99,9 @@ function CartCustomerInfo() {
   const [dueByCustomers, setDueByCustomers] = useState<CustomerDue[]>([]);
   const { name, phone, address, id } = showCustomerInfo || {};
 
+  const [loyaltyBalance, setLoyaltyBalance] = useState<number | null>(null);
+  const [storeCreditBalance, setStoreCreditBalance] = useState<number | null>(null);
+
   // reload when the customer changes, so the due is never stale
   useEffect(() => {
     let ignore = false;
@@ -108,6 +111,23 @@ function CartCustomerInfo() {
         if (!ignore) setDueByCustomers(res.data);
       })
       .catch((err) => console.error("Failed to load customer dues", err));
+    if (id != null) {
+      axios
+        .get(`/customers/${id}/loyalty`)
+        .then((res) => {
+          if (!ignore) setLoyaltyBalance(Number(res.data?.data?.balance ?? 0));
+        })
+        .catch(() => !ignore && setLoyaltyBalance(null));
+      axios
+        .get(`/customers/${id}/store-credit`)
+        .then((res) => {
+          if (!ignore) setStoreCreditBalance(Number(res.data?.data?.balance ?? 0));
+        })
+        .catch(() => !ignore && setStoreCreditBalance(null));
+    } else {
+      setLoyaltyBalance(null);
+      setStoreCreditBalance(null);
+    }
     return () => {
       ignore = true;
     };
@@ -128,6 +148,16 @@ function CartCustomerInfo() {
             ? `Total Amount: ${customerDue.totalAmount ?? 0}, Total Paid: ${customerDue.totalPaid ?? 0}, Total Due: ${customerDue.totalDue ?? 0}`
             : "No Due"}
         </span>
+        {loyaltyBalance !== null && (
+          <span className="col-span-2 text-xs">
+            Loyalty points: {loyaltyBalance.toFixed(2)}
+          </span>
+        )}
+        {storeCreditBalance !== null && (
+          <span className="col-span-2 text-xs">
+            Store credit: ৳{storeCreditBalance.toFixed(2)}
+          </span>
+        )}
       </CardContent>
     </Card>
   );

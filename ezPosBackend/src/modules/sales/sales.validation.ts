@@ -120,7 +120,13 @@ export async function validateStock(
   return stockMap;
 }
 type Payments = {
-  method: "cash" | "bangla_qr" | "card" | "due" | "store_credit";
+  method:
+    | "cash"
+    | "bangla_qr"
+    | "card"
+    | "due"
+    | "store_credit"
+    | "loyalty_points";
   amount?: number | undefined;
   tendered?: number | undefined;
   reference?: string | undefined;
@@ -179,10 +185,14 @@ export function validatePayments(
     throw new BadRequestError("Due payment requires a customer.");
   }
 
-  // Store credit is per-customer money — the spend must land on an account.
-  if (methods.includes("store_credit") && customerId === null) {
+  // Store credit and loyalty points are per-customer money — the spend
+  // must land on an account.
+  if (
+    (methods.includes("store_credit") || methods.includes("loyalty_points")) &&
+    customerId === null
+  ) {
     throw new BadRequestError(
-      "Store credit payments require a customer on the sale.",
+      "Store credit and loyalty payments require a customer on the sale.",
     );
   }
 
