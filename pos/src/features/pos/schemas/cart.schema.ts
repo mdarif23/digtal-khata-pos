@@ -84,6 +84,7 @@ export const createSalePayloadSchema = z.object({
     })
     .nullable(),
   vatPercent: z.number().nullable(),
+  couponCode: z.string().trim().max(60).optional(),
 
   // Client-generated key making checkout retries idempotent (see useCartStore).
   idempotencyKey: z.string().min(8).max(120).optional(),

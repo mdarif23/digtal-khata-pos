@@ -43,6 +43,9 @@ export const createSalePayloadSchema = z.object({
     .nullable(),
   vatPercent: z.number().nullable(),
 
+  // Coupon code (server-validated; discount applied by the backend).
+  couponCode: z.string().trim().min(1).max(60).optional(),
+
   // Client-generated key (UUID) that makes checkout retries idempotent:
   // resubmitting the same key returns the original sale instead of
   // creating a duplicate. Scoped per business at the database level.

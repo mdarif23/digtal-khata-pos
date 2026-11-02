@@ -41,6 +41,8 @@ function useCartTotals(form: ShowCustomerInfoProps["form"]) {
   const discount = useWatch({ control: form.control, name: "discount" });
   const vatPercent =
     useWatch({ control: form.control, name: "vatPercent" }) ?? 0;
+  const couponCode = useWatch({ control: form.control, name: "couponCode" });
+  const customerId = useCustomerStore((s) => s.showCustomerInfo?.id ?? null);
 
   const localTotals = useMemo(
     () => getCartTotals(cart, discount, Number(vatPercent)),
@@ -64,6 +66,8 @@ function useCartTotals(form: ShowCustomerInfoProps["form"]) {
         })),
         cartDiscount: discount,
         vatPercent: vatPercent === null ? null : Number(vatPercent),
+        couponCode: couponCode?.trim() || null,
+        customerId,
       })
         .then((totals) => {
           if (!ignore) setQuoted(totals);
@@ -76,7 +80,7 @@ function useCartTotals(form: ShowCustomerInfoProps["form"]) {
       ignore = true;
       clearTimeout(timer);
     };
-  }, [cart, discount, vatPercent]);
+  }, [cart, discount, vatPercent, couponCode, customerId]);
 
   if (quoted === null) return localTotals;
   // Trust the server quote for every money field; keep the client shape.
@@ -90,6 +94,8 @@ function useCartTotals(form: ShowCustomerInfoProps["form"]) {
     vat: quoted.vat,
     finalTotal: quoted.finalTotal,
     usesTaxRules: quoted.usesTaxRules,
+    coupon: quoted.coupon ?? null,
+    couponError: quoted.couponError ?? null,
   };
 }
 
@@ -160,6 +166,22 @@ function CartCustomerInfo() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// ---------- coupon entry (Module 6) ----------
+function CouponInput({ form }: { form: ShowCustomerInfoProps["form"] }) {
+  const value = useWatch({ control: form.control, name: "couponCode" });
+  return (
+    <Input
+      placeholder="Coupon code (optional)"
+      maxLength={60}
+      value={value ?? ""}
+      onChange={(e) =>
+        form.setValue("couponCode", e.target.value.toUpperCase() || undefined)
+      }
+      className="uppercase"
+    />
   );
 }
 
@@ -364,6 +386,7 @@ export function CartCalculation({
           {/* discount is applied on the amount after item discounts */}
           <DiscountModal form={form} subTotal={totals.itemsTotal} />
         </div>
+        <CouponInput form={form} />
         <div className="col-span-6">
           {/* payment gets the amount after discount, plus VAT */}
           <PaymentModal
@@ -414,6 +437,15 @@ function CartTextModal({
           <span>Discount</span>
           <span>-{tk(totals.cartDiscountAmount)}</span>
         </div>
+      )}
+      {"coupon" in totals && totals.coupon && (
+        <div className="flex justify-between py-1.5 text-sm text-emerald-700">
+          <span>Coupon {totals.coupon.code}</span>
+          <span>-{tk(totals.coupon.discountAmount)}</span>
+        </div>
+      )}
+      {"couponError" in totals && totals.couponError && (
+        <div className="py-1 text-xs text-destructive">{totals.couponError}</div>
       )}
       {totals.vat > 0 && (
         <div className="flex justify-between py-1.5 text-sm">

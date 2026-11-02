@@ -30,6 +30,7 @@ import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
 import { StockCountPage } from "@/features/products/pages/StockCountPage";
 import { ReorderPage } from "@/features/purchases/pages/ReorderPage";
 import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
+import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -217,6 +218,14 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="users.view">
             <UsersPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/coupons",
+        element: (
+          <RequirePermission permission="promotions.view">
+            <CouponsPage />
           </RequirePermission>
         ),
       },

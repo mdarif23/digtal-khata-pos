@@ -64,6 +64,10 @@ import {
   reverseLoyaltyPointsInTx,
 } from "../../services/loyalty.js";
 import { redeemGiftCardInTx } from "../../services/giftCards.js";
+import {
+  evaluateCouponInTx,
+  recordCouponRedemptionInTx,
+} from "../../services/coupons.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
 import {
   customerValidation,
@@ -632,6 +636,7 @@ export async function createSale(
   data: CreateSalePayload,
 ) {
   const { customerId, items, discount, vatPercent, payments, saleDate } = data;
+  const couponCode = data.couponCode?.trim() || null;
   const idempotencyKey = data.idempotencyKey?.trim() || null;
 
   const result = await db.transaction(async (tx) => {
@@ -697,14 +702,38 @@ export async function createSale(
       : getCartTotals(trustedItems, discount, Number(vatPercent ?? 0));
     const lineTaxes = "perLine" in totals ? totals.perLine : null;
 
+    // Coupons (Module 6): server-validated; v1 stacking rule — a coupon
+    // replaces the cart-level discount (both is rejected). The discount
+    // reduces the final charge; recorded on the sale via coupon_redemptions.
+    let couponEvaluation: Awaited<
+      ReturnType<typeof evaluateCouponInTx>
+    > | null = null;
+    if (couponCode) {
+      if (discount !== null && (discount.value ?? 0) > 0) {
+        throw new BadRequestError(
+          "Use either a cart discount or a coupon — not both.",
+        );
+      }
+      couponEvaluation = await evaluateCouponInTx(tx, {
+        businessId,
+        code: couponCode,
+        afterDiscountTotal: totals.afterDiscount,
+        customerId,
+      });
+    }
+    const couponDiscount = couponEvaluation?.discountAmount ?? 0;
+    const finalTotalWithCoupon = roundMoney(
+      Math.max(0, totals.finalTotal - couponDiscount),
+    );
+
     const totalDiscount = roundMoney(
       totals.itemDiscount + totals.cartDiscountAmount,
     );
 
-    // 6. Validate payment amounts against the final total.
+    // 6. Validate payment amounts against the final total (coupon applied).
     const { change, dueAmount, paidAmount } = validatePayments(
       payments,
-      totals.finalTotal,
+      finalTotalWithCoupon,
       customerId,
     );
 
@@ -732,7 +761,7 @@ export async function createSale(
         subtotal: totals.itemsBase,
         discount: totalDiscount,
         vat: totals.vat,
-        finalTotal: totals.finalTotal,
+        finalTotal: finalTotalWithCoupon,
         dueAmount,
         paymentStatus,
         status: "completed",
@@ -998,6 +1027,17 @@ export async function createSale(
         itemCount: items.length,
       },
     });
+
+    // Coupon redemption recorded atomically with the sale (Module 6).
+    if (couponEvaluation) {
+      await recordCouponRedemptionInTx(tx, {
+        businessId,
+        couponId: couponEvaluation.couponId,
+        saleId,
+        customerId,
+        discountAmount: couponDiscount,
+      });
+    }
 
     // Loyalty earn on the cash-equivalent amount paid (Module 7): dues
     // earn nothing, and points/store-credit-funded portions do not earn
@@ -2140,6 +2180,8 @@ export interface SaleQuotePayload {
   }[];
   cartDiscount?: DiscountInput | null | undefined;
   vatPercent?: number | null | undefined;
+  couponCode?: string | null | undefined;
+  customerId?: number | null | undefined;
 }
 
 export async function quoteSaleTotals(
@@ -2196,6 +2238,57 @@ export async function quoteSaleTotals(
       ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant)
       : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0));
 
+    // Coupon preview: same evaluation rules as createSale (no lock), same
+    // v1 stacking rule — a coupon excludes the cart-level discount.
+    let coupon: { code: string; discountAmount: number; description: string | null } | null = null;
+    const couponCode = payload.couponCode?.trim();
+    if (couponCode && payload.cartDiscount !== null && payload.cartDiscount !== undefined) {
+      return {
+        itemsBase: totals.itemsBase,
+        itemDiscount: totals.itemDiscount,
+        itemsTotal: totals.itemsTotal,
+        cartDiscountAmount: totals.cartDiscountAmount,
+        afterDiscount: totals.afterDiscount,
+        vatPercent: "vatPercent" in totals ? totals.vatPercent : 0,
+        vat: totals.vat,
+        finalTotal: totals.finalTotal,
+        usesTaxRules,
+        perLine: "perLine" in totals ? totals.perLine : [],
+        couponError:
+          "Use either a cart discount or a coupon — not both.",
+      };
+    }
+    if (couponCode) {
+      try {
+        const evaluation = await evaluateCouponInTx(tx, {
+          businessId,
+          code: couponCode,
+          afterDiscountTotal: totals.afterDiscount,
+          customerId: payload.customerId ?? null,
+        });
+        coupon = {
+          code: evaluation.code,
+          discountAmount: evaluation.discountAmount,
+          description: evaluation.description,
+        };
+      } catch (err) {
+        return {
+          itemsBase: totals.itemsBase,
+          itemDiscount: totals.itemDiscount,
+          itemsTotal: totals.itemsTotal,
+          cartDiscountAmount: totals.cartDiscountAmount,
+          afterDiscount: totals.afterDiscount,
+          vatPercent: "vatPercent" in totals ? totals.vatPercent : 0,
+          vat: totals.vat,
+          finalTotal: totals.finalTotal,
+          usesTaxRules,
+          perLine: "perLine" in totals ? totals.perLine : [],
+          couponError:
+            err instanceof Error ? err.message : "Coupon is not valid.",
+        };
+      }
+    }
+    const couponDiscount = coupon?.discountAmount ?? 0;
     const perLine = "perLine" in totals ? totals.perLine : [];
     return {
       itemsBase: totals.itemsBase,
@@ -2205,9 +2298,13 @@ export async function quoteSaleTotals(
       afterDiscount: totals.afterDiscount,
       vatPercent: "vatPercent" in totals ? totals.vatPercent : 0,
       vat: totals.vat,
-      finalTotal: totals.finalTotal,
+      finalTotal: roundMoney(Math.max(0, totals.finalTotal - couponDiscount)),
       usesTaxRules,
       perLine,
+      ...(coupon ? { coupon } : {}),
+      ...(coupon === null && couponCode
+        ? { couponError: "Coupon is not valid." }
+        : {}),
     };
   });
 }

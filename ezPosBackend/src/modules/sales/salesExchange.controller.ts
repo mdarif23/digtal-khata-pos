@@ -103,6 +103,8 @@ const quoteSchema = z.object({
     .nullable()
     .optional(),
   vatPercent: z.number().min(0).max(100).nullable().optional(),
+  couponCode: z.string().trim().min(1).max(60).nullable().optional(),
+  customerId: z.number().int().positive().nullable().optional(),
 });
 
 export async function quote(req: Request, res: Response) {

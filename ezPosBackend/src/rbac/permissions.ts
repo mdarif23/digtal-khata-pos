@@ -53,6 +53,8 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "taxes.manage", module: "taxes", description: "Manage tax rates and product tax assignments" },
   { key: "loyalty.view", module: "loyalty", description: "View customer loyalty balances and history" },
   { key: "loyalty.manage", module: "loyalty", description: "Configure the loyalty program (earn/redeem rates)" },
+  { key: "promotions.view", module: "promotions", description: "View coupons and promotions" },
+  { key: "promotions.manage", module: "promotions", description: "Manage coupons and promotions" },
 
   // Customers
   { key: "customers.view", module: "customers", description: "View customers" },
@@ -146,6 +148,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "taxes.manage",
     "loyalty.view",
     "loyalty.manage",
+    "promotions.view",
+    "promotions.manage",
     "customers.view",
     "customers.create",
     "customers.edit",

@@ -128,6 +128,12 @@ export const navigation = [
     ],
   },
   {
+    title: "Coupons",
+    url: "/coupons",
+    icon: Tags,
+    permission: "promotions.view",
+  },
+  {
     title: "Gift Cards",
     url: "/gift-cards",
     icon: CreditCard,
