@@ -27,6 +27,7 @@ import { StockTransfersPage } from "@/features/stockTransfers/pages/StockTransfe
 import { RolesPage } from "@/features/roles/pages/RolesPage";
 import { PaymentIntentReturn } from "@/features/pos/pages/PaymentIntentReturn";
 import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
+import { StockCountPage } from "@/features/products/pages/StockCountPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -214,6 +215,14 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="users.view">
             <UsersPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/stock-counts",
+        element: (
+          <RequirePermission permission="inventory.adjust">
+            <StockCountPage />
           </RequirePermission>
         ),
       },

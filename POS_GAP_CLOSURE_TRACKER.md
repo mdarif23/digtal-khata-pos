@@ -18,7 +18,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 1 Checkout | Active-cart recovery after refresh | **Defective** → **Complete** | 2 ✅ | n/a | ✅ write-through IndexedDB + restore-on-bootstrap (idempotency key persists) | n/a | ❌ (manual) | — |
 | 2 Inventory | Adjustments / transfers / receiving | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 2 Inventory | Batch & serial tracking | Complete | — | ✅ FEFO locking | ✅ | ✅ | integration | — |
-| 2 Inventory | Barcode stocktaking + cycle counts | Missing | 3 | ❌ | ❌ | ❌ | ❌ | `stock_count_sessions/lines`, approval flow |
+| 2 Inventory | Barcode stocktaking + cycle counts | Missing → **Complete** | 3 ✅ | ✅ sessions (whole-location or scoped cycle counts), variance-at-approval (counted − CURRENT, row-locked), movements + audit | ✅ Stock Counts page (scan/SKU entry, variance review, approve) | ✅ 0023 | integration 4/4 | Count-task assignment to staff (future refinement) |
 | 2 Inventory | Replenishment / reorder suggestions | Missing | 3 | ❌ | ❌ | ❌ | ❌ | min/max/reorder config, suggestion engine |
 | 2 Inventory | Aging, dead-stock, valuation reports | Partial | 3 | ❌ | 4 stock reports exist | — | ❌ | aging/dead-stock reports |
 | 3 Payments | Manual methods (cash/card/bKash-QR), split, dues | Complete | — | ✅ | ✅ | ✅ | integration | — |
@@ -96,6 +96,13 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-02** — Phase 3 slice 1 (stock-count sessions) complete:
+  - Migration `0023`: `stock_count_sessions` + `stock_count_lines` — whole-location stocktakes or variant-scoped cycle counts; expected quantities frozen at creation; partial counting is first-class (uncounted lines untouched).
+  - **Concurrency-safe approval (the core invariant):** the applied variance is counted − CURRENT stock with rows FOR UPDATE at approval time — a sale or transfer between counting and approval cannot produce a wrong adjustment. Proven by a dedicated integration test (count 50 with a concurrent sale of 3 → +6 applied, movement recorded against the session).
+  - Adjustments reuse the existing movement machinery (`movementType: "adjustment"`, `referenceType: "stock_count_session"`) so the shrinkage/movement reports reconcile; sessions audit as stock_count.created/approved/cancelled with counted_by vs approved_by separated.
+  - Endpoints under `inventory.adjust` (location-scoped like sales): list/create/detail/counts/approve/cancel; `stock.changed` realtime event on approval.
+  - Frontend: Stock Counts page (`/stock-counts`, Products nav group) — scan barcode/SKU/name to add lines, enter physical quantities, record, then approve with the variance summary.
+  - Verification: backend tsc clean, full suite 287/306 (same 19 pre-existing; +4 stock-count tests green); POS tsc + build green.
 - **2026-11-02** — Phase 2 slice 4 (real-time register updates) complete:
   - SSE-based push over the existing Express app (no new dependency; Module 11's "appropriate real-time mechanism"). Auth: authenticated `POST /api/realtime/ticket` mints a short-lived ONE-TIME ticket bound to the caller's business+location (EventSource cannot send headers); the stream consumes it and validates every connection. Heartbeats keep intermediaries open; the in-memory registry follows the documented single-instance stance.
   - Events: `sale.created` (createSale + exchanges — other registers at the location refresh stock within seconds, improving multi-cashier oversell protection), `held_sales.changed` (create/discard), `register.changed` (open/close). Location-scoped: a register never receives another location's events (verified by test).

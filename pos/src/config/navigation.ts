@@ -91,6 +91,7 @@ export const navigation = [
       { title: "Units", url: "/units", permission: "products.view" },
       { title: "Variants", url: "/variants", permission: "products.manage_variants" },
       { title: "Stock Transfers", url: "/transfers", permission: "inventory.transfer" },
+      { title: "Stock Counts", url: "/stock-counts", permission: "inventory.adjust" },
     ],
   },
   {
