@@ -55,6 +55,8 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "loyalty.manage", module: "loyalty", description: "Configure the loyalty program (earn/redeem rates)" },
   { key: "promotions.view", module: "promotions", description: "View coupons and promotions" },
   { key: "promotions.manage", module: "promotions", description: "Manage coupons and promotions" },
+  { key: "attendance.view", module: "attendance", description: "Clock in/out and view own attendance" },
+  { key: "attendance.manage", module: "attendance", description: "View all attendance, approve records, read summaries" },
 
   // Customers
   { key: "customers.view", module: "customers", description: "View customers" },
@@ -150,6 +152,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "loyalty.manage",
     "promotions.view",
     "promotions.manage",
+    "attendance.view",
+    "attendance.manage",
     "customers.view",
     "customers.create",
     "customers.edit",
@@ -171,6 +175,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "products.view",
     "inventory.view",
     "taxes.view",
+    "attendance.view",
     "customers.view",
     "customers.create",
   ],

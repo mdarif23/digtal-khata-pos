@@ -146,6 +146,12 @@ export const navigation = [
     permission: "locations.view",
   },
   {
+    title: "Attendance",
+    url: "/attendance",
+    icon: Users,
+    permission: "attendance.view",
+  },
+  {
     title: "Users",
     url: "/users",
     icon: Users,

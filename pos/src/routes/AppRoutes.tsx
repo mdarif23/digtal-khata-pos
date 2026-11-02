@@ -31,6 +31,7 @@ import { StockCountPage } from "@/features/products/pages/StockCountPage";
 import { ReorderPage } from "@/features/purchases/pages/ReorderPage";
 import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
 import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
+import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -218,6 +219,14 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="users.view">
             <UsersPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/attendance",
+        element: (
+          <RequirePermission permission="attendance.view">
+            <AttendancePage />
           </RequirePermission>
         ),
       },

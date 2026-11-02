@@ -36,7 +36,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 6 Promotions | Scheduled auto-promotions, BOGO, category/customer rules, group pricing | Missing | 4 | ❌ future engine | ❌ | ❌ | ❌ | Auto-applied promotion engine on the coupon foundation (tracked, deliberately not faked) |
 | 7 Loyalty | Points | Missing → **Complete** | 4 ✅ | ✅ ledger (earn on cash-equivalent paid, redeem with FOR UPDATE, refund clawback) + program config + history | ✅ payment method + balance in cart card | ✅ 0026 | integration 6/6 | Points expiry (FIFO sweep — future refinement); optional tiers |
 | 8 Staff | Users / roles / permissions | Complete | — | ✅ | ✅ | ✅ | integration | — |
-| 8 Staff | Timeclock / attendance / shifts | Missing | 4 | ❌ | ❌ | ❌ | ❌ | — |
+| 8 Staff | Timeclock / attendance | Missing → **Complete** | 4 ✅ | ✅ clock in/out (immutable once out), breaks, manager approval, hours summary, audit | ✅ Attendance page (self-service + manager view) | ✅ 0029 | integration 5/5 | Shift scheduling + late/overtime baselines (future feature — honest deferral) |
 | 9 Hardware | Browser printing + receipt settings | Complete | — | n/a | ✅ | n/a | ❌ | Fallback path done |
 | 9 Hardware | ESC/POS, USB/Serial/BT, drawer, scale, customer display | Missing | 5 | n/a | ❌ | n/a | ❌ | Behind hardware abstraction layer |
 | 10 Offline | Offline checkout + sync outbox | Missing → **Partial** | 2 🔄 | ✅ idempotent replay (no changes needed) | ✅ IndexedDB outbox + catalog cache + sync engine + status UI (cash/due only) | n/a | integration 3/3 | Service worker/background sync (optional); offline product search UX polish |
@@ -97,6 +97,13 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-03** — Phase 4 slice 4 (attendance/timeclock) complete — **PHASE 4 DONE**:
+  - Migration `0029`: `attendance_records` (immutable once clocked out — corrections go through manager approval, never edits) + `attendance_breaks` (one open break at a time). Location-scoped, UTC timestamps, client-local display. New attendance.view (self-service; cashiers seeded) / attendance.manage (managers) permissions.
+  - Self-service: clock in (one open record per user — double-clock rejected), clock out (auto-closes any open break), break start/end. Managers see all records, approve (a signal, never a time edit — approve-once enforced), and read the per-user hours summary (worked vs break hours).
+  - Clock events audited (attendance.clock_in/clock_out/approved).
+  - Shift scheduling — and the late-arrival/overtime baselines it provides — is a separate future feature, deliberately not faked (no dead config fields).
+  - Frontend: Attendance page (/attendance) — self-service status card + history; manager sections for all-records approval and the hours summary.
+  - Verification: backend tsc clean, full suite 317/336 (same 19 pre-existing; +5 attendance tests green: flow, double-clock rejection, break rules, approve-once, hours summary); POS tsc + build green.
 - **2026-11-03** — Phase 4 slice 3 (coupons) complete:
   - Migration `0028`: `coupons` (business-scoped codes; percentage/fixed; windows, order minimums, discount caps, total + per-customer usage limits) + `coupon_redemptions` (one per sale — reuse race-free, discount history inspectable). New promotions.view/manage permissions.
   - One evaluation engine drives BOTH the checkout quote and createSale — the cashier sees the exact discount before charging, and the sale-time rules are identical. The quote also enforces the v1 stacking rule (coupon excludes cart-level discount) so preview and charge can never diverge.
