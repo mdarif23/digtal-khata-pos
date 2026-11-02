@@ -704,3 +704,33 @@ export async function uploadMediaFile(
     bytes: file.size,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Analytics (stage 6) — tracked metrics only
+// ---------------------------------------------------------------------------
+
+export interface StorefrontAnalytics {
+  days: number;
+  tracked: {
+    visits: number;
+    productViews: number;
+    addToCarts: number;
+    checkoutStarts: number;
+  };
+  orders: number;
+  revenue: number;
+  conversionRate: number | null;
+  bestSellers: Array<{ productId: number; name: string; quantity: number }>;
+  notes: string[];
+}
+
+export async function fetchStorefrontAnalytics(
+  businessId: number,
+  storefrontId: number,
+  days = 30,
+): Promise<ApiResult<StorefrontAnalytics>> {
+  return request(
+    `/api/businesses/${businessId}/storefronts/${storefrontId}/analytics?days=${days}`,
+    { method: "GET", businessId },
+  );
+}

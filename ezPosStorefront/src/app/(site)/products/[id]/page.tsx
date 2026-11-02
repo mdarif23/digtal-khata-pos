@@ -5,6 +5,7 @@ import { getTenant } from "@/lib/tenant";
 import { fetchProduct } from "@/lib/backend";
 import { formatPrice } from "@/lib/format";
 import { AddToCart } from "@/components/add-to-cart";
+import { AnalyticsBeacon } from "@/components/analytics-beacon";
 
 
 export async function generateMetadata({
@@ -78,6 +79,10 @@ export default async function ProductPage({
 
   return (
     <div className="mx-auto px-4 py-8" style={{ maxWidth: "var(--sf-container)" }}>
+      {tenant.config.storefront.flags.analyticsEnabled &&
+      tenant.config.source === "published" ? (
+        <AnalyticsBeacon storefrontId={tenant.config.storefront.id} productId={product.id} />
+      ) : null}
       <script
         type="application/ld+json"
         // Structured data is built entirely from server-validated fields.

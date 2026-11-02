@@ -1472,4 +1472,110 @@ describe("storefront platform integration", { skip: !runIntegration }, () => {
       "shopper order history must include their order",
     );
   });
+  it("stage 6 hardening: analytics scoping, admin suspend/reactivate with audit, cross-tenant walls", async () => {
+    const owner = await createOwnerCtx("SFP Analytics Co");
+    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, { mode: "omnichannel" });
+    await setBusinessPlan(owner.businessId, {
+      features: { hostedStorefront: true, storefrontAnalytics: true },
+    });
+    const created = await api(
+      owner,
+      "POST",
+      `/api/businesses/${owner.businessId}/storefronts`,
+      { name: "Analytics Shop", themeId: "cornerstone-general", subdomain: "sfp-analytics-shop" },
+    );
+    const sfId = created.body.data.id as number;
+    const sfBase = `/api/businesses/${owner.businessId}/storefronts/${sfId}`;
+
+    // Analytics default OFF: beacon accepted silently but nothing recorded.
+    const beacon = (body: Record<string, unknown>) =>
+      fetch(`${baseUrl}/api/internal/storefront/analytics`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+        body: JSON.stringify({ storefrontId: sfId, ...body }),
+      });
+    assert.equal((await beacon({ eventType: "visit", path: "/" })).status, 200);
+    assert.equal((await api(owner, "POST", `${sfBase}/publish`)).status, 200);
+
+    // Enable tracking via the portal flag.
+    assert.equal(
+      (await api(owner, "PATCH", sfBase, { analyticsEnabled: true })).status,
+      200,
+    );
+    await beacon({ eventType: "visit", path: "/" });
+    await beacon({ eventType: "product_view", path: "/products/1", productId: 1 });
+    await beacon({ eventType: "product_view", path: "/products/1", productId: 1 });
+
+    // Unknown storefront / garbage events are silently dropped (no probe).
+    assert.equal(
+      (
+        await fetch(`${baseUrl}/api/internal/storefront/analytics`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+          body: JSON.stringify({ storefrontId: 99999999, eventType: "visit" }),
+        })
+      ).status,
+      200,
+    );
+
+    const analytics = await api(owner, "GET", `${sfBase}/analytics?days=30`);
+    assert.equal(analytics.status, 200);
+    assert.equal(analytics.body.data.tracked.visits, 1);
+    assert.equal(analytics.body.data.tracked.productViews, 2);
+    assert.equal(analytics.body.data.orders, 0);
+    assert.equal(analytics.body.data.conversionRate, 0);
+
+    // Cross-tenant: another business cannot read this storefront's analytics.
+    const outsider = await createOwnerCtx("SFP Analytics Outsider");
+    const crossRead = await api(
+      outsider,
+      "GET",
+      `/api/businesses/${outsider.businessId}/storefronts/${sfId}/analytics`,
+    );
+    assert.ok([403, 404].includes(crossRead.status));
+
+    // --- SaaS admin suspend/reactivate (audited) ---
+    const admin = await createOwnerCtx("SFP Platform Admin");
+    await pg!.query("UPDATE users SET platform_role = 'platform_admin' WHERE id = $1", [
+      admin.userId,
+    ]);
+
+    const denied = await api(outsider, "GET", "/api/saas/storefronts");
+    assert.equal(denied.status, 403);
+
+    const list = await api(admin, "GET", "/api/saas/storefronts?search=sfp-analytics-shop");
+    assert.equal(list.status, 200);
+    assert.ok(list.body.data.some((row: { id: number }) => row.id === sfId));
+
+    const suspend = await api(admin, "POST", `/api/saas/storefronts/${sfId}/suspend`, {
+      reason: "stage 6 test",
+    });
+    assert.equal(suspend.status, 200);
+
+    // Suspended storefront stops resolving immediately.
+    const resolved = await internalApi(
+      "GET",
+      `/api/internal/storefront/resolve?host=sfp-analytics-shop.ezpos.store`,
+      internalToken,
+    );
+    assert.equal(resolved.body.data.resolved, false);
+
+    const reactivate = await api(admin, "POST", `/api/saas/storefronts/${sfId}/reactivate`);
+    assert.equal(reactivate.status, 200);
+    const restored = await internalApi(
+      "GET",
+      `/api/internal/storefront/resolve?host=sfp-analytics-shop.ezpos.store`,
+      internalToken,
+    );
+    assert.equal(restored.body.data.resolved, true);
+
+    // Both admin mutations are audited.
+    const audits = await pg!.query(
+      `SELECT action FROM saas_admin_audit WHERE entity_type = 'storefront' AND entity_id = $1 ORDER BY id DESC LIMIT 2`,
+      [sfId],
+    );
+    const actions = audits.rows.map((row: { action: string }) => row.action);
+    assert.ok(actions.includes("storefront.suspend"), "suspend must be audited");
+    assert.ok(actions.includes("storefront.reactivate"), "reactivate must be audited");
+  });
 });

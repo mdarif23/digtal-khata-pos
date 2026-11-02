@@ -330,3 +330,71 @@ export async function updatePlan(
     body: JSON.stringify(input),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Hosted storefronts (stage 6) — audited admin mutations live backend-side
+// ---------------------------------------------------------------------------
+
+export interface AdminStorefront {
+  id: number;
+  name: string;
+  subdomain: string;
+  status: string;
+  themeId: string;
+  businessId: number;
+  businessName: string;
+  businessStatus: string;
+  publishedAt: string | null;
+  createdAt: string;
+  domainCount: number;
+}
+
+export interface AdminStorefrontDetail extends AdminStorefront {
+  analyticsEnabled: boolean;
+  shopperAccountsEnabled: boolean;
+  suspendedAt: string | null;
+  domains: Array<{
+    id: number;
+    kind: string;
+    domain: string;
+    status: string;
+    sslStatus: string;
+    isPrimary: boolean;
+    lastError: string | null;
+    createdAt: string;
+  }>;
+  media: { files: number; bytes: number };
+  shoppers: number;
+}
+
+export async function fetchAdminStorefronts(
+  search?: string,
+): Promise<ApiResult<AdminStorefront[]>> {
+  const query = search ? `?search=${encodeURIComponent(search)}` : "";
+  return request(`/api/saas/storefronts${query}`, { method: "GET" });
+}
+
+export async function fetchAdminStorefront(
+  storefrontId: number,
+): Promise<ApiResult<AdminStorefrontDetail>> {
+  return request(`/api/saas/storefronts/${storefrontId}`, { method: "GET" });
+}
+
+export async function suspendAdminStorefront(
+  storefrontId: number,
+  reason?: string,
+): Promise<ApiResult<unknown>> {
+  return request(`/api/saas/storefronts/${storefrontId}/suspend`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function reactivateAdminStorefront(
+  storefrontId: number,
+): Promise<ApiResult<unknown>> {
+  return request(`/api/saas/storefronts/${storefrontId}/reactivate`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}

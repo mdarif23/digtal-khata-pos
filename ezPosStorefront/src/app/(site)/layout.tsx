@@ -5,6 +5,7 @@ import { CartProvider } from "@/components/cart-context";
 import { ShopperProvider } from "@/components/shopper-context";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
+import { AnalyticsBeacon } from "@/components/analytics-beacon";
 
 /**
  * Tenant shell: injects the storefront's design tokens, wraps every page in
@@ -62,6 +63,10 @@ export default async function SiteLayout({
         <Header tenant={tenant.config} />
         <main className="flex-1">{children}</main>
         <Footer tenant={tenant.config} />
+        {tenant.config.storefront.flags.analyticsEnabled &&
+        tenant.config.source === "published" ? (
+          <AnalyticsBeacon storefrontId={tenant.config.storefront.id} />
+        ) : null}
       </div>
       </ShopperProvider>
     </CartProvider>

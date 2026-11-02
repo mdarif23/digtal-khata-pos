@@ -58,6 +58,28 @@ jobs:
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=critical
 
+  storefront:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ezPosStorefront
+    env:
+      NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN: ezpos.store
+      STOREFRONT_RENDERER_TOKEN: ci-only-renderer-token-not-used-in-production-0123456789
+      BACKEND_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ezPosStorefront/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=critical
+
   website:
     runs-on: ubuntu-latest
     defaults:

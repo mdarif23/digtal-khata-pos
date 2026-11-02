@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Building2,
   CreditCard,
+  Globe,
   LayoutDashboard,
   LifeBuoy,
   Receipt,
@@ -23,6 +24,7 @@ const NAV = [
   { href: "/saas-admin/plans", label: "Plans", icon: Tag },
   { href: "/saas-admin/support", label: "Support", icon: LifeBuoy },
   { href: "/saas-admin/audit-logs", label: "Audit logs", icon: ScrollText },
+  { href: "/saas-admin/storefronts", label: "Storefronts", icon: Globe },
 ] as const;
 
 export function SaasAdminShell({ children }: { children: React.ReactNode }) {

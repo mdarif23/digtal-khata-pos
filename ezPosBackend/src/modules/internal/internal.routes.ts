@@ -10,6 +10,7 @@ import { storefrontPublishVersions } from "../../db/schema/storefrontPublishVers
 import { env } from "../../config/env.js";
 import { verifyPreviewToken } from "../storefronts/previewToken.js";
 import * as sfInternal from "./storefront.controller.js";
+import { recordAnalyticsEvent } from "../storefronts/analytics.controller.js";
 
 /**
  * Internal endpoints for the ezPosStorefront renderer and the Caddy edge.
@@ -288,6 +289,12 @@ router.get(
   "/api/internal/storefront/shoppers/me",
   requireInternalToken,
   sfInternal.shopperMe,
+);
+// Analytics beacon sink (renderer bridge; backend-side backstop limiter).
+router.post(
+  "/api/internal/storefront/analytics",
+  requireInternalToken,
+  recordAnalyticsEvent,
 );
 
 /**

@@ -1,5 +1,8 @@
 import express from "express";
 import * as controller from "./storefront.controller.js";
+import {
+  getStorefrontAnalytics,
+} from "./analytics.controller.js";
 import { requireAuth } from "../../middleware/auth.js";
 import {
   requireBusinessAccess,
@@ -109,6 +112,13 @@ router.delete(
   `${sf}/:storefrontId/delivery-zones/:zoneId`,
   ...write,
   controller.deleteZone,
+);
+
+// Analytics (stage 6) — tracked metrics only.
+router.get(
+  `${sf}/:storefrontId/analytics`,
+  ...read,
+  getStorefrontAnalytics,
 );
 
 // Payment methods (configuration; capture lands in the payments stage)

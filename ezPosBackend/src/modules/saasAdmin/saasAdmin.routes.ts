@@ -1,5 +1,6 @@
 import express from "express";
 import * as adminController from "./saasAdmin.controller.js";
+import * as sfAdminController from "./storefronts.controller.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requirePlatformAdmin } from "../../middleware/platformAdmin.js";
 
@@ -59,6 +60,13 @@ router.post(
   ...admin,
   adminController.subscriptionStatusAction,
 );
+
+// Hosted storefront platform administration (stage 6) — audited mutations.
+router.get("/api/saas/storefronts", ...admin, sfAdminController.listStorefronts);
+router.get("/api/saas/storefronts/themes", ...admin, sfAdminController.listThemes);
+router.get("/api/saas/storefronts/:storefrontId", ...admin, sfAdminController.getStorefront);
+router.post("/api/saas/storefronts/:storefrontId/suspend", ...admin, sfAdminController.suspendStorefront);
+router.post("/api/saas/storefronts/:storefrontId/reactivate", ...admin, sfAdminController.reactivateStorefront);
 
 router.get("/api/saas/payments", ...admin, adminController.getPayments);
 router.get("/api/saas/invoices", ...admin, adminController.getInvoices);
