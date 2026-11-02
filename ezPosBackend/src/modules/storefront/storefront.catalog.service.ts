@@ -7,6 +7,7 @@ import { productImages } from "../../db/schema/productImages.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { products } from "../../db/schema/products.js";
 import { integrations } from "../../db/schema/integrations.js";
+import { storefrontProductVisibility } from "../../db/schema/storefrontProductVisibility.js";
 import { getOnlineAvailability } from "../commerce/reservations.service.js";
 import type { StorefrontContext } from "../../middleware/storefront.js";
 
@@ -163,6 +164,12 @@ export async function listStorefrontProducts(
     sort?: "newest" | "price_asc" | "price_desc" | "name" | undefined;
     page?: number | undefined;
     pageSize?: number | undefined;
+    /**
+     * Hosted-storefront mode: when set, only products explicitly published
+     * to this storefront are returned (opt-in visibility), and website-only
+     * SEO overrides do not leak anything beyond public fields.
+     */
+    storefrontId?: number | undefined;
   } = {},
 ): Promise<{
   products: StorefrontProduct[];
@@ -177,6 +184,21 @@ export async function listStorefrontProducts(
     eq(products.businessId, ctx.businessId),
     eq(products.status, "active"),
   ];
+  if (options.storefrontId !== undefined) {
+    const visible = await db
+      .select({ productId: storefrontProductVisibility.productId })
+      .from(storefrontProductVisibility)
+      .where(
+        and(
+          eq(storefrontProductVisibility.storefrontId, options.storefrontId),
+          eq(storefrontProductVisibility.published, true),
+        ),
+      )
+      .limit(5000);
+    const ids = visible.map((row) => row.productId);
+    // Opt-in catalog: an empty allowlist means nothing is published yet.
+    filters.push(ids.length > 0 ? inArray(products.id, ids) : sql`false`);
+  }
   if (options.search) {
     filters.push(
       or(
@@ -221,7 +243,23 @@ export async function listStorefrontProducts(
 export async function getStorefrontProduct(
   ctx: StorefrontContext,
   productId: number,
+  options: { storefrontId?: number | undefined } = {},
 ): Promise<StorefrontProduct | null> {
+  if (options.storefrontId !== undefined) {
+    const [visible] = await db
+      .select({ id: storefrontProductVisibility.id })
+      .from(storefrontProductVisibility)
+      .where(
+        and(
+          eq(storefrontProductVisibility.storefrontId, options.storefrontId),
+          eq(storefrontProductVisibility.productId, productId),
+          eq(storefrontProductVisibility.published, true),
+        ),
+      )
+      .limit(1);
+    // Opt-in catalog: unpublished products are not addressable at all.
+    if (!visible) return null;
+  }
   const found = await loadProducts(
     ctx,
     and(eq(products.businessId, ctx.businessId), eq(products.id, productId)),

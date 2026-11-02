@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+/*
+ * Storefront design tokens. The tenant's theme config injects concrete
+ * values as CSS variables on the storefront shell (see lib/theme.ts);
+ * every component styles through var(--sf-*), so themes are pure config.
+ */
+:root {
+  --sf-primary: #16a34a;
+  --sf-secondary: #0f172a;
+  --sf-bg: #ffffff;
+  --sf-text: #0f172a;
+  --sf-font-heading: system-ui, sans-serif;
+  --sf-font-body: system-ui, sans-serif;
+  --sf-radius: 0.5rem;
+  --sf-container: 72rem;
+}
+
+body {
+  background: var(--sf-bg);
+  color: var(--sf-text);
+  font-family: var(--sf-font-body);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--sf-font-heading);
+}
+
+.sf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--sf-primary);
+  color: #fff;
+  border-radius: var(--sf-radius);
+  font-weight: 600;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  transition: opacity 0.15s ease;
+}
+.sf-btn:hover { opacity: 0.9; }
+.sf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sf-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--sf-text) 25%, transparent);
+  color: var(--sf-text);
+  background: transparent;
+  border-radius: var(--sf-radius);
+  font-weight: 600;
+  padding: 0.55rem 1.15rem;
+  font-size: 0.875rem;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.sf-btn-outline:hover {
+  border-color: var(--sf-primary);
+  color: var(--sf-primary);
+}
+
+.sf-card {
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--sf-text) 12%, transparent);
+  border-radius: var(--sf-radius);
+  overflow: hidden;
+}
+
+.sf-input {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--sf-text) 25%, transparent);
+  border-radius: var(--sf-radius);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.875rem;
+  background: #fff;
+  color: var(--sf-text);
+}
+.sf-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--sf-primary) 60%, transparent);
+  outline-offset: 1px;
+}

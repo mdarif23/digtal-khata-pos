@@ -8,6 +8,7 @@ import { storefrontDomains } from "../../db/schema/storefrontDomains.js";
 import { storefrontPublishVersions } from "../../db/schema/storefrontPublishVersions.js";
 import { env } from "../../config/env.js";
 import { verifyPreviewToken } from "../storefronts/previewToken.js";
+import * as sfInternal from "./storefront.controller.js";
 
 /**
  * Internal endpoints for the ezPosStorefront renderer and the Caddy edge.
@@ -152,8 +153,7 @@ async function loadPublishedPayload(
   };
 }
 
-router.get("/api/internal/storefront/resolve", requireInternalToken, async (req, res) => {
-  try {
+router.get("/api/internal/storefront/resolve", requireInternalToken, async (req, res) => {  try {
     const host = String(req.query.host ?? "");
     if (!host) {
       return res
@@ -215,6 +215,33 @@ router.get("/api/internal/storefront/resolve", requireInternalToken, async (req,
       .json({ success: false, message: "Resolution failed." });
   }
 });
+
+// Hosted-storefront shopper surface (renderer → backend, internal token).
+router.get(
+  "/api/internal/storefront/config",
+  requireInternalToken,
+  sfInternal.getConfig,
+);
+router.get(
+  "/api/internal/storefront/catalog",
+  requireInternalToken,
+  sfInternal.getCatalog,
+);
+router.get(
+  "/api/internal/storefront/products/:productId",
+  requireInternalToken,
+  sfInternal.getProduct,
+);
+router.post(
+  "/api/internal/storefront/orders",
+  requireInternalToken,
+  sfInternal.createCheckoutOrder,
+);
+router.post(
+  "/api/internal/storefront/orders/track",
+  requireInternalToken,
+  sfInternal.trackOrder,
+);
 
 /**
  * Caddy on_demand_tls ask endpoint: 200 only for hosts we serve — subdomains

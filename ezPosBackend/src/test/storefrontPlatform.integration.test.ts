@@ -961,6 +961,240 @@ describe("storefront platform integration", { skip: !runIntegration }, () => {
         bytes: 1024,
       },
     );
-    assert.equal(crossKey.status, 400);
+      assert.equal(crossKey.status, 400);
+    });
+
+  // -----------------------------------------------------------------------
+  // Internal shopper surface (renderer endpoints)
+  // -----------------------------------------------------------------------
+
+  /** Product + default variant + stock at the business's default location. */
+  async function seedVariantWithStock(
+    businessId: number,
+    qty: number,
+    price = 100,
+  ): Promise<number> {
+    counter += 1;
+    const locationRow = (
+      await pg!.query(
+        "SELECT id FROM locations WHERE business_id = $1 AND is_default = true LIMIT 1",
+        [businessId],
+      )
+    ).rows[0] as { id: number } | undefined;
+    const locationId: number =
+      locationRow?.id ??
+      (
+        await pg!.query(
+          `INSERT INTO locations (business_id, name, is_default) VALUES ($1, $2, true) RETURNING id`,
+          [businessId, `SFP Location ${counter}`],
+        )
+      ).rows[0]!.id as number;
+    const product = await pg!.query(
+      `INSERT INTO products (business_id, name, description, product_type, tracking_type, status)
+       VALUES ($1, $2, 'Renderer test product', 'physical', 'none', 'active') RETURNING id`,
+      [businessId, `SFP Renderer Product ${counter}`],
+    );
+    const variant = await pg!.query(
+      `INSERT INTO product_variants (business_id, product_id, sku, selling_price, is_default, status)
+       VALUES ($1, $2, $3, $4, true, 'active') RETURNING id`,
+      [businessId, product.rows[0]!.id, `SFPV-${Date.now()}-${counter}`, price],
+    );
+    await pg!.query(
+      `INSERT INTO inventory_stock (business_id, variant_id, location_id, quantity, reserved_quantity)
+       VALUES ($1, $2, $3, $4, 0)`,
+      [businessId, variant.rows[0]!.id, locationId, qty],
+    );
+    // FIFO consumption (order confirmation) draws from batches.
+    await pg!.query(
+      `INSERT INTO inventory_batches (business_id, variant_id, location_id, batch_number, purchase_price, quantity_received, quantity_remaining)
+       VALUES ($1, $2, $3, $4, 80, $5, $5)`,
+      [businessId, variant.rows[0]!.id, locationId, `SFPB-${Date.now()}-${counter}`, qty],
+    );
+    return variant.rows[0]!.id as number;
+  }
+
+  it("internal shopper surface: visibility-scoped catalog, COD checkout with server-side delivery fee, stock consumption, tracking", async () => {
+    const owner = await createOwnerCtx("SFP Shopper Co");
+    // Online-capable mode is required for storefront orders.
+    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, { mode: "omnichannel" });
+    await setBusinessPlan(owner.businessId, {
+      features: { hostedStorefront: true, storefrontCustomDomains: true },
+    });
+    const created = await api(
+      owner,
+      "POST",
+      `/api/businesses/${owner.businessId}/storefronts`,
+      { name: "Shopper Shop", themeId: "cornerstone-general", subdomain: "sfp-shopper-shop" },
+    );
+    const sfId = created.body.data.id as number;
+    const sfBase = `/api/businesses/${owner.businessId}/storefronts/${sfId}`;
+
+    const visibleVariant = await seedVariantWithStock(owner.businessId, 10, 100);
+    const hiddenVariant = await seedVariantWithStock(owner.businessId, 5, 50);
+
+    // Publish the visible product to the storefront.
+    const visibility = await api(owner, "PUT", `${sfBase}/products/${
+      (
+        await pg!.query("SELECT product_id FROM product_variants WHERE id = $1", [visibleVariant])
+      ).rows[0]!.product_id
+    }`, { published: true });
+    assert.equal(visibility.status, 200);
+
+    // Delivery zone: ৳60, free over ৳1000.
+    const zone = await api(owner, "POST", `${sfBase}/delivery-zones`, {
+      name: "Inside Dhaka",
+      areas: ["Dhanmondi", "Gulshan"],
+      rate: 60,
+      freeThreshold: 1000,
+    });
+    assert.equal(zone.status, 201);
+
+    // Publish.
+    const published = await api(owner, "POST", `${sfBase}/publish`);
+    assert.equal(published.status, 200);
+
+    // Config payload (published snapshot).
+    const config = await internalApi("GET", `/api/internal/storefront/config?storefrontId=${sfId}`, internalToken);
+    assert.equal(config.status, 200);
+    assert.equal(config.body.data.available, true);
+    assert.equal(config.body.data.storefront.themeId, "cornerstone-general");
+    assert.equal(config.body.data.zones.length, 1);
+
+    // Catalog honors opt-in visibility: hidden product absent.
+    const catalog = await internalApi("GET", `/api/internal/storefront/catalog?storefrontId=${sfId}`, internalToken);
+    assert.equal(catalog.status, 200);
+    assert.equal(catalog.body.data.products.length, 1);
+    const hiddenProductId = (
+      await pg!.query("SELECT product_id FROM product_variants WHERE id = $1", [hiddenVariant])
+    ).rows[0]!.product_id as number;
+
+    // Hidden product is not addressable.
+    const hiddenProduct = await internalApi(
+      "GET",
+      `/api/internal/storefront/products/${hiddenProductId}?storefrontId=${sfId}`,
+      internalToken,
+    );
+    assert.equal(hiddenProduct.status, 404);
+
+    // Checkout: COD, zone fee ৳60 (subtotal 200 < 1000 threshold).
+    const idempotencyKey = `sfp-checkout-${Date.now()}`;
+    const checkoutRes = await fetch(`${baseUrl}/api/internal/storefront/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({
+        storefrontId: sfId,
+        customer: {
+          name: "Test Shopper",
+          phone: "01712345678",
+          address: "House 5, Road 2",
+          city: "Dhaka",
+          area: "Dhanmondi",
+        },
+        lines: [{ variantId: visibleVariant, quantity: 2 }],
+        deliveryZoneId: zone.body.data.id,
+        idempotencyKey,
+      }),
+    });
+    assert.equal(checkoutRes.status, 201);
+    const checkoutBody = (await checkoutRes.json()) as {
+      data: { invoiceNumber: string; status: string; total: number; deliveryFee: number; duplicated: boolean };
+    };
+    assert.equal(checkoutBody.data.status, "completed");
+    assert.equal(checkoutBody.data.total, 200); // goods total; delivery recorded separately
+    assert.equal(checkoutBody.data.deliveryFee, 60);
+
+    // Stock consumed through the FIFO workflow (10 → 8).
+    const stock = await pg!.query(
+      "SELECT quantity FROM inventory_stock WHERE variant_id = $1",
+      [visibleVariant],
+    );
+    assert.equal(Number(stock.rows[0]!.quantity), 8);
+
+    // Idempotent retry returns the same order.
+    const retry = await fetch(`${baseUrl}/api/internal/storefront/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({
+        storefrontId: sfId,
+        customer: {
+          name: "Test Shopper",
+          phone: "01712345678",
+          address: "House 5, Road 2",
+          city: "Dhaka",
+        },
+        lines: [{ variantId: visibleVariant, quantity: 2 }],
+        deliveryZoneId: zone.body.data.id,
+        idempotencyKey,
+      }),
+    });
+    assert.equal(retry.status, 201);
+    const retryBody = (await retry.json()) as { data: { invoiceNumber: string; duplicated: boolean } };
+    assert.equal(retryBody.data.duplicated, true);
+    assert.equal(retryBody.data.invoiceNumber, checkoutBody.data.invoiceNumber);
+
+    // Overselling is rejected.
+    const oversell = await fetch(`${baseUrl}/api/internal/storefront/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({
+        storefrontId: sfId,
+        customer: {
+          name: "Test Shopper",
+          phone: "01712345678",
+          address: "House 5, Road 2",
+          city: "Dhaka",
+        },
+        lines: [{ variantId: hiddenVariant, quantity: 99 }],
+        deliveryZoneId: zone.body.data.id,
+        idempotencyKey: `sfp-oversell-${Date.now()}`,
+      }),
+    });
+    assert.ok(oversell.status >= 400, "overselling must be rejected");
+
+    // Order tracking: correct phone works, wrong phone is a neutral 404.
+    const track = await fetch(`${baseUrl}/api/internal/storefront/orders/track`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({
+        storefrontId: sfId,
+        invoiceNumber: checkoutBody.data.invoiceNumber,
+        phone: "01712345678",
+      }),
+    });
+    assert.equal(track.status, 200);
+    const trackBody = (await track.json()) as { data: { status: string } };
+    assert.equal(trackBody.data.status, "completed");
+
+    const wrongPhone = await fetch(`${baseUrl}/api/internal/storefront/orders/track`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({
+        storefrontId: sfId,
+        invoiceNumber: checkoutBody.data.invoiceNumber,
+        phone: "01800000000",
+      }),
+    });
+    assert.equal(wrongPhone.status, 404);
+
+    // Unpublish → shopper surface closes.
+    await api(owner, "POST", `${sfBase}/unpublish`);
+    const closedConfig = await internalApi(
+      "GET",
+      `/api/internal/storefront/config?storefrontId=${sfId}`,
+      internalToken,
+    );
+    assert.equal(closedConfig.body.data.available, false);
+    const closedCheckout = await fetch(`${baseUrl}/api/internal/storefront/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({
+        storefrontId: sfId,
+        customer: { name: "Late Shopper", phone: "01712345678", address: "Somewhere 1", city: "Dhaka" },
+        lines: [{ variantId: visibleVariant, quantity: 1 }],
+        deliveryZoneId: zone.body.data.id,
+        idempotencyKey: `sfp-late-${Date.now()}`,
+      }),
+    });
+    assert.equal(closedCheckout.status, 400);
   });
 });
