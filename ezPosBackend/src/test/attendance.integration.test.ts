@@ -148,7 +148,7 @@ describe("attendance integration", { skip: !runIntegration }, () => {
       (r) => r.workedHours !== null,
     );
     assert.ok(record, "closed record has worked hours");
-    assert.ok(record.workedHours >= 0);
+    assert.ok((record.workedHours ?? 0) >= 0);
 
     // Clock-out again without an open record → 409.
     const again = await api("POST", "/api/attendance/clock-out", {});
@@ -178,8 +178,9 @@ describe("attendance integration", { skip: !runIntegration }, () => {
       breakHours: number;
     }[];
     assert.ok(rows.length >= 1);
-    assert.ok(rows[0].shifts >= 1);
-    assert.ok(rows[0].workedHours >= 0);
-    assert.ok(rows[0].breakHours >= 0);
+    const firstRow = rows[0]!;
+    assert.ok(firstRow.shifts >= 1);
+    assert.ok(firstRow.workedHours >= 0);
+    assert.ok(firstRow.breakHours >= 0);
   });
 });

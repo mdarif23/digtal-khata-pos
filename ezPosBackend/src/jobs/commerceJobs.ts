@@ -67,8 +67,8 @@ export async function sweepExpiredReservations(
 
 export async function runCommerceSweeps(
   now: Date = new Date(),
-): Promise<{ reservationsExpired: number; heldSalesExpired: number }> {
-  const results = { reservationsExpired: 0, heldSalesExpired: 0 };
+): Promise<{ reservationsExpired: number; heldSalesExpired: number; expiryNotifications: number }> {
+  const results = { reservationsExpired: 0, heldSalesExpired: 0, expiryNotifications: 0 };
   try {
     results.reservationsExpired = await sweepExpiredReservations(now);
   } catch (err) {
@@ -82,5 +82,52 @@ export async function runCommerceSweeps(
   } catch (err) {
     console.error("Held-sale expiry sweep failed:", err);
   }
+  try {
+    results.expiryNotifications = await sweepExpiringInventory();
+  } catch (err) {
+    console.error("Expiring-inventory sweep failed:", err);
+  }
   return results;
+}
+
+/**
+ * Expiring-inventory notifications (Module 14): batches expiring within 7
+ * days with stock remaining, deduped per batch per day.
+ */
+async function sweepExpiringInventory(): Promise<number> {
+  const { sql } = await import("drizzle-orm");
+  const { db } = await import("../db/schema/index.js");
+  const { notifyExpiringBatches } = await import(
+    "../services/notifications.js"
+  );
+  const result = await db.execute(sql`
+    SELECT b.id AS "batchId", p.name AS "productName",
+           b.expiry_date::text AS "expiryDate",
+           b.quantity_remaining AS "quantity",
+           b.business_id AS "businessId"
+    FROM inventory_batches b
+    JOIN product_variants v ON v.id = b.variant_id
+    JOIN products p ON p.id = v.product_id
+    WHERE b.quantity_remaining > 0
+      AND b.expiry_date IS NOT NULL
+      AND b.expiry_date <= (CURRENT_DATE + INTERVAL '7 days')
+    LIMIT 100
+  `);
+  const rows = result.rows as {
+    batchId: number;
+    productName: string;
+    expiryDate: string;
+    quantity: number;
+    businessId: number;
+  }[];
+  const byBusiness = new Map<number, typeof rows>();
+  for (const row of rows) {
+    const list = byBusiness.get(row.businessId) ?? [];
+    list.push(row);
+    byBusiness.set(row.businessId, list);
+  }
+  for (const [businessId, list] of byBusiness) {
+    await notifyExpiringBatches(businessId, list);
+  }
+  return rows.length;
 }

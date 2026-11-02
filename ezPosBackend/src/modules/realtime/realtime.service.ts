@@ -112,6 +112,7 @@ export function openStream(req: Request, res: Response): void {
 export type RealtimeEvent =
   | { kind: "sale.created"; locationId: number; saleId: number }
   | { kind: "stock.changed"; locationId: number }
+  | { kind: "notification.created" }
   | { kind: "held_sales.changed"; locationId: number }
   | { kind: "register.changed"; locationId: number };
 

@@ -6,6 +6,7 @@ import {
   webhookEndpoints,
 } from "../../db/schema/webhooks.js";
 import { decryptSecret, encryptSecret } from "../../utils/encryption.js";
+import { notifyIntegrationFailure } from "../../services/notifications.js";
 import { NotFoundError } from "../../utils/handleError.js";
 
 /**
@@ -322,6 +323,13 @@ export async function processWebhookDeliveries(
           nextAttemptAt: new Date(now.getTime() + backoffSeconds * 1000),
         })
         .where(eq(webhookDeliveries.id, delivery.id));
+      if (dead) {
+        // Dead-letter → tell the business (Module 14, deduped per day).
+        await notifyIntegrationFailure(
+          delivery.businessId,
+          `Webhook delivery to endpoint #${delivery.endpointId} failed permanently: ${message.slice(0, 120)}`,
+        );
+      }
       failed += 1;
     }
   }

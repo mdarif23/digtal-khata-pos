@@ -27,6 +27,7 @@ import { SaleSuccessDialog } from "../components/receipt/SaleSuccessDialog.js";
 import { LocationBadge } from "@/components/common/LocationBadge";
 import { RegisterDialog } from "@/features/cashRegisters/components/RegisterDialog";
 import { SyncStatusIndicator } from "@/features/pos/components/pos/SyncStatus.js";
+import { NotificationBell } from "@/features/pos/components/pos/NotificationBell.js";
 import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
 import { useRealtimeStore } from "@/features/pos/offline/realtime.js";
 import { useProductStore } from "@/features/products/usedashboardProductStore.js";
@@ -44,6 +45,7 @@ function Pos() {
   // location update this register's stock view within seconds.
   const stockRevision = useRealtimeStore((s) => s.stockRevision);
   const holdsRevision = useRealtimeStore((s) => s.holdsRevision);
+  const notificationRevision = useRealtimeStore((s) => s.notificationRevision);
   useEffect(() => {
     useRealtimeStore.getState().start();
     return () => useRealtimeStore.getState().stop();
@@ -183,6 +185,7 @@ function Pos() {
         <div className="col-span-full flex items-center justify-between">
           <LocationBadge />
           <div className="flex items-center gap-2">
+            <NotificationBell revision={notificationRevision} />
             <SyncStatusIndicator />
             <RegisterDialog />
           </div>

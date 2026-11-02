@@ -68,6 +68,7 @@ import {
   evaluateCouponInTx,
   recordCouponRedemptionInTx,
 } from "../../services/coupons.js";
+import { notifyStockLevel } from "../../services/notifications.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
 import {
   customerValidation,
@@ -888,12 +889,36 @@ export async function createSale(
         )
         .returning({
           variantId: inventoryStock.variantId,
+          quantity: inventoryStock.quantity,
         });
 
       if (updatedRows.length !== 1) {
         throw new Error(
           `Failed to update stock for variant ${item.variantId}.`,
         );
+      }
+
+      // Stock alerts (Module 14): deduped per variant+location per day.
+      {
+        const [variantInfo] = await tx
+          .select({
+            alertQuantity: productVariants.alertQuantity,
+            productName: products.name,
+          })
+          .from(productVariants)
+          .innerJoin(products, eq(products.id, productVariants.productId))
+          .where(eq(productVariants.id, item.variantId))
+          .limit(1);
+        if (variantInfo) {
+          await notifyStockLevel(tx, {
+            businessId,
+            variantId: item.variantId,
+            productName: variantInfo.productName,
+            newQuantity: Number(updatedRows[0]?.quantity ?? 0),
+            alertQuantity: Number(variantInfo.alertQuantity ?? 0),
+            locationId,
+          });
+        }
       }
       await tx.insert(inventoryMovements).values({
         businessId,

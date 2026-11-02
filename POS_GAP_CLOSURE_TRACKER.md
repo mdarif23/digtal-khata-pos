@@ -46,7 +46,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 12 Omnichannel | Shopify adapter | Missing | 6+ | ❌ | n/a | ❌ | ❌ | Adapter interface ready |
 | 12 Omnichannel | Store URL validation (SSRF) | **Defective** → **fixed** | **1** ✅ | ✅ `assertPublicStoreUrl` at connect (https-required in prod, private-range + DNS checks) | — | — | unit | — |
 | 13 Restaurant | Menus, modifiers, tables, KDS | Missing | 7 | ❌ | ❌ | ❌ | ❌ | Greenfield module |
-| 14 Notifications | Notification center | Missing | 5 | ❌ | ❌ | ❌ | ❌ | Event-driven generation |
+| 14 Notifications | Notification center | Missing → **Complete** | 5 ✅ | ✅ event-driven generation (low/out-of-stock, expiring inventory sweep, register discrepancies, webhook dead-letters) with per-day dedupe | ✅ bell + panel (unread badge on SSE signal, read/mute actions) | ✅ 0030 | integration 5/5 | Email/SMS channels (future providers); per-user prefs UI beyond mute |
 | 15 Reports | 20 report pages incl. profit/tax/regr | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 15 Reports | Forecasting, CLV, channel reports, exports | Missing/Partial | 8 | ❌ | partial | — | ❌ | CSV/Excel export to verify |
 | Security | RBAC + tenant isolation, encrypted credentials, webhook HMAC | Complete | — | ✅ | ✅ | ✅ | integration | — |
@@ -97,6 +97,12 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-03** — Phase 5 slice 1 (notification center) complete:
+  - Migration `0030`: `notifications` (kind/severity/payload + per-day dedupe via composed dedupe key), `notification_reads` (per-user), `notification_prefs` (per-user per-kind muting, filtered at read time — generation always records so history stays complete).
+  - Generators from real events: low-stock/out-of-stock on sale stock changes (alert-quantity aware, deduped per variant+location per day), expiring inventory (7-day sweep in the scheduler, deduped per batch), register close discrepancies, webhook dead-letters.
+  - Delivery: in-app over the existing SSE stream (new `notification.created` business-wide signal) + REST (list, unread-count, read, read-all, prefs). Signals are advisory — the panel refetches through the API.
+  - Frontend: notification bell in the register header with an unread badge and a history panel (severity markers, mark read / mark all).
+  - Verification: backend tsc clean, full suite 322/341 (same 19 pre-existing; +5 notification tests green: low-stock generation, same-day dedupe, out-of-stock critical, per-user read state, muting); POS tsc + build green.
 - **2026-11-03** — Phase 4 slice 4 (attendance/timeclock) complete — **PHASE 4 DONE**:
   - Migration `0029`: `attendance_records` (immutable once clocked out — corrections go through manager approval, never edits) + `attendance_breaks` (one open break at a time). Location-scoped, UTC timestamps, client-local display. New attendance.view (self-service; cashiers seeded) / attendance.manage (managers) permissions.
   - Self-service: clock in (one open record per user — double-clock rejected), clock out (auto-closes any open break), break start/end. Managers see all records, approve (a signal, never a time edit — approve-once enforced), and read the per-user hours summary (worked vs break hours).

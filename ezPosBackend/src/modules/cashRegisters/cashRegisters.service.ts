@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { publishRealtime } from "../realtime/realtime.service.js";
+import { notifyRegisterDiscrepancy } from "../../services/notifications.js";
 import { db } from "../../db/schema/index.js";
 import { registerSessions } from "../../db/schema/registers.js";
 import { registerTransactions } from "../../db/schema/registers.js";
@@ -596,6 +597,18 @@ export async function closeSession(
       throw new Error("Session lookup failed after close.");
     }
     const closed = toSummary(row, expected);
+    const closeDelta =
+      closed.countedCash === null
+        ? null
+        : roundMoney(closed.countedCash - closed.expectedCash);
+    if (closeDelta !== null && Math.abs(closeDelta) > 0.01) {
+      await notifyRegisterDiscrepancy(tx, {
+        businessId,
+        sessionId: row.id,
+        registerName: closed.registerName || `Register ${closed.registerId}`,
+        difference: closeDelta,
+      });
+    }
     publishRealtime(businessId, closed.locationId, {
       kind: "register.changed",
       locationId: closed.locationId,

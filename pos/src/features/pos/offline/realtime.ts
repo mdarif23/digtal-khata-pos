@@ -17,7 +17,8 @@ import axios from "../../../api/axios.js";
 export type RealtimeEvent =
   | { kind: "sale.created"; locationId: number; saleId: number }
   | { kind: "held_sales.changed"; locationId: number }
-  | { kind: "register.changed"; locationId: number };
+  | { kind: "register.changed"; locationId: number }
+  | { kind: "notification.created" };
 
 interface RealtimeState {
   connected: boolean;
@@ -25,6 +26,7 @@ interface RealtimeState {
   stockRevision: number;
   holdsRevision: number;
   registerRevision: number;
+  notificationRevision: number;
   start: () => void;
   stop: () => void;
 }
@@ -38,6 +40,7 @@ export const useRealtimeStore = create<RealtimeState>()((set, get) => ({
   stockRevision: 0,
   holdsRevision: 0,
   registerRevision: 0,
+  notificationRevision: 0,
 
   start: () => {
     if (source) return;
@@ -80,6 +83,11 @@ async function connect(
             break;
           case "register.changed":
             set((state) => ({ registerRevision: state.registerRevision + 1 }));
+            break;
+          case "notification.created":
+            set((state) => ({
+              notificationRevision: state.notificationRevision + 1,
+            }));
             break;
         }
       } catch {
