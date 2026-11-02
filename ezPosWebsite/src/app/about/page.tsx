@@ -1,14 +1,14 @@
+import type { Metadata } from "next";
 import { Check } from "lucide-react";
 import { Container } from "@/components/ui/container";
 import { SectionHeading } from "@/components/marketing/section-heading";
 import { CtaBand } from "@/components/marketing/cta-band";
-import { publicMetadata } from "@/lib/seo";
 
-export const metadata = publicMetadata(
-  "/about",
-  "About us",
-  "Why ezPos exists: to give small and medium retailers in Bangladesh the tools that used to be reserved for large chains — accurate stock, clear accounts, and honest reports.",
-);
+export const metadata: Metadata = {
+  title: "About us",
+  description:
+    "Why ezPos exists: to give small and medium retailers in Bangladesh the tools that used to be reserved for large chains — accurate stock, clear accounts, and honest reports.",
+};
 
 const principles = [
   {

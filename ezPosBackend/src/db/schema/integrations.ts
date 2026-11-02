@@ -1,5 +1,6 @@
 import {
   index,
+  boolean,
   integer,
   jsonb,
   pgTable,
@@ -44,6 +45,11 @@ export const integrations = pgTable(
     syncPolicy: jsonb("sync_policy")
       .$type<Record<string, string>>(),
     lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+    /** Outbound customer push (Module 12) — on by default for new connects. */
+    customerSyncEnabled: boolean("customer_sync_enabled")
+      .notNull()
+      .default(true),
+    customerSyncedAt: timestamp("customer_synced_at", { withTimezone: true }),
     health: jsonb().$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),

@@ -1,13 +1,13 @@
+import type { Metadata } from "next";
 import { Container } from "@/components/ui/container";
 import { SectionHeading } from "@/components/marketing/section-heading";
 import { FaqItem } from "@/components/marketing/faq-item";
-import { publicMetadata } from "@/lib/seo";
 
-export const metadata = publicMetadata(
-  "/faq",
-  "FAQ",
-  "Answers to common questions about ezPos: what it is, what it costs, how your data is handled, and what is coming next.",
-);
+export const metadata: Metadata = {
+  title: "FAQ",
+  description:
+    "Answers to common questions about ezPos: what it is, what it costs, how your data is handled, and what is coming next.",
+};
 
 const faqs = [
   {
@@ -48,7 +48,7 @@ const faqs = [
   {
     question: "Can developers integrate with ezPos?",
     answer:
-      "Yes. The Storefront API lets your own website sell from ezPos products and stock, and WooCommerce stores connect directly. See the developer documentation for keys, endpoints, and webhooks.",
+      "Yes — a public API is planned so developers and businesses can connect their own applications to ezPos. Details will be published at launch.",
   },
 ] as const;
 

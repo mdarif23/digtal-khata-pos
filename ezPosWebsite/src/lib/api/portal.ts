@@ -34,14 +34,14 @@ async function request<T>(
     return { ok: false, status: 0, message: SERVER_UNREACHABLE_MESSAGE };
   }
   const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-  // Three response shapes exist: `{ success, message?, data }` (most
-  // endpoints), field-style payloads (`{ success, subscription, plan, ... }`
-  // without a data key), and raw arrays (the public plan catalog).
-  // Failure envelopes without `data` still surface the server's message.
+  // Two response shapes exist: `{ success, message?, data }` (most endpoints)
+  // and field-style payloads (`{ success, subscription, plan, usage, events }`)
+  // or raw arrays (the public plan catalog). Unwrap the former so callers
+  // always receive the inner data.
   let data: unknown = body;
   let message: string;
-  if (body && typeof body === "object" && "success" in body) {
-    if ("data" in body) data = body.data;
+  if (body && typeof body === "object" && "success" in body && "data" in body) {
+    data = body.data;
     message =
       res.status === 0
         ? SERVER_UNREACHABLE_MESSAGE
@@ -176,9 +176,8 @@ export interface PaymentSummary {
 
 export async function fetchInvoices(
   businessId: number,
-  page = 1,
 ): Promise<ApiResult<InvoiceSummary[]>> {
-  return request(`/api/businesses/${businessId}/invoices?page=${page}`, {
+  return request("/api/businesses/" + businessId + "/invoices", {
     method: "GET",
     businessId,
   });
@@ -196,9 +195,8 @@ export async function fetchInvoice(
 
 export async function fetchPayments(
   businessId: number,
-  page = 1,
 ): Promise<ApiResult<PaymentSummary[]>> {
-  return request(`/api/businesses/${businessId}/payments?page=${page}`, {
+  return request("/api/businesses/" + businessId + "/payments", {
     method: "GET",
     businessId,
   });

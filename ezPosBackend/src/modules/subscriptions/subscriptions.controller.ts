@@ -127,16 +127,9 @@ export async function getCurrentSubscription(req: Request, res: Response) {
 
 export async function getInvoices(req: Request, res: Response) {
   try {
-    const page = Number(req.query.page);
-    const pageSize = Number(req.query.pageSize);
-    res.status(200).json({
-      success: true,
-      data: await listInvoices(getBusinessId(req), {
-        page: Number.isInteger(page) && page > 0 ? page : undefined,
-        pageSize:
-          Number.isInteger(pageSize) && pageSize > 0 ? pageSize : undefined,
-      }),
-    });
+    res
+      .status(200)
+      .json({ success: true, data: await listInvoices(getBusinessId(req)) });
   } catch (err) {
     sendSafeError(res, err, "Unable to load invoices right now.");
   }
@@ -165,16 +158,9 @@ export async function getInvoiceDetail(req: Request, res: Response) {
 
 export async function getPayments(req: Request, res: Response) {
   try {
-    const page = Number(req.query.page);
-    const pageSize = Number(req.query.pageSize);
-    res.status(200).json({
-      success: true,
-      data: await listPayments(getBusinessId(req), {
-        page: Number.isInteger(page) && page > 0 ? page : undefined,
-        pageSize:
-          Number.isInteger(pageSize) && pageSize > 0 ? pageSize : undefined,
-      }),
-    });
+    res
+      .status(200)
+      .json({ success: true, data: await listPayments(getBusinessId(req)) });
   } catch (err) {
     sendSafeError(res, err, "Unable to load payments right now.");
   }

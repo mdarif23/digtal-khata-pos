@@ -17,6 +17,7 @@ import type {
  */
 export const mockProvider: PaymentProvider = {
   name: "mock",
+  supportsRefund: true,
 
   async initiateSession(input: GatewaySessionInput): Promise<GatewaySession> {
     const sessionId = `mock-session-${input.tranId}`;
@@ -74,6 +75,20 @@ export const mockProvider: PaymentProvider = {
       currency: null,
       transactionId: valId,
       raw: { provider: "mock" },
+    };
+  },
+
+  // Deterministic refund: accepted unless the transaction id is the
+  // "MOCK-REFUND-REJECT" sentinel, so tests can exercise both outcomes.
+  async refundPayment(input) {
+    if (input.transactionId === "MOCK-REFUND-REJECT") {
+      return { accepted: false, refundId: null, status: "REJECTED", raw: { provider: "mock" } };
+    }
+    return {
+      accepted: true,
+      refundId: `mock-refund-${input.transactionId}-${Math.round(input.amount * 100)}`,
+      status: "REFUNDED",
+      raw: { provider: "mock", amount: input.amount },
     };
   },
 };

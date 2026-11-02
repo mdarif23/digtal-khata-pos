@@ -1,16 +1,13 @@
 import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { businesses } from "../../db/schema/businesses.js";
-import { businessMemberships } from "../../db/schema/businessMemberships.js";
 import { locations } from "../../db/schema/locations.js";
-import { roles } from "../../db/schema/roles.js";
 import { saasAdminAudit } from "../../db/schema/saasAdminAudit.js";
 import { saasInvoices } from "../../db/schema/saasInvoices.js";
 import { subscriptionPayments } from "../../db/schema/subscriptionPayments.js";
 import { subscriptionPlans } from "../../db/schema/subscriptionPlans.js";
 import { subscriptions } from "../../db/schema/subscriptions.js";
 import { subscriptionEvents } from "../../db/schema/subscriptionEvents.js";
-import { notifications } from "../../db/schema/notifications.js";
 import { supportTickets } from "../../db/schema/supportTickets.js";
 import { supportTicketMessages } from "../../db/schema/supportTickets.js";
 import { users } from "../../db/schema/users.js";
@@ -691,22 +688,6 @@ export async function adminReplyToTicket(
     .update(supportTickets)
     .set({ status: "pending", updatedAt: new Date() })
     .where(eq(supportTickets.id, ticketId));
-  // In-app notification for the ticket owner (customer-side bell).
-  const [ticketRow] = await db
-    .select({ userId: supportTickets.userId, businessId: supportTickets.businessId })
-    .from(supportTickets)
-    .where(eq(supportTickets.id, ticketId));
-  if (ticketRow?.businessId) {
-    await db.insert(notifications).values({
-      businessId: ticketRow.businessId,
-      userId: ticketRow.userId,
-      type: "ticket.replied",
-      title: "Support replied to your ticket",
-      body: "Open Account → Support to read the reply.",
-      entityType: "ticket",
-      entityId: ticketId,
-    });
-  }
   await audit({ adminUserId }, "support_ticket_replied", "ticket", ticketId);
   return message;
 }
@@ -734,165 +715,4 @@ export async function setTicketStatus(
     ticketId,
     { status },
   );
-}
-
-// ---------------------------------------------------------------------------
-// Per-business detail (Phase: portal completion)
-// ---------------------------------------------------------------------------
-
-export interface AdminBusinessDetail {
-  id: number;
-  name: string;
-  slug: string;
-  status: string;
-  mode: string;
-  ownerName: string | null;
-  ownerEmail: string | null;
-  createdAt: Date | null;
-  subscription: {
-    id: number;
-    status: string;
-    planName: string;
-    planPrice: number;
-    planInterval: string;
-    currentPeriodEnd: Date;
-    cancelAtPeriodEnd: boolean;
-  } | null;
-  users: { userId: number; name: string; email: string; role: string; status: string }[];
-  locations: { id: number; name: string; isDefault: boolean }[];
-  invoices: { id: number; invoiceNumber: string; status: string; total: number; currency: string; issuedAt: Date }[];
-}
-
-export async function getBusinessDetailAdmin(
-  businessId: number,
-): Promise<AdminBusinessDetail> {
-  const [business] = await db
-    .select({
-      id: businesses.id,
-      name: businesses.name,
-      slug: businesses.slug,
-      status: businesses.status,
-      mode: businesses.mode,
-      createdAt: businesses.createdAt,
-      ownerName: users.fullName,
-      ownerEmail: users.email,
-    })
-    .from(businesses)
-    .leftJoin(users, eq(users.id, businesses.createdByUserId))
-    .where(eq(businesses.id, businessId));
-  if (!business) {
-    throw new NotFoundError("Business not found.");
-  }
-
-  const [subscription] = await db
-    .select({
-      id: subscriptions.id,
-      status: subscriptions.status,
-      planName: subscriptionPlans.name,
-      planPrice: subscriptionPlans.price,
-      planInterval: subscriptionPlans.interval,
-      currentPeriodEnd: subscriptions.currentPeriodEnd,
-      cancelAtPeriodEnd: subscriptions.cancelAtPeriodEnd,
-    })
-    .from(subscriptions)
-    .innerJoin(
-      subscriptionPlans,
-      eq(subscriptionPlans.id, subscriptions.planId),
-    )
-    .where(
-      and(
-        eq(subscriptions.businessId, businessId),
-        inArray(subscriptions.status, [
-          "trialing",
-          "active",
-          "past_due",
-          "suspended",
-        ]),
-      ),
-    )
-    .limit(1);
-
-  const members = await db
-    .select({
-      userId: users.id,
-      name: users.fullName,
-      email: users.email,
-      role: roles.name,
-      status: sql<string>`${businessMemberships.status}`,
-    })
-    .from(businessMemberships)
-    .innerJoin(users, eq(users.id, businessMemberships.userId))
-    .innerJoin(roles, eq(roles.id, businessMemberships.roleId))
-    .where(eq(businessMemberships.businessId, businessId))
-    .orderBy(businessMemberships.id);
-
-  const locationRows = await db
-    .select({
-      id: locations.id,
-      name: locations.name,
-      isDefault: locations.isDefault,
-    })
-    .from(locations)
-    .where(eq(locations.businessId, businessId))
-    .orderBy(locations.id);
-
-  const invoiceRows = await db
-    .select({
-      id: saasInvoices.id,
-      invoiceNumber: saasInvoices.invoiceNumber,
-      status: saasInvoices.status,
-      total: saasInvoices.total,
-      currency: saasInvoices.currency,
-      issuedAt: saasInvoices.issuedAt,
-    })
-    .from(saasInvoices)
-    .where(eq(saasInvoices.businessId, businessId))
-    .orderBy(desc(saasInvoices.id))
-    .limit(20);
-
-  return {
-    ...business,
-    subscription: subscription ?? null,
-    users: members,
-    locations: locationRows,
-    invoices: invoiceRows,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Audit-log viewer (approved proposal #1)
-// ---------------------------------------------------------------------------
-
-export async function listAuditLogs(
-  options: {
-    action?: string | undefined;
-    entityType?: string | undefined;
-  } = {},
-) {
-  return db
-    .select({
-      id: saasAdminAudit.id,
-      adminUserId: saasAdminAudit.adminUserId,
-      adminName: users.fullName,
-      adminEmail: users.email,
-      action: saasAdminAudit.action,
-      entityType: saasAdminAudit.entityType,
-      entityId: saasAdminAudit.entityId,
-      metadata: saasAdminAudit.metadata,
-      createdAt: saasAdminAudit.createdAt,
-    })
-    .from(saasAdminAudit)
-    .innerJoin(users, eq(users.id, saasAdminAudit.adminUserId))
-    .where(
-      and(
-        options.action
-          ? eq(saasAdminAudit.action, options.action)
-          : undefined,
-        options.entityType
-          ? eq(saasAdminAudit.entityType, options.entityType)
-          : undefined,
-      ),
-    )
-    .orderBy(desc(saasAdminAudit.id))
-    .limit(100);
 }

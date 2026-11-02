@@ -1,53 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { fetchAdminPayments, fetchAdminInvoices, type AdminInvoice, type AdminPayment } from "@/lib/api/saas-admin";
-import { downloadCsv, toCsv } from "@/lib/csv";
 
 function money(amount: number, currency: string): string {
   return `${currency} ${Number(amount).toLocaleString()}`;
 }
 
-const STATUS_FILTERS = ["", "succeeded", "initiated", "failed", "verification_failed", "canceled"] as const;
-
-function exportPaymentsCsv(payments: AdminPayment[]) {
-  const csv = toCsv(
-    ["Business", "Invoice", "Currency", "Amount", "Provider", "Provider reference", "Status", "Failure reason", "Paid at", "Created at"],
-    payments.map((payment) => [
-      payment.businessName,
-      payment.invoiceNumber,
-      payment.currency,
-      payment.amount,
-      payment.provider,
-      payment.providerReference,
-      payment.status,
-      payment.failureReason,
-      payment.paidAt,
-      payment.createdAt,
-    ]),
-  );
-  downloadCsv("ezpos-admin-payments.csv", csv);
-}
-
 export function AdminPayments() {
-  const [statusFilter, setStatusFilter] = useState<string>("");
   const [payments, setPayments] = useState<AdminPayment[] | null>(null);
   const [invoices, setInvoices] = useState<AdminInvoice[] | null>(null);
 
-  const reload = useCallback(async (status: string) => {
-    const [paymentRes, invoiceRes] = await Promise.all([
-      fetchAdminPayments(status ? { status } : undefined),
-      fetchAdminInvoices(),
-    ]);
-    setPayments(paymentRes.data ?? []);
-    setInvoices(invoiceRes.data ?? []);
-  }, []);
-
   useEffect(() => {
     void (async () => {
-      await reload(statusFilter);
+      const [paymentRes, invoiceRes] = await Promise.all([
+        fetchAdminPayments(),
+        fetchAdminInvoices(),
+      ]);
+      setPayments(paymentRes.data ?? []);
+      setInvoices(invoiceRes.data ?? []);
     })();
-  }, [reload, statusFilter]);
+  }, []);
 
   return (
     <div className="space-y-8">
@@ -61,36 +34,10 @@ export function AdminPayments() {
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {STATUS_FILTERS.map((status) => (
-          <button
-            key={status || "all"}
-            type="button"
-            className={
-              statusFilter === status
-                ? "rounded-full bg-indigo-600 px-3 py-1 text-xs font-medium text-white"
-                : "rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:border-slate-400"
-            }
-            onClick={() => setStatusFilter(status)}
-          >
-            {status || "all"}
-          </button>
-        ))}
-      </div>
-
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-          <h3 className="text-sm font-semibold text-slate-900">Payments</h3>
-          {payments !== null && payments.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => exportPaymentsCsv(payments)}
-              className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-            >
-              Export CSV
-            </button>
-          ) : null}
-        </div>
+        <h3 className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
+          Payments
+        </h3>
         {payments === null ? (
           <p className="px-5 py-6 text-sm text-slate-500">Loading…</p>
         ) : payments.length === 0 ? (

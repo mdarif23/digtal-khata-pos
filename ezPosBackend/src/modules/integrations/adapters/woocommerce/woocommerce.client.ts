@@ -97,6 +97,44 @@ export class WoocommerceClient {
     await this.request<unknown>("GET", "/data");
   }
 
+  /**
+   * Upserts a customer by email (Module 12 customer sync): looks the
+   * customer up by email, updates the Woo record when found, creates one
+   * otherwise. Returns the Woo customer id.
+   */
+  async upsertCustomerByEmail(customer: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    phone?: string | null;
+  }): Promise<{ id: number; created: boolean }> {
+    const email = customer.email.trim().toLowerCase();
+    const existing = await this.request<
+      { id: number }[]
+    >("GET", `/customers?email=${encodeURIComponent(email)}&per_page=1`);
+    const match = Array.isArray(existing) ? existing[0] : undefined;
+    const body = {
+      email,
+      first_name: customer.firstName.slice(0, 100),
+      last_name: customer.lastName.slice(0, 100),
+      ...(customer.phone ? { billing: { phone: customer.phone } } : {}),
+    };
+    if (match?.id) {
+      await this.request<{ id: number }>(
+        "PUT",
+        `/customers/${match.id}`,
+        body,
+      );
+      return { id: match.id, created: false };
+    }
+    const created = await this.request<{ id: number }>(
+      "POST",
+      "/customers",
+      body,
+    );
+    return { id: created.id, created: true };
+  }
+
   async createWebhook(secret: string, deliveryUrl: string): Promise<{ id: number }> {
     const webhook = await this.request<{ id: number }>("POST", "/webhooks", {
       name: "ezPos order sync",

@@ -190,9 +190,6 @@ export async function createBusinessForUser(
         address: input.address ?? null,
         // Server-derived: the creator, not any client-supplied user ID.
         createdByUserId: userId,
-        ...(input.termsAccepted === true
-          ? { termsAcceptedAt: new Date() }
-          : {}),
       })
       .returning({
         id: businesses.id,
@@ -263,8 +260,6 @@ export interface BusinessDetail {
   currency: string;
   timezone: string;
   mode: "physical_only" | "online_only" | "omnichannel";
-  onboardingStep: number;
-  logoUrl: string | null;
   createdAt: Date | null;
   subscription: SubscriptionState;
   roleSlug: string;
@@ -288,8 +283,6 @@ export async function getBusinessForMembership(
       currency: businesses.currency,
       timezone: businesses.timezone,
       mode: businesses.mode,
-      logoUrl: businesses.logoUrl,
-      onboardingStep: businesses.onboardingStep,
       createdAt: businesses.createdAt,
       roleSlug: roles.slug,
     })
@@ -350,12 +343,6 @@ export async function updateBusinessForMembership(
       ...(input.country !== undefined ? { country: input.country } : {}),
       ...(input.currency !== undefined ? { currency: input.currency } : {}),
       ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
-      ...(input.logoDataUrl !== undefined
-        ? { logoUrl: input.logoDataUrl }
-        : {}),
-      ...(input.onboardingStep !== undefined
-        ? { onboardingStep: input.onboardingStep }
-        : {}),
       updatedAt: new Date(),
     })
     .where(eq(businesses.id, businessId));

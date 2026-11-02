@@ -1,43 +1,22 @@
+import type { Metadata } from "next";
 import { Container } from "@/components/ui/container";
 import { SectionHeading } from "@/components/marketing/section-heading";
 import { Alert } from "@/components/ui/alert";
 import { PricingPlans } from "@/components/pricing/pricing-plans";
 import { CtaBand } from "@/components/marketing/cta-band";
 import { getSubscriptionPlans } from "@/lib/api/subscription-plans";
-import { publicMetadata } from "@/lib/seo";
-import { JsonLd } from "@/components/seo/json-ld";
 
-export const metadata = publicMetadata(
-  "/pricing",
-  "Pricing",
-  "ezPos subscription plans for retail shops — monthly and yearly options with user, location, and product limits.",
-);
+export const metadata: Metadata = {
+  title: "Pricing",
+  description:
+    "ezPos subscription plans for retail shops — monthly and yearly options with user, location, and product limits.",
+};
 
 export default async function PricingPage() {
   const result = await getSubscriptionPlans();
 
-  // Structured data is built only from plans actually served by the backend —
-  // no fabricated prices when the catalog is unavailable.
-  const offersJsonLd =
-    result.status === "ok" && result.plans.length > 0
-      ? {
-          "@context": "https://schema.org",
-          "@type": "SoftwareApplication",
-          name: "ezPos",
-          applicationCategory: "BusinessApplication",
-          operatingSystem: "Web",
-          offers: result.plans.map((plan) => ({
-            "@type": "Offer",
-            name: plan.name,
-            price: String(plan.price),
-            priceCurrency: plan.currency,
-          })),
-        }
-      : null;
-
   return (
     <>
-      {offersJsonLd ? <JsonLd data={offersJsonLd} /> : null}
       <section className="border-b border-slate-100 bg-slate-50 py-16 sm:py-20">
         <Container>
           <SectionHeading

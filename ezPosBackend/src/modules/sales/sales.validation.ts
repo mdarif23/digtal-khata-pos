@@ -120,7 +120,14 @@ export async function validateStock(
   return stockMap;
 }
 type Payments = {
-  method: "cash" | "bangla_qr" | "card" | "due";
+  method:
+    | "cash"
+    | "bangla_qr"
+    | "card"
+    | "due"
+    | "store_credit"
+    | "loyalty_points"
+    | "gift_card";
   amount?: number | undefined;
   tendered?: number | undefined;
   reference?: string | undefined;
@@ -161,6 +168,15 @@ export function validatePayments(
         "Card and QR payments require a transaction reference of at least 6 characters.",
       );
     }
+
+    if (
+      payment.method === "gift_card" &&
+      (payment.reference ?? "").trim().length < 8
+    ) {
+      throw new BadRequestError(
+        "Gift card payments require the full card code as the reference.",
+      );
+    }
   }
 
   const paidPoisha = payments.reduce(
@@ -176,11 +192,22 @@ export function validatePayments(
   );
 
   if (duePoisha > 0 && customerId === null) {
-    throw new NotFoundError("Due payment requires a customer.");
+    throw new BadRequestError("Due payment requires a customer.");
+  }
+
+  // Store credit and loyalty points are per-customer money — the spend
+  // must land on an account.
+  if (
+    (methods.includes("store_credit") || methods.includes("loyalty_points")) &&
+    customerId === null
+  ) {
+    throw new BadRequestError(
+      "Store credit and loyalty payments require a customer on the sale.",
+    );
   }
 
   if (paidPoisha + duePoisha !== toPoisha(finalTotal)) {
-    throw new NotFoundError(
+    throw new BadRequestError(
       "Received payments plus due must equal the final total.",
     );
   }

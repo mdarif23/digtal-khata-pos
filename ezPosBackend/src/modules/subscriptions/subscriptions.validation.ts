@@ -27,14 +27,6 @@ export const createTicketSchema = z.object({
     .min(10, "Please describe your issue (at least 10 characters)")
     .max(5000, "Message is too long"),
   businessId: z.number().int().positive().nullish(),
-  category: z
-    .enum(["general", "billing", "technical", "feature_request"], {
-      message: "Invalid category.",
-    })
-    .optional(),
-  priority: z
-    .enum(["low", "normal", "high"], { message: "Invalid priority." })
-    .optional(),
 });
 
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;

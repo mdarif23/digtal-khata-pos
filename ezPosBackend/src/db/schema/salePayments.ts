@@ -45,10 +45,14 @@ export const salePayments = pgTable(
       foreignColumns: [sales.id, sales.businessId],
       name: "sale_payments_sale_business_fkey",
     }),
-    // Per-business reference uniqueness (policy resolved stage 5): a gateway
-    // reference recorded by one business must never block another's. Global
-    // uniqueness was a cross-tenant coupling hazard.
-    unique("sale_payments_method_reference_unique").on(
+    // References are scoped per business: two tenants recording the same
+    // gateway reference (their own bKash/Nagad merchant accounts) is
+    // legitimate and must not collide. Duplicates WITHIN a business for the
+    // same method are still rejected — the cashier double-entry protection
+    // is unchanged. Both workstreams resolved the pending policy decision
+    // identically; the constraint name follows 0016 in this lineage.
+    // 'sslcommerz' covers storefront order capture (website platform).
+    unique("sale_payments_business_method_reference_unique").on(
       t.businessId,
       t.paymentMethod,
       t.reference,

@@ -15,7 +15,13 @@ export const useProductStore = create<ProductsStore>((set) => ({
   getProducts: async () => {
     set({ loading: true });
     try {
-      const productsData = await getProductsApi();
+      // Offline POS: on a network failure the IndexedDB catalog cache
+      // (populated on every successful load) keeps the register working —
+      // clearly flagged as offline data via useOfflineStore.offlineMode.
+      const { loadProductsWithCache } = await import(
+        "../pos/offline/catalog.js"
+      );
+      const { data: productsData } = await loadProductsWithCache(getProductsApi);
       set({ products: productsData, loading: false });
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);

@@ -17,13 +17,10 @@ export function VerifyEmailContent() {
   useEffect(() => {
     const token = searchParams.get("token");
     if (!token) {
-      void (async () => {
-        await Promise.resolve();
-        setState({
-          kind: "failed",
-          message: "This link is missing its verification token.",
-        });
-      })();
+      setState({
+        kind: "failed",
+        message: "This link is missing its verification token.",
+      });
       return;
     }
     let cancelled = false;

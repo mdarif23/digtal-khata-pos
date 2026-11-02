@@ -1,11 +1,11 @@
+import type { Metadata } from "next";
 import { LegalPage } from "@/components/legal/legal-page";
-import { publicMetadata } from "@/lib/seo";
 
-export const metadata = publicMetadata(
-  "/terms",
-  "Terms and Conditions",
-  "The terms that govern your use of the ezPos point of sale service and website.",
-);
+export const metadata: Metadata = {
+  title: "Terms and Conditions",
+  description:
+    "The terms that govern your use of the ezPos point of sale service and website.",
+};
 
 const UPDATED = "October 31, 2026";
 

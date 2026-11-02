@@ -113,6 +113,49 @@ router.get(
   requirePermission("reports.inventory.view"),
   reportsController.getBatchExpiry,
 );
+// Advanced analytics (Module 15)
+router.get(
+  "/api/reports/analytics/channels",
+  ...read,
+  requirePermission("reports.financial.view"),
+  reportsController.getChannelPerformance,
+);
+router.get(
+  "/api/reports/analytics/clv",
+  ...read,
+  requirePermission("reports.financial.view"),
+  reportsController.getCustomerLifetimeValue,
+);
+router.get(
+  "/api/reports/analytics/retention",
+  ...read,
+  requirePermission("reports.financial.view"),
+  reportsController.getCustomerRetention,
+);
+router.get(
+  "/api/reports/analytics/staff",
+  ...read,
+  requirePermission("reports.financial.view"),
+  reportsController.getStaffPerformance,
+);
+router.get(
+  "/api/reports/analytics/forecast",
+  ...read,
+  requirePermission("reports.financial.view"),
+  reportsController.getSalesForecast,
+);
+router.get(
+  "/api/reports/inventory/aging",
+  ...read,
+  requirePermission("reports.inventory.view"),
+  reportsController.getInventoryAging,
+);
+router.get(
+  "/api/reports/inventory/dead-stock",
+  ...read,
+  requirePermission("reports.inventory.view"),
+  reportsController.getDeadStock,
+);
 router.get(
   "/api/reports/inventory/shrinkage",
   ...read,

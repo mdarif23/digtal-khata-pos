@@ -8,6 +8,7 @@ import {
   Users,
   BarChart3,
   ShieldCheck,
+  Percent,
 } from "lucide-react";
 import { GiExpense } from "react-icons/gi";
 import { MdOutlinePointOfSale } from "react-icons/md";
@@ -69,10 +70,17 @@ export const navigation = [
       { title: "Payment Breakdown", url: "/reports?tab=sales-payments", permission: "reports.sales.view" },
       { title: "Gross Profit & Margins", url: "/reports?tab=profit", permission: "reports.profit.view" },
       { title: "Customer Receivables", url: "/reports?tab=receivables", permission: "reports.financial.view" },
+      { title: "Channel Performance", url: "/reports?tab=analytics-channels", permission: "reports.financial.view" },
+      { title: "Customer Lifetime Value", url: "/reports?tab=analytics-clv", permission: "reports.financial.view" },
+      { title: "Customer Retention", url: "/reports?tab=analytics-retention", permission: "reports.financial.view" },
+      { title: "Staff Performance", url: "/reports?tab=analytics-staff", permission: "reports.financial.view" },
+      { title: "Sales Forecast", url: "/reports?tab=analytics-forecast", permission: "reports.financial.view" },
       { title: "Tax / VAT Reconciliation", url: "/reports?tab=tax", permission: "reports.financial.view" },
       { title: "Stock & Valuation", url: "/reports?tab=stock", permission: "reports.inventory.view" },
       { title: "Loss & Shrinkage", url: "/reports?tab=shrinkage", permission: "reports.inventory.view" },
       { title: "Batch & Expiry", url: "/reports?tab=batch-expiry", permission: "reports.inventory.view" },
+      { title: "Inventory Aging", url: "/reports?tab=inventory-aging", permission: "reports.inventory.view" },
+      { title: "Dead Stock", url: "/reports?tab=dead-stock", permission: "reports.inventory.view" },
       { title: "Purchase Summary", url: "/reports?tab=purchases-summary", permission: "reports.purchase.view" },
       { title: "Supplier Payables", url: "/reports?tab=supplier-payables", permission: "reports.purchase.view" },
     ],
@@ -90,6 +98,7 @@ export const navigation = [
       { title: "Units", url: "/units", permission: "products.view" },
       { title: "Variants", url: "/variants", permission: "products.manage_variants" },
       { title: "Stock Transfers", url: "/transfers", permission: "inventory.transfer" },
+      { title: "Stock Counts", url: "/stock-counts", permission: "inventory.adjust" },
     ],
   },
   {
@@ -118,15 +127,34 @@ export const navigation = [
     icon: Tags,
     anyPermission: ["purchases.view", "purchases.create"],
     items: [
+      { title: "Reorder", url: "/reorder", permission: "purchases.view" },
       { title: "All Purchases", url: "/purchases", permission: "purchases.create" },
       { title: "Purchases List", url: "/purchases-list", permission: "purchases.view" },
     ],
+  },
+  {
+    title: "Coupons",
+    url: "/coupons",
+    icon: Tags,
+    permission: "promotions.view",
+  },
+  {
+    title: "Gift Cards",
+    url: "/gift-cards",
+    icon: CreditCard,
+    permission: "pos.view",
   },
   {
     title: "Locations",
     url: "/locations",
     icon: MapPin,
     permission: "locations.view",
+  },
+  {
+    title: "Attendance",
+    url: "/attendance",
+    icon: Users,
+    permission: "attendance.view",
   },
   {
     title: "Users",
@@ -139,5 +167,11 @@ export const navigation = [
     url: "/roles",
     icon: ShieldCheck,
     permission: "roles.view",
+  },
+  {
+    title: "Tax Rates",
+    url: "/tax-rates",
+    icon: Percent,
+    permission: "taxes.view",
   },
 ];

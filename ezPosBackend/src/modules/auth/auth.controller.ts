@@ -2,14 +2,12 @@ import type { Request, Response } from "express";
 import {
   changePassword,
   getCurrentUserContext,
-  listActiveSessions,
   loginUser,
   registerUser,
   requestPasswordReset,
   resetPassword,
   resendVerificationEmail,
   revokeRefreshToken,
-  revokeSession,
   rotateRefreshToken,
   updateProfile,
   verifyEmailToken,
@@ -319,36 +317,5 @@ export async function changeMyPassword(req: Request, res: Response) {
     });
   } catch (err) {
     return sendSafeError(res, err, "Unable to change the password right now.");
-  }
-}
-
-
-export async function getSessions(req: Request, res: Response) {
-  try {
-    const sessions = await listActiveSessions(req.user!.id);
-    res.status(200).json({ success: true, data: sessions });
-  } catch (err) {
-    return sendSafeError(res, err, "Unable to load sessions right now.");
-  }
-}
-
-export async function revokeSessionById(req: Request, res: Response) {
-  const sessionId = Number(req.params.sessionId);
-  if (!Number.isInteger(sessionId) || sessionId <= 0) {
-    return res
-      .status(400)
-      .json({ success: false, message: "A valid session ID is required." });
-  }
-  try {
-    const ok = await revokeSession(req.user!.id, sessionId);
-    if (!ok) {
-      return res.status(404).json({
-        success: false,
-        message: "Session not found (it may already be signed out).",
-      });
-    }
-    res.status(200).json({ success: true, message: "Session signed out." });
-  } catch (err) {
-    return sendSafeError(res, err, "Unable to revoke the session right now.");
   }
 }

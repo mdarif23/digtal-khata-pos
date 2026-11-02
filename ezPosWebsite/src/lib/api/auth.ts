@@ -119,7 +119,6 @@ export async function signUp(input: {
   email: string;
   password: string;
   phone?: string;
-  termsAccepted: boolean;
 }): Promise<{ ok: boolean; status: number; message: string }> {
   const { status, body } = await request<{ success?: boolean; message?: string }>(
     "/api/auth/register",
@@ -178,7 +177,6 @@ export async function fetchMe(): Promise<MeResponse | null> {
 export async function createBusiness(input: {
   name: string;
   phone?: string;
-  termsAccepted?: boolean;
 }): Promise<{ ok: boolean; status: number; message: string; businessId?: number }> {
   const { status, body } = await request<{
     success?: boolean;

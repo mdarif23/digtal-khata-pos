@@ -19,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card.js";
 import { Input } from "@/components/ui/input.js";
 import { Switch } from "@/components/ui/switch.js";
 import { getCartTotals, getLinePricing } from "../../cartPricing.js";
+import { quoteSaleApi, type QuoteTotals } from "../../quote.api.js";
 import { SerialPickerDialog } from "./SerialPickerDialog.js";
 import { toast } from "@/components/ui/toast.js";
 import { Button } from "@/components/ui/button.js";
@@ -32,16 +33,70 @@ type CartItem = ReturnType<typeof useCartStore.getState>["cart"][number];
 const tk = (n: number) => `৳${n.toFixed(2)}`;
 
 // ---------- shared totals (used by every cart component) ----------
+// Server-authoritative: the backend computes the same totals createSale will
+// charge, including product tax rules the client cannot know. Local math
+// fills the gap instantly and keeps working offline / on quote failure.
 function useCartTotals(form: ShowCustomerInfoProps["form"]) {
   const cart = useCartStore((state) => state.cart);
   const discount = useWatch({ control: form.control, name: "discount" });
   const vatPercent =
     useWatch({ control: form.control, name: "vatPercent" }) ?? 0;
+  const couponCode = useWatch({ control: form.control, name: "couponCode" });
+  const customerId = useCustomerStore((s) => s.showCustomerInfo?.id ?? null);
 
-  return useMemo(
+  const localTotals = useMemo(
     () => getCartTotals(cart, discount, Number(vatPercent)),
     [cart, discount, vatPercent],
   );
+
+  const [quoted, setQuoted] = useState<QuoteTotals | null>(null);
+
+  useEffect(() => {
+    if (cart.length === 0) {
+      setQuoted(null);
+      return;
+    }
+    let ignore = false;
+    const timer = setTimeout(() => {
+      quoteSaleApi({
+        items: cart.map((item) => ({
+          variantId: item.variants[0]?.id ?? 0,
+          quantity: item.quantity,
+          discount: item.discount ?? null,
+        })),
+        cartDiscount: discount,
+        vatPercent: vatPercent === null ? null : Number(vatPercent),
+        couponCode: couponCode?.trim() || null,
+        customerId,
+      })
+        .then((totals) => {
+          if (!ignore) setQuoted(totals);
+        })
+        .catch(() => {
+          if (!ignore) setQuoted(null); // fall back to local math
+        });
+    }, 250);
+    return () => {
+      ignore = true;
+      clearTimeout(timer);
+    };
+  }, [cart, discount, vatPercent, couponCode, customerId]);
+
+  if (quoted === null) return localTotals;
+  // Trust the server quote for every money field; keep the client shape.
+  return {
+    itemsBase: quoted.itemsBase,
+    itemDiscount: quoted.itemDiscount,
+    itemsTotal: quoted.itemsTotal,
+    cartDiscountAmount: quoted.cartDiscountAmount,
+    afterDiscount: quoted.afterDiscount,
+    vatPercent: quoted.usesTaxRules ? 0 : quoted.vatPercent,
+    vat: quoted.vat,
+    finalTotal: quoted.finalTotal,
+    usesTaxRules: quoted.usesTaxRules,
+    coupon: quoted.coupon ?? null,
+    couponError: quoted.couponError ?? null,
+  };
 }
 
 // ---------- customer info ----------
@@ -49,6 +104,9 @@ function CartCustomerInfo() {
   const showCustomerInfo = useCustomerStore((state) => state.showCustomerInfo);
   const [dueByCustomers, setDueByCustomers] = useState<CustomerDue[]>([]);
   const { name, phone, address, id } = showCustomerInfo || {};
+
+  const [loyaltyBalance, setLoyaltyBalance] = useState<number | null>(null);
+  const [storeCreditBalance, setStoreCreditBalance] = useState<number | null>(null);
 
   // reload when the customer changes, so the due is never stale
   useEffect(() => {
@@ -59,6 +117,23 @@ function CartCustomerInfo() {
         if (!ignore) setDueByCustomers(res.data);
       })
       .catch((err) => console.error("Failed to load customer dues", err));
+    if (id != null) {
+      axios
+        .get(`/customers/${id}/loyalty`)
+        .then((res) => {
+          if (!ignore) setLoyaltyBalance(Number(res.data?.data?.balance ?? 0));
+        })
+        .catch(() => !ignore && setLoyaltyBalance(null));
+      axios
+        .get(`/customers/${id}/store-credit`)
+        .then((res) => {
+          if (!ignore) setStoreCreditBalance(Number(res.data?.data?.balance ?? 0));
+        })
+        .catch(() => !ignore && setStoreCreditBalance(null));
+    } else {
+      setLoyaltyBalance(null);
+      setStoreCreditBalance(null);
+    }
     return () => {
       ignore = true;
     };
@@ -79,8 +154,34 @@ function CartCustomerInfo() {
             ? `Total Amount: ${customerDue.totalAmount ?? 0}, Total Paid: ${customerDue.totalPaid ?? 0}, Total Due: ${customerDue.totalDue ?? 0}`
             : "No Due"}
         </span>
+        {loyaltyBalance !== null && (
+          <span className="col-span-2 text-xs">
+            Loyalty points: {loyaltyBalance.toFixed(2)}
+          </span>
+        )}
+        {storeCreditBalance !== null && (
+          <span className="col-span-2 text-xs">
+            Store credit: ৳{storeCreditBalance.toFixed(2)}
+          </span>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+// ---------- coupon entry (Module 6) ----------
+function CouponInput({ form }: { form: ShowCustomerInfoProps["form"] }) {
+  const value = useWatch({ control: form.control, name: "couponCode" });
+  return (
+    <Input
+      placeholder="Coupon code (optional)"
+      maxLength={60}
+      value={value ?? ""}
+      onChange={(e) =>
+        form.setValue("couponCode", e.target.value.toUpperCase() || undefined)
+      }
+      className="uppercase"
+    />
   );
 }
 
@@ -285,6 +386,7 @@ export function CartCalculation({
           {/* discount is applied on the amount after item discounts */}
           <DiscountModal form={form} subTotal={totals.itemsTotal} />
         </div>
+        <CouponInput form={form} />
         <div className="col-span-6">
           {/* payment gets the amount after discount, plus VAT */}
           <PaymentModal
@@ -336,9 +438,22 @@ function CartTextModal({
           <span>-{tk(totals.cartDiscountAmount)}</span>
         </div>
       )}
-      {totals.vatPercent > 0 && (
+      {"coupon" in totals && totals.coupon && (
+        <div className="flex justify-between py-1.5 text-sm text-emerald-700">
+          <span>Coupon {totals.coupon.code}</span>
+          <span>-{tk(totals.coupon.discountAmount)}</span>
+        </div>
+      )}
+      {"couponError" in totals && totals.couponError && (
+        <div className="py-1 text-xs text-destructive">{totals.couponError}</div>
+      )}
+      {totals.vat > 0 && (
         <div className="flex justify-between py-1.5 text-sm">
-          <span>VAT: {totals.vatPercent}%</span>
+          <span>
+            {"usesTaxRules" in totals && totals.usesTaxRules
+              ? "VAT / Tax (product rules)"
+              : `VAT: ${totals.vatPercent}%`}
+          </span>
           <span>{tk(totals.vat)}</span>
         </div>
       )}

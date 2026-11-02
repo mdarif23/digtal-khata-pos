@@ -1,13 +1,13 @@
+import type { Metadata } from "next";
 import { Clock, Mail, MessageSquareText } from "lucide-react";
 import { Container } from "@/components/ui/container";
 import { ContactForm } from "@/components/forms/contact-form";
-import { publicMetadata } from "@/lib/seo";
 
-export const metadata = publicMetadata(
-  "/contact",
-  "Contact us",
-  "Questions about ezPos, pricing, or your shop's setup? Send us a message — we reply by email.",
-);
+export const metadata: Metadata = {
+  title: "Contact us",
+  description:
+    "Questions about ezPos, pricing, or your shop's setup? Send us a message — we reply by email.",
+};
 
 const highlights = [
   {

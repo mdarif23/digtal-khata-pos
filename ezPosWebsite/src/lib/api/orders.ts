@@ -100,12 +100,11 @@ export interface OrderDetail {
 
 export async function fetchOrders(
   businessId: number,
-  filters: { channel?: string; status?: string; page?: number },
+  filters: { channel?: string; status?: string },
 ): Promise<ApiResult<{ orders: UnifiedOrder[]; total: number }>> {
   const params = new URLSearchParams();
   if (filters.channel) params.set("channel", filters.channel);
   if (filters.status) params.set("status", filters.status);
-  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
   return request(`/api/businesses/${businessId}/orders?${params}`, {
     method: "GET",
     businessId,

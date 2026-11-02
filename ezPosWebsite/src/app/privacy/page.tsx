@@ -1,11 +1,11 @@
+import type { Metadata } from "next";
 import { LegalPage } from "@/components/legal/legal-page";
-import { publicMetadata } from "@/lib/seo";
 
-export const metadata = publicMetadata(
-  "/privacy",
-  "Privacy Policy",
-  "What data ezPos collects, why, and how your business information is protected.",
-);
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description:
+    "What data ezPos collects, why, and how your business information is protected.",
+};
 
 export default function PrivacyPage() {
   return (
@@ -62,7 +62,7 @@ export default function PrivacyPage() {
         {
           heading: "Your choices",
           paragraphs: [
-            "You can access and correct your account information in your account settings, and request an export of your business data or deletion of your account by contacting us — we will provide it in a machine-readable format.",
+            "You can access and correct your account information in your account settings, request an export of your business data, or request deletion of your account by contacting us.",
             "If you have questions about this policy or how your data is handled, contact us through the contact page.",
           ],
         },

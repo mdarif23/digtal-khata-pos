@@ -33,9 +33,6 @@ export const registerSchema = z.object({
     .string()
     .min(8, "Use at least 8 characters")
     .max(128, "Password is too long"),
-  // Optional for backward compatibility with existing clients; the website
-  // always sends true (required by its checkbox).
-  termsAccepted: z.boolean().optional(),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;

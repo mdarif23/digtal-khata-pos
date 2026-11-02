@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import {
   CookingPot,
   Laptop,
@@ -11,13 +12,12 @@ import {
 import { Container } from "@/components/ui/container";
 import { SectionHeading } from "@/components/marketing/section-heading";
 import { CtaBand } from "@/components/marketing/cta-band";
-import { publicMetadata } from "@/lib/seo";
 
-export const metadata = publicMetadata(
-  "/industries",
-  "Industries and use cases",
-  "How retail shops of every kind use ezPos: clothing with sizes, electronics with serial numbers, groceries with expiry dates, hardware stores, and multi-outlet businesses.",
-);
+export const metadata: Metadata = {
+  title: "Industries and use cases",
+  description:
+    "How retail shops of every kind use ezPos: clothing with sizes, electronics with serial numbers, groceries with expiry dates, hardware stores, and multi-outlet businesses.",
+};
 
 const industries = [
   {

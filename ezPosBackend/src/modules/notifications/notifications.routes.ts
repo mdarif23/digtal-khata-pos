@@ -1,25 +1,21 @@
 import express from "express";
 import * as notificationsController from "./notifications.controller.js";
 import { requireAuth } from "../../middleware/auth.js";
-import { requireBusinessAccess } from "../../middleware/business.js";
+import { requireBusinessContext } from "../../middleware/business.js";
 
+/**
+ * Notification center (Module 14): in-app delivery for every signed-in
+ * member of the business; read state and muting are per user.
+ */
 const router = express.Router();
-const read = [requireAuth, requireBusinessAccess()] as const;
 
-router.get(
-  "/api/businesses/:businessId/notifications",
-  ...read,
-  notificationsController.getNotifications,
-);
-router.post(
-  "/api/businesses/:businessId/notifications/read-all",
-  ...read,
-  notificationsController.readAll,
-);
-router.post(
-  "/api/businesses/:businessId/notifications/:notificationId/read",
-  ...read,
-  notificationsController.readOne,
-);
+const stack = [requireAuth, requireBusinessContext()] as const;
+
+router.get("/api/notifications", ...stack, notificationsController.list);
+router.get("/api/notifications/unread-count", ...stack, notificationsController.unread);
+router.post("/api/notifications/read", ...stack, notificationsController.markRead);
+router.post("/api/notifications/read-all", ...stack, notificationsController.markAllRead);
+router.get("/api/notifications/prefs", ...stack, notificationsController.getPrefs);
+router.post("/api/notifications/prefs", ...stack, notificationsController.setPref);
 
 export default router;

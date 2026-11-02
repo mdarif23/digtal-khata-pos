@@ -28,8 +28,6 @@ export const createBusinessSchema = z.object({
   address: optionalTextField(z.string().max(500, "Address is too long")),
   businessType: optionalTextField(z.string().max(50, "Business type is too long")),
   country: optionalTextField(z.string().max(50, "Country is too long")),
-  // Set by the website when the owner accepted the terms at sign-up.
-  termsAccepted: z.boolean().optional(),
 });
 
 export type CreateBusinessInput = z.infer<typeof createBusinessSchema>;
@@ -63,18 +61,6 @@ export const updateBusinessSchema = z.object({
       message: "Invalid business mode.",
     })
     .optional(),
-  // Logo as a data URL — avoids a file-upload surface entirely; images are
-  // size-capped (~250KB encoded) and format-checked.
-  logoDataUrl: z
-    .string()
-    .max(350_000, "Logo is too large — use an image under 250KB")
-    .regex(
-      /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/,
-      "Logo must be a PNG, JPEG, or WebP image",
-    )
-    .nullish(),
-  // Resumable onboarding progress: 0 = not started, 4 = complete.
-  onboardingStep: z.number().int().min(0).max(4).optional(),
 });
 
 export type UpdateBusinessInput = z.infer<typeof updateBusinessSchema>;

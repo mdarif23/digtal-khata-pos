@@ -14,6 +14,7 @@ import type { SaleReceiptData, PaperWidth } from "../../types/receipt.types.js";
 import { ReceiptTemplate } from "./ReceiptTemplate.js";
 import { useReceiptSettingsStore } from "../../stores/useReceiptSettingsStore.js";
 import { usePrintReceipt } from "../../hooks/usePrintReceipt.js";
+import { HardwareSettings } from "./HardwareSettings.js";
 
 interface ReceiptPrintDialogProps {
   receipt: SaleReceiptData | null;
@@ -92,7 +93,8 @@ export function ReceiptPrintDialog({
 
         {/* Quick settings editor if toggled */}
         {showSettings && (
-          <div className="p-4 bg-muted/30 border-b space-y-3 text-xs shrink-0 max-h-56 overflow-y-auto">
+          <div className="p-4 bg-muted/30 border-b space-y-3 text-xs shrink-0 max-h-72 overflow-y-auto">
+            <HardwareSettings />
             <div className="font-semibold text-foreground">Receipt Preferences</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>

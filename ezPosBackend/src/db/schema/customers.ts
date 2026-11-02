@@ -21,6 +21,9 @@ export const customers = pgTable(
     email: varchar({ length: 255 }),
     address: text(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [index("customers_business_id_idx").on(table.businessId)],
 );

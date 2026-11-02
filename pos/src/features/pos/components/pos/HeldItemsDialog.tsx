@@ -10,9 +10,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  resumeHeldItems,
   useCartStore,
   useHoldCartStore,
 } from "@/features/pos/stores/useCartStore";
+import { useEffect } from "react";
+import { toast } from "@/components/ui/toast";
 
 export function HeldItemsDialog({
   open,
@@ -22,7 +25,14 @@ export function HeldItemsDialog({
   handleOpenChange: (open: boolean) => void;
 }) {
   const { addHoldItemsToCart } = useCartStore();
-  const { holdCartItems, removeHoldCart, clearHoldCarts } = useHoldCartStore();
+  const { holdCartItems, removeHoldCart, clearHoldCarts, refreshHolds } =
+    useHoldCartStore();
+
+  // Holds live on the server (Module 1): refresh every time the dialog
+  // opens so holds from OTHER registers appear.
+  useEffect(() => {
+    if (open) void refreshHolds();
+  }, [open, refreshHolds]);
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       {/* Removed DialogTrigger completely! */}
@@ -39,9 +49,23 @@ export function HeldItemsDialog({
             holdCartItems.map((cart, index) => (
               <Card
                 onClick={() => {
-                  addHoldItemsToCart(cart.items);
-                  removeHoldCart(cart.id);
-                  handleOpenChange(false);
+                  // Rebuild cart lines from LIVE catalog data (prices/stock
+                  // re-validated at sale time); report unresolvable items.
+                  const { lines, missing } = resumeHeldItems(
+                    cart.items as never,
+                  );
+                  if (missing.length > 0) {
+                    toast.add({
+                      type: "error",
+                      description: `Not in the current catalog: ${missing.join(", ")}`,
+                      priority: "high",
+                    });
+                  }
+                  if (lines.length > 0) {
+                    addHoldItemsToCart(lines);
+                    void removeHoldCart(cart.id);
+                    handleOpenChange(false);
+                  }
                 }}
                 className="w-full flex flex-col items-center cursor-pointer mb-2 p-2 rounded"
                 key={cart.id}
@@ -65,8 +89,7 @@ export function HeldItemsDialog({
         <DialogFooter>
           <Button
             onClick={() => {
-              clearHoldCarts();
-              handleOpenChange(false);
+              void clearHoldCarts().then(() => handleOpenChange(false));
             }}
           >
             Clear Hold Carts

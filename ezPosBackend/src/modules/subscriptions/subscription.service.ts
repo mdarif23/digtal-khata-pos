@@ -675,10 +675,7 @@ export interface InvoiceSummary {
 /** Invoices for the billing portal — visible even in read-only mode. */
 export async function listInvoices(
   businessId: number,
-  options: { page?: number | undefined; pageSize?: number | undefined } = {},
 ): Promise<InvoiceSummary[]> {
-  const page = Math.max(1, options.page ?? 1);
-  const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 25));
   return db
     .select({
       id: saasInvoices.id,
@@ -695,8 +692,7 @@ export async function listInvoices(
     .from(saasInvoices)
     .where(eq(saasInvoices.businessId, businessId))
     .orderBy(desc(saasInvoices.id))
-    .limit(pageSize)
-    .offset((page - 1) * pageSize);
+    .limit(100);
 }
 
 export interface InvoiceDetail extends InvoiceSummary {
@@ -763,7 +759,6 @@ export interface PaymentSummary {
 
 export async function listPayments(
   businessId: number,
-  options: { page?: number | undefined; pageSize?: number | undefined } = {},
 ): Promise<PaymentSummary[]> {
   // Real gateway payment records (populated from Phase 5 onward); invoices
   // remain the billing-portal source of truth until then.
@@ -788,8 +783,7 @@ export async function listPayments(
     .leftJoin(saasInvoices, eq(saasInvoices.id, subscriptionPayments.invoiceId))
     .where(eq(subscriptions.businessId, businessId))
     .orderBy(desc(subscriptionPayments.id))
-    .limit(Math.min(100, Math.max(1, options.pageSize ?? 25)))
-    .offset((Math.max(1, options.page ?? 1) - 1) * Math.min(100, Math.max(1, options.pageSize ?? 25)));
+    .limit(100);
 }
 
 /**

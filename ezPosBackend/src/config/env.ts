@@ -102,6 +102,11 @@ export const env = {
       : "ezpos-local-development-integration-encryption-key"),
   /** Storefront API per-key request ceiling per minute. */
   storefrontRateLimitPerMinute: optionalInt("STOREFRONT_RATE_LIMIT_PER_MINUTE", 600),
+  /**
+   * Held-sale (parked cart) TTL in hours. 0 or negative disables expiry;
+   * expired holds are cleaned lazily on list plus by the scheduler sweep.
+   */
+  heldSalesTtlHours: optionalInt("HELD_SALES_TTL_HOURS", 72),
   emailVerificationTokenTtlHours: optionalInt(
     "EMAIL_VERIFICATION_TOKEN_TTL_HOURS",
     24,
