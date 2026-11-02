@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ProductList } from "@/features/pos/components/pos/ProductList.js";
 import { CartHeader } from "@/features/pos/components/pos/CartHeader.js";
 import CartItems, {
@@ -28,6 +28,8 @@ import { LocationBadge } from "@/components/common/LocationBadge";
 import { RegisterDialog } from "@/features/cashRegisters/components/RegisterDialog";
 import { SyncStatusIndicator } from "@/features/pos/components/pos/SyncStatus.js";
 import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
+import { useRealtimeStore } from "@/features/pos/offline/realtime.js";
+import { useProductStore } from "@/features/products/usedashboardProductStore.js";
 
 function Pos() {
   const { cart, resetCart } = useCartStore();
@@ -35,6 +37,29 @@ function Pos() {
   const { createSale } = useSalesStore();
   const [lastReceipt, setLastReceipt] = useState<SaleReceiptData | null>(null);
   const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false);
+
+  // Real-time register updates (Module 11): server-pushed signals bump
+  // revision counters; the affected stores refresh through their normal
+  // APIs (revalidated server-side). Other registers selling at this
+  // location update this register's stock view within seconds.
+  const stockRevision = useRealtimeStore((s) => s.stockRevision);
+  const holdsRevision = useRealtimeStore((s) => s.holdsRevision);
+  useEffect(() => {
+    useRealtimeStore.getState().start();
+    return () => useRealtimeStore.getState().stop();
+  }, []);
+  useEffect(() => {
+    if (stockRevision > 0) {
+      void useProductStore.getState().getProducts();
+    }
+  }, [stockRevision]);
+  useEffect(() => {
+    if (holdsRevision > 0) {
+      void import("../stores/useCartStore.js").then((m) =>
+        m.useHoldCartStore.getState().refreshHolds(),
+      );
+    }
+  }, [holdsRevision]);
 
   const form = useForm<CartSchemaType>({
     resolver: zodResolver(cartSchema),

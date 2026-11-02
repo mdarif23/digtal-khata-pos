@@ -40,7 +40,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 9 Hardware | ESC/POS, USB/Serial/BT, drawer, scale, customer display | Missing | 5 | n/a | ❌ | n/a | ❌ | Behind hardware abstraction layer |
 | 10 Offline | Offline checkout + sync outbox | Missing → **Partial** | 2 🔄 | ✅ idempotent replay (no changes needed) | ✅ IndexedDB outbox + catalog cache + sync engine + status UI (cash/due only) | n/a | integration 3/3 | Service worker/background sync (optional); offline product search UX polish |
 | 11 Multi-loc | Locations, transfers, registers, location RBAC/reports | Complete | — | ✅ | ✅ | ✅ | integration | — |
-| 11 Multi-loc | Real-time register sync, health monitoring | Missing | 2 | ❌ (no WS/SSE) | ❌ | ❌ | ❌ | — |
+| 11 Multi-loc | Real-time register sync, activity monitoring | Missing → **Partial** | 2 🔄 | ✅ SSE streams (ticket auth, heartbeats, location-scoped publishes; sale/hold/register events) | ✅ EventSource client → revision-counter refreshes (stock, holds) | n/a | integration 3/3 | Register health dashboard UI; cross-location inventory overview |
 | 12 Omnichannel | Catalog, reservations, order sync, webhooks, entitlements | Complete (Ph9) | — | ✅ | ✅ | ✅ | integration | Customer sync pending |
 | 12 Omnichannel | Shopify adapter | Missing | 6+ | ❌ | n/a | ❌ | ❌ | Adapter interface ready |
 | 12 Omnichannel | Store URL validation (SSRF) | **Defective** → **fixed** | **1** ✅ | ✅ `assertPublicStoreUrl` at connect (https-required in prod, private-range + DNS checks) | — | — | unit | — |
@@ -96,6 +96,11 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-02** — Phase 2 slice 4 (real-time register updates) complete:
+  - SSE-based push over the existing Express app (no new dependency; Module 11's "appropriate real-time mechanism"). Auth: authenticated `POST /api/realtime/ticket` mints a short-lived ONE-TIME ticket bound to the caller's business+location (EventSource cannot send headers); the stream consumes it and validates every connection. Heartbeats keep intermediaries open; the in-memory registry follows the documented single-instance stance.
+  - Events: `sale.created` (createSale + exchanges — other registers at the location refresh stock within seconds, improving multi-cashier oversell protection), `held_sales.changed` (create/discard), `register.changed` (open/close). Location-scoped: a register never receives another location's events (verified by test).
+  - Client: one EventSource per register page with one-time-ticket re-negotiation + backoff; events bump revision counters and the affected stores refresh through their NORMAL APIs — real-time signals never replace server-side validation (per the master prompt).
+  - Verification: backend tsc clean, full suite 283/302 (same 19 pre-existing; +3 realtime tests green: no-ticket 401, one-time ticket replay rejected, same-location delivery + cross-location isolation); POS tsc + build green.
 - **2026-11-02** — Phase 2 slice 3 (active-cart persistence) complete:
   - The register's active cart writes through to IndexedDB (debounced 300ms, scoped per user+business) and is restored at session bootstrap — a refresh or crash no longer destroys a checkout in progress.
   - The checkout idempotency key persists WITH the cart: a post-crash retry reuses the same key, so even a restored interrupted checkout cannot double-charge.

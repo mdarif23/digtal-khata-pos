@@ -5,6 +5,7 @@ import { users } from "../../db/schema/users.js";
 import { env } from "../../config/env.js";
 import { NotFoundError } from "../../utils/handleError.js";
 import { recordAuditInTx } from "../../services/audit.js";
+import { publishRealtime } from "../realtime/realtime.service.js";
 import type { DbTransaction } from "../purchases/purchase.types.js";
 
 /**
@@ -51,7 +52,7 @@ export async function createHeldSale(input: {
     throw new NotFoundError("A held sale requires at least one item.");
   }
   const ttl = ttlMs();
-  return db.transaction(async (tx) => {
+  const created = await db.transaction(async (tx) => {
     const [created] = await tx
       .insert(heldSales)
       .values({
@@ -79,6 +80,11 @@ export async function createHeldSale(input: {
     });
     return created;
   });
+  publishRealtime(input.businessId, input.locationId, {
+    kind: "held_sales.changed",
+    locationId: input.locationId,
+  });
+  return created;
 }
 
 export async function listHeldSales(businessId: number, locationId: number) {
@@ -136,6 +142,15 @@ export async function deleteHeldSale(
       entityId: id,
       metadata: {},
     });
+    publishRealtime(businessId, locationId, {
+      kind: "held_sales.changed",
+      locationId,
+    });
     return { deleted: true };
   });
+  publishRealtime(businessId, locationId, {
+    kind: "held_sales.changed",
+    locationId,
+  });
+  return { deleted: true };
 }

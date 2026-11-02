@@ -58,6 +58,7 @@ import {
   consumeStoreCreditInTx,
   grantStoreCreditInTx,
 } from "../../services/storeCredit.js";
+import { publishRealtime } from "../realtime/realtime.service.js";
 import {
   customerValidation,
   validatePayments,
@@ -964,6 +965,14 @@ export async function createSale(
   });
 
   const receipt = await getSaleReceipt(businessId, result.sale.id);
+  // Real-time register updates (Module 11): other registers at this
+  // location refresh their stock views. Signal only — they refetch through
+  // the normal APIs and the backend re-validates everything.
+  publishRealtime(businessId, locationId, {
+    kind: "sale.created",
+    locationId,
+    saleId: result.sale.id,
+  });
   return {
     ...result,
     receipt,
@@ -1997,6 +2006,7 @@ export async function createSaleExchange(
     return {
       replayed: false as const,
       sale: exchangeSale,
+      exchangeLocationId,
       refundId,
       refundTotal,
       replacementTotal,
@@ -2028,6 +2038,13 @@ export async function createSaleExchange(
   }
 
   const receipt = await getSaleReceipt(businessId, result.sale.id);
+  if (!result.replayed) {
+    publishRealtime(businessId, result.exchangeLocationId, {
+      kind: "sale.created",
+      locationId: result.exchangeLocationId,
+      saleId: result.sale.id,
+    });
+  }
   return { ...result, receipt, providerPayout };
 }
 
