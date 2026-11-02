@@ -294,9 +294,36 @@ export async function createPlan(input: {
   return request("/api/saas/plans", { method: "POST", body: JSON.stringify(input) });
 }
 
+export interface PlanLimits {
+  maxUsers?: number;
+  maxLocations?: number;
+  maxProducts?: number;
+  maxConnectedStores?: number;
+  maxWebhookEndpoints?: number;
+}
+
+export interface PlanFeatures {
+  multiLocation?: boolean;
+  advancedReports?: boolean;
+  exports?: boolean;
+  purchaseManagement?: boolean;
+  storefrontApi?: boolean;
+  woocommerceIntegration?: boolean;
+  customStorefront?: boolean;
+  multipleOnlineStores?: boolean;
+  advancedWebhooks?: boolean;
+}
+
 export async function updatePlan(
   planId: number,
-  input: { price?: number; isActive?: boolean; isPopular?: boolean; description?: string },
+  input: {
+    price?: number;
+    isActive?: boolean;
+    isPopular?: boolean;
+    description?: string;
+    limits?: PlanLimits;
+    features?: PlanFeatures;
+  },
 ): Promise<ApiResult<AdminPlan>> {
   return request(`/api/saas/plans/${planId}`, {
     method: "PATCH",

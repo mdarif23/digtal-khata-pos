@@ -5,6 +5,7 @@ import "./globals.css";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { JsonLd } from "@/components/seo/json-ld";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3001";
 
@@ -26,10 +27,28 @@ export const metadata: Metadata = {
   },
 };
 
+const organizationJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "ezPos",
+  url: siteUrl,
+  description:
+    "Web-based point of sale for small and medium retailers: counter billing, inventory, purchasing, and reports.",
+};
+
+const websiteJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "ezPos",
+  url: siteUrl,
+};
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full">
       <body className="flex min-h-full flex-col bg-white font-sans text-slate-900 antialiased">
+        <JsonLd data={organizationJsonLd} />
+        <JsonLd data={websiteJsonLd} />
         <AuthProvider>
           <a
             href="#main-content"

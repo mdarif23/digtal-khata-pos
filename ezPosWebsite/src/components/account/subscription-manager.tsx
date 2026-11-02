@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/providers/auth-provider";
+import { useActiveBusiness } from "@/hooks/useActiveBusiness";
 import { fetchSubscription } from "@/lib/api/account";
 import {
   changePlan,
@@ -49,8 +50,7 @@ function eventLabel(eventType: string): string {
 }
 
 export function SubscriptionManager() {
-  const { businesses } = useAuth();
-  const businessId = businesses[0]?.businessId ?? null;
+  const { businessId } = useActiveBusiness();
   const [payload, setPayload] = useState<SubscriptionDetail | null>(null);
   const [openSub, setOpenSub] = useState<OpenSubscription | null>(null);
   const [plans, setPlans] = useState<PublicPlan[]>([]);
@@ -74,7 +74,9 @@ export function SubscriptionManager() {
   }, [businessId]);
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      await reload();
+    })();
   }, [reload]);
 
   const currentPlanId = payload?.plan?.id ?? null;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/forms/text-field";
@@ -22,7 +23,9 @@ export function AdminBusinesses() {
   }, []);
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      await reload();
+    })();
   }, [reload]);
 
   async function toggleStatus(business: AdminBusiness) {
@@ -98,7 +101,11 @@ export function AdminBusinesses() {
               {businesses.map((business) => (
                 <tr key={business.id}>
                   <td className="px-5 py-3">
-                    <p className="font-medium text-slate-900">{business.name}</p>
+                    <p className="font-medium text-slate-900">
+                      <Link href={`/saas-admin/businesses/${business.id}`} className="hover:underline">
+                        {business.name}
+                      </Link>
+                    </p>
                     <p className="text-xs text-slate-400">{business.slug}</p>
                   </td>
                   <td className="px-5 py-3 text-slate-600">

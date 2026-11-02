@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   LifeBuoy,
   Receipt,
+  ScrollText,
   Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/saas-admin/payments", label: "Payments", icon: Receipt },
   { href: "/saas-admin/plans", label: "Plans", icon: Tag },
   { href: "/saas-admin/support", label: "Support", icon: LifeBuoy },
+  { href: "/saas-admin/audit-logs", label: "Audit logs", icon: ScrollText },
 ] as const;
 
 export function SaasAdminShell({ children }: { children: React.ReactNode }) {

@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/forms/text-field";
+import Link from "next/link";
 import { signUpSchema, type SignUpValues } from "@/lib/validations/auth";
 import { signIn, signUp } from "@/lib/api/auth";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -42,6 +43,7 @@ export function SignUpForm() {
           email: values.email,
           password: values.password,
           phone: values.phone || undefined,
+          termsAccepted: values.termsAccepted,
         });
         if (!registered.ok) {
           setServerError(registered.message);
@@ -130,6 +132,46 @@ export function SignUpForm() {
           {...register("confirmPassword")}
         />
       </div>
+
+      <label className="flex items-start gap-2 text-xs leading-5 text-slate-600">
+        <input
+          type="checkbox"
+          className="mt-0.5 size-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600"
+          {...register("termsAccepted")}
+        />
+        <span>
+          I agree to the{" "}
+          <Link
+            href="/terms"
+            target="_blank"
+            className="font-medium text-indigo-700 hover:underline"
+          >
+            Terms and Conditions
+          </Link>
+          ,{" "}
+          <Link
+            href="/privacy"
+            target="_blank"
+            className="font-medium text-indigo-700 hover:underline"
+          >
+            Privacy Policy
+          </Link>{" "}
+          and{" "}
+          <Link
+            href="/refund-policy"
+            target="_blank"
+            className="font-medium text-indigo-700 hover:underline"
+          >
+            Refund Policy
+          </Link>
+          .
+        </span>
+      </label>
+      {errors.termsAccepted ? (
+        <p className="text-xs font-medium text-red-600">
+          {errors.termsAccepted.message}
+        </p>
+      ) : null}
 
       <p className="text-xs leading-5 text-slate-500">
         The business name is saved for your workspace — you will set it up as

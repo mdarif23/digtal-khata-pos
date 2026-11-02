@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/forms/text-field";
-import { useAuth } from "@/components/providers/auth-provider";
+import { useActiveBusiness } from "@/hooks/useActiveBusiness";
 import {
   createWebhookEndpoint,
   deleteWebhookEndpoint,
@@ -24,8 +24,7 @@ const deliveryStyle: Record<string, string> = {
 };
 
 export function WebhooksCenter() {
-  const { businesses } = useAuth();
-  const businessId = businesses[0]?.businessId ?? null;
+  const { businessId } = useActiveBusiness();
 
   const [endpoints, setEndpoints] = useState<WebhookEndpoint[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -63,7 +62,9 @@ export function WebhooksCenter() {
   );
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      await reload();
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId]);
 

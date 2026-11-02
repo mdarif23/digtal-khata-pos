@@ -18,6 +18,8 @@ export const refreshTokens = pgTable(
     tokenHash: varchar("token_hash", { length: 255 }).notNull().unique(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    /** Updated whenever this token is successfully used (refresh). */
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     userAgent: varchar("user_agent", { length: 255 }),
     ipAddress: varchar("ip_address", { length: 45 }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),

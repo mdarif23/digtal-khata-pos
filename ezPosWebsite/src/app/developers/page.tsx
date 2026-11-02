@@ -1,11 +1,11 @@
-import type { Metadata } from "next";
 import { Container } from "@/components/ui/container";
+import { publicMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Developer documentation",
-  description:
-    "Build a custom storefront on the ezPos Storefront API: authentication, products, inventory, orders, and webhooks.",
-};
+export const metadata = publicMetadata(
+  "/developers",
+  "Developer documentation",
+  "Build a custom storefront on the ezPos Storefront API: authentication, products, inventory, orders, and webhooks.",
+);
 
 function Code({ children }: { children: string }) {
   return (
@@ -170,8 +170,8 @@ export async function POST(request: Request) {
 
         <Section title="6. Webhooks">
           <p>
-            Register an endpoint under <strong>Account → Integrations →
-            Webhooks</strong> to receive <code>order.created</code>,{" "}
+            Register an endpoint under <strong>Account → Webhooks</strong> to
+            receive <code>order.created</code>,{" "}
             <code>order.paid</code>, and <code>order.cancelled</code> events.
             Deliveries are signed with your endpoint secret:
           </p>

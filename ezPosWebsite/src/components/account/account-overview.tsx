@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/auth-provider";
+import { useActiveBusiness } from "@/hooks/useActiveBusiness";
 import { fetchSubscription } from "@/lib/api/account";
 import {
   fetchInvoices,
@@ -71,9 +72,7 @@ function UsageRow({
 }
 
 export function AccountOverview() {
-  const { businesses } = useAuth();
-  const businessId = businesses[0]?.businessId ?? null;
-  const membership = businesses[0];
+  const { businessId, business: membership } = useActiveBusiness();
   const [sub, setSub] = useState<Awaited<
     ReturnType<typeof fetchSubscription>
   > | null>(null);
@@ -83,7 +82,10 @@ export function AccountOverview() {
 
   useEffect(() => {
     if (!businessId) {
-      setLoading(false);
+      void (async () => {
+        await Promise.resolve();
+        setLoading(false);
+      })();
       return;
     }
     void (async () => {

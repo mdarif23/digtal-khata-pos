@@ -30,7 +30,9 @@ export function AdminSupport() {
   }, []);
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      await reload();
+    })();
   }, [reload]);
 
   async function sendReply() {

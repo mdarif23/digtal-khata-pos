@@ -54,6 +54,7 @@ import {
   webhookDeliveries,
   webhookEndpoints,
 } from "./webhooks.js";
+import { notifications } from "./notifications.js";
 import { passwordResetTokens } from "./passwordResetTokens.js";
 import { businessInvitations } from "./businessInvitations.js";
 import { documentSequences } from "./documentSequences.js";
@@ -404,6 +405,13 @@ export const storefrontApiKeysRelations = relations(
     }),
   }),
 );
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  business: one(businesses, {
+    fields: [notifications.businessId],
+    references: [businesses.id],
+  }),
+}));
 
 export const webhookEndpointsRelations = relations(
   webhookEndpoints,

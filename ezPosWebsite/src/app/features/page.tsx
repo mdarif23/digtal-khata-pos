@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import {
   BarChart3,
   Check,
@@ -11,12 +10,13 @@ import {
 import { Container } from "@/components/ui/container";
 import { SectionHeading } from "@/components/marketing/section-heading";
 import { CtaBand } from "@/components/marketing/cta-band";
+import { publicMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Features",
-  description:
-    "Counter billing, product and inventory management with variants, batches and serials, purchasing with supplier ledgers, customer and expense tracking, and flexible reports — everything ezPos does today.",
-};
+export const metadata = publicMetadata(
+  "/features",
+  "Features",
+  "Counter billing, product and inventory management with variants, batches and serials, purchasing with supplier ledgers, customer and expense tracking, and flexible reports — everything ezPos does today.",
+);
 
 const featureGroups = [
   {

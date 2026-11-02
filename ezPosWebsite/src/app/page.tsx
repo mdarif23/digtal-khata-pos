@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import {
   BarChart3,
@@ -25,6 +26,10 @@ import { FaqItem } from "@/components/marketing/faq-item";
 import { CtaBand } from "@/components/marketing/cta-band";
 import { getSubscriptionPlans } from "@/lib/api/subscription-plans";
 import { describeLimit, formatPrice } from "@/lib/format";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 const overviewFeatures = [
   {

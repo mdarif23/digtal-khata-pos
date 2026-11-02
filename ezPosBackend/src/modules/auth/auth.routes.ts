@@ -56,6 +56,18 @@ router.post(
   authController.forgotPassword,
 );
 
+// GET /api/auth/sessions   (Authorization: Bearer <accessToken>)
+// Active (non-revoked, unexpired) sessions for the signed-in user.
+router.get("/api/auth/sessions", requireAuth, authController.getSessions);
+
+// DELETE /api/auth/sessions/:sessionId — revokes one of the caller's own
+// sessions (ownership enforced in the service).
+router.delete(
+  "/api/auth/sessions/:sessionId",
+  requireAuth,
+  authController.revokeSessionById,
+);
+
 // PATCH /api/auth/me   (Authorization: Bearer <accessToken>)
 // Body: { fullName?, phone? } — updates the signed-in user's own profile.
 router.patch("/api/auth/me", requireAuth, authController.updateMe);

@@ -31,6 +31,8 @@ export const supportTickets = pgTable(
     phone: varchar({ length: 30 }),
     subject: varchar({ length: 200 }).notNull(),
     message: text().notNull(),
+    category: varchar({ length: 40 }).default("general").notNull(),
+    priority: varchar({ length: 10 }).default("normal").notNull(),
     status: ticketStatusEnum("status").default("open").notNull(),
     source: varchar({ length: 40 }).default("contact").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })

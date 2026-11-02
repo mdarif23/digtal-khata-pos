@@ -1,5 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
-import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { users } from "../../db/schema/users.js";
 import { userRoles } from "../../db/schema/userRoles.js";
@@ -95,6 +95,9 @@ async function issueRefreshToken(
     userId,
     tokenHash: hashToken(refreshToken),
     expiresAt,
+    // A freshly issued token has been "used" the moment it is handed out —
+    // keeps the sessions card's last-active non-null.
+    lastUsedAt: new Date(),
     // Columns are varchar(45)/varchar(255) — truncate defensively.
     ipAddress: meta.ip?.slice(0, 45),
     userAgent: meta.userAgent?.slice(0, 255),
@@ -482,10 +485,11 @@ export async function rotateRefreshToken(
   }
 
   // Atomic claim: exactly one concurrent rotation wins. A loser observes
-  // zero updated rows and falls into the (grace) reuse path.
+  // zero updated rows and falls into the (grace) reuse path. lastUsedAt is
+  // stamped for the sessions "last active" display.
   const claimed = await db
     .update(refreshTokens)
-    .set({ revokedAt: new Date() })
+    .set({ revokedAt: new Date(), lastUsedAt: new Date() })
     .where(
       and(eq(refreshTokens.id, stored.id), isNull(refreshTokens.revokedAt)),
     )
@@ -810,4 +814,61 @@ export async function latestVerificationTokenIssuedAt(
     .orderBy(desc(emailVerificationTokens.createdAt))
     .limit(1);
   return record?.createdAt ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Active sessions (portal Settings)
+// ---------------------------------------------------------------------------
+
+export interface ActiveSession {
+  id: number;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: Date | null;
+  lastUsedAt: Date | null;
+  expiresAt: Date;
+}
+
+export async function listActiveSessions(
+  userId: number,
+): Promise<ActiveSession[]> {
+  const rows = await db
+    .select({
+      id: refreshTokens.id,
+      ipAddress: refreshTokens.ipAddress,
+      userAgent: refreshTokens.userAgent,
+      createdAt: refreshTokens.createdAt,
+      lastUsedAt: refreshTokens.lastUsedAt,
+      expiresAt: refreshTokens.expiresAt,
+    })
+    .from(refreshTokens)
+    .where(
+      and(
+        eq(refreshTokens.userId, userId),
+        isNull(refreshTokens.revokedAt),
+        sql`${refreshTokens.expiresAt} > now()`,
+      ),
+    )
+    .orderBy(desc(refreshTokens.createdAt))
+    .limit(20);
+  return rows;
+}
+
+/** Revokes one of the caller's own sessions; returns whether it existed. */
+export async function revokeSession(
+  userId: number,
+  sessionId: number,
+): Promise<boolean> {
+  const revoked = await db
+    .update(refreshTokens)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(refreshTokens.id, sessionId),
+        eq(refreshTokens.userId, userId),
+        isNull(refreshTokens.revokedAt),
+      ),
+    )
+    .returning({ id: refreshTokens.id });
+  return revoked.length > 0;
 }

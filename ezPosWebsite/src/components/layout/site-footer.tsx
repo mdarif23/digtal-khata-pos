@@ -20,6 +20,8 @@ const legalLinks = [
   { href: "/terms", label: "Terms and Conditions" },
   { href: "/privacy", label: "Privacy Policy" },
   { href: "/refund-policy", label: "Refund Policy" },
+  { href: "/subscription-billing-policy", label: "Billing Policy" },
+  { href: "/cookie-policy", label: "Cookie Policy" },
 ] as const;
 
 // Evaluated once at build/startup — calling new Date() during render breaks

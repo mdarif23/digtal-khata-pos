@@ -26,7 +26,13 @@ function PaymentSuccessInner() {
 
   useEffect(() => {
     if (!Number.isInteger(paymentId) || paymentId <= 0 || !Number.isInteger(businessId)) {
-      setState({ kind: "failed", message: "This link is missing its payment reference." });
+      void (async () => {
+        await Promise.resolve();
+        setState({
+          kind: "failed",
+          message: "This link is missing its payment reference.",
+        });
+      })();
       return;
     }
     let cancelled = false;

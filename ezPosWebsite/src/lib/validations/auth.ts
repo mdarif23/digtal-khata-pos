@@ -37,6 +37,9 @@ export const signUpSchema = z
       .regex(/^$|^\+?[0-9\s-]{6,19}$/, "Enter a valid phone number"),
     password: z.string().min(8, "Use at least 8 characters"),
     confirmPassword: z.string().min(1, "Confirm your password"),
+    termsAccepted: z.literal(true, {
+      message: "You must accept the Terms and Conditions",
+    }),
   })
   .refine((values) => values.password === values.confirmPassword, {
     path: ["confirmPassword"],

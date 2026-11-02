@@ -91,10 +91,17 @@ function OnboardingContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { status, businesses } = useAuth();
+  // Active business from localStorage (business switcher) as fallback.
   const businessParam = Number(searchParams.get("business"));
+  const storedBusinessId = (() => {
+    if (typeof window === "undefined") return null;
+    const parsed = Number(window.localStorage.getItem("ezpos-active-business"));
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  })();
+  const activeBusinessId = storedBusinessId;
   const businessId = Number.isInteger(businessParam) && businessParam > 0
     ? businessParam
-    : (businesses[0]?.businessId ?? null);
+    : (activeBusinessId ?? null);
 
   const [step, setStep] = useState<Step>(0);
   const [error, setError] = useState<string | null>(null);
@@ -129,9 +136,38 @@ function OnboardingContent() {
   // Prefill from the existing membership once the auth context resolves.
   useEffect(() => {
     if (membership && !name) {
-      setName(membership.businessName);
+      void (async () => {
+        await Promise.resolve();
+        setName(membership.businessName);
+      })();
     }
   }, [membership, name]);
+
+  // Resume incomplete onboarding where the owner left off.
+  useEffect(() => {
+    if (!businessId || status !== "authenticated") return;
+    void (async () => {
+      const { getAccessToken } = await import("@/lib/api/auth");
+      const detail = await fetch(
+        `${
+          process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3000"
+        }/api/businesses/${businessId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${getAccessToken() ?? ""}`,
+            "X-Business-Id": String(businessId),
+          },
+        },
+      );
+      if (!detail.ok) return;
+      const body = (await detail.json()) as {
+        business: { onboardingStep: number };
+      };
+      const saved = body.business.onboardingStep;
+      if (saved > 0 && saved < 4) setStep(saved as Step);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessId]);
 
   useEffect(() => {
     if (step !== 3 || !businessId) return;
@@ -192,6 +228,7 @@ function OnboardingContent() {
         country: country.trim() || undefined,
         phone: phone.trim() || undefined,
         address: address.trim() || undefined,
+        onboardingStep: 1,
       });
       if (!result.ok) {
         setError(result.message);
@@ -223,6 +260,7 @@ function OnboardingContent() {
       const result = await updateBusiness(businessId, {
         currency,
         timezone,
+        onboardingStep: 3,
       });
       if (!result.ok) {
         setError(result.message);

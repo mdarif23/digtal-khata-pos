@@ -27,6 +27,8 @@ export function SupportCenter() {
   const [tickets, setTickets] = useState<TicketSummary[] | null>(null);
   const [selected, setSelected] = useState<TicketDetail | null>(null);
   const [subject, setSubject] = useState("");
+  const [category, setCategory] = useState("general");
+  const [priority, setPriority] = useState("normal");
   const [message, setMessage] = useState("");
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
@@ -44,7 +46,9 @@ export function SupportCenter() {
   }
 
   useEffect(() => {
-    void reload();
+    void (async () => {
+      await reload();
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -103,13 +107,55 @@ export function SupportCenter() {
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-900">New ticket</h2>
         <div className="mt-4 space-y-4">
-          <TextField
-            id="ticket-subject"
-            label="Subject"
-            value={subject}
-            onChange={(event) => setSubject(event.target.value)}
-            placeholder="What is this about?"
-          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextField
+              id="ticket-subject"
+              label="Subject"
+              value={subject}
+              onChange={(event) => setSubject(event.target.value)}
+              placeholder="What is this about?"
+            />
+            <div>
+              <label
+                htmlFor="ticket-category"
+                className="block text-sm font-medium text-slate-700"
+              >
+                Category
+              </label>
+              <select
+                id="ticket-category"
+                value={category}
+                onChange={(event) => setCategory(event.target.value)}
+                className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-2 focus:outline-indigo-600"
+              >
+                <option value="general">General</option>
+                <option value="billing">Billing</option>
+                <option value="technical">Technical</option>
+                <option value="feature_request">Feature request</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <span className="block text-sm font-medium text-slate-700">
+              Priority
+            </span>
+            <div className="mt-2 flex gap-2">
+              {["normal", "high"].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={
+                    priority === p
+                      ? "rounded-full bg-indigo-600 px-3 py-1 text-xs font-medium text-white"
+                      : "rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:border-slate-400"
+                  }
+                  onClick={() => setPriority(p)}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
           <TextareaField
             id="ticket-message"
             label="Message"

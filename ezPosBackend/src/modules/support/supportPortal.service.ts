@@ -86,11 +86,15 @@ export async function createTicketForUser(
         message: input.message,
         source: "portal",
         status: "open",
+        category: input.category ?? "general",
+        priority: input.priority ?? "normal",
       })
       .returning({
         id: supportTickets.id,
         subject: supportTickets.subject,
         status: supportTickets.status,
+        category: supportTickets.category,
+        priority: supportTickets.priority,
         createdAt: supportTickets.createdAt,
         updatedAt: supportTickets.updatedAt,
       });

@@ -38,6 +38,23 @@ export async function getBusinesses(req: Request, res: Response) {
   }
 }
 
+export async function getBusinessDetail(req: Request, res: Response) {
+  const businessId = Number(req.params.businessId);
+  if (!Number.isInteger(businessId) || businessId <= 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "A valid business ID is required." });
+  }
+  try {
+    res.status(200).json({
+      success: true,
+      data: await saasAdminService.getBusinessDetailAdmin(businessId),
+    });
+  } catch (err) {
+    sendSafeError(res, err, "Business not found.");
+  }
+}
+
 export async function setBusinessStatus(req: Request, res: Response) {
   const businessId = Number(req.params.businessId);
   const status = req.body?.status === "suspended" ? "suspended" : req.body?.status === "active" ? "active" : null;
@@ -294,5 +311,22 @@ export async function runJobs(_req: Request, res: Response) {
     res.status(200).json({ success: true, data: merged });
   } catch (err) {
     sendSafeError(res, err, "Unable to run the background jobs right now.");
+  }
+}
+
+export async function getAuditLogs(req: Request, res: Response) {
+  try {
+    res.status(200).json({
+      success: true,
+      data: await saasAdminService.listAuditLogs({
+        action: typeof req.query.action === "string" ? req.query.action : undefined,
+        entityType:
+          typeof req.query.entityType === "string"
+            ? req.query.entityType
+            : undefined,
+      }),
+    });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to load audit logs right now.");
   }
 }

@@ -165,7 +165,7 @@ function DashboardContent() {
                           variant="outline"
                           size="sm"
                         >
-                          Settings
+                          Business setup
                         </ButtonLink>
                         <ButtonLink href={POS_URL} target="_blank" size="sm">
                           <ExternalLink className="size-4" aria-hidden="true" />
