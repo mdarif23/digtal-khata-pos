@@ -225,6 +225,13 @@
       "when": 1793647254061,
       "tag": "0031_customer_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793648540557,
+      "tag": "0032_sales_cashier_analytics",
+      "breakpoints": true
     }
   ]
 }

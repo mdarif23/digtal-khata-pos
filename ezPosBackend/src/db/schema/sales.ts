@@ -20,6 +20,7 @@ import { integrations } from "./integrations.js";
 import { sql } from "drizzle-orm";
 import { customers } from "./customers.js";
 import { businesses } from "./businesses.js";
+import { users } from "./users.js";
 import { locations } from "./locations.js";
 export const paymentStatusEnum = pgEnum("payment_status", [
   "paid",
@@ -63,6 +64,8 @@ export const sales = pgTable(
      * exchange story.
      */
     exchangeOfSaleId: integer("exchange_of_sale_id"),
+    /** Register attribution for staff performance (Module 15). */
+    cashierUserId: integer("cashier_user_id").references(() => users.id),
     fulfillmentStatus: fulfillmentStatusEnum("fulfillment_status")
       .default("unfulfilled")
       .notNull(),

@@ -96,6 +96,31 @@ export interface RegisterSessionReportData {
 }
 
 export const reportsApi = {
+  getChannelPerformance: (filters: Partial<ReportFilters> = {}) =>
+    api.get<{ success: boolean; data: ChannelPerformanceRow[] }>(
+      "/reports/analytics/channels",
+      { params: buildParams(filters) },
+    ),
+
+  getCustomerLifetimeValue: () =>
+    api.get<{ success: boolean; data: ClvRow[] }>("/reports/analytics/clv"),
+
+  getCustomerRetention: () =>
+    api.get<{ success: boolean; data: RetentionRow[] }>(
+      "/reports/analytics/retention",
+    ),
+
+  getStaffPerformance: (filters: Partial<ReportFilters> = {}) =>
+    api.get<{ success: boolean; data: StaffPerformanceRow[] }>(
+      "/reports/analytics/staff",
+      { params: buildParams(filters) },
+    ),
+
+  getSalesForecast: () =>
+    api.get<{ success: boolean; data: SalesForecastData }>(
+      "/reports/analytics/forecast",
+    ),
+
   getInventoryAging: () =>
     api.get<{ success: boolean; data: InventoryAgingData }>(
       "/reports/inventory/aging",
@@ -242,4 +267,49 @@ export interface DeadStockRow {
   lastSoldAt: string | null;
   daysSinceLastSale: number | null;
   daysOnShelf: number | null;
+}
+
+// --- advanced analytics (Module 15) ------------------------------------------
+
+export interface ChannelPerformanceRow {
+  channel: string;
+  orders: number;
+  revenue: number;
+  avgOrderValue: number;
+}
+
+export interface ClvRow {
+  customerId: number;
+  customerName: string;
+  phone: string | null;
+  orders: number;
+  totalSpent: number;
+  avgOrderValue: number;
+  firstPurchase: string | null;
+  lastPurchase: string | null;
+}
+
+export interface RetentionRow {
+  month: string;
+  newCustomers: number;
+  returningCustomers: number;
+  totalActive: number;
+}
+
+export interface StaffPerformanceRow {
+  cashierUserId: number;
+  cashierName: string;
+  orders: number;
+  revenue: number;
+  avgBasket: number;
+}
+
+export interface SalesForecastData {
+  history: {
+    date: string;
+    actualRevenue: number | null;
+    projectedRevenue: number;
+  }[];
+  projection: { next7DaysTotal: number; dailyAverage: number; trendPerDay: number };
+  method: string;
 }

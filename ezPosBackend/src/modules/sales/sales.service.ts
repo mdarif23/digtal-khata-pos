@@ -767,6 +767,7 @@ export async function createSale(
         paymentStatus,
         status: "completed",
         idempotencyKey,
+        cashierUserId,
       })
       .onConflictDoNothing({
         target: [sales.businessId, sales.idempotencyKey],
@@ -2033,6 +2034,7 @@ export async function createSaleExchange(
         status: "completed",
         exchangeOfSaleId: saleId,
         idempotencyKey,
+        cashierUserId: actorUserId,
         note: payload.notes ?? null,
       })
       .onConflictDoNothing({
