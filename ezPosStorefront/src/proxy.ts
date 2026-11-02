@@ -17,6 +17,8 @@ const NEGATIVE_TTL_MS = 30_000;
 
 interface ResolveEntry {
   storefrontId: number | null;
+  /** The tenant's canonical host (for 301 redirects); null when unresolved. */
+  primaryDomain: string | null;
   expiresAt: number;
 }
 
@@ -44,12 +46,18 @@ function isLocalHost(host: string): boolean {
   );
 }
 
-async function resolveHost(host: string, preview: string): Promise<number | null> {
+async function resolveHost(
+  host: string,
+  preview: string,
+): Promise<{ storefrontId: number | null; primaryDomain: string | null }> {
   const cacheKey = `${host}|${preview ? "preview" : "live"}`;
   const cached = cache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.storefrontId;
+  if (cached && cached.expiresAt > Date.now()) {
+    return { storefrontId: cached.storefrontId, primaryDomain: cached.primaryDomain };
+  }
 
   let storefrontId: number | null = null;
+  let primaryDomain: string | null = null;
   try {
     const query = new URLSearchParams({ host });
     if (preview) query.set("preview", preview);
@@ -62,11 +70,15 @@ async function resolveHost(host: string, preview: string): Promise<number | null
     );
     if (res.ok) {
       const body = (await res.json()) as {
-        data?: { resolved?: boolean; storefront?: { storefrontId?: number } };
+        data?: {
+          resolved?: boolean;
+          storefront?: { storefrontId?: number; primaryDomain?: string | null };
+        };
       };
-      storefrontId = body?.data?.resolved
-        ? (body.data.storefront?.storefrontId ?? null)
-        : null;
+      if (body?.data?.resolved) {
+        storefrontId = body.data.storefront?.storefrontId ?? null;
+        primaryDomain = body.data.storefront?.primaryDomain ?? null;
+      }
     }
   } catch {
     storefrontId = null;
@@ -74,6 +86,7 @@ async function resolveHost(host: string, preview: string): Promise<number | null
 
   cache.set(cacheKey, {
     storefrontId,
+    primaryDomain,
     expiresAt:
       Date.now() + (storefrontId === null ? NEGATIVE_TTL_MS : RESOLVE_TTL_MS),
   });
@@ -82,7 +95,21 @@ async function resolveHost(host: string, preview: string): Promise<number | null
       if (entry.expiresAt < Date.now()) cache.delete(key);
     }
   }
-  return storefrontId;
+  return { storefrontId, primaryDomain };
+}
+
+/** Best-effort: proves the edge issued the tenant's certificate. Fires at
+ *  most once per host per process (the backend update is a no-op afterwards). */
+const sslReported = new Set<string>();
+function reportSslIssued(host: string): void {
+  if (sslReported.has(host)) return;
+  sslReported.add(host);
+  void fetch(`${backendUrl()}/api/internal/storefront/ssl-reported`, {
+    method: "POST",
+    headers: { "x-internal-token": internalToken(), "Content-Type": "application/json" },
+    body: JSON.stringify({ domain: host }),
+    cache: "no-store",
+  }).catch(() => undefined);
 }
 
 export async function proxy(request: NextRequest) {
@@ -92,6 +119,7 @@ export async function proxy(request: NextRequest) {
   const preview = request.nextUrl.searchParams.get("preview") ?? "";
 
   let host = rawHost;
+  let isLocalDev = false;
   if (isLocalHost(rawHost)) {
     const devSubdomain = process.env.STOREFRONT_DEV_SUBDOMAIN?.trim();
     if (devSubdomain) {
@@ -99,15 +127,36 @@ export async function proxy(request: NextRequest) {
         process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN?.trim().toLowerCase() ||
         "ezpos.store";
       host = `${devSubdomain}.${base}`;
+      isLocalDev = true;
     } else {
       // No dev tenant configured: render the parked page locally.
       return NextResponse.rewrite(new URL("/parked", request.url));
     }
   }
 
-  const storefrontId = await resolveHost(host, preview);
+  const { storefrontId, primaryDomain } = await resolveHost(host, preview);
   if (storefrontId === null) {
     return NextResponse.rewrite(new URL("/parked", request.url));
+  }
+
+  // Canonical-host redirect: send every non-primary host of this tenant to
+  // the primary domain (preserving path/query). Never applied in preview
+  // mode or local development.
+  if (
+    !preview &&
+    !isLocalDev &&
+    primaryDomain &&
+    host !== primaryDomain
+  ) {
+    const target = new URL(request.nextUrl);
+    target.protocol = "https:";
+    target.host = primaryDomain;
+    return NextResponse.redirect(target, 301);
+  }
+
+  // First HTTPS request for a domain proves the certificate exists.
+  if (!isLocalDev && request.headers.get("x-forwarded-proto") === "https") {
+    reportSslIssued(host);
   }
 
   const requestHeaders = new Headers(request.headers);

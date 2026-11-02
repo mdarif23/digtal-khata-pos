@@ -17,6 +17,7 @@ import {
 } from "../../services/entitlements.js";
 import { storefrontThemeConfigSchema } from "./themeConfig.schema.js";
 import { getTheme } from "./themes.catalog.js";
+import { env } from "../../config/env.js";
 
 /**
  * Hosted storefront lifecycle: create → draft → publish (versioned) →
@@ -311,9 +312,11 @@ export async function createStorefront(
       await tx.insert(storefrontDomains).values({
         storefrontId: created.id,
         kind: "subdomain",
-        domain: `${subdomain}`.trim(),
+        // Full host (not the bare label) — the edge/proxy compares FQDNs for
+        // primary-domain redirects and certificate allowlisting.
+        domain: `${subdomain}.${env.storefrontBaseDomain}`,
         status: "verified",
-        sslStatus: "pending",
+        sslStatus: "issued",
         isPrimary: true,
         verifiedAt: new Date(),
       });
@@ -604,7 +607,11 @@ export async function changeSubdomain(
         .where(eq(storefronts.id, storefrontId));
       await tx
         .update(storefrontDomains)
-        .set({ domain: subdomain, status: "verified", lastError: null })
+        .set({
+          domain: `${subdomain}.${env.storefrontBaseDomain}`,
+          status: "verified",
+          lastError: null,
+        })
         .where(
           and(
             eq(storefrontDomains.storefrontId, storefrontId),

@@ -1197,4 +1197,82 @@ describe("storefront platform integration", { skip: !runIntegration }, () => {
     });
     assert.equal(closedCheckout.status, 400);
   });
+
+  it("edge policy: suspension stops serving, primary-domain redirect info, ssl-reported flips status only for verified domains", async () => {
+    const owner = await createOwnerCtx("SFP Edge Co");
+    await setBusinessPlan(owner.businessId, {
+      features: { hostedStorefront: true, storefrontCustomDomains: true },
+    });
+    const created = await api(
+      owner,
+      "POST",
+      `/api/businesses/${owner.businessId}/storefronts`,
+      { name: "Edge Shop", themeId: "cornerstone-general", subdomain: "sfp-edge-shop" },
+    );
+    const sfId = created.body.data.id as number;
+    const sfBase = `/api/businesses/${owner.businessId}/storefronts/${sfId}`;
+
+    const domain = await api(owner, "POST", `${sfBase}/domains`, {
+      domain: "edge-shop.example.test",
+    });
+    assert.equal(domain.status, 201);
+    await pg!.query(
+      `UPDATE storefront_domains SET status = 'verified', verified_at = now() WHERE id = $1`,
+      [domain.body.data.id],
+    );
+
+    const published = await api(owner, "POST", `${sfBase}/publish`);
+    assert.equal(published.status, 200);
+
+    // Normal published resolution: subdomain host, subdomain is primary.
+    const resolvePath = `/api/internal/storefront/resolve?host=sfp-edge-shop.ezpos.store`;
+    const resolved = await internalApi("GET", resolvePath, internalToken);
+    assert.equal(resolved.body.data.resolved, true);
+    assert.equal(resolved.body.data.storefront.primaryDomain, "sfp-edge-shop.ezpos.store");
+
+    // SSL report: verified domain flips to issued...
+    const ssl = await fetch(`${baseUrl}/api/internal/storefront/ssl-reported`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({ domain: "edge-shop.example.test" }),
+    });
+    assert.equal(ssl.status, 200);
+    const afterSsl = await pg!.query(
+      "SELECT ssl_status FROM storefront_domains WHERE id = $1",
+      [domain.body.data.id],
+    );
+    assert.equal(afterSsl.rows[0]!.ssl_status, "issued");
+
+    // ...but unknown domains are ignored.
+    await fetch(`${baseUrl}/api/internal/storefront/ssl-reported`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({ domain: "never-connected.example.test" }),
+    });
+    const nothing = await pg!.query(
+      "SELECT id FROM storefront_domains WHERE domain = 'never-connected.example.test'",
+    );
+    assert.equal(nothing.rows.length, 0);
+
+    // Platform suspension stops resolution immediately (parked page path).
+    await pg!.query("UPDATE businesses SET status = 'suspended' WHERE id = $1", [
+      owner.businessId,
+    ]);
+    const suspended = await internalApi("GET", resolvePath, internalToken);
+    assert.equal(suspended.body.data.resolved, false);
+    // Custom-domain resolution is blocked too.
+    const suspendedCustom = await internalApi(
+      "GET",
+      `/api/internal/storefront/resolve?host=edge-shop.example.test`,
+      internalToken,
+    );
+    assert.equal(suspendedCustom.body.data.resolved, false);
+    await pg!.query("UPDATE businesses SET status = 'active' WHERE id = $1", [
+      owner.businessId,
+    ]);
+
+    // Restored: resolution resumes.
+    const restored = await internalApi("GET", resolvePath, internalToken);
+    assert.equal(restored.body.data.resolved, true);
+  });
 });

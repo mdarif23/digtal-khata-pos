@@ -61,10 +61,12 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ezpos}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      # Browser uploads from the portal go directly to MinIO via presigned
+      # PUT; this CORS allowance is what makes that possible.
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_CORS_ALLOW_ORIGIN:-https://ezpos.com}
     volumes:
       - minio-data:/data
-    # Not exposed publicly by default; media is served via the edge/CDN host
-    # or presigned URLs (stage 4 wires the cdn.<domain> route in Caddy).
+    # Public reads go through the CDN host (caddy cdn.ezpos.com → :9000).
 
   # One-shot bucket bootstrap (creates the media bucket if missing).
   minio-init:
@@ -81,6 +83,50 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ezpos}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
       S3_BUCKET: ${S3_BUCKET:-ezpos-media}
+
+  # Hosted storefront renderer (tenant websites).
+  storefront:
+    build:
+      context: ./ezPosStorefront
+      args:
+        BACKEND_URL: http://backend:3000
+        STOREFRONT_RENDERER_TOKEN: ${STOREFRONT_RENDERER_TOKEN:?set STOREFRONT_RENDERER_TOKEN in .env}
+        NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN: ${STOREFRONT_BASE_DOMAIN:-ezpos.store}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NODE_ENV: production
+      BACKEND_URL: http://backend:3000
+      STOREFRONT_RENDERER_TOKEN: ${STOREFRONT_RENDERER_TOKEN}
+      NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN: ${STOREFRONT_BASE_DOMAIN:-ezpos.store}
+
+  # Edge: automated TLS for the platform AND every tenant domain
+  # (wildcard *.ezpos.store via DNS-01, custom domains via on-demand TLS).
+  # Replaces the nginx+certbot edge; nginx/ezpos.conf is kept for rollback.
+  caddy:
+    build:
+      context: ./caddy
+      args:
+        DNS_PLUGIN: ${CADDY_DNS_PLUGIN:-github.com/caddy-dns/cloudflare}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      TLS_ASK_TOKEN: ${STOREFRONT_RENDERER_TOKEN:?set STOREFRONT_RENDERER_TOKEN in .env}
+      CLOUDFLARE_DNS_API_TOKEN: ${DNS_PROVIDER_API_TOKEN:?set DNS_PROVIDER_API_TOKEN in .env}
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - website
+      - pos
+      - backend
+      - storefront
+      - minio
 
   website:
     build:
@@ -102,23 +148,10 @@ services:
         VITE_WEBSITE_URL: ${SITE_ORIGIN:-https://ezpos.com}
     restart: unless-stopped
 
-  nginx:
-    image: nginx:1.27-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/ezpos.conf:/etc/nginx/conf.d/default.conf:ro
-      - certbot-webroot:/var/www/certbot:ro
-      - certbot-certs:/etc/letsencrypt:ro
-    depends_on:
-      - website
-      - pos
-      - backend
-
 volumes:
   pgdata:
   certbot-webroot:
   certbot-certs:
   minio-data:
+  caddy-data:
+  caddy-config:

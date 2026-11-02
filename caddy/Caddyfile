@@ -1,0 +1,69 @@
+# ezPos edge — automated TLS for the platform AND every tenant domain.
+#
+# Replaces nginx/ezpos.conf (kept in the repo for rollback). Certificate
+# strategy:
+#   - Platform hosts: automatic HTTPS (HTTP-01 / TLS-ALPN).
+#   - *.ezpos.store + ezpos.store: one wildcard certificate via DNS-01
+#     (DNS provider plugin is baked into the image; token from env).
+#   - Customer custom domains: on_demand TLS — Caddy asks the backend and a
+#     certificate is minted ONLY for hosts the backend verifies.
+#
+# All HTTP is redirected to HTTPS by Caddy's automatic HTTPS.
+
+{
+	email {$ACME_EMAIL}
+
+	# The backend's ask endpoint accepts the shared token as a query param
+	# because Caddy's on-demand ask cannot send custom headers. It answers
+	# 200 ONLY for verified tenant domains (never for arbitrary hosts).
+	on_demand_tls {
+		ask https://api.ezpos.com/api/internal/tls/ask?token={$TLS_ASK_TOKEN}
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Platform hosts (existing services, unchanged upstreams)
+# ---------------------------------------------------------------------------
+
+ezpos.com, www.ezpos.com {
+	reverse_proxy website:3001
+}
+
+api.ezpos.com {
+	reverse_proxy backend:3000
+}
+
+app.ezpos.com {
+	reverse_proxy pos:80
+}
+
+# Media CDN: public reads of storefront images (bucket policy allows GET).
+cdn.ezpos.com {
+	reverse_proxy minio:9000
+	header {
+		Cache-Control "public, max-age=31536000, immutable"
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Hosted storefronts
+# ---------------------------------------------------------------------------
+
+# Tenant subdomains — covered by the wildcard certificate (DNS-01).
+*.ezpos.store, ezpos.store {
+	tls {
+		dns cloudflare {$CLOUDFLARE_DNS_API_TOKEN}
+	}
+	reverse_proxy storefront:3002
+}
+
+# Custom domains: any other HTTPS host that reaches this server gets an
+# on-demand certificate IF (and only if) the backend's ask endpoint allows
+# it, then is served by the storefront renderer. Platform hosts above take
+# precedence over this catch-all.
+https:// {
+	tls {
+		on_demand
+	}
+	reverse_proxy storefront:3002
+}

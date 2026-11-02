@@ -1,8 +1,9 @@
 import express from "express";
 import { timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
+import { businesses } from "../../db/schema/businesses.js";
 import { storefronts } from "../../db/schema/storefronts.js";
 import { storefrontDomains } from "../../db/schema/storefrontDomains.js";
 import { storefrontPublishVersions } from "../../db/schema/storefrontPublishVersions.js";
@@ -78,13 +79,32 @@ async function resolveByHost(rawHost: string): Promise<{
   const isBaseSubdomain =
     host.endsWith(`.${baseDomain}`) && !subdomain.includes(".");
 
+  // Platform-level suspension must stop serving immediately: resolve joins
+  // businesses and excludes suspended ones for BOTH host kinds.
   if (isBaseSubdomain) {
     const [row] = await db
-      .select()
+      .select({ storefront: storefronts })
       .from(storefronts)
-      .where(eq(storefronts.subdomain, subdomain))
+      .innerJoin(businesses, eq(businesses.id, storefronts.businessId))
+      .where(
+        and(
+          eq(storefronts.subdomain, subdomain),
+          sql`${businesses.status} <> 'suspended'`,
+        ),
+      )
       .limit(1);
-    return { storefront: row ?? null, primaryDomain: null };
+    if (!row) return { storefront: null, primaryDomain: null };
+    const [primary] = await db
+      .select({ domain: storefrontDomains.domain })
+      .from(storefrontDomains)
+      .where(
+        and(
+          eq(storefrontDomains.storefrontId, row.storefront.id),
+          eq(storefrontDomains.isPrimary, true),
+        ),
+      )
+      .limit(1);
+    return { storefront: row.storefront, primaryDomain: primary?.domain ?? null };
   }
 
   // Custom domain: strict single-row lookup (domains are globally unique).
@@ -98,9 +118,15 @@ async function resolveByHost(rawHost: string): Promise<{
   if (!domainRow) return { storefront: null, primaryDomain: null };
 
   const [row] = await db
-    .select()
+    .select({ storefront: storefronts })
     .from(storefronts)
-    .where(eq(storefronts.id, domainRow.storefrontId))
+    .innerJoin(businesses, eq(businesses.id, storefronts.businessId))
+    .where(
+      and(
+        eq(storefronts.id, domainRow.storefrontId),
+        sql`${businesses.status} <> 'suspended'`,
+      ),
+    )
     .limit(1);
   const [primary] = await db
     .select({ domain: storefrontDomains.domain })
@@ -112,7 +138,7 @@ async function resolveByHost(rawHost: string): Promise<{
       ),
     )
     .limit(1);
-  return { storefront: row ?? null, primaryDomain: primary?.domain ?? null };
+  return { storefront: row?.storefront ?? null, primaryDomain: primary?.domain ?? null };
 }
 
 async function loadPublishedPayload(
@@ -153,7 +179,8 @@ async function loadPublishedPayload(
   };
 }
 
-router.get("/api/internal/storefront/resolve", requireInternalToken, async (req, res) => {  try {
+router.get("/api/internal/storefront/resolve", requireInternalToken, async (req, res) => {
+  try {
     const host = String(req.query.host ?? "");
     if (!host) {
       return res
@@ -244,12 +271,63 @@ router.post(
 );
 
 /**
+ * SSL issuance report: the renderer fires this once when it first serves a
+ * custom domain over HTTPS (x-forwarded-proto), which is proof the edge has
+ * provisioned the certificate. Only flips ssl_status for VERIFIED domains —
+ * a domain is "Connected" only after verification AND issuance.
+ */
+router.post(
+  "/api/internal/storefront/ssl-reported",
+  requireInternalToken,
+  async (req, res) => {
+    try {
+      const domain = String((req.body as { domain?: unknown })?.domain ?? "")
+        .trim()
+        .toLowerCase();
+      if (!domain) return res.status(400).json({ success: false, message: "domain required." });
+      await db
+        .update(storefrontDomains)
+        .set({ sslStatus: "issued" })
+        .where(
+          and(
+            eq(storefrontDomains.domain, domain),
+            eq(storefrontDomains.status, "verified"),
+            sql`${storefrontDomains.sslStatus} <> 'issued'`,
+          ),
+        );
+      return res.status(200).json({ success: true });
+    } catch (err) {
+      console.error("SSL report failed:", err);
+      return res.status(500).json({ success: false, message: "Report failed." });
+    }
+  },
+);
+
+/**
  * Caddy on_demand_tls ask endpoint: 200 only for hosts we serve — subdomains
  * of the base domain and VERIFIED custom domains. Anything else is 403, so
  * certificates can never be minted for arbitrary hosts.
+ *
+ * Caddy's ask cannot send custom headers, so the shared token may arrive as
+ * a `token` query param (configured in caddy/Caddyfile) or the standard
+ * x-internal-token header.
  */
-router.get("/api/internal/tls/ask", requireInternalToken, async (req, res) => {
+router.get("/api/internal/tls/ask", async (req, res) => {
   try {
+    const headerToken = (() => {
+      const raw = req.headers["x-internal-token"];
+      return (Array.isArray(raw) ? raw[0] : raw) ?? "";
+    })();
+    const queryToken = String(req.query.token ?? "");
+    const provided = Buffer.from(headerToken || queryToken);
+    const expected = Buffer.from(env.internalApiToken);
+    if (
+      provided.length !== expected.length ||
+      !timingSafeEqual(provided, expected)
+    ) {
+      return res.status(401).end();
+    }
+
     const host = String(req.query.domain ?? "")
       .trim()
       .toLowerCase()
