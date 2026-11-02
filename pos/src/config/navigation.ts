@@ -8,7 +8,6 @@ import {
   Users,
   BarChart3,
   ShieldCheck,
-  Percent,
 } from "lucide-react";
 import { GiExpense } from "react-icons/gi";
 import { MdOutlinePointOfSale } from "react-icons/md";
@@ -140,11 +139,5 @@ export const navigation = [
     url: "/roles",
     icon: ShieldCheck,
     permission: "roles.view",
-  },
-  {
-    title: "Tax Rates",
-    url: "/tax-rates",
-    icon: Percent,
-    permission: "taxes.view",
   },
 ];

@@ -7,14 +7,6 @@ export interface SaleReceiptCustomer {
   address: string | null;
 }
 
-export interface SaleReceiptTaxDetail {
-  taxRateId: number;
-  name: string;
-  rate: number;
-  isInclusive: boolean;
-  amount: number;
-}
-
 export interface SaleReceiptItem {
   id: number;
   variantId: number;
@@ -26,9 +18,6 @@ export interface SaleReceiptItem {
   unitPrice: number;
   discount: number;
   lineTotal: number;
-  /** Historical tax snapshot (Module 4): tax content of this line. */
-  taxAmount: number;
-  taxDetail: SaleReceiptTaxDetail[];
 }
 
 export interface SaleReceiptPayment {

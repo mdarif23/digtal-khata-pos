@@ -2,7 +2,6 @@ import { createColumnHelper } from "@tanstack/react-table";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { Package, Pencil } from "lucide-react";
-import { ProductTaxCell } from "@/features/taxes/components/ProductTaxCell";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -171,18 +170,6 @@ export const columns = columnHelper.columns([
         {formatPriceRange(
           row.original.variants.map((variant) => variant.sellingPrice),
         )}
-      </div>
-    ),
-  }),
-  columnHelper.display({
-    id: "taxes",
-    header: () => <div className="text-right">Tax</div>,
-    cell: ({ row }) => (
-      <div className="flex justify-end">
-        <ProductTaxCell
-          productId={row.original.id}
-          productName={row.original.name}
-        />
       </div>
     ),
   }),

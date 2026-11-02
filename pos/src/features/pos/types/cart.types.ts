@@ -14,15 +14,6 @@ export interface CartType extends ProductType {
 export type DiscountType = "percentage" | "fixed";
 export interface CartStore {
   cart: CartType[];
-  /**
-   * Client-generated key for the checkout currently in flight. Created once
-   * per checkout attempt and reused across retries (double-click, network
-   * failure, resubmit) so the backend returns the original sale instead of
-   * creating a duplicate. Cleared after a successful sale.
-   */
-  checkoutIdempotencyKey: string | null;
-  beginCheckout: () => string;
-  clearCheckoutIdempotency: () => void;
   addToCart: (product: ProductType) => void;
   removeCartItem: (id: number) => void;
   addCartQuantity: (id: number) => void;

@@ -51,8 +51,6 @@ import { SalesDataTable } from "../components/sales/SalesDataTable.js";
 import { getSaleReceiptApi } from "../sales.api.js";
 import type { SaleReceiptData } from "../types/receipt.types.js";
 import { ReceiptPrintDialog } from "../components/receipt/ReceiptPrintDialog.js";
-import { ExchangeDialog } from "../components/pos/ExchangeDialog.js";
-import { PaymentIntentDialog } from "../components/pos/PaymentIntentDialog.js";
 
 const DATE_RANGES = ["all", "today", "7-days", "30-days"] as const;
 type DateRange = (typeof DATE_RANGES)[number];
@@ -196,15 +194,10 @@ export function Sales() {
     SaleRefundRequest["disposition"] | null
   >(null);
   const [refundNotes, setRefundNotes] = useState("");
-  const [refundMethod, setRefundMethod] = useState<
-    "cash" | "store_credit" | "original_payment"
-  >("cash");
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<SaleReceiptData | null>(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [isFetchingReceipt, setIsFetchingReceipt] = useState(false);
-  const [exchangeTarget, setExchangeTarget] = useState<SalesStoreType | null>(null);
-  const [paymentTarget, setPaymentTarget] = useState<SalesStoreType | null>(null);
 
   const handlePrintReceipt = async (saleId: number) => {
     try {
@@ -278,7 +271,6 @@ export function Sales() {
         reason,
         disposition,
         ...(refundNotes.trim() ? { notes: refundNotes.trim() } : {}),
-        refundMethod,
       };
       if (refundTarget.type === "sale") {
         await returnProducts(refundTarget.sale.id, options);
@@ -520,7 +512,7 @@ export function Sales() {
                   </TableBody>
                 </Table>
               </div>
-              <div className="flex flex-wrap justify-between items-center gap-2">
+              <div className="flex justify-between items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
@@ -530,35 +522,6 @@ export function Sales() {
                   <Printer className="size-4" />
                   {isFetchingReceipt ? "Loading..." : "Print Receipt"}
                 </Button>
-                <div className="flex gap-2">
-                  {selectedSale.paymentStatus !== "paid" && (
-                    <Button
-                      variant="outline"
-                      disabled={busySaleId !== null}
-                      onClick={() => {
-                        setPaymentTarget(selectedSale);
-                        setSelectedSaleId(null);
-                      }}
-                    >
-                      Collect due via QR / Card
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    disabled={
-                      busySaleId !== null ||
-                      selectedSale.items.every(
-                        (item) => item.returnedQuantity >= item.soldQuantity,
-                      )
-                    }
-                    onClick={() => {
-                      setExchangeTarget(selectedSale);
-                      setSelectedSaleId(null);
-                    }}
-                  >
-                    Exchange items
-                  </Button>
-                </div>
                 <Button
                   variant="destructive"
                   disabled={
@@ -647,36 +610,6 @@ export function Sales() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="refund-method">
-                  Refund method
-                </label>
-                <Select
-                  value={refundMethod}
-                  onValueChange={(value) => {
-                    if (
-                      value === "cash" ||
-                      value === "store_credit" ||
-                      value === "original_payment"
-                    ) {
-                      setRefundMethod(value);
-                    }
-                  }}
-                >
-                  <SelectTrigger id="refund-method" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cash">Cash (counter payout)</SelectItem>
-                    <SelectItem value="store_credit">
-                      Store credit (customer account)
-                    </SelectItem>
-                    <SelectItem value="original_payment">
-                      Original payment (provider refund)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="return-notes">
                   Notes (optional)
                 </label>
@@ -713,24 +646,6 @@ export function Sales() {
           )}
         </DialogContent>
       </Dialog>
-      {exchangeTarget !== null && (
-        <ExchangeDialog
-          sale={exchangeTarget}
-          open={exchangeTarget !== null}
-          onOpenChange={(open) => {
-            if (!open) setExchangeTarget(null);
-          }}
-        />
-      )}
-      {paymentTarget !== null && (
-        <PaymentIntentDialog
-          sale={paymentTarget}
-          open={paymentTarget !== null}
-          onOpenChange={(open) => {
-            if (!open) setPaymentTarget(null);
-          }}
-        />
-      )}
       <ReceiptPrintDialog
         receipt={activeReceipt}
         open={isReceiptModalOpen}

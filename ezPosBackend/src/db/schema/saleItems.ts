@@ -1,7 +1,6 @@
 import {
   foreignKey,
   index,
-  jsonb,
   pgTable,
   serial,
   integer,
@@ -42,32 +41,6 @@ export const saleItems = pgTable(
       scale: 2,
       mode: "number",
     }).notNull(),
-    /**
-     * Historical tax snapshot (Module 4): the tax content of this line at
-     * transaction time. Exclusive taxes are added on top of lineTotal;
-     * inclusive taxes are extracted from it. taxDetail preserves the exact
-     * rules applied (id, name, rate, mode, per-rule amount) so editing or
-     * deactivating a tax rate can never rewrite financial history.
-     */
-    taxAmount: numeric("tax_amount", {
-      precision: 12,
-      scale: 2,
-      mode: "number",
-    })
-      .default(0)
-      .notNull(),
-    taxDetail: jsonb("tax_detail")
-      .$type<
-        {
-          taxRateId: number;
-          name: string;
-          rate: number;
-          isInclusive: boolean;
-          amount: number;
-        }[]
-      >()
-      .default([])
-      .notNull(),
   },
   (table) => [
     index("sale_items_business_id_idx").on(table.businessId),

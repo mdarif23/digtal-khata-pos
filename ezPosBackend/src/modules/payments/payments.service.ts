@@ -11,7 +11,6 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { getPaymentProvider } from "../../services/payments/index.js";
-import { recordAuditInTx } from "../../services/audit.js";
 import { recordEvent } from "../subscriptions/subscription.service.js";
 import { notifyPaymentSucceeded, notifySubscriptionActivated } from "../../services/email/email.hooks.js";
 import { env } from "../../config/env.js";
@@ -336,22 +335,6 @@ export async function verifyAndActivate(
         paymentId: payment.id,
         invoiceId: payment.invoiceId,
         amount: payment.amount,
-        provider: provider.name,
-      },
-    });
-
-    // Platform audit trail: gateway-verified money movement. Actor is the
-    // system (IPN callback or redirect verify), never a user session.
-    await recordAuditInTx(tx, {
-      businessId: payment.businessId,
-      actorUserId: null,
-      action: "subscription.payment.verified",
-      entityType: "subscription_payment",
-      entityId: payment.id,
-      metadata: {
-        invoiceId: payment.invoiceId,
-        amount: Number(payment.amount),
-        currency: payment.currency,
         provider: provider.name,
       },
     });

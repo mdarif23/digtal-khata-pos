@@ -82,9 +82,6 @@ export const createSalePayloadSchema = z.object({
     .nullable(),
   vatPercent: z.number().nullable(),
 
-  // Client-generated key making checkout retries idempotent (see useCartStore).
-  idempotencyKey: z.string().min(8).max(120).optional(),
-
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),
 });

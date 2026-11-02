@@ -42,24 +42,6 @@ export interface VerificationResult {
 
 export interface PaymentProvider {
   readonly name: string;
-  /** Whether the provider can push money back to the original instrument. */
-  readonly supportsRefund?: boolean;
   initiateSession(input: GatewaySessionInput): Promise<GatewaySession>;
   verifyPayment(input: VerificationInput): Promise<VerificationResult>;
-  /**
-   * Refunds to the original payment instrument. Only called when
-   * supportsRefund is true; `transactionId` is the provider transaction id
-   * recorded at capture time. Providers WITHOUT this capability leave
-   * refunds to manual/external settlement — never fake it.
-   */
-  refundPayment?(input: {
-    transactionId: string;
-    amount: number;
-    reason?: string;
-  }): Promise<{
-    accepted: boolean;
-    refundId: string | null;
-    status: string;
-    raw: Record<string, unknown>;
-  }>;
 }

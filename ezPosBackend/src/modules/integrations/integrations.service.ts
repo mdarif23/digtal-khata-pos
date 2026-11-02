@@ -16,7 +16,6 @@ import { sales } from "../../db/schema/sales.js";
 import { products } from "../../db/schema/products.js";
 import { locations } from "../../db/schema/locations.js";
 import { decryptSecret, encryptSecret } from "../../utils/encryption.js";
-import { assertPublicStoreUrl } from "../../utils/validateStoreUrl.js";
 import {
   WoocommerceApiError,
   WoocommerceClient,
@@ -108,9 +107,7 @@ export async function connectWoocommerceStore(
   assertFeature(entitlements, "woocommerceIntegration");
   assertWithinStoreLimit(entitlements, await countConnectedStores(businessId));
 
-  // SSRF guard: the store URL drives authenticated server-side requests, so
-  // it must be a public http(s) host before anything is persisted or sent.
-  const storeUrl = await assertPublicStoreUrl(input.storeUrl);
+  const storeUrl = input.storeUrl.replace(/\/+$/, "");
   const webhookSecret = randomBytes(24).toString("hex");
 
   // Validate against the real store BEFORE persisting anything.

@@ -30,13 +30,6 @@ router.post(
   requirePermission("customers.create"),
   customersController.createCustomer,
 );
-// Store credit balance for the checkout's store_credit payment method.
-router.get(
-  "/api/customers/:id/store-credit",
-  ...read,
-  requirePermission("customers.view"),
-  customersController.getStoreCredit,
-);
 router.get(
   "/api/due_by_customers",
   ...read,

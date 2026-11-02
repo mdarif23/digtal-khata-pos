@@ -25,8 +25,6 @@ import { UsersPage } from "@/features/users/pages/UsersPage";
 import { LocationsPage } from "@/features/locations/pages/LocationsPage";
 import { StockTransfersPage } from "@/features/stockTransfers/pages/StockTransfersPage";
 import { RolesPage } from "@/features/roles/pages/RolesPage";
-import { PaymentIntentReturn } from "@/features/pos/pages/PaymentIntentReturn";
-import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -38,12 +36,6 @@ const REPORTS_PERMISSIONS = [
 ];
 
 const router = createBrowserRouter([
-  {
-    // Gateway return handler — the provider redirects here with val_id +
-    // tran_id; verification happens server-side before anything is recorded.
-    path: "/payment/return",
-    element: <PaymentIntentReturn />,
-  },
   {
     path: "/",
     element: (
@@ -214,14 +206,6 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="users.view">
             <UsersPage />
-          </RequirePermission>
-        ),
-      },
-      {
-        path: "/tax-rates",
-        element: (
-          <RequirePermission permission="taxes.view">
-            <TaxRatesPage />
           </RequirePermission>
         ),
       },

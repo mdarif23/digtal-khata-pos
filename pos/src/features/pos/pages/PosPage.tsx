@@ -47,13 +47,8 @@ function Pos() {
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
 
   async function onSubmit(data: CartSchemaType) {
-    // Claim the checkout key before anything else: every retry of THIS
-    // checkout (double-click, network failure, resubmit) reuses it, so the
-    // backend replays the original sale instead of creating a duplicate.
-    const idempotencyKey = useCartStore.getState().beginCheckout();
     const rawPayload = {
       ...data,
-      idempotencyKey,
       items: cart.map((item) => ({
         variantId: item.variants[0]?.id ?? 0,
         quantity: item.quantity,

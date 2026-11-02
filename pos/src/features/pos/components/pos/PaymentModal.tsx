@@ -38,8 +38,6 @@ function buildPayments(
     case "bangla_qr":
     case "card":
       return [{ method, amount: finalTotal, reference: "" }];
-    case "store_credit":
-      return [{ method: "store_credit", amount: finalTotal }];
     case "due":
       return [{ method: "due", amount: finalTotal }];
     case "split":
@@ -219,7 +217,6 @@ function PaymentMethod({
     { label: "Cash", value: "cash" },
     { label: "Bangla QR", value: "bangla_qr" },
     { label: "Card", value: "card" },
-    { label: "Store credit", value: "store_credit" },
     { label: "Due", value: "due" },
     { label: "Split", value: "split" },
   ];
@@ -243,10 +240,7 @@ function PaymentMethod({
           <ToggleGroupItem
             key={m.value}
             value={m.value}
-            disabled={
-              customerId == null &&
-              (m.value === "due" || m.value === "store_credit")
-            }
+            disabled={customerId == null && m.value === "due"}
             className="col-span-1 data-pressed:bg-primary data-pressed:text-primary-foreground"
           >
             {m.label}
