@@ -193,6 +193,7 @@ describe("stock count sessions integration", { skip: !runIntegration }, () => {
     const lines = detail.json.data.lines as {
       variantId: number;
       expectedQuantity: number;
+      countedQuantity: number | null;
     }[];
     const line = lines.find((l) => l.variantId === variantId)!;
     assert.equal(line.expectedQuantity, 50);

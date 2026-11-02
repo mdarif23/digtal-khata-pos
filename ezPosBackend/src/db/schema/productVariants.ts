@@ -27,6 +27,14 @@ export const productVariants = pgTable(
       scale: 2,
       mode: "number",
     }).notNull(),
+
+    /**
+     * Automated replenishment (Module 2C): reorder when available stock
+     * (current + outstanding purchases) falls to or below reorderPoint;
+     * reorderQuantity is the default order size. NULL = no suggestion.
+     */
+    reorderPoint: integer("reorder_point"),
+    reorderQuantity: integer("reorder_quantity"),
     alertQuantity: integer("alert_quantity").default(0),
     isDefault: boolean("is_default").default(false),
     status: varchar({ length: 30 }),

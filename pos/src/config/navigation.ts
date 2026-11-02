@@ -120,6 +120,7 @@ export const navigation = [
     icon: Tags,
     anyPermission: ["purchases.view", "purchases.create"],
     items: [
+      { title: "Reorder", url: "/reorder", permission: "purchases.view" },
       { title: "All Purchases", url: "/purchases", permission: "purchases.create" },
       { title: "Purchases List", url: "/purchases-list", permission: "purchases.view" },
     ],

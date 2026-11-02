@@ -96,6 +96,13 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-02** — Phase 3 slice 2 (automated replenishment) complete:
+  - Migration `0024`: per-variant `reorder_point` / `reorder_quantity` config (products.edit permission; audited).
+  - Suggestions are DERIVED at read time (never stored, always fresh): a variant is a candidate when current stock + OUTSTANDING purchase quantity has reached its point — in-flight orders are never double-ordered (proven by test: 5 stock + 25 on order > point 10 → no suggestion). Default order size = configured quantity, else the shortfall. Last purchase's supplier + unit cost prefill the conversion.
+  - Conversion reuses the existing purchase-creation machinery end to end (`purchase.from_reorder` audited) — draft POs land in the normal purchases flow with prefilled prices.
+  - Frontend: Reorder page (`/reorder`, Purchases nav group) — suggestions table with editable order quantities, inline reorder-point updates, supplier/cost hints, one-click PO creation.
+  - Ops note: the 0024 migration had invalid CHECK syntax that made drizzle-kit silently skip it; fixed and applied to both databases with reconciled bookkeeping (verified: future migrate runs are clean).
+  - Verification: backend tsc clean, full suite 290/309 (same 19 pre-existing; +3 reorder tests green); POS tsc + build green.
 - **2026-11-02** — Phase 3 slice 1 (stock-count sessions) complete:
   - Migration `0023`: `stock_count_sessions` + `stock_count_lines` — whole-location stocktakes or variant-scoped cycle counts; expected quantities frozen at creation; partial counting is first-class (uncounted lines untouched).
   - **Concurrency-safe approval (the core invariant):** the applied variance is counted − CURRENT stock with rows FOR UPDATE at approval time — a sale or transfer between counting and approval cannot produce a wrong adjustment. Proven by a dedicated integration test (count 50 with a concurrent sale of 3 → +6 applied, movement recorded against the session).

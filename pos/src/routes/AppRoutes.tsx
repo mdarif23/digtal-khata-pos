@@ -28,6 +28,7 @@ import { RolesPage } from "@/features/roles/pages/RolesPage";
 import { PaymentIntentReturn } from "@/features/pos/pages/PaymentIntentReturn";
 import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
 import { StockCountPage } from "@/features/products/pages/StockCountPage";
+import { ReorderPage } from "@/features/purchases/pages/ReorderPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -215,6 +216,14 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="users.view">
             <UsersPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/reorder",
+        element: (
+          <RequirePermission permission="purchases.view">
+            <ReorderPage />
           </RequirePermission>
         ),
       },

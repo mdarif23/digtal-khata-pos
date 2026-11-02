@@ -11,6 +11,7 @@ import taxRatesRouter from "./modules/taxRates/taxRates.routes.js";
 import heldSalesRouter from "./modules/heldSales/heldSales.routes.js";
 import realtimeRouter from "./modules/realtime/realtime.routes.js";
 import stockCountRouter from "./modules/stockCount/stockCount.routes.js";
+import reorderRouter from "./modules/reorder/reorder.routes.js";
 import customersRouter from "./modules/customers/customers.routes.js";
 import expenseRouter from "./modules/expenses/expenses.routes.js";
 import purchasesRouter from "./modules/purchases/purchases.routes.js";
@@ -109,6 +110,7 @@ export function buildApp() {
   app.use("/", heldSalesRouter);
   app.use("/", realtimeRouter);
   app.use("/", stockCountRouter);
+  app.use("/", reorderRouter);
   app.use("/", customersRouter);
   app.use("/", expenseRouter);
   app.use("/", purchasesRouter);
