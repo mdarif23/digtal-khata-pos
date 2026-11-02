@@ -88,12 +88,15 @@ export async function createSingleRefund(req: Request, res: Response) {
         errors: result.error.flatten(),
       });
     }
-    const { message, refundId } = await salesService.createSingleRefund(
-      getBusinessId(req),
-      id,
-      result.data,
-    );
-    res.status(200).json({ message, refundId });
+    const { saleItemSaleId: _internal, ...refundResult } =
+      await salesService.createSingleRefund(
+        getBusinessId(req),
+        id,
+        result.data,
+        req.user?.id ?? null,
+      );
+    void _internal;
+    res.status(200).json(refundResult);
   } catch (err) {
     sendSafeError(res, err, "Unable to create the refund.");
   }
@@ -111,12 +114,13 @@ export async function createMultipleRefunds(req: Request, res: Response) {
         errors: result.error.flatten(),
       });
     }
-    const { message, refundId } = await salesService.createMultipleRefunds(
+    const refundResult = await salesService.createMultipleRefunds(
       getBusinessId(req),
       id,
       result.data,
+      req.user?.id ?? null,
     );
-    res.status(200).json({ message, refundId });
+    res.status(200).json(refundResult);
   } catch (err) {
     sendSafeError(res, err, "Unable to create the refund.");
   }

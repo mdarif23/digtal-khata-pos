@@ -81,8 +81,19 @@ import { HoldCartItems } from "@/features/pos/types/cart.types.js";
 //   )
 // );
 
-export const useCartStore = create<CartStore>((set) => ({
+export const useCartStore = create<CartStore>((set, get) => ({
   cart: [],
+  checkoutIdempotencyKey: null,
+  // One key per checkout attempt: retries of the SAME checkout reuse it so
+  // the backend deduplicates; the next sale gets a fresh key.
+  beginCheckout: () => {
+    const existing = get().checkoutIdempotencyKey;
+    if (existing) return existing;
+    const key = crypto.randomUUID();
+    set({ checkoutIdempotencyKey: key });
+    return key;
+  },
+  clearCheckoutIdempotency: () => set({ checkoutIdempotencyKey: null }),
   addToCart: (product) =>
     set((state) => {
       const variant = product.variants[0];
@@ -154,6 +165,8 @@ export const useCartStore = create<CartStore>((set) => ({
   resetCart: () =>
     set((state) => ({
       cart: [],
+      // A fresh cart is a fresh checkout — never reuse the old sale's key.
+      checkoutIdempotencyKey: null,
     })),
   addHoldItemsToCart: (holdItems) => {
     set(() => {

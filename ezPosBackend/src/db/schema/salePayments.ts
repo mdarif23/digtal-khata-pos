@@ -41,10 +41,16 @@ export const salePayments = pgTable(
       foreignColumns: [sales.id, sales.businessId],
       name: "sale_payments_sale_business_fkey",
     }),
-    // PENDING POLICY DECISION (user, unresolved): the original global
-    // UNIQUE (payment_method, reference) is preserved unchanged. A per-business
-    // version would be UNIQUE (business_id, payment_method, reference) — do not
-    // swap until the user confirms the duplicate-reference policy.
-    unique("sale_payments_method_reference_unique").on(t.paymentMethod, t.reference),
+    // References are scoped per business: two tenants recording the same
+    // gateway reference (their own bKash/Nagad merchant accounts) is
+    // legitimate and must not collide. Duplicates WITHIN a business for the
+    // same method are still rejected — the cashier double-entry protection
+    // is unchanged. (Resolves the previously pending policy decision; see
+    // the Phase 1 roadmap in POS_GAP_CLOSURE_TRACKER.md.)
+    unique("sale_payments_business_method_reference_unique").on(
+      t.businessId,
+      t.paymentMethod,
+      t.reference,
+    ),
   ],
 );

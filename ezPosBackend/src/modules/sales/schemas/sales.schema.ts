@@ -4,6 +4,7 @@ export const PAYMENT_ROW_METHODS = [
   "bangla_qr",
   "card",
   "due",
+  "store_credit",
 ] as const;
 
 export const paymentSchema = z.object({
@@ -40,6 +41,11 @@ export const createSalePayloadSchema = z.object({
     .nullable(),
   vatPercent: z.number().nullable(),
 
+  // Client-generated key (UUID) that makes checkout retries idempotent:
+  // resubmitting the same key returns the original sale instead of
+  // creating a duplicate. Scoped per business at the database level.
+  idempotencyKey: z.string().trim().min(8).max(120).optional(),
+
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),
 });
@@ -59,6 +65,14 @@ export const saleRefundRequestSchema = z.object({
   ]),
   notes: z.string().trim().max(500).optional(),
   disposition: z.enum(["restock", "inspection", "damaged"]),
+  /**
+   * How the money goes back. 'cash' = counter/drawer payout;
+   * 'original_payment' = provider refund to the original instrument
+   * (requires a captured payment intent for the sale and a provider with
+   * refund support — the payout fires after the ledger commits and is
+   * retryable; provider_refund_id stays NULL until it succeeds).
+   */
+  refundMethod: z.enum(["cash", "original_payment", "store_credit"]).optional(),
 });
 
 // 3. Export the TypeScript type for your payload

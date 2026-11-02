@@ -56,6 +56,13 @@ export const sales = pgTable(
     externalOrderNumber: varchar("external_order_number", { length: 100 }),
     /** Duplicate-submission protection for storefront orders. */
     idempotencyKey: varchar("idempotency_key", { length: 120 }).unique(),
+    /**
+     * Exchange transactions (Module 5): the replacement sale references the
+     * original. Composite FK keeps the tenant guarantee; NULL for normal
+     * sales. The original's refund rows + this sale's items tell the whole
+     * exchange story.
+     */
+    exchangeOfSaleId: integer("exchange_of_sale_id"),
     fulfillmentStatus: fulfillmentStatusEnum("fulfillment_status")
       .default("unfulfilled")
       .notNull(),

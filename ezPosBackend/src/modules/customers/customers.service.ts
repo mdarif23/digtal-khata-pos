@@ -73,3 +73,28 @@ export async function getCustomerDueSummary(businessId: number) {
       sql`COALESCE(SUM(${sales.dueAmount}),0) > 0`,
     );
 }
+
+import { NotFoundError } from "../../utils/handleError.js";
+import { getStoreCreditBalance } from "../../services/storeCredit.js";
+
+/**
+ * Spendable store credit balance for one customer (Module 5). The customer
+ * must belong to the caller's business; a foreign id is indistinguishable
+ * from a missing one.
+ */
+export async function getCustomerStoreCredit(
+  businessId: number,
+  customerId: number,
+): Promise<number> {
+  const [customer] = await db
+    .select({ id: customers.id })
+    .from(customers)
+    .where(
+      and(eq(customers.id, customerId), eq(customers.businessId, businessId)),
+    )
+    .limit(1);
+  if (!customer) {
+    throw new NotFoundError(`Customer with ID ${customerId} not found.`);
+  }
+  return getStoreCreditBalance(businessId, customerId);
+}

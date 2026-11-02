@@ -39,3 +39,19 @@ export async function getCustomerDueSummary(req: Request, res: Response) {
     sendSafeError(res, err, "Unable to load the dues summary.");
   }
 }
+
+export async function getStoreCredit(req: Request, res: Response) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid customer ID." });
+    }
+    const balance = await customersService.getCustomerStoreCredit(
+      getBusinessId(req),
+      id,
+    );
+    return res.status(200).json({ success: true, data: { balance } });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to read the store credit balance.");
+  }
+}
