@@ -50,6 +50,7 @@ export const updateStorefrontSchema = z
     storePickupEnabled: z.boolean().optional(),
     analyticsEnabled: z.boolean().optional(),
     searchIndexingEnabled: z.boolean().optional(),
+    shopperAccountsEnabled: z.boolean().optional(),
   })
   .strict();
 

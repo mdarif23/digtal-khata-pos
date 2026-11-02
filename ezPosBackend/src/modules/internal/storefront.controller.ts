@@ -22,6 +22,16 @@ import {
   createOnlineOrder,
   confirmOnlineOrder,
 } from "../commerce/orders.service.js";
+import {
+  initiateOrderPayment,
+  verifyOrderPayment,
+} from "../commerce/orderPayments.service.js";
+import {
+  listShopperOrders,
+  loginShopper,
+  registerShopper,
+  resolveShopper,
+} from "../storefronts/shoppers.service.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { BadRequestError, NotFoundError } from "../../utils/handleError.js";
 
@@ -179,6 +189,7 @@ export async function getConfig(req: Request, res: Response) {
             storePickupEnabled: storefront.storePickupEnabled,
             analyticsEnabled: storefront.analyticsEnabled,
             searchIndexingEnabled: storefront.searchIndexingEnabled,
+            shopperAccountsEnabled: storefront.shopperAccountsEnabled,
           },
         },
         pages: isPreview ? pages : pages.filter((page) => page.isPublished !== false),
@@ -276,6 +287,22 @@ const checkoutSchema = z.object({
   /** Server re-validates the zone and computes the fee — never client trust. */
   deliveryZoneId: z.number().int().positive().nullable().optional(),
   storePickup: z.boolean().optional(),
+  paymentMethod: z.enum(["cod", "sslcommerz"]).default("cod"),
+  /**
+   * The storefront origin the gateway should return the shopper to
+   * (https, or http localhost for development). Only ever used to build
+   * redirect URLs — never for any trust decision.
+   */
+  returnOrigin: z
+    .string()
+    .trim()
+    .url()
+    .refine((value) => value.startsWith("https://") || value.startsWith("http://localhost"), {
+      message: "returnOrigin must be an https URL.",
+    })
+    .optional(),
+  /** Shopper session bearer token (optional — guest checkout is default). */
+  shopperToken: z.string().trim().max(200).optional(),
   idempotencyKey: z.string().trim().min(8).max(80),
 });
 
@@ -335,9 +362,13 @@ export async function createCheckoutOrder(req: Request, res: Response) {
       deliveryLabel = zone.name;
     }
 
-    const result = await createOnlineOrder({
+    const shopper = input.shopperToken
+      ? await resolveShopper(input.storefrontId, input.shopperToken)
+      : null;
+
+    const orderInput = {
       businessId: storefront.businessId,
-      channel: "custom_storefront",
+      channel: "custom_storefront" as const,
       integrationId: null,
       customer: {
         name: input.customer.name,
@@ -354,11 +385,49 @@ export async function createCheckoutOrder(req: Request, res: Response) {
       },
       lines: input.lines,
       idempotencyKey: input.idempotencyKey,
-      paymentMethod: "cod",
+      paymentMethod: input.paymentMethod,
+      deliveryFee,
+      shopperId: shopper?.id ?? null,
       note: `Storefront order — delivery: ${deliveryLabel}${
         deliveryFee > 0 ? ` (delivery ৳${deliveryFee})` : " (free delivery)"
       }${input.customer.note ? ` — ${input.customer.note}` : ""}`,
-    });
+    };
+
+    // Online payment: order stays pending/unpaid with an active reservation;
+    // the gateway session is returned and the order is confirmed only after
+    // SERVER-side verification (IPN or post-redirect verify).
+    if (input.paymentMethod === "sslcommerz") {
+      if (!input.returnOrigin) {
+        throw new BadRequestError(
+          "The store misconfigured its payment return URL.",
+        );
+      }
+      const payment = await initiateOrderPayment({
+        ...orderInput,
+        storefrontId: input.storefrontId,
+        returnOrigin: input.returnOrigin,
+      });
+      res.status(201).json({
+        success: true,
+        message: "Order created — redirecting to the payment gateway.",
+        data: {
+          saleId: payment.saleId,
+          invoiceNumber: payment.invoiceNumber,
+          status: "pending",
+          total: payment.amount,
+          deliveryFee,
+          currency: payment.currency,
+          duplicated: false,
+          payment: {
+            gatewayUrl: payment.gatewayUrl,
+            paymentId: payment.paymentId,
+          },
+        },
+      });
+      return;
+    }
+
+    const result = await createOnlineOrder(orderInput);
 
     // COD is confirmed immediately: stock is consumed through the existing
     // FIFO workflow and the order lands in the portal for fulfillment.
@@ -441,5 +510,126 @@ export async function trackOrder(req: Request, res: Response) {
     });
   } catch (err) {
     sendSafeError(res, err, "Unable to look up the order right now.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Order payment verification (post-redirect; IPN funnels separately)
+// ---------------------------------------------------------------------------
+
+/**
+ * Called by the renderer when the shopper returns from the gateway. The
+ * redirect itself never marks anything paid — this triggers the shared
+ * server-side verify core (gateway validation + amount match + ledger +
+ * stock consumption), which is idempotent and also fed by the IPN.
+ */
+export async function verifyOrderPaymentEndpoint(req: Request, res: Response) {
+  try {
+    const schema = z.object({
+      saleId: z.number().int().positive(),
+      valId: z.string().trim().min(4).max(255),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new BadRequestError(
+        parsed.error.issues[0]?.message ?? "Invalid verification data.",
+      );
+    }
+    const result = await verifyOrderPayment({
+      tranId: `ord-${parsed.data.saleId}`,
+      valId: parsed.data.valId,
+    });
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to verify the payment right now.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shopper accounts (optional per storefront)
+// ---------------------------------------------------------------------------
+
+const shopperCredentialsSchema = z.object({
+  storefrontId: z.number().int().positive(),
+  email: z.string().trim().email().max(255),
+  password: z.string().min(8, "Use at least 8 characters.").max(200),
+});
+
+export async function shopperRegister(req: Request, res: Response) {
+  try {
+    const parsed = shopperCredentialsSchema
+      .extend({
+        fullName: z.string().trim().min(2).max(120),
+        phone: z.string().trim().max(20).optional(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      throw new BadRequestError(
+        parsed.error.issues[0]?.message ?? "Invalid registration data.",
+      );
+    }
+    const { token } = await registerShopper(parsed.data.storefrontId, {
+      email: parsed.data.email,
+      password: parsed.data.password,
+      fullName: parsed.data.fullName,
+      phone: parsed.data.phone,
+    });
+    res.status(201).json({
+      success: true,
+      message: "Account created.",
+      data: { token },
+    });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to create the account right now.");
+  }
+}
+
+export async function shopperLogin(req: Request, res: Response) {
+  try {
+    const parsed = shopperCredentialsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new BadRequestError(
+        parsed.error.issues[0]?.message ?? "Enter your email and password.",
+      );
+    }
+    const { token } = await loginShopper(parsed.data.storefrontId, {
+      email: parsed.data.email,
+      password: parsed.data.password,
+    });
+    res.status(200).json({
+      success: true,
+      message: "Signed in.",
+      data: { token },
+    });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to sign in right now.");
+  }
+}
+
+/** Shopper profile + order history (bearer token in Authorization header). */
+export async function shopperMe(req: Request, res: Response) {
+  try {
+    const storefrontId = parseId(String(req.query.storefrontId ?? ""), "storefront ID");
+    const auth = req.headers.authorization ?? "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    const shopper = await resolveShopper(storefrontId, token);
+    if (!shopper) {
+      throw new BadRequestError("Not signed in.");
+    }
+    const orders = await listShopperOrders(storefrontId, shopper.id);
+    res.status(200).json({
+      success: true,
+      data: {
+        shopper: {
+          id: shopper.id,
+          email: shopper.email,
+          fullName: shopper.fullName,
+          phone: shopper.phone,
+        },
+        orders,
+      },
+    });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to load the account right now.");
   }
 }

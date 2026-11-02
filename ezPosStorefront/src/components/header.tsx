@@ -73,6 +73,11 @@ export function Header({ tenant }: { tenant: TenantConfig }) {
               </li>
             ))}
           </ul>
+          {tenant.storefront.flags.shopperAccountsEnabled ? (
+            <Link href="/account" className={pathname === "/account" ? "font-semibold text-[var(--sf-primary)]" : ""}>
+              Account
+            </Link>
+          ) : null}
           <Link href="/cart" className="relative font-medium" aria-label={`Cart (${count} items)`}>
             Cart
             {count > 0 ? (

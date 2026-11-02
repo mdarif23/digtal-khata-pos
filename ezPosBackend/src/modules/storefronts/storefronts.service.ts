@@ -339,6 +339,7 @@ export interface UpdateStorefrontPatch {
   storePickupEnabled?: boolean | undefined;
   analyticsEnabled?: boolean | undefined;
   searchIndexingEnabled?: boolean | undefined;
+  shopperAccountsEnabled?: boolean | undefined;
 }
 
 export async function updateStorefront(
@@ -386,6 +387,9 @@ export async function updateStorefront(
   }
   if (patch.searchIndexingEnabled !== undefined) {
     update.searchIndexingEnabled = patch.searchIndexingEnabled;
+  }
+  if (patch.shopperAccountsEnabled !== undefined) {
+    update.shopperAccountsEnabled = patch.shopperAccountsEnabled;
   }
 
   const [updated] = await db

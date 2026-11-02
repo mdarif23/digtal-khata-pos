@@ -21,14 +21,14 @@ export const mockProvider: PaymentProvider = {
   async initiateSession(input: GatewaySessionInput): Promise<GatewaySession> {
     const sessionId = `mock-session-${input.tranId}`;
     // The "gateway" page exists only in dev; tests bypass it and call the
-    // verify endpoint directly with a deterministic val_id. The success
-    // URL's own query (paymentId, businessId) is preserved and the val_id
-    // appended, so the redirect lands as a fully working success page.
+    // verify endpoint directly with a deterministic val_id. The val_id is
+    // TRANSACTION-keyed (unique per session) — real gateways issue unique
+    // val_ids, and the ledger's reference uniqueness depends on that.
     const base = input.urls.success;
     const sep = base.includes("?") ? "&" : "?";
     const gatewayUrl = `${base}${sep}mock-gateway=1&tran_id=${encodeURIComponent(
       input.tranId,
-    )}&val_id=${encodeURIComponent("MOCK-VALID-" + input.amount)}`;
+    )}&val_id=${encodeURIComponent(`MOCK-VALID-T-${input.tranId}-${input.amount}`)}`;
     return { gatewayUrl, sessionId };
   },
 
@@ -50,6 +50,18 @@ export const mockProvider: PaymentProvider = {
         valid: true,
         status: "VALID",
         amount: Number(amountMatch[1]),
+        currency: "BDT",
+        transactionId: valId,
+        raw: { provider: "mock" },
+      };
+    }
+    // Transaction-keyed form issued by initiateSession (unique per order).
+    const tranMatch = /^MOCK-VALID-T-(.+)-(\d+(?:\.\d{1,2})?)$/.exec(valId);
+    if (tranMatch) {
+      return {
+        valid: true,
+        status: "VALID",
+        amount: Number(tranMatch[2]),
         currency: "BDT",
         transactionId: valId,
         raw: { provider: "mock" },

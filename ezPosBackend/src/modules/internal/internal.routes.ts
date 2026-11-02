@@ -269,6 +269,26 @@ router.post(
   requireInternalToken,
   sfInternal.trackOrder,
 );
+router.post(
+  "/api/internal/storefront/orders/pay/verify",
+  requireInternalToken,
+  sfInternal.verifyOrderPaymentEndpoint,
+);
+router.post(
+  "/api/internal/storefront/shoppers/register",
+  requireInternalToken,
+  sfInternal.shopperRegister,
+);
+router.post(
+  "/api/internal/storefront/shoppers/login",
+  requireInternalToken,
+  sfInternal.shopperLogin,
+);
+router.get(
+  "/api/internal/storefront/shoppers/me",
+  requireInternalToken,
+  sfInternal.shopperMe,
+);
 
 /**
  * SSL issuance report: the renderer fires this once when it first serves a

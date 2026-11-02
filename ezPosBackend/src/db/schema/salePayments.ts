@@ -35,16 +35,23 @@ export const salePayments = pgTable(
   (t) => [
     index("sale_payments_business_id_idx").on(t.businessId),
     check("sale_payments_amount_positive", sql`${t.amount} > 0`),
-    check("sale_payments_method_valid", sql`${t.paymentMethod} in ('cash','bangla_qr','card')`),
+    // sslcommerz: storefront/online order gateway capture (stage 5).
+    check(
+      "sale_payments_method_valid",
+      sql`${t.paymentMethod} in ('cash','bangla_qr','card','sslcommerz')`,
+    ),
     foreignKey({
       columns: [t.saleId, t.businessId],
       foreignColumns: [sales.id, sales.businessId],
       name: "sale_payments_sale_business_fkey",
     }),
-    // PENDING POLICY DECISION (user, unresolved): the original global
-    // UNIQUE (payment_method, reference) is preserved unchanged. A per-business
-    // version would be UNIQUE (business_id, payment_method, reference) — do not
-    // swap until the user confirms the duplicate-reference policy.
-    unique("sale_payments_method_reference_unique").on(t.paymentMethod, t.reference),
+    // Per-business reference uniqueness (policy resolved stage 5): a gateway
+    // reference recorded by one business must never block another's. Global
+    // uniqueness was a cross-tenant coupling hazard.
+    unique("sale_payments_method_reference_unique").on(
+      t.businessId,
+      t.paymentMethod,
+      t.reference,
+    ),
   ],
 );

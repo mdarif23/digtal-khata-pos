@@ -79,6 +79,12 @@ export const sales = pgTable(
       mode: "number",
     }),
     paymentStatus: paymentStatusEnum("payment_status").default("paid").notNull(),
+    /** Storefront delivery charge, included in final_total (stage 5). */
+    deliveryFee: numeric("delivery_fee", {
+      precision: 10,
+      scale: 2,
+      mode: "number",
+    }).default(0),
     dueAmount: numeric("due_amount", {
       precision: 10,
       scale: 2,
@@ -86,6 +92,8 @@ export const sales = pgTable(
     }).default(0),
     note: text(),
     customerId: integer("customer_id").references(() => customers.id),
+    /** Shopper account that placed a storefront order (nullable; guest = null). */
+    shopperId: integer("shopper_id"),
   },
   (table) => [
     foreignKey({

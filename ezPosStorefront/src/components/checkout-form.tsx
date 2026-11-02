@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useCart } from "./cart-context";
+import { useShopper } from "./shopper-context";
 import { formatPrice } from "@/lib/format";
 
 interface Zone {
@@ -31,13 +32,19 @@ export function CheckoutForm({
   zones,
   storePickupEnabled,
   paymentMethods,
+  returnOrigin,
 }: {
   storefrontId: number;
   zones: Zone[];
   storePickupEnabled: boolean;
   paymentMethods: Array<{ method: string; label: string | null }>;
+  returnOrigin: string;
 }) {
   const { items, ready, clear, subtotal } = useCart();
+  const { token: shopperToken } = useShopper();
+  const [paymentMethod, setPaymentMethod] = useState<string>(
+    paymentMethods[0]?.method ?? "cod",
+  );
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -90,14 +97,27 @@ export function CheckoutForm({
           })),
           deliveryZoneId: storePickup ? null : deliveryZoneId,
           storePickup,
+          paymentMethod,
+          returnOrigin,
+          ...(shopperToken ? { shopperToken } : {}),
           idempotencyKey,
         }),
       });
       const body = (await res.json().catch(() => null)) as
         | { ok?: boolean; message?: string; data?: PlacedOrder }
         | null;
-      if (res.ok && body?.ok && body.data) {
-        setPlaced(body.data);
+      const data = body?.data as
+        | (PlacedOrder & { payment?: { gatewayUrl?: string } })
+        | undefined;
+      if (res.ok && body?.ok && data?.payment?.gatewayUrl) {
+        // Online payment: send the shopper to the gateway. Verification
+        // happens server-side after the redirect/IPN — never here.
+        clear();
+        window.location.href = data.payment.gatewayUrl;
+        return;
+      }
+      if (res.ok && body?.ok && data) {
+        setPlaced(data);
         clear();
       } else {
         setError(body?.message ?? "Checkout failed. Please try again.");
@@ -290,9 +310,20 @@ export function CheckoutForm({
         <fieldset className="sf-card space-y-2 p-5" disabled={submitting}>
           <legend className="px-1 text-sm font-semibold">Payment</legend>
           {paymentMethods.map((method) => (
-            <label key={method.method} className="flex items-center gap-2 rounded-lg border p-3 text-sm">
-              <input type="radio" name="payment" defaultChecked />
-              {method.label ?? (method.method === "cod" ? "Cash on delivery" : method.method)}
+            <label
+              key={method.method}
+              className={`flex items-center gap-2 rounded-lg border p-3 text-sm ${paymentMethod === method.method ? "border-[var(--sf-primary)]" : ""}`}
+            >
+              <input
+                type="radio"
+                name="payment"
+                checked={paymentMethod === method.method}
+                onChange={() => setPaymentMethod(method.method)}
+              />
+              {method.label ?? (method.method === "cod" ? "Cash on delivery" : "Online payment")}
+              <span className="ml-auto text-xs opacity-60">
+                {method.method === "cod" ? "pay on delivery" : "pay now"}
+              </span>
             </label>
           ))}
         </fieldset>

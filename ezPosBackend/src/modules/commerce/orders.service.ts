@@ -70,6 +70,13 @@ export interface CreateOnlineOrderInput {
   idempotencyKey: string;
   /** Payment method recorded for the eventual payment ("cod", "online", …). */
   paymentMethod?: string | null;
+  /**
+   * Storefront delivery charge (stage 5) — computed SERVER-side by the
+   * caller from the storefront's zones; included in final_total.
+   */
+  deliveryFee?: number | undefined;
+  /** Shopper account placing the order (null/undefined = guest checkout). */
+  shopperId?: number | null | undefined;
   note?: string | null;
 }
 
@@ -296,6 +303,7 @@ export async function createOnlineOrder(
       ),
     );
     const customerId = await resolveCustomerId(tx, input.businessId, input.customer);
+    const deliveryFee = roundMoney(input.deliveryFee ?? 0);
 
     const [sale] = await tx
       .insert(sales)
@@ -310,10 +318,12 @@ export async function createOnlineOrder(
         subtotal,
         discount: 0,
         vat: 0,
-        finalTotal: subtotal,
+        deliveryFee,
+        finalTotal: roundMoney(subtotal + deliveryFee),
         paymentStatus: "unpaid",
-        dueAmount: subtotal,
+        dueAmount: roundMoney(subtotal + deliveryFee),
         customerId,
+        shopperId: input.shopperId ?? null,
         idempotencyKey: input.idempotencyKey,
         note:
           input.note ??
@@ -357,7 +367,7 @@ export async function createOnlineOrder(
       saleId: sale.id,
       invoiceNumber: sale.invoiceNumber,
       status: "pending" as const,
-      total: subtotal,
+      total: roundMoney(subtotal + deliveryFee),
       currency: "BDT" as const,
       duplicated: false,
     };
@@ -391,7 +401,21 @@ export async function confirmOnlineOrder(
   businessId: number,
   saleId: number,
 ): Promise<OnlineOrderResult> {
-  return db.transaction(async (tx) => {
+  return db.transaction((tx) => confirmOnlineOrderInTx(tx, businessId, saleId));
+}
+
+/**
+ * Transaction-scoped confirm — callers that already hold a transaction (the
+ * order-payment verify core locks the sale row before paying) MUST use this
+ * variant; opening a nested db.transaction here would deadlock on the sale
+ * row lock.
+ */
+export async function confirmOnlineOrderInTx(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  businessId: number,
+  saleId: number,
+): Promise<OnlineOrderResult> {
+  {
     const [sale] = await tx
       .select({
         id: sales.id,
@@ -507,7 +531,7 @@ export async function confirmOnlineOrder(
       entityId: result.saleId,
     });
     return result;
-  });
+  }
 }
 
 /** Cancels a pending online order and releases its reservations. */

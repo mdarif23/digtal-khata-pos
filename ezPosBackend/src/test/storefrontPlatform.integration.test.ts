@@ -1100,7 +1100,7 @@ describe("storefront platform integration", { skip: !runIntegration }, () => {
       data: { invoiceNumber: string; status: string; total: number; deliveryFee: number; duplicated: boolean };
     };
     assert.equal(checkoutBody.data.status, "completed");
-    assert.equal(checkoutBody.data.total, 200); // goods total; delivery recorded separately
+    assert.equal(checkoutBody.data.total, 260); // goods 200 + delivery 60 (stage 5)
     assert.equal(checkoutBody.data.deliveryFee, 60);
 
     // Stock consumed through the FIFO workflow (10 → 8).
@@ -1274,5 +1274,202 @@ describe("storefront platform integration", { skip: !runIntegration }, () => {
     // Restored: resolution resumes.
     const restored = await internalApi("GET", resolvePath, internalToken);
     assert.equal(restored.body.data.resolved, true);
+  });
+  it("online payments + shoppers: gateway session, verify-once core, IPN routing, shopper accounts", async () => {
+    const owner = await createOwnerCtx("SFP Pay Co");
+    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, { mode: "omnichannel" });
+    await setBusinessPlan(owner.businessId, {
+      features: { hostedStorefront: true, storefrontCustomDomains: true },
+    });
+    const created = await api(
+      owner,
+      "POST",
+      `/api/businesses/${owner.businessId}/storefronts`,
+      { name: "Pay Shop", themeId: "cornerstone-general", subdomain: "sfp-pay-shop" },
+    );
+    const sfId = created.body.data.id as number;
+    const sfBase = `/api/businesses/${owner.businessId}/storefronts/${sfId}`;
+
+    // Enable shopper accounts.
+    const flagPatch = await api(owner, "PATCH", sfBase, { shopperAccountsEnabled: true });
+    assert.equal(flagPatch.status, 200);
+
+    const variant = await seedVariantWithStock(owner.businessId, 10, 100);
+    const productId = (
+      await pg!.query("SELECT product_id FROM product_variants WHERE id = $1", [variant])
+    ).rows[0]!.product_id as number;
+    await api(owner, "PUT", `${sfBase}/products/${productId}`, { published: true });
+    const zone = await api(owner, "POST", `${sfBase}/delivery-zones`, {
+      name: "Dhaka",
+      areas: ["Dhanmondi"],
+      rate: 60,
+    });
+    assert.equal(zone.status, 201);
+    assert.equal((await api(owner, "POST", `${sfBase}/publish`)).status, 200);
+
+    // Shopper accounts are opt-in: a storefront without the flag refuses.
+    const disabledShop = await createOwnerCtx("SFP Pay NoAccounts");
+    await setBusinessPlan(disabledShop.businessId, {
+      features: { hostedStorefront: true },
+    });
+    const disabled = await api(
+      disabledShop,
+      "POST",
+      `/api/businesses/${disabledShop.businessId}/storefronts`,
+      { name: "No Accounts Shop", themeId: "cornerstone-general", subdomain: "sfp-no-accounts" },
+    );
+    assert.equal(disabled.status, 201);
+    const registerDisabled = await fetch(`${baseUrl}/api/internal/storefront/shoppers/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({ storefrontId: disabled.body.data.id, email: "x@example.test", password: "password123", fullName: "Xy" }),
+    });
+    assert.equal(registerDisabled.status, 403);
+
+    const register = await fetch(`${baseUrl}/api/internal/storefront/shoppers/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({ storefrontId: sfId, email: "shopper@example.test", password: "password123", fullName: "Test Shopper", phone: "01712345678" }),
+    });
+    assert.equal(register.status, 201);
+    const registerBody = (await register.json()) as { data: { token: string } };
+    assert.ok(registerBody.data.token);
+
+    const badLogin = await fetch(`${baseUrl}/api/internal/storefront/shoppers/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({ storefrontId: sfId, email: "shopper@example.test", password: "wrong-password" }),
+    });
+    assert.equal(badLogin.status, 400);
+
+    const login = await fetch(`${baseUrl}/api/internal/storefront/shoppers/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({ storefrontId: sfId, email: "shopper@example.test", password: "password123" }),
+    });
+    assert.equal(login.status, 200);
+    const loginBody = (await login.json()) as { data: { token: string } };
+
+    // --- Online payment flow (mock provider; deterministic val_id) ---
+    const checkout = await fetch(`${baseUrl}/api/internal/storefront/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({
+        storefrontId: sfId,
+        customer: { name: "Paying Shopper", phone: "01712345678", address: "House 1", city: "Dhaka", area: "Dhanmondi" },
+        lines: [{ variantId: variant, quantity: 1 }],
+        deliveryZoneId: zone.body.data.id,
+        paymentMethod: "sslcommerz",
+        returnOrigin: "https://sfp-pay-shop.ezpos.store",
+        shopperToken: loginBody.data.token,
+        idempotencyKey: `sfp-pay-${Date.now()}`,
+      }),
+    });
+    assert.equal(checkout.status, 201);
+    const checkoutBody = (await checkout.json()) as {
+      data: { saleId: number; invoiceNumber: string; status: string; total: number; payment: { gatewayUrl: string } };
+    };
+    assert.equal(checkoutBody.data.status, "pending");
+    assert.equal(checkoutBody.data.total, 160); // goods 100 + delivery 60
+    assert.ok(checkoutBody.data.payment.gatewayUrl.includes("ord-"));
+
+    // Order pending, stock NOT consumed yet.
+    const stockBefore = await pg!.query("SELECT quantity FROM inventory_stock WHERE variant_id = $1", [variant]);
+    assert.equal(Number(stockBefore.rows[0]!.quantity), 10);
+
+    // Wrong-amount verification is rejected.
+    const wrongAmount = await fetch(`${baseUrl}/api/internal/storefront/orders/pay/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({ storefrontId: sfId, saleId: checkoutBody.data.saleId, valId: "MOCK-VALID-999" }),
+    });
+    assert.equal(wrongAmount.status, 400);
+
+    // Correct verification: server-side core pays + confirms + consumes.
+    const verify = await fetch(`${baseUrl}/api/internal/storefront/orders/pay/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({ storefrontId: sfId, saleId: checkoutBody.data.saleId, valId: "MOCK-VALID-160" }),
+    });
+    assert.equal(verify.status, 200);
+    const verifyBody = (await verify.json()) as { data: { paid: boolean; status: string } };
+    assert.equal(verifyBody.data.paid, true);
+    assert.equal(verifyBody.data.status, "completed");
+
+    const stockAfter = await pg!.query("SELECT quantity FROM inventory_stock WHERE variant_id = $1", [variant]);
+    assert.equal(Number(stockAfter.rows[0]!.quantity), 9);
+
+    // Ledger row recorded with the sslcommerz method.
+    const ledger = await pg!.query(
+      "SELECT payment_method, amount FROM sale_payments WHERE sale_id = $1",
+      [checkoutBody.data.saleId],
+    );
+    assert.equal(ledger.rows.length, 1);
+    assert.equal(ledger.rows[0]!.payment_method, "sslcommerz");
+    assert.equal(Number(ledger.rows[0]!.amount), 160);
+
+    // Idempotent verification does not double-record.
+    const verifyAgain = await fetch(`${baseUrl}/api/internal/storefront/orders/pay/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({ storefrontId: sfId, saleId: checkoutBody.data.saleId, valId: "MOCK-VALID-160" }),
+    });
+    assert.equal(verifyAgain.status, 200);
+    const ledgerAgain = await pg!.query(
+      "SELECT count(*)::int AS n FROM sale_payments WHERE sale_id = $1",
+      [checkoutBody.data.saleId],
+    );
+    assert.equal(ledgerAgain.rows[0]!.n, 1);
+
+    // --- IPN routing for order payments (second order) ---
+    const checkout2 = await fetch(`${baseUrl}/api/internal/storefront/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({
+        storefrontId: sfId,
+        customer: { name: "IPN Shopper", phone: "01712345679", address: "House 2", city: "Dhaka", area: "Dhanmondi" },
+        lines: [{ variantId: variant, quantity: 1 }],
+        deliveryZoneId: zone.body.data.id,
+        paymentMethod: "sslcommerz",
+        returnOrigin: "https://sfp-pay-shop.ezpos.store",
+        idempotencyKey: `sfp-ipn-${Date.now()}`,
+      }),
+    });
+    assert.equal(checkout2.status, 201);
+    const checkout2Body = (await checkout2.json()) as { data: { saleId: number; total: number } };
+
+    const ipn = await fetch(`${baseUrl}/api/payments/ipn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        tran_id: `ord-${checkout2Body.data.saleId}`,
+        // Transaction-keyed form (what the mock gateway actually issues).
+        val_id: `MOCK-VALID-T-ord-${checkout2Body.data.saleId}-${checkout2Body.data.total}`,
+        status: "VALID",
+      }).toString(),
+    });
+    assert.equal(ipn.status, 200);
+    const ipnBody = (await ipn.json()) as { verified: boolean };
+    assert.equal(ipnBody.verified, true);
+
+    const ipnSale = await pg!.query(
+      "SELECT payment_status, status FROM sales WHERE id = $1",
+      [checkout2Body.data.saleId],
+    );
+    assert.equal(ipnSale.rows[0]!.payment_status, "paid");
+    assert.equal(ipnSale.rows[0]!.status, "completed");
+
+    // --- Shopper sees the order they placed while signed in ---
+    const me = await fetch(
+      `${baseUrl}/api/internal/storefront/shoppers/me?storefrontId=${sfId}`,
+      { headers: { "x-internal-token": internalToken, Authorization: `Bearer ${loginBody.data.token}` } },
+    );
+    assert.equal(me.status, 200);
+    const meBody = (await me.json()) as { data: { shopper: { email: string }; orders: Array<{ invoiceNumber: string }> } };
+    assert.equal(meBody.data.shopper.email, "shopper@example.test");
+    assert.ok(
+      meBody.data.orders.some((order) => order.invoiceNumber === checkoutBody.data.invoiceNumber),
+      "shopper order history must include their order",
+    );
   });
 });

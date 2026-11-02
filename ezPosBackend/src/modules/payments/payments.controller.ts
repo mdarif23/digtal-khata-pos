@@ -113,6 +113,19 @@ export async function paymentIpn(req: Request, res: Response) {
       // Negative IPNs never activate anything; payment stays retryable.
       return res.status(200).json({ success: true, message: "Recorded." });
     }
+    // Order payments (storefront checkout, stage 5) share the IPN endpoint —
+    // routed by tran_id prefix, verified through the same server-side core.
+    if (tranId.startsWith("ord-")) {
+      const { handleOrderPaymentIpn } = await import(
+        "../commerce/orderPayments.service.js"
+      );
+      const orderOutcome = await handleOrderPaymentIpn({ tranId, valId });
+      return res.status(200).json({
+        success: true,
+        verified: orderOutcome.paid,
+        handled: orderOutcome.handled,
+      });
+    }
     const outcome = await verifyAndActivate(valId, { tranId });
     res.status(200).json({
       success: true,

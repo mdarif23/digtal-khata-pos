@@ -43,6 +43,7 @@ export function StoreSettings() {
   // SEO + contact
   const [seoTitle, setSeoTitle] = useState("");
   const [seoDescription, setSeoDescription] = useState("");
+  const [shopperAccountsEnabled, setShopperAccountsEnabled] = useState(false);
 
   const ready = businessId && Number.isInteger(storeId) && storeId > 0;
 
@@ -54,6 +55,7 @@ export function StoreSettings() {
       setSubdomain(result.data.subdomain);
       setSeoTitle(result.data.seo?.title ?? "");
       setSeoDescription(result.data.seo?.description ?? "");
+      setShopperAccountsEnabled(result.data.shopperAccountsEnabled === true);
     } else {
       setMessage({ tone: "warning", text: result.message, role: "alert" });
     }
@@ -113,6 +115,7 @@ export function StoreSettings() {
         title: seoTitle || undefined,
         description: seoDescription || undefined,
       },
+      shopperAccountsEnabled,
     });
     setBusy(false);
     setMessage({
@@ -186,9 +189,17 @@ export function StoreSettings() {
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
           </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={shopperAccountsEnabled}
+              onChange={(event) => setShopperAccountsEnabled(event.target.checked)}
+            />
+            Allow customers to create accounts and see their order history
+          </label>
           <div>
             <Button onClick={() => void saveSeoAndFlags()} disabled={busy}>
-              Save SEO settings
+              Save store settings
             </Button>
           </div>
         </div>

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getTenant } from "@/lib/tenant";
 import { tokensToStyle } from "@/lib/theme";
 import { CartProvider } from "@/components/cart-context";
+import { ShopperProvider } from "@/components/shopper-context";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 
@@ -51,6 +52,7 @@ export default async function SiteLayout({
 
   return (
     <CartProvider storefrontId={tenant.config.storefront.id}>
+      <ShopperProvider storefrontId={tenant.config.storefront.id}>
       <div style={tokensToStyle(tokens)} className="flex min-h-screen flex-col bg-[var(--sf-bg)] text-[var(--sf-text)]">
         {tenant.config.source === "preview" ? (
           <div className="bg-amber-400 px-4 py-1.5 text-center text-xs font-semibold text-amber-950">
@@ -61,6 +63,7 @@ export default async function SiteLayout({
         <main className="flex-1">{children}</main>
         <Footer tenant={tenant.config} />
       </div>
+      </ShopperProvider>
     </CartProvider>
   );
 }

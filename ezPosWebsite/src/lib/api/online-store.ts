@@ -107,6 +107,7 @@ export interface StorefrontDetail {
   storePickupEnabled: boolean;
   analyticsEnabled: boolean;
   searchIndexingEnabled: boolean;
+  shopperAccountsEnabled: boolean;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -264,6 +265,7 @@ export async function updateStorefront(
     storePickupEnabled?: boolean;
     analyticsEnabled?: boolean;
     searchIndexingEnabled?: boolean;
+    shopperAccountsEnabled?: boolean;
   },
 ): Promise<ApiResult<StorefrontDetail>> {
   return request(`/api/businesses/${businessId}/storefronts/${storefrontId}`, {

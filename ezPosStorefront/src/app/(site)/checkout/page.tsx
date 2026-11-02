@@ -13,6 +13,7 @@ export default async function CheckoutPage() {
       <h1 className="text-2xl font-bold">Checkout</h1>
       <CheckoutForm
         storefrontId={tenant.config.storefront.id}
+        returnOrigin={tenant.origin}
         zones={tenant.config.zones}
         storePickupEnabled={tenant.config.storefront.flags.storePickupEnabled}
         paymentMethods={

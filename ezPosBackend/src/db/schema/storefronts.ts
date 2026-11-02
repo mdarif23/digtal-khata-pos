@@ -69,6 +69,10 @@ export const storefronts = pgTable(
     searchIndexingEnabled: boolean("search_indexing_enabled")
       .default(true)
       .notNull(),
+    /** Optional shopper accounts: customers can register/login on the store. */
+    shopperAccountsEnabled: boolean("shopper_accounts_enabled")
+      .default(false)
+      .notNull(),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
     archivedAt: timestamp("archived_at", { withTimezone: true }),

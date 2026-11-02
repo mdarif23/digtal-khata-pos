@@ -26,6 +26,7 @@ export interface TenantConfig {
       storePickupEnabled: boolean;
       analyticsEnabled: boolean;
       searchIndexingEnabled: boolean;
+      shopperAccountsEnabled: boolean;
     };
   };
   source: "published" | "preview";
@@ -229,6 +230,127 @@ export async function trackOrder(
   return {
     ok: res.ok && body?.success === true,
     message: body?.message ?? "Lookup failed.",
+    data: body?.data,
+  };
+}
+
+export interface VerifyPaymentResult {
+  paid: boolean;
+  saleId: number;
+  invoiceNumber: string;
+  amount: number;
+  status: string;
+  message: string;
+}
+
+/** Post-redirect payment verification (server-side core on the backend). */
+export async function verifyOrderPayment(
+  payload: Record<string, unknown>,
+): Promise<{ ok: boolean; message: string; data?: VerifyPaymentResult }> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${serverConfig.backendUrl}/api/internal/storefront/orders/pay/verify`,
+      {
+        method: "POST",
+        headers: {
+          "x-internal-token": requireInternalToken(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      },
+    );
+  } catch {
+    return { ok: false, message: "We could not reach the store. Try again." };
+  }
+  const body = (await res.json().catch(() => null)) as
+    | { success?: boolean; message?: string; data?: VerifyPaymentResult }
+    | null;
+  return {
+    ok: res.ok && body?.success === true,
+    message: body?.message ?? "Verification failed.",
+    data: body?.data,
+  };
+}
+
+export interface ShopperProfile {
+  id: number;
+  email: string;
+  fullName: string | null;
+  phone: string | null;
+}
+
+export interface ShopperOrder {
+  invoiceNumber: string;
+  status: string;
+  paymentStatus: string;
+  fulfillmentStatus: string | null;
+  total: number;
+  createdAt: string;
+}
+
+export interface ShopperMe {
+  shopper: ShopperProfile;
+  orders: ShopperOrder[];
+}
+
+export async function shopperSession(
+  mode: "login" | "register",
+  payload: Record<string, unknown>,
+): Promise<{ ok: boolean; message: string; token?: string }> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${serverConfig.backendUrl}/api/internal/storefront/shoppers/${mode}`,
+      {
+        method: "POST",
+        headers: {
+          "x-internal-token": requireInternalToken(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      },
+    );
+  } catch {
+    return { ok: false, message: "We could not reach the store. Try again." };
+  }
+  const body = (await res.json().catch(() => null)) as
+    | { success?: boolean; message?: string; data?: { token?: string } }
+    | null;
+  return {
+    ok: res.ok && body?.success === true,
+    message: body?.message ?? "Sign-in failed.",
+    token: body?.data?.token,
+  };
+}
+
+export async function shopperMe(
+  storefrontId: number,
+  token: string,
+): Promise<{ ok: boolean; message: string; data?: ShopperMe }> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${serverConfig.backendUrl}/api/internal/storefront/shoppers/me?storefrontId=${storefrontId}`,
+      {
+        headers: {
+          "x-internal-token": requireInternalToken(),
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      },
+    );
+  } catch {
+    return { ok: false, message: "We could not reach the store. Try again." };
+  }
+  const body = (await res.json().catch(() => null)) as
+    | { success?: boolean; message?: string; data?: ShopperMe }
+    | null;
+  return {
+    ok: res.ok && body?.success === true,
+    message: body?.message ?? "Could not load the account.",
     data: body?.data,
   };
 }
