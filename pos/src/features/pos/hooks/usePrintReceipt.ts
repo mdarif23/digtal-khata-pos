@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import type { SaleReceiptData, PaperWidth, ReceiptSettings } from "../types/receipt.types.js";
 import { useReceiptSettingsStore } from "../stores/useReceiptSettingsStore.js";
+import { useHardwareStore, toPrintPayload } from "@/hardware/deviceManager";
 
 // Global set across mounts to prevent duplicate automatic prints for the same sale
 const printedSaleIds = new Set<string | number>();
@@ -30,6 +31,28 @@ export function usePrintReceipt() {
       isPrintingRef.current = true;
 
       const activeSettings = { ...settings, ...options?.settings };
+
+      // Hardware path (Module 9): a connected USB thermal printer prints
+      // directly — no browser dialog. ANY failure falls through to the
+      // browser-print pipeline below, so a device problem can never lose
+      // or corrupt a receipt.
+      const hardware = useHardwareStore.getState();
+      if (hardware.mode === "usb") {
+        const result = await hardware.printReceipt(
+          toPrintPayload(
+            receipt,
+            activeSettings.shopName,
+            activeSettings.footerMessage,
+          ),
+          async () => false, // no-op: the browser fallback is the code below
+        );
+        if (result.ok && result.mode === "usb") {
+          isPrintingRef.current = false;
+          return true;
+        }
+        // Fall through to the browser print below.
+      }
+
       const paperWidth = options?.paperWidth || activeSettings.paperWidth || "80mm";
       const is58mm = paperWidth === "58mm";
       const isA4 = paperWidth === "a4";
