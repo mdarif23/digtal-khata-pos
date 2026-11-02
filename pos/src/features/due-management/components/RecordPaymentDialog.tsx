@@ -230,6 +230,11 @@ function CustomerPaymentForm({
               onValueChange={(value) =>
                 field.onChange(value as CustomerFormValues["paymentMethod"])
               }
+              items={(
+                Object.keys(CUSTOMER_METHOD_LABELS) as Array<
+                  CustomerFormValues["paymentMethod"]
+                >
+              ).map((key) => ({ value: key, label: CUSTOMER_METHOD_LABELS[key] }))}
             >
               <SelectTrigger id="payment-method" className="w-full">
                 <SelectValue placeholder="Select method" />
@@ -416,6 +421,11 @@ function SupplierPaymentForm({
               onValueChange={(value) =>
                 field.onChange(value as SupplierFormValues["method"])
               }
+              items={(
+                Object.keys(SUPPLIER_METHOD_LABELS) as Array<
+                  SupplierFormValues["method"]
+                >
+              ).map((key) => ({ value: key, label: SUPPLIER_METHOD_LABELS[key] }))}
             >
               <SelectTrigger id="payment-method" className="w-full">
                 <SelectValue placeholder="Select method" />

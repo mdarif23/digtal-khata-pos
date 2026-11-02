@@ -191,6 +191,10 @@ export function DueManagementPage() {
           onValueChange={(value) =>
             setStatus(value as DueRowFilter["status"])
           }
+          items={statusOptions.map((option) => ({
+            value: String(option.value),
+            label: option.label,
+          }))}
         >
           <SelectTrigger id="due-status" className="lg:w-40">
             <SelectValue />

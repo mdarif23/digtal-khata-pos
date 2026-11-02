@@ -293,6 +293,10 @@ export function RegisterDialog() {
                 <Select
                   value={registerId || undefined}
                   onValueChange={(value) => setRegisterId(value ?? "")}
+                  items={availableRegisters.map((register) => ({
+                    value: String(register.id),
+                    label: register.name,
+                  }))}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Choose a register" />
