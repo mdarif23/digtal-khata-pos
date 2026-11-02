@@ -29,6 +29,7 @@ import { PaymentIntentReturn } from "@/features/pos/pages/PaymentIntentReturn";
 import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
 import { StockCountPage } from "@/features/products/pages/StockCountPage";
 import { ReorderPage } from "@/features/purchases/pages/ReorderPage";
+import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -216,6 +217,14 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="users.view">
             <UsersPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/gift-cards",
+        element: (
+          <RequirePermission permission="pos.view">
+            <GiftCardsPage />
           </RequirePermission>
         ),
       },

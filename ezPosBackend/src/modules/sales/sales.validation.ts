@@ -126,7 +126,8 @@ type Payments = {
     | "card"
     | "due"
     | "store_credit"
-    | "loyalty_points";
+    | "loyalty_points"
+    | "gift_card";
   amount?: number | undefined;
   tendered?: number | undefined;
   reference?: string | undefined;
@@ -165,6 +166,15 @@ export function validatePayments(
     ) {
       throw new BadRequestError(
         "Card and QR payments require a transaction reference of at least 6 characters.",
+      );
+    }
+
+    if (
+      payment.method === "gift_card" &&
+      (payment.reference ?? "").trim().length < 8
+    ) {
+      throw new BadRequestError(
+        "Gift card payments require the full card code as the reference.",
       );
     }
   }

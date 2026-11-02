@@ -190,6 +190,13 @@
       "when": 1793641919001,
       "tag": "0026_loyalty_program",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1793643136934,
+      "tag": "0027_gift_cards",
+      "breakpoints": true
     }
   ]
 }

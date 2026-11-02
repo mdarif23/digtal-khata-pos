@@ -42,6 +42,8 @@ function buildPayments(
       return [{ method: "store_credit", amount: finalTotal }];
     case "loyalty_points":
       return [{ method: "loyalty_points", amount: finalTotal }];
+    case "gift_card":
+      return [{ method: "gift_card", amount: finalTotal, reference: "" }];
     case "due":
       return [{ method: "due", amount: finalTotal }];
     case "split":
@@ -72,6 +74,8 @@ function isPaymentValid(
 
   if (mode === "bangla_qr" || mode === "card")
     return (p0?.reference ?? "").trim().length >= 6;
+
+  if (mode === "gift_card") return (p0?.reference ?? "").trim().length >= 8;
 
   if (mode === "due") return customerId != null;
 
@@ -173,6 +177,13 @@ export function PaymentModal({
                 paymentInstruction="Insert / tap card on POS terminal"
               />
             )}
+            {mode === "gift_card" && (
+              <DigitalCashPayment
+                finalTotal={finalTotal}
+                form={form}
+                paymentInstruction="Enter the customer's gift card code"
+              />
+            )}
             {mode === "split" && (
               <SplitPayment
                 finalTotal={finalTotal}
@@ -223,6 +234,7 @@ function PaymentMethod({
     { label: "Card", value: "card" },
     { label: "Store credit", value: "store_credit" },
     { label: "Loyalty points", value: "loyalty_points" },
+    { label: "Gift card", value: "gift_card" },
     { label: "Due", value: "due" },
     { label: "Split", value: "split" },
   ];

@@ -128,6 +128,12 @@ export const navigation = [
     ],
   },
   {
+    title: "Gift Cards",
+    url: "/gift-cards",
+    icon: CreditCard,
+    permission: "pos.view",
+  },
+  {
     title: "Locations",
     url: "/locations",
     icon: MapPin,

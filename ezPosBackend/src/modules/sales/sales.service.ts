@@ -63,6 +63,7 @@ import {
   redeemLoyaltyPointsInTx,
   reverseLoyaltyPointsInTx,
 } from "../../services/loyalty.js";
+import { redeemGiftCardInTx } from "../../services/giftCards.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
 import {
   customerValidation,
@@ -895,7 +896,7 @@ export async function createSale(
               amount: payment.amount,
               paymentMethod: payment.method,
               reference:
-                payment.method === "cash"
+                payment.method === "cash" || payment.method === "gift_card"
                   ? null
                   : payment.reference?.trim() || null,
               tendered:
@@ -937,6 +938,25 @@ export async function createSale(
             customerId,
             amount: Number(payment.amount),
             sourceId: saleId,
+            actorUserId: cashierUserId,
+          });
+        }
+
+        // Gift card redemption: code resolved + ledger locked inside this
+        // transaction — concurrent double-redemption is impossible (M7).
+        for (const payment of receivedPayments) {
+          if (payment.method !== "gift_card") continue;
+          const code = payment.reference?.trim() ?? "";
+          if (code.length < 8) {
+            throw new BadRequestError(
+              "Gift card payments require the full card code as the reference.",
+            );
+          }
+          await redeemGiftCardInTx(tx, {
+            businessId,
+            code,
+            amount: Number(payment.amount),
+            saleId,
             actorUserId: cashierUserId,
           });
         }
@@ -987,7 +1007,8 @@ export async function createSale(
         .filter(
           (payment) =>
             payment.method === "loyalty_points" ||
-            payment.method === "store_credit",
+            payment.method === "store_credit" ||
+            payment.method === "gift_card",
         )
         .reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
       const earnBase = roundMoney(paidAmount - fundedByAccount);
