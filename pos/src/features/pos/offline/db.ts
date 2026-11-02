@@ -16,11 +16,12 @@
  */
 
 const DB_NAME = "ezpos-offline";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export const STORE_PRODUCTS = "catalog_products";
 export const STORE_CUSTOMERS = "catalog_customers";
 export const STORE_OUTBOX = "outbox";
+export const STORE_CART = "active_cart";
 export const STORE_SYNC_LOG = "sync_log";
 
 export type ScopeKey = string;
@@ -57,6 +58,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_CUSTOMERS)) {
         db.createObjectStore(STORE_CUSTOMERS, { keyPath: "scope" });
+      }
+      if (!db.objectStoreNames.contains(STORE_CART)) {
+        db.createObjectStore(STORE_CART, { keyPath: "scope" });
       }
       if (!db.objectStoreNames.contains(STORE_OUTBOX)) {
         const outbox = db.createObjectStore(STORE_OUTBOX, {

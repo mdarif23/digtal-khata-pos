@@ -226,6 +226,12 @@ async function loadSession(): Promise<void> {
   );
   bindOfflineSession(user.id ?? "anon", activeBusinessId);
   useOfflineStore.getState().startWatchers();
+  // Cart recovery (Module 1.5): restore a checkout interrupted by a
+  // refresh/crash. After the offline scope is bound, before the first UI.
+  const { restorePersistedCart } = await import(
+    "../features/pos/stores/useCartStore.js"
+  );
+  await restorePersistedCart();
 }
 
 /** Restores the persisted location selection for this user/business pair. */

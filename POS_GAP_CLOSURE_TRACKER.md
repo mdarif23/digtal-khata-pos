@@ -15,7 +15,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 1 Checkout | Duplicate-submission prevention | B→F incomplete → **fixed** | **1** ✅ | ✅ replay + `onConflictDoNothing` | ✅ key sent, retry-safe | ✅ composite unique (0015) | unit 61/61, integration (see log) | — |
 | 1 Checkout | Server-authoritative checkout totals (tax consistency) | Missing → **Complete** | **1** ✅ | ✅ `POST /sales/quote` | ✅ quote-backed totals hook, local fallback | — | integration | — |
 | 1 Checkout | Cart expiry / cleanup, cart audit | Missing → **Complete (backend)** | 2 ✅ | ✅ HELD_SALES_TTL_HOURS + lazy + scheduled cleanup, hold audits | — | ✅ 0022 | integration | — |
-| 1 Checkout | Active-cart recovery after refresh | **Defective** → **Partial** | 2 🔄 | n/a | ⚠️ cart remains memory-only; offline outbox survives restarts | n/a | ❌ | Persist cart store to IndexedDB (remaining slice) |
+| 1 Checkout | Active-cart recovery after refresh | **Defective** → **Complete** | 2 ✅ | n/a | ✅ write-through IndexedDB + restore-on-bootstrap (idempotency key persists) | n/a | ❌ (manual) | — |
 | 2 Inventory | Adjustments / transfers / receiving | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 2 Inventory | Batch & serial tracking | Complete | — | ✅ FEFO locking | ✅ | ✅ | integration | — |
 | 2 Inventory | Barcode stocktaking + cycle counts | Missing | 3 | ❌ | ❌ | ❌ | ❌ | `stock_count_sessions/lines`, approval flow |
@@ -96,6 +96,11 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-02** — Phase 2 slice 3 (active-cart persistence) complete:
+  - The register's active cart writes through to IndexedDB (debounced 300ms, scoped per user+business) and is restored at session bootstrap — a refresh or crash no longer destroys a checkout in progress.
+  - The checkout idempotency key persists WITH the cart: a post-crash retry reuses the same key, so even a restored interrupted checkout cannot double-charge.
+  - Restore only fills an empty cart (never overwrites an in-flight one); IDB schema bumped to v2 with a safe upgrade path.
+  - Verification: POS tsc + vite build green (frontend-only change; no backend surface).
 - **2026-11-02** — Phase 2 slice 2 (shared held sales) complete:
   - Migration `0022`: `held_sales` — holds move from localStorage to the server, scoped per business+location with a composite FK; slim serializable cart snapshot (prices/stock re-validated at sale time); `HELD_SALES_TTL_HOURS` (default 72, 0 = never) with lazy cleanup on list + a scheduler sweep (`heldSalesExpired` in the commerce sweeps); hold/discard audited.
   - Endpoints: GET/POST/DELETE `/api/held-sales` (pos.view / pos.create_sale), location-scoped like the sales routes.

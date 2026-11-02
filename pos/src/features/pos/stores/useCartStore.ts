@@ -372,3 +372,35 @@ export function resumeHeldItems(
   }
   return { lines, missing };
 }
+
+// ---------------------------------------------------------------------------
+// Active-cart persistence (Module 1.5 / Module 10): the cart writes through
+// to IndexedDB (debounced) on every change and is restored at session
+// bootstrap — a refresh or crash no longer destroys a checkout in progress.
+// The checkout idempotency key persists WITH the cart, so a post-crash
+// retry still reuses the same key and cannot double-charge.
+// ---------------------------------------------------------------------------
+import {
+  loadPersistedCart,
+  persistCartDebounced,
+} from "../offline/cartPersistence.js";
+
+useCartStore.subscribe((state) => {
+  persistCartDebounced(state.cart, state.checkoutIdempotencyKey);
+});
+
+/**
+ * Restores the persisted cart once per session, called from the session
+ * bootstrap AFTER the offline scope is bound. Only fills an empty cart —
+ * an in-flight cart (e.g. restored by another path) is never overwritten.
+ */
+export async function restorePersistedCart(): Promise<void> {
+  const current = useCartStore.getState();
+  if (current.cart.length > 0) return;
+  const persisted = await loadPersistedCart();
+  if (!persisted || persisted.cart.length === 0) return;
+  useCartStore.setState({
+    cart: persisted.cart,
+    checkoutIdempotencyKey: persisted.checkoutIdempotencyKey,
+  });
+}
