@@ -26,6 +26,8 @@ import type { SaleReceiptData } from "../types/receipt.types.js";
 import { SaleSuccessDialog } from "../components/receipt/SaleSuccessDialog.js";
 import { LocationBadge } from "@/components/common/LocationBadge";
 import { RegisterDialog } from "@/features/cashRegisters/components/RegisterDialog";
+import { SyncStatusIndicator } from "@/features/pos/components/pos/SyncStatus.js";
+import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
 
 function Pos() {
   const { cart, resetCart } = useCartStore();
@@ -76,6 +78,43 @@ function Pos() {
     }
 
     const payload: CreateSalePayload = result.data;
+    // Offline sales (Module 10): cash and due sales can be recorded without
+    // connectivity — the payload (with its claimed idempotency key) goes to
+    // the durable outbox and replays safely when the connection returns.
+    const offlineEligible = payload.payments.every(
+      (payment) => payment.method === "cash" || payment.method === "due",
+    );
+    const recordOffline = async () => {
+      const total = payload.payments.reduce(
+        (sum, payment) => sum + Number(payment.amount ?? 0),
+        0,
+      );
+      await useOfflineStore.getState().recordOfflineSale({
+        payload,
+        summary: {
+          total,
+          itemCount: payload.items.length,
+          customerName: null,
+        },
+      });
+      toast.add({
+        type: "info",
+        description:
+          "No connection — the sale is recorded offline and will sync automatically (duplicates are impossible).",
+        priority: "high",
+      });
+      // Clear checkout inputs and modal
+      resetCart();
+      setIsPaymentDialogOpen(false);
+      setShowCustomerInfo(null);
+      form.reset();
+    };
+
+    if (!navigator.onLine && offlineEligible) {
+      await recordOffline();
+      return;
+    }
+
     try {
       const response = await createEntityPromiseToast({
         data: payload,
@@ -97,6 +136,18 @@ function Pos() {
         setIsSuccessDialogOpen(true);
       }
     } catch (error) {
+      // Connection dropped mid-checkout: cash/due sales fall back to the
+      // outbox instead of losing the cart; everything else keeps the cart
+      // (electronic payments genuinely need connectivity).
+      const isNetworkError =
+        Boolean(error) &&
+        typeof error === "object" &&
+        "response" in error &&
+        (error as { response?: unknown }).response === undefined;
+      if (isNetworkError && offlineEligible) {
+        await recordOffline();
+        return;
+      }
       console.error("Sale submission error:", error);
     }
   }
@@ -106,7 +157,10 @@ function Pos() {
       <div className="mx-auto flex min-h-[calc(100dvh-1.5rem)] max-w-[1800px] flex-col gap-3 sm:min-h-[calc(100dvh-2rem)] lg:grid lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1.55fr)_minmax(380px,0.9fr)] lg:gap-4">
         <div className="col-span-full flex items-center justify-between">
           <LocationBadge />
-          <RegisterDialog />
+          <div className="flex items-center gap-2">
+            <SyncStatusIndicator />
+            <RegisterDialog />
+          </div>
         </div>
         <section className="flex h-[60dvh] min-h-[420px] shrink-0 flex-col overflow-hidden rounded-xl border bg-background shadow-sm lg:h-full lg:min-h-0 lg:shrink">
           <ProductList />

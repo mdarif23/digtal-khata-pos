@@ -76,7 +76,10 @@ export const useCustomerStore = create<CustomerStore>((set, get) => ({
   getCustomers: async () => {
     set({ loading: true, error: null });
     try {
-      const customersData = await getCustomersApi();
+      const { loadCustomersWithCache } = await import(
+        "@/features/pos/offline/catalog.js"
+      );
+      const { data: customersData } = await loadCustomersWithCache(getCustomersApi);
       set({ customers: customersData, loading: false });
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);

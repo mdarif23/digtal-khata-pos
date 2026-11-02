@@ -215,6 +215,17 @@ async function loadSession(): Promise<void> {
     window.location.href = `${WEBSITE_URL}/dashboard`;
     throw new Error("session_redirect: no_active_business");
   }
+
+  // Offline POS (Module 10): scope the cache to this user+business and
+  // start the sync engine once per session.
+  const { bindOfflineSession } = await import(
+    "../features/pos/offline/catalog.js"
+  );
+  const { useOfflineStore } = await import(
+    "../features/pos/offline/offlineStore.js"
+  );
+  bindOfflineSession(user.id ?? "anon", activeBusinessId);
+  useOfflineStore.getState().startWatchers();
 }
 
 /** Restores the persisted location selection for this user/business pair. */

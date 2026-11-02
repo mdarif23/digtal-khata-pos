@@ -15,7 +15,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 1 Checkout | Duplicate-submission prevention | B→F incomplete → **fixed** | **1** ✅ | ✅ replay + `onConflictDoNothing` | ✅ key sent, retry-safe | ✅ composite unique (0015) | unit 61/61, integration (see log) | — |
 | 1 Checkout | Server-authoritative checkout totals (tax consistency) | Missing → **Complete** | **1** ✅ | ✅ `POST /sales/quote` | ✅ quote-backed totals hook, local fallback | — | integration | — |
 | 1 Checkout | Cart expiry / cleanup, cart audit | Missing | 2 | ❌ | ❌ | ❌ | ❌ | — |
-| 1 Checkout | Active-cart recovery after refresh | **Defective** (audit correction: only held carts persist) | 2 | n/a | ❌ main cart store not persisted | n/a | ❌ | Persist cart store (with Phase 2 offline work) |
+| 1 Checkout | Active-cart recovery after refresh | **Defective** → **Partial** | 2 🔄 | n/a | ⚠️ cart remains memory-only; offline outbox survives restarts | n/a | ❌ | Persist cart store to IndexedDB (remaining slice) |
 | 2 Inventory | Adjustments / transfers / receiving | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 2 Inventory | Batch & serial tracking | Complete | — | ✅ FEFO locking | ✅ | ✅ | integration | — |
 | 2 Inventory | Barcode stocktaking + cycle counts | Missing | 3 | ❌ | ❌ | ❌ | ❌ | `stock_count_sessions/lines`, approval flow |
@@ -38,7 +38,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 8 Staff | Timeclock / attendance / shifts | Missing | 4 | ❌ | ❌ | ❌ | ❌ | — |
 | 9 Hardware | Browser printing + receipt settings | Complete | — | n/a | ✅ | n/a | ❌ | Fallback path done |
 | 9 Hardware | ESC/POS, USB/Serial/BT, drawer, scale, customer display | Missing | 5 | n/a | ❌ | n/a | ❌ | Behind hardware abstraction layer |
-| 10 Offline | Offline checkout + sync outbox | Missing | 2 (critical) | ❌ | ❌ | ❌ | ❌ | IndexedDB + SW + durable outbox; idempotent sync |
+| 10 Offline | Offline checkout + sync outbox | Missing → **Partial** | 2 🔄 | ✅ idempotent replay (no changes needed) | ✅ IndexedDB outbox + catalog cache + sync engine + status UI (cash/due only) | n/a | integration 3/3 | Service worker/background sync (optional); offline product search UX polish |
 | 11 Multi-loc | Locations, transfers, registers, location RBAC/reports | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 11 Multi-loc | Real-time register sync, health monitoring | Missing | 2 | ❌ (no WS/SSE) | ❌ | ❌ | ❌ | — |
 | 12 Omnichannel | Catalog, reservations, order sync, webhooks, entitlements | Complete (Ph9) | — | ✅ | ✅ | ✅ | integration | Customer sync pending |
@@ -96,6 +96,13 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-02** — Phase 2 slice 1 (offline-first core) complete:
+  - IndexedDB foundation (`pos/src/features/pos/offline/db.ts`): dependency-free IDB wrapper — catalog caches (products/customers, scoped per user+business), durable `outbox` keyed by client sale id, bounded sync log, persistent-storage request. localStorage deliberately NOT used as the transaction DB (per the master prompt).
+  - Offline sale recording: when the device is offline (or the connection drops mid-checkout), cash/due sales go to the outbox with a client-generated UUID that doubles as the backend idempotency key — **replays can never create duplicates** (proven by a dedicated integration test: 1 create + 3 replays → exactly 1 sale, 1 stock deduction; a stock-conflicted payload is rejected, never duplicated). Electronic payments/credits/due-without-customer keep the cart — they genuinely need connectivity.
+  - Sync engine (`offlineStore.ts`): auto-sync on reconnect + backoff (5s→5min, resets on success), sequential replay in recorded order, network-failure entries stay pending, backend REJECTIONS become "review required" (never retried, never dropped) with the exact server reason; full history + event log visible to the cashier (`SyncStatus` indicator + history dialog in the register header; re-queue after review).
+  - Catalog fallback: product/customer loads fall back to the IndexedDB cache on network failure with an "Offline mode" flag on the register.
+  - Backend: ZERO changes needed — Phase 1's idempotent checkout is the sync-safety foundation.
+  - Verification: backend tsc clean, full suite 276/295 (same 19 pre-existing; +3 offline-replay tests green); POS tsc + vite build green.
 - **2026-11-01** — Phase 1 slice 9 (Phase 1 tail: store credit + tax settings UI) complete — **PHASE 1 DONE**:
   - Migration `0021`: `customer_credits` — a pure transaction ledger (positive rows grant, negative rows consume; balance = SUM(amount), reconciles by construction). Consumers lock the customer's rows FOR UPDATE, so concurrent checkouts cannot overspend. `store_credit` added to sale-payment and refund-method constraints.
   - Refunds settle as store credit transactionally (`grantStoreCreditInTx` inside the refund tx; requires a customer on the sale). Sales can PAY with store credit (`consumeStoreCreditInTx` inside the sale tx; insufficient balance aborts the whole sale with a clear message; balance endpoint `GET /api/customers/:id/store-credit`).
