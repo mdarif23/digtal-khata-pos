@@ -20,7 +20,7 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
 | 2 Inventory | Batch & serial tracking | Complete | — | ✅ FEFO locking | ✅ | ✅ | integration | — |
 | 2 Inventory | Barcode stocktaking + cycle counts | Missing → **Complete** | 3 ✅ | ✅ sessions (whole-location or scoped cycle counts), variance-at-approval (counted − CURRENT, row-locked), movements + audit | ✅ Stock Counts page (scan/SKU entry, variance review, approve) | ✅ 0023 | integration 4/4 | Count-task assignment to staff (future refinement) |
 | 2 Inventory | Replenishment / reorder suggestions | Missing | 3 | ❌ | ❌ | ❌ | ❌ | min/max/reorder config, suggestion engine |
-| 2 Inventory | Aging, dead-stock, valuation reports | Partial | 3 | ❌ | 4 stock reports exist | — | ❌ | aging/dead-stock reports |
+| 2 Inventory | Aging, dead-stock, valuation reports | Partial → **Complete** | 3 ✅ | ✅ batch aging (receipt-date based, cost-valued buckets) + dead-stock (lookback window, never-sold detection) | ✅ Reports Hub tabs + nav | ✅ 0025 | integration 3/3 | — |
 | 3 Payments | Manual methods (cash/card/bKash-QR), split, dues | Complete | — | ✅ | ✅ | ✅ | integration | — |
 | 3 Payments | Provider architecture for **sale** payments | Missing → **Partial** | **1** 🔄 | ✅ intent layer + per-business configs + SSLCommerz adapter + verify/IPN + reconciliation fields | ✅ due collection via QR/Card (gateway redirect → server-verified return) | ✅ 0018 | integration 10/9→10 | Provider admin UI; bKash/Nagad adapters (blocked on official docs + merchant credentials) |
 | 3 Payments | Sale payment webhooks / reconciliation / settlement | Missing | **1** | ❌ | ❌ | ❌ | ❌ | — |
@@ -96,6 +96,12 @@ Status vocabulary: **Complete** · **Partial** · **Missing** · **Defective** �
   - Tax rate CRUD + product assignment endpoints (`/api/tax-rates`, `/api/products/:id/tax-rates`), permission-gated, audited (`tax_rate.created/updated`, `product.taxes_assigned`); receipts now carry `taxAmount`/`taxDetail` per line.
   - Fix: `validatePayments` mis-mapped two client errors (due-without-customer, payments-must-equal-total) as 404 — now 400.
   - Verification: tsc clean; full suite 257/276 (same 19 pre-existing; +10 tax tests green): exclusive 100+15=115, inclusive 115→extract 15, exempt+mixed carts ignore legacy VAT, legacy fallback intact, rate-change history preservation, future-dated rates, sales.vat = Σ line tax reconciliation.
+- **2026-11-02** — Phase 3 slice 3 (inventory aging + dead stock) complete — **Module 2 DONE**:
+  - `GET /api/reports/inventory/aging`: batch-level aging bucketed 0-30/31-60/61-90/90+ days, valued at each batch's own cost; age sourced from the linked purchase receipt date (fallback: batch created_at).
+  - `GET /api/reports/inventory/dead-stock?days=N`: stocked variants with no sales in the window (never-sold included), valued at remaining batch cost, sorted by value at rest.
+  - Ops: fixed a real schema drift — `inventory_batches.created_at` existed in the ORM schema but no migration ever added it (migration `0025` applied to both databases with reconciled bookkeeping).
+  - Frontend: Inventory Aging + Dead Stock report pages in the Reports Hub (new tabs + sidebar entries under Inventory reports).
+  - Verification: backend tsc clean, full suite 293/312 (same 19 pre-existing; +3 report tests green: bucket math, batch-cost valuation, dead-stock detection/exclusion, never-sold flagging); POS tsc + build green.
 - **2026-11-02** — Phase 3 slice 2 (automated replenishment) complete:
   - Migration `0024`: per-variant `reorder_point` / `reorder_quantity` config (products.edit permission; audited).
   - Suggestions are DERIVED at read time (never stored, always fresh): a variant is a candidate when current stock + OUTSTANDING purchase quantity has reached its point — in-flight orders are never double-ordered (proven by test: 5 stock + 25 on order > point 10 → no suggestion). Default order size = configured quantity, else the shortfall. Last purchase's supplier + unit cost prefill the conversion.

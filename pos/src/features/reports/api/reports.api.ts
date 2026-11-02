@@ -96,6 +96,17 @@ export interface RegisterSessionReportData {
 }
 
 export const reportsApi = {
+  getInventoryAging: () =>
+    api.get<{ success: boolean; data: InventoryAgingData }>(
+      "/reports/inventory/aging",
+    ),
+
+  getDeadStock: (days = 60) =>
+    api.get<{ success: boolean; data: DeadStockRow[] }>(
+      "/reports/inventory/dead-stock",
+      { params: { days } },
+    ),
+
   getLocationComparison: (filters: Partial<ReportFilters> = {}) =>
     api.get<{ success: boolean; data: LocationComparisonData }>(
       "/reports/locations/comparison",
@@ -200,3 +211,35 @@ export const reportsApi = {
   getSupplierPayables: () =>
     api.get<{ success: boolean; data: SupplierPayablesReportData }>("/reports/purchases/payables"),
 };
+
+// --- inventory intelligence (Module 2D) -------------------------------------
+
+export interface InventoryAgingRow {
+  batchId: number;
+  variantId: number;
+  productName: string;
+  sku: string | null;
+  batchNumber: string;
+  quantityRemaining: number;
+  unitCost: number;
+  stockValue: number;
+  ageDays: number;
+  bucket: "0-30" | "31-60" | "61-90" | "90+";
+}
+
+export interface InventoryAgingData {
+  rows: InventoryAgingRow[];
+  buckets: Record<string, { quantity: number; value: number }>;
+}
+
+export interface DeadStockRow {
+  variantId: number;
+  productId: number;
+  productName: string;
+  sku: string | null;
+  currentStock: number;
+  stockValue: number;
+  lastSoldAt: string | null;
+  daysSinceLastSale: number | null;
+  daysOnShelf: number | null;
+}

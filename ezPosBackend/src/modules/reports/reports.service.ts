@@ -1503,3 +1503,148 @@ export async function getLocationComparisonReport(
 
   return { rows, totals, periodBounds: { start, end } };
 }
+
+
+// ---------------------------------------------------------------------------
+// Inventory aging + dead stock (Module 2D, Phase 3).
+// ---------------------------------------------------------------------------
+
+export interface InventoryAgingRow {
+  batchId: number;
+  variantId: number;
+  productName: string;
+  sku: string | null;
+  batchNumber: string;
+  locationId: number;
+  quantityRemaining: number;
+  unitCost: number;
+  stockValue: number;
+  ageDays: number;
+  bucket: "0-30" | "31-60" | "61-90" | "90+";
+}
+
+/**
+ * Batch-level inventory aging: remaining quantities bucketed by how long
+ * ago each batch was received, valued at the batch's own cost (the same
+ * batch-wise cost tracking COGS uses).
+ */
+export async function getInventoryAgingReport(
+  businessId: number,
+  locationId?: number,
+): Promise<{ rows: InventoryAgingRow[]; buckets: Record<string, { quantity: number; value: number }> }> {
+  const result = await db.execute(sql`
+    SELECT b.id AS "batchId", b.variant_id AS "variantId", p.name AS "productName",
+           v.sku AS "sku", b.batch_number AS "batchNumber",
+           b.location_id AS "locationId",
+           b.quantity_remaining AS "quantityRemaining",
+           b.purchase_price AS "unitCost",
+           (b.quantity_remaining * b.purchase_price)::numeric AS "stockValue",
+           EXTRACT(DAY FROM now() - COALESCE(
+             (SELECT pu.purchase_date FROM purchase_items pi
+              JOIN purchases pu ON pu.id = pi.purchase_id
+              WHERE pi.id = b.purchase_item_id),
+             b.created_at, now()))::int AS "ageDays"
+    FROM inventory_batches b
+    JOIN product_variants v ON v.id = b.variant_id
+    JOIN products p ON p.id = v.product_id
+    WHERE b.business_id = ${businessId}
+      AND b.quantity_remaining > 0
+      ${locationId !== undefined ? sql`AND b.location_id = ${locationId}` : sql``}
+    ORDER BY b.created_at ASC
+  `);
+  const rows = (result.rows as Record<string, unknown>[]).map((row) => {
+    const ageDays = Number(row.ageDays ?? 0);
+    const bucket: InventoryAgingRow["bucket"] =
+      ageDays <= 30 ? "0-30" : ageDays <= 60 ? "31-60" : ageDays <= 90 ? "61-90" : "90+";
+    return {
+      batchId: Number(row.batchId),
+      variantId: Number(row.variantId),
+      productName: String(row.productName ?? ""),
+      sku: (row.sku as string | null) ?? null,
+      batchNumber: String(row.batchNumber ?? ""),
+      locationId: Number(row.locationId),
+      quantityRemaining: Number(row.quantityRemaining ?? 0),
+      unitCost: Number(row.unitCost ?? 0),
+      stockValue: Number(row.stockValue ?? 0),
+      ageDays,
+      bucket,
+    };
+  });
+  const buckets: Record<string, { quantity: number; value: number }> = {};
+  for (const row of rows) {
+    const bucket = buckets[row.bucket] ?? { quantity: 0, value: 0 };
+    bucket.quantity += row.quantityRemaining;
+    bucket.value = Number((bucket.value + row.stockValue).toFixed(2));
+    buckets[row.bucket] = bucket;
+  }
+  return { rows, buckets };
+}
+
+export interface DeadStockRow {
+  variantId: number;
+  productId: number;
+  productName: string;
+  sku: string | null;
+  currentStock: number;
+  stockValue: number;
+  lastSoldAt: string | null;
+  daysSinceLastSale: number | null;
+  daysOnShelf: number;
+}
+
+/**
+ * Dead stock: stocked variants with no sales in the given window (or never
+ * sold), valued at batch cost — capital sitting on the shelf.
+ */
+export async function getDeadStockReport(
+  businessId: number,
+  days: number,
+  locationId?: number,
+): Promise<DeadStockRow[]> {
+  const result = await db.execute(sql`
+    SELECT st.variant_id AS "variantId", p.id AS "productId", p.name AS "productName",
+           v.sku AS "sku",
+           st.quantity AS "currentStock",
+           COALESCE((SELECT SUM(b.quantity_remaining * b.purchase_price)
+             FROM inventory_batches b
+             WHERE b.variant_id = st.variant_id AND b.business_id = ${businessId}
+               AND b.quantity_remaining > 0
+               ${locationId !== undefined ? sql`AND b.location_id = ${locationId}` : sql``}
+           ), 0)::numeric AS "stockValue",
+           last_sale.last_sold_at AS "lastSoldAt",
+           NULL::int AS "daysOnShelf"
+    FROM inventory_stock st
+    JOIN product_variants v ON v.id = st.variant_id
+    JOIN products p ON p.id = v.product_id
+    LEFT JOIN (
+      SELECT si.variant_id, MAX(s.purchase_date) AS last_sold_at
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id AND s.business_id = si.business_id
+      WHERE s.business_id = ${businessId}
+        AND s.status IN ('completed', 'refunded')
+      GROUP BY si.variant_id
+    ) last_sale ON last_sale.variant_id = st.variant_id
+    WHERE st.business_id = ${businessId}
+      AND st.quantity > 0
+      ${locationId !== undefined ? sql`AND st.location_id = ${locationId}` : sql``}
+      AND (last_sale.last_sold_at IS NULL
+           OR last_sale.last_sold_at < now() - (${days} || ' days')::interval)
+    ORDER BY "stockValue" DESC
+  `);
+  return (result.rows as Record<string, unknown>[]).map((row) => {
+    const lastSoldAt = row.lastSoldAt ? new Date(row.lastSoldAt as string).toISOString() : null;
+    return {
+      variantId: Number(row.variantId),
+      productId: Number(row.productId),
+      productName: String(row.productName ?? ""),
+      sku: (row.sku as string | null) ?? null,
+      currentStock: Number(row.currentStock ?? 0),
+      stockValue: Number(row.stockValue ?? 0),
+      lastSoldAt,
+      daysSinceLastSale: lastSoldAt
+        ? Math.floor((Date.now() - new Date(lastSoldAt).getTime()) / 86_400_000)
+        : null,
+      daysOnShelf: Number(row.daysOnShelf ?? 0),
+    };
+  });
+}

@@ -37,6 +37,10 @@ import { RegisterCloseReport } from "./RegisterCloseReport";
 import { StockReport } from "./StockReport";
 import { StockMovementReport } from "./StockMovementReport";
 import { BatchExpiryReport } from "./BatchExpiryReport";
+import {
+  DeadStockReport,
+  InventoryAgingReport,
+} from "./InventoryIntelligenceReports";
 import { InventoryShrinkageReport } from "./InventoryShrinkageReport";
 import { PurchaseSummaryReport } from "./PurchaseSummaryReport";
 import { SupplierPayablesReport } from "./SupplierPayablesReport";
@@ -274,6 +278,10 @@ export default function ReportsHub() {
         return <InventoryShrinkageReport />;
       case "batch-expiry":
         return <BatchExpiryReport />;
+      case "inventory-aging":
+        return <InventoryAgingReport />;
+      case "dead-stock":
+        return <DeadStockReport />;
       case "purchases-summary":
         return <PurchaseSummaryReport />;
       case "supplier-payables":

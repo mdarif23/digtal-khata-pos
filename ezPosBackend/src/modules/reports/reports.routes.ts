@@ -114,6 +114,18 @@ router.get(
   reportsController.getBatchExpiry,
 );
 router.get(
+  "/api/reports/inventory/aging",
+  ...read,
+  requirePermission("reports.inventory.view"),
+  reportsController.getInventoryAging,
+);
+router.get(
+  "/api/reports/inventory/dead-stock",
+  ...read,
+  requirePermission("reports.inventory.view"),
+  reportsController.getDeadStock,
+);
+router.get(
   "/api/reports/inventory/shrinkage",
   ...read,
   requirePermission("reports.inventory.view"),

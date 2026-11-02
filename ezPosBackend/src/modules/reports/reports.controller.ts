@@ -302,3 +302,32 @@ export async function getLocationComparison(req: Request, res: Response) {
 function sendSafe(err: unknown, res: Response) {
   sendSafeError(res, err, "Unable to generate this report right now.");
 }
+
+export async function getInventoryAging(req: Request, res: Response) {
+  try {
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getInventoryAgingReport(
+      getBusinessId(req),
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}
+
+export async function getDeadStock(req: Request, res: Response) {
+  try {
+    const locationId = await resolveReportLocation(req);
+    const days = Number(req.query.days ?? 60);
+    const windowDays = Number.isFinite(days) && days >= 1 && days <= 365 ? Math.floor(days) : 60;
+    const data = await reportsService.getDeadStockReport(
+      getBusinessId(req),
+      windowDays,
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}

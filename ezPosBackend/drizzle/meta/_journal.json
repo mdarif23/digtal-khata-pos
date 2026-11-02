@@ -176,6 +176,13 @@
       "when": 1793639417241,
       "tag": "0024_variant_reorder_config",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793641051921,
+      "tag": "0025_inventory_batches_created_at",
+      "breakpoints": true
     }
   ]
 }

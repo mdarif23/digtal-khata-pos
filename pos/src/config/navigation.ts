@@ -74,6 +74,8 @@ export const navigation = [
       { title: "Stock & Valuation", url: "/reports?tab=stock", permission: "reports.inventory.view" },
       { title: "Loss & Shrinkage", url: "/reports?tab=shrinkage", permission: "reports.inventory.view" },
       { title: "Batch & Expiry", url: "/reports?tab=batch-expiry", permission: "reports.inventory.view" },
+      { title: "Inventory Aging", url: "/reports?tab=inventory-aging", permission: "reports.inventory.view" },
+      { title: "Dead Stock", url: "/reports?tab=dead-stock", permission: "reports.inventory.view" },
       { title: "Purchase Summary", url: "/reports?tab=purchases-summary", permission: "reports.purchase.view" },
       { title: "Supplier Payables", url: "/reports?tab=supplier-payables", permission: "reports.purchase.view" },
     ],
