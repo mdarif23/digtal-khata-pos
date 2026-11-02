@@ -224,7 +224,7 @@ async function loadSession(): Promise<void> {
   const { useOfflineStore } = await import(
     "../features/pos/offline/offlineStore.js"
   );
-  bindOfflineSession(user.id ?? "anon", activeBusinessId);
+  bindOfflineSession(getSessionUser()?.id ?? "anon", activeBusinessId);
   useOfflineStore.getState().startWatchers();
   // Cart recovery (Module 1.5): restore a checkout interrupted by a
   // refresh/crash. After the offline scope is bound, before the first UI.
