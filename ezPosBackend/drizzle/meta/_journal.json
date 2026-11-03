@@ -260,6 +260,13 @@
       "when": 1793825240003,
       "tag": "0036_smart_procurement",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793735769316,
+      "tag": "0037_online_order_fulfillment",
+      "breakpoints": true
     }
   ]
 }

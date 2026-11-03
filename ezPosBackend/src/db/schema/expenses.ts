@@ -16,6 +16,8 @@ import { sql } from "drizzle-orm";
 import { expenseCategories } from "./expenseCategories.js";
 import { businesses } from "./businesses.js";
 import { locations } from "./locations.js";
+import { sales } from "./sales.js";
+import { saleChannelEnum } from "./commerceEnums.js";
 
 export const expenses = pgTable(
   "expenses",
@@ -33,6 +35,14 @@ export const expenses = pgTable(
     // location belongs to the same business.
     locationId: integer("location_id"),
     referenceNo: varchar("reference_no", { length: 100 }),
+    /**
+     * Optional channel attribution (online profitability): NULL = shared
+     * across all channels; otherwise the expense is attributable to that
+     * sales channel only.
+     */
+    channel: saleChannelEnum("channel"),
+    /** Optional order link for order-specific expenses (estimated op. profit). */
+    saleId: integer("sale_id"),
     note: text(),
     expenseDate: date("expense_date").notNull(),
     createdAt: timestamp("created_at", { mode: "string" }).default(
@@ -54,6 +64,11 @@ export const expenses = pgTable(
       columns: [table.categoryId, table.businessId],
       foreignColumns: [expenseCategories.id, expenseCategories.businessId],
       name: "expenses_category_business_fkey",
+    }),
+    foreignKey({
+      columns: [table.saleId, table.businessId],
+      foreignColumns: [sales.id, sales.businessId],
+      name: "expenses_sale_business_fkey",
     }),
     check("expenses_amount_check", sql`amount >= (0)::numeric`),
     check(
