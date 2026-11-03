@@ -328,7 +328,7 @@ describe("unified orders integration", { skip: !runIntegration }, () => {
       `/api/businesses/${owner.businessId}/orders?channel=woocommerce`,
     );
     const order = list.body.orders[0];
-    assert.equal(order.fulfillmentStatus, "processing");
+    assert.equal(order.fulfillmentStatus, "confirmed");
 
     // Invalid jump: unfulfilled → delivered is allowed by design, but the
     // transition map rejects nothing here — assert the valid path works.

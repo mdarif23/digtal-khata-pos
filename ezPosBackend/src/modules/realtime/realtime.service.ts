@@ -114,7 +114,10 @@ export type RealtimeEvent =
   | { kind: "stock.changed"; locationId: number }
   | { kind: "notification.created" }
   | { kind: "held_sales.changed"; locationId: number }
-  | { kind: "register.changed"; locationId: number };
+  | { kind: "register.changed"; locationId: number }
+  /** Online order activity (module two) — business-wide so every portal
+   * screen can refresh its order lists. */
+  | { kind: "order.updated"; saleId: number };
 
 /**
  * Publishes an event to every stream of the same business. locationId-scoped

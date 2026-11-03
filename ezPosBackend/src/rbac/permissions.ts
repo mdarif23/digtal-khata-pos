@@ -108,6 +108,22 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   // Online Store (hosted storefront platform)
   { key: "storefront.view", module: "storefront", description: "View the online store, its settings and orders" },
   { key: "storefront.manage", module: "storefront", description: "Create and manage the online store, domains and publishing" },
+
+  // Online Orders (order management & fulfillment)
+  { key: "orders.view", module: "orders", description: "View online orders, their details and timelines" },
+  { key: "orders.confirm", module: "orders", description: "Confirm or reject incoming online orders" },
+  { key: "orders.process", module: "orders", description: "Start processing and progress order fulfillment" },
+  { key: "orders.pack", module: "orders", description: "Record and edit order packages" },
+  { key: "orders.ready_to_ship", module: "orders", description: "Mark packed orders as ready to ship" },
+  { key: "orders.ship", module: "orders", description: "Record shipments and mark orders shipped" },
+  { key: "orders.deliver", module: "orders", description: "Record delivery and COD collection" },
+  { key: "orders.cancel", module: "orders", description: "Cancel online orders" },
+  { key: "orders.return", module: "orders", description: "Process online order returns and refunds" },
+  { key: "orders.manage_shipping", module: "orders", description: "Update courier and tracking information" },
+  { key: "orders.mark_paid", module: "orders", description: "Record payment collection for unpaid orders" },
+
+  // Reports (online channel)
+  { key: "reports.online_profitability.view", module: "reports", description: "View online store profitability, costs and fees" },
 ];
 
 export const ALL_PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((p) => p.key);
@@ -175,6 +191,18 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "reports.inventory.view",
     "storefront.view",
     "storefront.manage",
+    "orders.view",
+    "orders.confirm",
+    "orders.process",
+    "orders.pack",
+    "orders.ready_to_ship",
+    "orders.ship",
+    "orders.deliver",
+    "orders.cancel",
+    "orders.return",
+    "orders.manage_shipping",
+    "orders.mark_paid",
+    "reports.online_profitability.view",
   ],
 
   cashier: [
@@ -187,6 +215,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "attendance.view",
     "customers.view",
     "customers.create",
+    "orders.view",
+    "orders.process",
+    "orders.pack",
   ],
 
   accountant: [
@@ -209,6 +240,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "reports.profit.view",
     "reports.expense.view",
     "reports.financial.view",
+    "reports.online_profitability.view",
+    "orders.view",
   ],
 };
 
