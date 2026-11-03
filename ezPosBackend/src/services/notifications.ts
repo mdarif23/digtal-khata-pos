@@ -24,6 +24,7 @@ export type NotificationKind =
   | "expiring_inventory"
   | "register_discrepancy"
   | "integration_failure"
+  | "price_increase"
   | "system";
 
 export interface NotifyInput {

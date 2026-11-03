@@ -1,24 +1,24 @@
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { productVariants } from "../../db/schema/productVariants.js";
-import { products } from "../../db/schema/products.js";
-import { inventoryStock } from "../../db/schema/inventoryStock.js";
-import { purchaseItems } from "../../db/schema/purchaseItems.js";
-import { purchases } from "../../db/schema/purchases.js";
-import { suppliers } from "../../db/schema/suppliers.js";
 import { BadRequestError, NotFoundError } from "../../utils/handleError.js";
 import { createPurchase } from "../purchases/purchases.service.js";
 import { recordAuditInTx } from "../../services/audit.js";
+import {
+  computeReorderRows,
+  rowsToSuggestions,
+} from "../procurement/reorderPlanning.service.js";
 
 /**
  * Automated replenishment (Module 2C).
  *
- * Suggestions are DERIVED at read time (never stored): a variant is a
- * candidate when current stock + outstanding (unreceived) purchase
- * quantity has reached its reorder point, so in-flight orders are not
- * double-ordered. The default order size is the configured reorder
- * quantity, else the shortfall to the point. The last purchase's supplier
- * and unit cost prefill the purchase-order conversion.
+ * Suggestions are DERIVED at read time (never stored) and share ONE
+ * computation with the Smart Reorder dashboard
+ * (procurement/reorderPlanning.service): available = (stock − reserved)
+ * + outstanding POs + in-transit inbound transfers, so in-flight orders
+ * are never double-ordered. The default order size is the configured
+ * reorder quantity, else the shortfall to the point. The last purchase's
+ * supplier and unit cost prefill the purchase-order conversion.
  */
 
 export interface ReorderSuggestion {
@@ -40,104 +40,8 @@ export async function listReorderSuggestions(
   businessId: number,
   locationId: number,
 ): Promise<ReorderSuggestion[]> {
-  const rows = await db
-    .select({
-      variantId: productVariants.id,
-      productId: products.id,
-      productName: products.name,
-      sku: productVariants.sku,
-      currentStock: inventoryStock.quantity,
-      reorderPoint: productVariants.reorderPoint,
-      reorderQuantity: productVariants.reorderQuantity,
-      // Outstanding = not-yet-received quantity across open purchases.
-      outstandingOnOrder: sql<number>`(
-        SELECT COALESCE(SUM(${purchaseItems.quantity} - ${purchaseItems.receivedQuantity} - ${purchaseItems.cancelledQuantity}), 0)
-        FROM ${purchaseItems}
-        JOIN ${purchases} ON ${purchases.id} = ${purchaseItems.purchaseId}
-        WHERE ${purchaseItems.variantId} = ${productVariants.id}
-          AND ${purchases.businessId} = ${businessId}
-          AND ${purchases.status} NOT IN ('received')
-      )`,
-      lastSupplierId: sql<number | null>`(
-        SELECT ${purchases.supplierId} FROM ${purchaseItems}
-        JOIN ${purchases} ON ${purchases.id} = ${purchaseItems.purchaseId}
-        WHERE ${purchaseItems.variantId} = ${productVariants.id}
-          AND ${purchases.businessId} = ${businessId}
-          AND ${purchases.supplierId} IS NOT NULL
-        ORDER BY ${purchases.id} DESC LIMIT 1
-      )`,
-      lastUnitCost: sql<number | null>`(
-        SELECT ${purchaseItems.unitCost} FROM ${purchaseItems}
-        JOIN ${purchases} ON ${purchases.id} = ${purchaseItems.purchaseId}
-        WHERE ${purchaseItems.variantId} = ${productVariants.id}
-          AND ${purchases.businessId} = ${businessId}
-        ORDER BY ${purchases.id} DESC LIMIT 1
-      )`,
-    })
-    .from(productVariants)
-    .innerJoin(products, eq(products.id, productVariants.productId))
-    .innerJoin(
-      inventoryStock,
-      and(
-        eq(inventoryStock.variantId, productVariants.id),
-        eq(inventoryStock.businessId, businessId),
-        eq(inventoryStock.locationId, locationId),
-      ),
-    )
-    .where(
-      and(
-        eq(productVariants.businessId, businessId),
-        isNotNull(productVariants.reorderPoint),
-      ),
-    );
-
-  const supplierNames = new Map<number, string>();
-  const supplierIds = [
-    ...new Set(
-      rows.map((r) => r.lastSupplierId).filter((id): id is number => id !== null),
-    ),
-  ];
-  if (supplierIds.length > 0) {
-    const supplierRows = await db
-      .select({ id: suppliers.id, name: suppliers.name })
-      .from(suppliers)
-      .where(eq(suppliers.businessId, businessId));
-    for (const row of supplierRows) supplierNames.set(row.id, row.name);
-  }
-
-  const suggestions: ReorderSuggestion[] = [];
-  for (const row of rows) {
-    const current = Number(row.currentStock ?? 0);
-    const onOrder = Number(row.outstandingOnOrder ?? 0);
-    const point = Number(row.reorderPoint ?? 0);
-    // Actual available stock nets in-flight purchases — no double-ordering.
-    const available = current + onOrder;
-    if (available > point) continue;
-    const suggested =
-      row.reorderQuantity !== null && Number(row.reorderQuantity) > 0
-        ? Number(row.reorderQuantity)
-        : Math.max(1, point - available);
-    suggestions.push({
-      variantId: row.variantId,
-      productId: row.productId,
-      productName: row.productName,
-      sku: row.sku,
-      currentStock: current,
-      outstandingOnOrder: onOrder,
-      reorderPoint: point,
-      reorderQuantity:
-        row.reorderQuantity !== null ? Number(row.reorderQuantity) : null,
-      suggestedQuantity: suggested,
-      lastSupplierId: row.lastSupplierId,
-      lastSupplierName:
-        row.lastSupplierId !== null
-          ? (supplierNames.get(row.lastSupplierId) ?? null)
-          : null,
-      lastUnitCost:
-        row.lastUnitCost !== null ? Number(row.lastUnitCost) : null,
-    });
-  }
-  return suggestions;
+  const rows = await computeReorderRows(businessId, locationId);
+  return rowsToSuggestions(rows);
 }
 
 export async function setReorderConfig(

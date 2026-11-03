@@ -7,6 +7,7 @@ import { salePayments } from "./salePayments.js";
 import { saleItems } from "./saleItems.js";
 import { supplierLedger } from "./supplierLedger.js";
 import { suppliers } from "./suppliers.js";
+import { priceObservations } from "./priceObservations.js";
 import { purchaseReturns } from "./purchaseReturns.js";
 import { purchaseReturnItems } from "./purchaseReturnItems.js";
 import { purchaseItems } from "./purchaseItems.js";
@@ -91,7 +92,30 @@ export const supplierLedgerRelations = relations(supplierLedger, ({ one }) => ({
 export const suppliersRelations = relations(suppliers, ({ many }) => ({
   supplierLedgers: many(supplierLedger),
   purchaseReturns: many(purchaseReturns),
+  priceObservations: many(priceObservations),
 }));
+
+export const priceObservationsRelations = relations(
+  priceObservations,
+  ({ one }) => ({
+    business: one(businesses, {
+      fields: [priceObservations.businessId],
+      references: [businesses.id],
+    }),
+    productVariants: one(productVariants, {
+      fields: [priceObservations.variantId],
+      references: [productVariants.id],
+    }),
+    supplier: one(suppliers, {
+      fields: [priceObservations.supplierId],
+      references: [suppliers.id],
+    }),
+    createdByUser: one(users, {
+      fields: [priceObservations.createdByUserId],
+      references: [users.id],
+    }),
+  }),
+);
 
 export const saleRefundItemsRelations = relations(
   saleRefundItems,

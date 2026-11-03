@@ -253,6 +253,13 @@
       "when": 1793652440002,
       "tag": "0035_order_payments_shoppers",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793825240003,
+      "tag": "0036_smart_procurement",
+      "breakpoints": true
     }
   ]
 }

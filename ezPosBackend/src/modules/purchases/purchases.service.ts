@@ -12,6 +12,7 @@ import { suppliers } from "../../db/schema/suppliers.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { units } from "../../db/schema/units.js";
 import type { ReceiveItemsFormValues } from "./schemas/receiveItem.schema.js";
+import { checkPriceIncreasesInTx } from "../procurement/priceAlerts.service.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import {
   basicRequestValidation,
@@ -438,6 +439,31 @@ export async function createReceivePurchase(
         newPaymentAmount,
         paymentNotes,
       );
+    }
+
+    // =========================================================
+    // 15. PRICE-INCREASE ALERTS (Smart Procurement)
+    // Factual supplier price monitoring: compares each received line's
+    // actual unit cost against this supplier's previous actual price for
+    // the variant; records a deduplicated notification when the business's
+    // configured threshold is met. Runs inside this transaction but never
+    // blocks a legitimate receive.
+    // =========================================================
+
+    try {
+      await checkPriceIncreasesInTx(tx, {
+        businessId,
+        purchaseId,
+        supplierId: purchase.supplierId,
+        items: items.map((receiveItem) => ({
+          variantId:
+            existingItems.find((pi) => pi.id === receiveItem.itemId)?.variantId ?? 0,
+          unitCost: receiveItem.unitCost,
+          receiveNow: receiveItem.receiveNow,
+        })),
+      });
+    } catch (alertError) {
+      console.error("Price-increase alert check failed:", alertError);
     }
 
     // =========================================================

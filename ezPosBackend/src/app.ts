@@ -22,6 +22,7 @@ import customersRouter from "./modules/customers/customers.routes.js";
 import expenseRouter from "./modules/expenses/expenses.routes.js";
 import purchasesRouter from "./modules/purchases/purchases.routes.js";
 import purchasesReturnRouter from "./modules/purchaseReturn/purchaseReturn.routes.js";
+import procurementRouter from "./modules/procurement/procurement.routes.js";
 import addProductRouter from "./modules/addProduct/product.routes.js";
 import contactRouter from "./modules/contact/contact.routes.js";
 import dueManagementRouter from "./modules/dueManagement/dueManagement.routes.js";
@@ -129,6 +130,7 @@ export function buildApp() {
   app.use("/", expenseRouter);
   app.use("/", purchasesRouter);
   app.use("/", purchasesReturnRouter);
+  app.use("/", procurementRouter);
   app.use("/", addProductRouter);
   app.use("/", contactRouter);
   app.use("/", dueManagementRouter);

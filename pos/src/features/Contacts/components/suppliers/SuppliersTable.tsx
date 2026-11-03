@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Mail, MapPin, Phone } from "lucide-react";
+import { useNavigate } from "react-router";
 import type { Supplier } from "../../contact.type";
 
 interface SuppliersTableProps {
@@ -17,6 +18,7 @@ interface SuppliersTableProps {
 }
 
 export function SuppliersTable({ suppliers, loading }: SuppliersTableProps) {
+  const navigate = useNavigate();
   return (
     <div className="overflow-hidden rounded-lg border">
       <Table>
@@ -40,7 +42,11 @@ export function SuppliersTable({ suppliers, loading }: SuppliersTableProps) {
             </TableRow>
           ) : suppliers.length ? (
             suppliers.map((supplier) => (
-              <TableRow key={supplier.id}>
+              <TableRow
+                key={supplier.id}
+                className="cursor-pointer"
+                onClick={() => navigate(`/procurement/suppliers/${supplier.id}`)}
+              >
                 <TableCell>
                   <div className="flex items-center gap-3">
                     <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 font-semibold text-primary">
