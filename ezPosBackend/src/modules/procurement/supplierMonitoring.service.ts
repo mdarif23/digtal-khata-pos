@@ -5,6 +5,7 @@ import { NotFoundError } from "../../utils/handleError.js";
 import { getPriceOverview, receivedEventsCte } from "./priceHistory.service.js";
 import type { PriceOverviewRow } from "./priceHistory.service.js";
 import type { PriceOverviewQuery } from "./schemas/priceHistory.schema.js";
+import type { UpdateOrderSettingsInput } from "./schemas/priceCheck.schema.js";
 
 /**
  * Supplier Price Monitoring (Smart Procurement Phase 3): this supplier's
@@ -132,6 +133,45 @@ export async function getSupplierPriceHistory(
 
 /** Re-exported for tests that need the shared events definition. */
 export { receivedEventsCte };
+
+/**
+ * Supplier order-value settings (Feature D). The minimum order value is
+ * the supplier's requirement, the target order value is the business's
+ * own spending goal — configured independently, never derived from each
+ * other. Omitted fields stay unchanged; explicit nulls clear them.
+ */
+export async function updateSupplierOrderSettings(
+  businessId: number,
+  supplierId: number,
+  input: UpdateOrderSettingsInput,
+): Promise<SupplierDetail> {
+  const [supplier] = await db
+    .select({ id: suppliers.id })
+    .from(suppliers)
+    .where(and(eq(suppliers.id, supplierId), eq(suppliers.businessId, businessId)))
+    .limit(1);
+  if (!supplier) throw new NotFoundError("Supplier not found.");
+
+  await db
+    .update(suppliers)
+    .set({
+      ...(input.minimumOrderValue !== undefined
+        ? { minimumOrderValue: input.minimumOrderValue }
+        : {}),
+      ...(input.targetOrderValue !== undefined
+        ? { targetOrderValue: input.targetOrderValue }
+        : {}),
+      ...(input.orderSettingsEnabled !== undefined
+        ? { orderSettingsEnabled: input.orderSettingsEnabled }
+        : {}),
+      ...(input.orderSettingsNotes !== undefined
+        ? { orderSettingsNotes: input.orderSettingsNotes }
+        : {}),
+    })
+    .where(and(eq(suppliers.id, supplierId), eq(suppliers.businessId, businessId)));
+
+  return getSupplierDetail(businessId, supplierId);
+}
 
 export interface SupplierVariantEvent {
   purchaseId: number;

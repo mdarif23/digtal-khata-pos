@@ -81,6 +81,13 @@ router.get(
   requireAnyPermission(["suppliers.view", "purchases.view"]),
   procurementController.getSupplierVariantTrend,
 );
+// Order-value settings are supplier editing (Feature D, Phase 5).
+router.patch(
+  "/api/procurement/suppliers/:supplierId/order-settings",
+  ...write,
+  requirePermission("suppliers.edit"),
+  procurementController.updateSupplierOrderSettings,
+);
 
 // Business-wide price-increase alert configuration. Reading is open to
 // purchases.view; changing the threshold is its own key (owner-level by

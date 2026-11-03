@@ -7,5 +7,8 @@ export const reorderDashboardQuerySchema = z.object({
   status: z
     .enum(["all", "attention", "out_of_stock", "low_stock", "needs_reorder", "healthy"])
     .optional(),
+  // Restrict to one supplier's attention products (Phase 5: "add more
+  // needed products from this supplier" when below the minimum).
+  supplierId: z.coerce.number().int().positive().optional(),
 });
 export type ReorderDashboardQuery = z.infer<typeof reorderDashboardQuerySchema>;

@@ -291,6 +291,24 @@ export async function getSupplierDetailApi(
   return data.data;
 }
 
+export interface UpdateOrderSettingsInput {
+  minimumOrderValue?: number | null | undefined;
+  targetOrderValue?: number | null | undefined;
+  orderSettingsEnabled?: boolean | undefined;
+  orderSettingsNotes?: string | null | undefined;
+}
+
+export async function updateOrderSettingsApi(
+  supplierId: number,
+  payload: UpdateOrderSettingsInput,
+): Promise<SupplierDetail> {
+  const { data } = await api.patch<{ success: boolean; data: SupplierDetail }>(
+    `/procurement/suppliers/${supplierId}/order-settings`,
+    payload,
+  );
+  return data.data;
+}
+
 export async function getSupplierPriceHistoryApi(
   supplierId: number,
   filters: SupplierHistoryFilters = {},
@@ -374,6 +392,13 @@ export interface ReorderDashboardSummary {
   supplierCount: number;
 }
 
+export type OrderValueStatus =
+  | "below_minimum"
+  | "minimum_reached"
+  | "target_reached"
+  | "above_target"
+  | "ready_for_review";
+
 export interface SupplierReorderGroup {
   supplierId: number | null;
   supplierName: string | null;
@@ -382,6 +407,8 @@ export interface SupplierReorderGroup {
   estimatedValue: number;
   minimumOrderValue: number | null;
   targetOrderValue: number | null;
+  orderStatus: OrderValueStatus;
+  amountRemaining: number;
 }
 
 export interface ReorderDashboard {
@@ -396,6 +423,7 @@ export interface ReorderDashboard {
 export interface ReorderDashboardFilters {
   search?: string | undefined;
   status?: "all" | "attention" | ReorderStatus | undefined;
+  supplierId?: number | undefined;
   page?: number | undefined;
   limit?: number | undefined;
 }

@@ -62,8 +62,8 @@ Drizzle mirrors: `src/db/schema/priceObservations.ts`,
 | 2 | Wholesale Market Price Check (Quick Price Check) | ✅ Complete (2026-11-04) — see §5 |
 | 3 | Supplier Price Monitoring + increase alerts | ✅ Complete (2026-11-04) — see §6 |
 | 4 | Smart Reorder Planning (extend `modules/reorder`) | ✅ Complete (2026-11-04) — see §7 |
-| 5 | Supplier Order Value Management | ⬜ Not started |
-| 6 | Integration QA + regressions | ⬜ Not started |
+| 5 | Supplier Order Value Management | ✅ Complete (2026-11-04) — see §8 |
+| 6 | Integration QA + regressions | ✅ Complete (2026-11-04) — see §9 |
 
 ## 4. Phase 1 — Product Price Intelligence
 
@@ -453,14 +453,128 @@ Filters: `search`, `status` (`all`/`attention`/per-status), pagination.
   without reorder config are visible but need Phase 5's draft editor for
   ordering.
 
-## 8. Remaining work
+## 8. Phase 5 — Supplier Order Value Management
 
-- **Phase 2**: ✅ shipped (see §5).
-- **Phase 3**: ✅ shipped (see §6).
-- **Phase 4**: ✅ shipped (see §7).
-- **Phase 5**: supplier order settings (columns ready), PATCH endpoint
-  (permission `suppliers.edit`), order-value status indicators,
-  below-minimum flow with warnings, draft creation via existing
-  `createPurchase` (also add `id` to its `POST /api/purchases` response —
-  currently returns only `purchaseOrderNumber`).
-- **Phase 6**: full regression pass (purchases/receiving/POS), cleanup.
+Committed history: 1–2 = `316e51b`, 3 = `0b0c81d`, 4 = `6e20830`.
+
+### Backend
+
+- **Order settings editing** — `PATCH
+  /api/procurement/suppliers/:supplierId/order-settings`
+  (`suppliers.edit`): independent `minimumOrderValue` (supplier's
+  requirement) and `targetOrderValue` (business's own goal), enable
+  flag, notes. Omitted fields unchanged; explicit nulls clear. Returns
+  the full supplier detail. The two values are never derived from each
+  other.
+- **Order-value status** on dashboard supplier groups (factual, in
+  `reorderPlanning.service orderValueStatus`): `below_minimum` (with
+  `amountRemaining`), `minimum_reached`, `target_reached`,
+  `above_target`, `ready_for_review`. Informational only — nothing is
+  blocked, nothing is forced.
+- **Supplier filter** on the reorder dashboard
+  (`?supplierId=&status=attention`) — powers "add other needed products
+  from this supplier" in the draft dialog.
+- **`POST /api/purchases` now returns `id`** alongside
+  `purchaseOrderNumber` (backward-compatible; promised in Phase 0).
+
+### Frontend
+
+- **SupplierDetailsPage "Order settings" card** — enable switch, minimum
+  and target inputs, notes; editable with `suppliers.edit`, read-only
+  otherwise.
+- **Dashboard groups table** — order-status badge + "Remaining to
+  minimum" column.
+- **Draft creation dialog upgraded**: per-draft **supplier reassignment**
+  (Select over all suppliers — the buyer can change suppliers "where
+  appropriate"), per-item quantity/price lines, below-minimum **warning
+  panel** ("Below {supplier}'s minimum by ৳X — you can still create this
+  draft, or add other products that genuinely need replenishment") with
+  **"Show needed products"** — fetches that supplier's other attention
+  rows and adds them (with their suggested quantities) to the draft.
+  Main table rows gained "Compare prices" links to the variant's
+  supplier-comparison page. Nothing auto-submits; below-minimum drafts
+  are allowed with the warning, per spec.
+
+### Business rules implemented
+
+- Minimum and target are independent, user-configured, enable/disable-able.
+- Order status reports facts (below/at/above) and never judges the
+  supplier.
+- The buyer always reviews: quantities editable, supplier changeable,
+  confirmation explicit; below-minimum proceeds with a visible warning;
+  quantities are never auto-increased (suggestions are defaults the user
+  edits).
+
+### Test evidence (executed 2026-11-04)
+
+- Backend: tsc clean; `procurementOrderValue.integration.test.ts`
+  **7/7** — ready_for_review default, settings saved + surfaced,
+  below_minimum with amountRemaining 8500 / above_target classification,
+  supplierId filter, negative-value 400 + cashier 403, foreign-tenant
+  404 + empty dashboard, purchase `id` in create response. Full suite
+  **400/400** (393 + 7).
+- Frontend: **32/32** vitest (2 new order-settings permission tests);
+  `tsc -b` 0 new-file errors; `vite build` green.
+
+## 9. Phase 6 — Integration QA and acceptance verification
+
+No regressions were discovered in the final verification pass, and no
+existing module's code paths were modified except the two intentional
+hooks (receive-transaction alert check; `createPurchase` return gains
+`id`).
+
+Final verification (all executed 2026-11-04, after the last code change):
+- Backend `tsc --noEmit` clean; full suite **400/400** — includes the
+  untouched suites for purchases, receiving, payments, returns,
+  inventory, transfers, registers, RBAC, locations, tenancy/isolation,
+  sales, POS, storefront, subscriptions (67 suites).
+- Frontend vitest **32/32**; `tsc -b` 0 errors in new files (pre-existing
+  baseline untouched); `vite build` green.
+- Migration 0036 applied to `ezpos_test` and dev `ezPos`; every feature
+  runs on additive schema only.
+
+Master-prompt acceptance scenarios (§17), each covered by automated
+tests:
+1. **Product price comparison** → Phase 1 suite: per-supplier latest/
+   previous/min/max/weighted-avg with exact math (102.22 / 22.22%).
+2. **Wholesale market price check** → Phase 2 suite: quotations persist
+   separately, per-unit normalization, source separation, CRUD + audit.
+3. **Supplier price increase (৳100 → ৳120 = +20%)** → Phase 3 suite:
+   factual `price_increase` notification with exact body/payload, once
+   per event, threshold-gated.
+4. **Automatic reorder detection** → Phase 4 suite: reorder point/alert
+   monitoring, status classification, no double-ordering across
+   outstanding POs, reserved and in-transit netting.
+5. **Supplier minimum (৳10,000 vs ৳8,000)** → Phase 5 suite + UI:
+   `below_minimum` with exact remaining amount and add-needed-products
+   flow; below-minimum drafts allowed with a warning.
+6. **Business target (৳7,000)** → Phase 5: independent target with
+   `target_reached`/`above_target` classification.
+7. **Purchase integration** → Phases 4–5: draft creation via the
+   existing convert/purchase workflow; receiving, payments, and
+   inventory continue to pass their full suites; tenancy isolation
+   verified in all five new suites.
+
+## 10. Remaining work (post-feature polish, non-blocking)
+
+- **Nav consolidation**: the legacy `/reorder` suggestions page and the
+  new `/procurement/reorder` dashboard both live under Purchases; once
+  owners are settled, fold the old page into the dashboard (it keeps
+  inline reorder-point editing the dashboard does not have yet).
+- **Quotation-only suppliers**: currently visible in Price Check history
+  and the observations list but not in the purchase-based supplier
+  comparison table (which aggregates received purchases only).
+- **Alert channels**: `price_increase` alerts are in-app (bell + SSE);
+  email/push would need a delivery channel outside this feature.
+- **Trend chart depth**: supplier/variant trend caps at the 200 most
+  recent events; a dedicated long-range points query is a candidate if
+  owners need multi-year charts.
+- **Cross-unit comparison**: quotations normalize per unit only within
+  the same variant; a unit-conversion table would be required for
+  cross-unit comparisons (deliberately out of scope — no such data
+  exists in the schema).
+- **Existing businesses' staff roles**: new permission keys
+  (`purchases.price_check`, `purchases.manage_price_alerts`) reach staff
+  roles of pre-existing businesses only via the Roles UI (owner wildcard
+  covers owners automatically); new businesses get them via the manager
+  template.

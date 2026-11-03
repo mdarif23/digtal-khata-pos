@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, LineChart } from "lucide-react";
+import { ArrowLeft, LineChart, NotebookPen } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -27,6 +27,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/components/ui/toast";
+import { usePermissions } from "@/hooks/usePermissions";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { ReportTrendChart } from "@/features/reports/components/ReportChart";
 import {
@@ -39,6 +43,7 @@ import {
   useSupplierDetail,
   useSupplierPriceHistory,
   useSupplierVariantTrend,
+  useUpdateOrderSettings,
 } from "../hooks/useProcurement";
 import type { SupplierHistoryFilters } from "../api/procurement.api";
 
@@ -105,6 +110,83 @@ export function SupplierDetailsPage() {
   const supplier = detail.data?.supplier;
   const stats = detail.data?.stats;
 
+  const { hasPermission } = usePermissions();
+  const canEditSettings = hasPermission("suppliers.edit");
+  const updateOrderSettings = useUpdateOrderSettings();
+  const [settingsEnabled, setSettingsEnabled] = useState(false);
+  const [minOrder, setMinOrder] = useState("");
+  const [targetOrder, setTargetOrder] = useState("");
+  const [settingsNotes, setSettingsNotes] = useState("");
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  useEffect(() => {
+    if (detail.data && !settingsLoaded) {
+      setSettingsEnabled(detail.data.supplier.orderSettingsEnabled);
+      setMinOrder(
+        detail.data.supplier.minimumOrderValue === null
+          ? ""
+          : String(detail.data.supplier.minimumOrderValue),
+      );
+      setTargetOrder(
+        detail.data.supplier.targetOrderValue === null
+          ? ""
+          : String(detail.data.supplier.targetOrderValue),
+      );
+      setSettingsNotes(detail.data.supplier.orderSettingsNotes ?? "");
+      setSettingsLoaded(true);
+    }
+  }, [detail.data, settingsLoaded]);
+
+  const saveOrderSettings = async () => {
+    if (!supplier) return;
+    const minValue = minOrder.trim() === "" ? null : Number(minOrder);
+    const targetValue = targetOrder.trim() === "" ? null : Number(targetOrder);
+    if ((minValue !== null && (!Number.isFinite(minValue) || minValue < 0)) ||
+        (targetValue !== null && (!Number.isFinite(targetValue) || targetValue < 0))) {
+      toast.add({
+        type: "error",
+        title: "Invalid amounts",
+        description: "Order values must be positive numbers.",
+      });
+      return;
+    }
+    try {
+      const saved = await updateOrderSettings.mutateAsync({
+        supplierId: supplier.id,
+        payload: {
+          minimumOrderValue: minValue,
+          targetOrderValue: targetValue,
+          orderSettingsEnabled: settingsEnabled,
+          orderSettingsNotes: settingsNotes.trim() || null,
+        },
+      });
+      setSettingsEnabled(saved.supplier.orderSettingsEnabled);
+      setMinOrder(
+        saved.supplier.minimumOrderValue === null
+          ? ""
+          : String(saved.supplier.minimumOrderValue),
+      );
+      setTargetOrder(
+        saved.supplier.targetOrderValue === null
+          ? ""
+          : String(saved.supplier.targetOrderValue),
+      );
+      toast.add({
+        type: "success",
+        title: "Order settings saved",
+        description: settingsEnabled
+          ? "Reorder drafts will show this supplier's minimum and target."
+          : "Order-value tracking is disabled for this supplier.",
+      });
+    } catch (err) {
+      toast.add({
+        type: "error",
+        title: "Could not save order settings",
+        description: getErrorMessage(err),
+      });
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6">
       <BackButton />
@@ -153,6 +235,89 @@ export function SupplierDetailsPage() {
             label="Last purchase"
             value={detail.isLoading ? null : formatDate(stats?.lastPurchaseDate)}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <NotebookPen aria-hidden className="size-4" />
+            Order settings
+          </CardTitle>
+          <CardDescription>
+            The supplier's minimum order value and your own target order
+            value are independent — reorder drafts check both. Never
+            enforced: you can always order below the minimum with a
+            warning.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="flex items-center gap-3 text-sm font-medium">
+              <Switch
+                checked={settingsEnabled}
+                disabled={!canEditSettings || detail.isLoading}
+                onCheckedChange={(checked) =>
+                  setSettingsEnabled(checked === true)
+                }
+              />
+              {settingsEnabled ? "Tracking on" : "Tracking off"}
+            </label>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-slate-500">
+                Supplier minimum order (৳)
+              </span>
+              <Input
+                aria-label="Supplier minimum order value"
+                type="number"
+                step="0.01"
+                min="0"
+                className="w-40"
+                value={minOrder}
+                disabled={!canEditSettings}
+                onChange={(event) => setMinOrder(event.target.value)}
+                placeholder="e.g. 10000"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-slate-500">
+                Your target order (৳)
+              </span>
+              <Input
+                aria-label="Business target order value"
+                type="number"
+                step="0.01"
+                min="0"
+                className="w-40"
+                value={targetOrder}
+                disabled={!canEditSettings}
+                onChange={(event) => setTargetOrder(event.target.value)}
+                placeholder="e.g. 12000"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!canEditSettings || updateOrderSettings.isPending}
+              onClick={() => void saveOrderSettings()}
+            >
+              Save settings
+            </Button>
+          </div>
+          <Textarea
+            aria-label="Order settings notes"
+            rows={2}
+            placeholder="Notes (e.g. bargaining context, delivery terms)…"
+            value={settingsNotes}
+            disabled={!canEditSettings}
+            onChange={(event) => setSettingsNotes(event.target.value)}
+          />
+          {!canEditSettings ? (
+            <p className="text-xs text-slate-400">
+              Only users with supplier editing permission can change these
+              settings.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
