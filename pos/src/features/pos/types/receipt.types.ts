@@ -22,6 +22,8 @@ export interface SaleReceiptItem {
   variantName: string | null;
   sku: string | null;
   barcode: string | null;
+  /** Unit abbreviation of the product (e.g. "Pcs"), when the product has one. */
+  unitName?: string | null;
   quantity: number;
   unitPrice: number;
   discount: number;
@@ -40,12 +42,34 @@ export interface SaleReceiptPayment {
   paymentDate: string | Date;
 }
 
+/** Business branding embedded by the backend on every receipt payload. */
+export interface SaleReceiptBusiness {
+  name: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  website: string | null;
+  vatBin: string | null;
+  tagline: string | null;
+  logoUrl: string | null;
+  currency: string;
+}
+
 export interface SaleReceiptData {
   saleId: number;
   invoiceNumber: string;
   saleDate: string | Date;
   createdAt: string | Date | null;
+  /** Name of the user who rang up the sale (when recorded). */
+  cashierName?: string | null;
   customer: SaleReceiptCustomer | null;
+  business?: SaleReceiptBusiness;
+  /** Saved document templates; validated client-side before use. */
+  documentSettings?: {
+    sales_receipt?: unknown;
+    sales_invoice?: unknown;
+    defaultsVersion?: number;
+  };
   items: SaleReceiptItem[];
   subtotal: number;
   discount: number;

@@ -105,6 +105,12 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "locations.view", module: "settings", description: "View business locations" },
   { key: "locations.manage", module: "settings", description: "Create, edit and deactivate locations" },
 
+  // Receipt & Invoice Customization
+  { key: "receipt_settings.view", module: "settings", description: "View receipt and invoice template settings" },
+  { key: "receipt_settings.edit", module: "settings", description: "Edit receipt and invoice template settings" },
+  { key: "receipt_settings.manage_logo", module: "settings", description: "Upload, replace or remove the business logo" },
+  { key: "receipt_settings.print_test", module: "settings", description: "Print test receipts and invoices" },
+
   // Online Store (hosted storefront platform)
   { key: "storefront.view", module: "storefront", description: "View the online store, its settings and orders" },
   { key: "storefront.manage", module: "storefront", description: "Create and manage the online store, domains and publishing" },
@@ -203,6 +209,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "orders.manage_shipping",
     "orders.mark_paid",
     "reports.online_profitability.view",
+    "receipt_settings.view",
+    "receipt_settings.edit",
+    "receipt_settings.manage_logo",
+    "receipt_settings.print_test",
   ],
 
   cashier: [
@@ -218,6 +228,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "orders.view",
     "orders.process",
     "orders.pack",
+    "receipt_settings.view",
   ],
 
   accountant: [
@@ -242,6 +253,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "reports.financial.view",
     "reports.online_profitability.view",
     "orders.view",
+    "receipt_settings.view",
   ],
 };
 

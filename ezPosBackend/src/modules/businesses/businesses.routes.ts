@@ -5,6 +5,7 @@ import {
   requireBusinessAccess,
   requireFullAccess,
 } from "../../middleware/business.js";
+import { requirePermission } from "../../middleware/permissions.js";
 import { authRateLimit } from "../../middleware/rateLimit.js";
 
 const router = express.Router();
@@ -41,6 +42,29 @@ router.put(
   requireBusinessAccess(),
   requireFullAccess,
   businessesController.updateBusiness,
+);
+
+// PUT /api/businesses/:businessId/logo   (auth + membership + full access +
+// receipt_settings.manage_logo) — receipt/invoice branding. Body:
+// { dataUrl: "data:image/png;base64,..." } validated (type allow-list,
+// magic bytes, 300 KB cap) in the service.
+router.put(
+  "/api/businesses/:businessId/logo",
+  requireAuth,
+  requireBusinessAccess(),
+  requireFullAccess,
+  requirePermission("receipt_settings.manage_logo"),
+  businessesController.setBusinessLogo,
+);
+
+// DELETE /api/businesses/:businessId/logo   (same chain) — clears the logo.
+router.delete(
+  "/api/businesses/:businessId/logo",
+  requireAuth,
+  requireBusinessAccess(),
+  requireFullAccess,
+  requirePermission("receipt_settings.manage_logo"),
+  businessesController.removeBusinessLogo,
 );
 
 // GET /api/businesses/:businessId/subscription   (auth + membership)

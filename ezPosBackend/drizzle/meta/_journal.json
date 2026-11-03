@@ -267,6 +267,13 @@
       "when": 1793735769316,
       "tag": "0037_online_order_fulfillment",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793741762092,
+      "tag": "0038_receipt_invoice_customization",
+      "breakpoints": true
     }
   ]
 }

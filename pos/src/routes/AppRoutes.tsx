@@ -27,6 +27,7 @@ import { StockTransfersPage } from "@/features/stockTransfers/pages/StockTransfe
 import { RolesPage } from "@/features/roles/pages/RolesPage";
 import { PaymentIntentReturn } from "@/features/pos/pages/PaymentIntentReturn";
 import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
+import ReceiptSettingsPage from "@/features/receipt-settings/pages/ReceiptSettingsPage";
 import { StockCountPage } from "@/features/products/pages/StockCountPage";
 import { ReorderPage } from "@/features/purchases/pages/ReorderPage";
 import { PriceMonitoringPage } from "@/features/procurement/pages/PriceMonitoringPage";
@@ -333,6 +334,14 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="taxes.view">
             <TaxRatesPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/settings/receipt",
+        element: (
+          <RequirePermission permission="receipt_settings.view">
+            <ReceiptSettingsPage />
           </RequirePermission>
         ),
       },

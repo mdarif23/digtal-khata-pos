@@ -1,8 +1,11 @@
 import type { Request, Response } from "express";
+import { z } from "zod";
 import {
   createBusinessForUser,
   deleteBusinessForMembership,
   getBusinessForMembership,
+  removeBusinessLogoForMembership,
+  setBusinessLogoForMembership,
   updateBusinessForMembership,
 } from "./businesses.service.js";
 import {
@@ -136,6 +139,62 @@ export async function deleteBusiness(req: Request, res: Response) {
     });
   } catch (err) {
     return sendSafeError(res, err, "Unable to delete the business right now.");
+  }
+}
+
+const setLogoSchema = z.object({
+  dataUrl: z.string(),
+});
+
+/** PUT /api/businesses/:businessId/logo — body { dataUrl } (validated in service). */
+export async function setBusinessLogo(req: Request, res: Response) {
+  try {
+    if (!req.user || !req.membership) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
+    }
+    const parsed = setLogoSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide the logo as a { dataUrl } string.",
+      });
+    }
+    const detail = await setBusinessLogoForMembership(
+      req.user.id,
+      req.membership.businessId,
+      parsed.data.dataUrl,
+    );
+    return res.status(200).json({
+      success: true,
+      message: "Logo saved.",
+      logoUrl: detail.logoUrl,
+    });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to save the logo right now.");
+  }
+}
+
+/** DELETE /api/businesses/:businessId/logo — clears the business logo. */
+export async function removeBusinessLogo(req: Request, res: Response) {
+  try {
+    if (!req.user || !req.membership) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
+    }
+    const detail = await removeBusinessLogoForMembership(
+      req.user.id,
+      req.membership.businessId,
+    );
+    return res.status(200).json({
+      success: true,
+      message: "Logo removed.",
+      logoUrl: detail.logoUrl,
+    });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to remove the logo right now.");
   }
 }
 

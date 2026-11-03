@@ -107,7 +107,7 @@ export function toPrintPayload(receipt: {
   vat: number;
   finalTotal: number;
   customer?: unknown;
-  cashierName?: string;
+  cashierName?: string | null;
 }, shopName: string, footer: string | null): ReceiptPrintPayload {
   return {
     shopName,
