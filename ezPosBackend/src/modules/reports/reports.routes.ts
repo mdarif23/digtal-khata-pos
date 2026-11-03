@@ -1,5 +1,6 @@
 import express from "express";
 import * as reportsController from "./reports.controller.js";
+import * as profitabilityController from "./onlineProfitability.controller.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requireBusinessContext } from "../../middleware/business.js";
 import { requirePermission } from "../../middleware/permissions.js";
@@ -182,6 +183,40 @@ router.get(
   ...read,
   requirePermission("reports.purchase.view"),
   reportsController.getSupplierPayables,
+);
+
+// Online Store Profitability (module three) — costs and channel economics
+// are sensitive: dedicated permission + advancedReports entitlement.
+const profitability = [
+  ...read,
+  requirePermission("reports.online_profitability.view"),
+  requireFeature("advancedReports"),
+] as const;
+
+router.get(
+  "/api/reports/online-profitability/summary",
+  ...profitability,
+  profitabilityController.getOnlineProfitabilitySummary,
+);
+router.get(
+  "/api/reports/online-profitability/trends",
+  ...profitability,
+  profitabilityController.getOnlineProfitabilityTrends,
+);
+router.get(
+  "/api/reports/online-profitability/products",
+  ...profitability,
+  profitabilityController.getOnlineProfitabilityProducts,
+);
+router.get(
+  "/api/reports/online-profitability/channels",
+  ...profitability,
+  profitabilityController.getOnlineProfitabilityChannels,
+);
+router.get(
+  "/api/reports/online-profitability/expenses",
+  ...profitability,
+  profitabilityController.getOnlineProfitabilityExpenses,
 );
 
 export default router;

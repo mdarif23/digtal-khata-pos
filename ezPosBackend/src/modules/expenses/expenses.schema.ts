@@ -8,6 +8,10 @@ export const expenseWriteSchema = z.object({
   payment_method: z.enum(["Cash", "Mobile", "Card"]),
   reference_no: z.string().trim().max(100).nullable().optional(),
   note: z.string().trim().nullable().optional(),
+  /** Online-channel attribution (profitability): NULL = shared across channels. */
+  channel: z.enum(["woocommerce", "custom_storefront"]).nullable().optional(),
+  /** Optional order link for order-specific expenses (estimated op. profit). */
+  sale_id: z.number().int().positive().nullable().optional(),
 });
 
 export type ExpenseWriteInput = z.infer<typeof expenseWriteSchema>;

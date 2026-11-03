@@ -1,13 +1,28 @@
 import { expenseCategories } from "../../db/schema/expenseCategories.js";
 import { expenses } from "../../db/schema/expenses.js";
+import { sales } from "../../db/schema/sales.js";
 import { db } from "../../db/schema/index.js";
 import { and, asc, desc, eq } from "drizzle-orm";
-import { ConflictError, NotFoundError } from "../../utils/handleError.js";
+import { BadRequestError, ConflictError, NotFoundError } from "../../utils/handleError.js";
 import type { ExpenseWriteInput } from "./expenses.schema.js";
 type NewExpense = typeof expenses.$inferInsert;
 
 // Every function takes the caller's server-verified businessId (from
 // requireBusinessContext) and scopes all reads and writes to it.
+
+/** Channel/order attribution must reference rows the business owns. */
+async function assertAttribution(businessId: number, data: ExpenseWriteInput) {
+  if (data.sale_id != null) {
+    const [sale] = await db
+      .select({ id: sales.id })
+      .from(sales)
+      .where(and(eq(sales.id, data.sale_id), eq(sales.businessId, businessId)))
+      .limit(1);
+    if (!sale) {
+      throw new BadRequestError("Linked order does not exist for this business.");
+    }
+  }
+}
 
 function toExpenseValues(
   businessId: number,
@@ -24,6 +39,8 @@ function toExpenseValues(
     paymentMethod: data.payment_method,
     referenceNo: data.reference_no ?? null,
     note: data.note ?? null,
+    channel: data.channel ?? null,
+    saleId: data.sale_id ?? null,
   };
 }
 
@@ -32,6 +49,7 @@ export async function createExpense(
   locationId: number,
   data: ExpenseWriteInput,
 ) {
+  await assertAttribution(businessId, data);
   const [expense] = await db
     .insert(expenses)
     .values(toExpenseValues(businessId, locationId, data))
@@ -44,6 +62,7 @@ export async function updateExpense(
   id: number,
   data: ExpenseWriteInput,
 ) {
+  await assertAttribution(businessId, data);
   // Expense edits never move an expense between locations — the owning
   // location stays whatever it was created with.
   const [expense] = await db
@@ -56,6 +75,8 @@ export async function updateExpense(
       paymentMethod: data.payment_method,
       referenceNo: data.reference_no ?? null,
       note: data.note ?? null,
+      channel: data.channel ?? null,
+      saleId: data.sale_id ?? null,
     })
     .where(and(eq(expenses.id, id), eq(expenses.businessId, businessId)))
     .returning();
@@ -121,6 +142,8 @@ export async function getExpenses(businessId: number) {
       paymentMethod: expenses.paymentMethod,
       referenceNo: expenses.referenceNo,
       note: expenses.note,
+      channel: expenses.channel,
+      saleId: expenses.saleId,
       expenseDate: expenses.expenseDate,
       createdAt: expenses.createdAt,
     })
