@@ -56,6 +56,18 @@ export const updateBusinessSchema = z.object({
         "Use an IANA timezone such as Asia/Dhaka",
       ),
   ),
+  website: optionalTextField(
+    z
+      .string()
+      .max(255, "Website is too long")
+      .regex(/^https?:\/\/\S+$/i, "Use a full URL starting with http:// or https://"),
+  ),
+  vatBin: optionalTextField(
+    z.string().max(60, "VAT/BIN number is too long"),
+  ),
+  tagline: optionalTextField(
+    z.string().max(160, "Tagline is too long"),
+  ),
   mode: z
     .enum(["physical_only", "online_only", "omnichannel"], {
       message: "Invalid business mode.",

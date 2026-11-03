@@ -26,6 +26,12 @@ export const businesses = pgTable("businesses", {
   currency: varchar({ length: 3 }).default("BDT").notNull(),
   /** Business logo as a data URL (small images only, validated at write). */
   logoUrl: text("logo_url"),
+  /** Public website shown on branded documents (receipt customization). */
+  website: varchar("website", { length: 255 }),
+  /** VAT / BIN registration number shown on branded documents. */
+  vatBin: varchar("vat_bin", { length: 60 }),
+  /** Optional short tagline shown under the business name on documents. */
+  tagline: varchar("tagline", { length: 160 }),
   /** When the owner accepted the terms at registration. */
   termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
   /** Resumable onboarding progress: 0 = not started, 4 = complete. */

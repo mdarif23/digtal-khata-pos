@@ -10,8 +10,7 @@ import {
 import { Button } from "@/components/ui/button.js";
 import { CheckCircle2, Printer, Eye, PlusCircle, Check, Copy } from "lucide-react";
 import type { SaleReceiptData } from "../../types/receipt.types.js";
-import { usePrintReceipt } from "../../hooks/usePrintReceipt.js";
-import { useReceiptSettingsStore } from "../../stores/useReceiptSettingsStore.js";
+import { resolveReceiptConfig, usePrintReceipt } from "../../hooks/usePrintReceipt.js";
 import { ReceiptPrintDialog } from "./ReceiptPrintDialog.js";
 
 interface SaleSuccessDialogProps {
@@ -28,15 +27,19 @@ export function SaleSuccessDialog({
   onNewSale,
 }: SaleSuccessDialogProps) {
   const { printReceipt } = usePrintReceipt();
-  const settings = useReceiptSettingsStore((s) => s.settings);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Auto-print is driven by the business's SAVED receipt template — carried
+  // on the receipt payload itself (falls back to local settings for
+  // legacy/offline receipts).
+  const autoPrintOnSale = receipt ? resolveReceiptConfig(receipt).print.autoPrintOnSale : false;
 
   // StrictMode / Remount safe ref guard for auto-printing
   const autoPrintedRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (open && receipt && settings.autoPrintOnSale) {
+    if (open && receipt && autoPrintOnSale) {
       if (autoPrintedRef.current !== receipt.saleId) {
         autoPrintedRef.current = receipt.saleId;
         // Schedule print after dialog mounts
@@ -46,7 +49,7 @@ export function SaleSuccessDialog({
         return () => clearTimeout(timer);
       }
     }
-  }, [open, receipt, settings.autoPrintOnSale, printReceipt]);
+  }, [open, receipt, autoPrintOnSale, printReceipt]);
 
   if (!receipt) return null;
 

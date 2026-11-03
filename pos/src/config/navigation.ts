@@ -10,6 +10,7 @@ import {
   BarChart3,
   ShieldCheck,
   Percent,
+  ReceiptText,
 } from "lucide-react";
 import { GiExpense } from "react-icons/gi";
 import { MdOutlinePointOfSale } from "react-icons/md";
@@ -186,5 +187,11 @@ export const navigation = [
     url: "/tax-rates",
     icon: Percent,
     permission: "taxes.view",
+  },
+  {
+    title: "Receipt & Invoice",
+    url: "/settings/receipt",
+    icon: ReceiptText,
+    permission: "receipt_settings.view",
   },
 ];

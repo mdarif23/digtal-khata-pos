@@ -80,6 +80,12 @@ import {
 } from "./sales.validation.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 import { recordCashSaleInTx } from "../cashRegisters/cashRegisters.service.js";
+import { units } from "../../db/schema/units.js";
+import { users } from "../../db/schema/users.js";
+import {
+  getDocumentBranding,
+  getDocumentSettings,
+} from "../documentSettings/documentSettings.service.js";
 import {
   getCartTotals,
   getCartTotalsWithTaxRules,
@@ -392,9 +398,11 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
       customerName: customers.name,
       customerPhone: customers.phone,
       customerAddress: customers.address,
+      cashierName: users.fullName,
     })
     .from(sales)
     .leftJoin(customers, eq(sales.customerId, customers.id))
+    .leftJoin(users, eq(sales.cashierUserId, users.id))
     .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
     .limit(1);
 
@@ -415,10 +423,12 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
       lineTotal: saleItems.lineTotal,
       taxAmount: saleItems.taxAmount,
       taxDetail: saleItems.taxDetail,
+      unitName: units.abbreviation,
     })
     .from(saleItems)
     .innerJoin(productVariants, eq(saleItems.variantId, productVariants.id))
     .innerJoin(products, eq(productVariants.productId, products.id))
+    .leftJoin(units, eq(products.unitId, units.id))
     .where(
       and(
         eq(saleItems.saleId, saleId),
@@ -474,11 +484,20 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
     return max;
   }, 0);
 
+  // Document branding + active templates ride along with every receipt, so
+  // the printed output always matches the business's saved customization.
+  // Financial values above stay sourced from the immutable sale rows.
+  const [branding, documentSettings] = await Promise.all([
+    getDocumentBranding(businessId),
+    getDocumentSettings(businessId),
+  ]);
+
   return {
     saleId: sale.id,
     invoiceNumber: sale.invoiceNumber,
     saleDate: sale.saleDate,
     createdAt: sale.createdAt,
+    cashierName: sale.cashierName ?? null,
     customer: sale.customerId
       ? {
           id: sale.customerId,
@@ -487,6 +506,8 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
           address: sale.customerAddress ?? null,
         }
       : null,
+    business: branding,
+    documentSettings,
     items: items.map((item) => {
       const optValues = optionsMap.get(item.variantId);
       const variantName =
@@ -498,6 +519,7 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
         variantName,
         sku: item.sku,
         barcode: item.barcode,
+        unitName: item.unitName ?? null,
         quantity: Number(item.quantity),
         unitPrice: Number(item.unitPrice),
         discount: Number(item.discount),

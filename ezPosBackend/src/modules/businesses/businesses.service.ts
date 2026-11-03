@@ -265,6 +265,11 @@ export interface BusinessDetail {
   currency: string;
   timezone: string;
   mode: "physical_only" | "online_only" | "omnichannel";
+  /** Document branding (receipt customization). */
+  logoUrl: string | null;
+  website: string | null;
+  vatBin: string | null;
+  tagline: string | null;
   createdAt: Date | null;
   subscription: SubscriptionState;
   roleSlug: string;
@@ -288,6 +293,10 @@ export async function getBusinessForMembership(
       currency: businesses.currency,
       timezone: businesses.timezone,
       mode: businesses.mode,
+      logoUrl: businesses.logoUrl,
+      website: businesses.website,
+      vatBin: businesses.vatBin,
+      tagline: businesses.tagline,
       createdAt: businesses.createdAt,
       roleSlug: roles.slug,
     })
@@ -348,6 +357,9 @@ export async function updateBusinessForMembership(
       ...(input.country !== undefined ? { country: input.country } : {}),
       ...(input.currency !== undefined ? { currency: input.currency } : {}),
       ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
+      ...(input.website !== undefined ? { website: input.website } : {}),
+      ...(input.vatBin !== undefined ? { vatBin: input.vatBin } : {}),
+      ...(input.tagline !== undefined ? { tagline: input.tagline } : {}),
       updatedAt: new Date(),
     })
     .where(eq(businesses.id, businessId));
@@ -355,6 +367,99 @@ export async function updateBusinessForMembership(
   if (input.mode !== undefined) {
     await changeBusinessMode(businessId, input.mode);
   }
+
+  return getBusinessForMembership(userId, businessId);
+}
+
+const LOGO_MAX_BYTES = 300 * 1024; // 300 KB decoded — plenty for a receipt logo.
+
+/** magic-byte signatures for the allowed logo image formats. */
+const LOGO_SIGNATURES: Record<string, { bytes: number[]; webp?: boolean }> = {
+  "image/png": { bytes: [0x89, 0x50, 0x4e, 0x47] },
+  "image/jpeg": { bytes: [0xff, 0xd8, 0xff] },
+  "image/webp": { bytes: [0x52, 0x49, 0x46, 0x46], webp: true }, // RIFF....WEBP
+};
+
+/**
+ * Validates a `data:image/...;base64,...` logo data URL: declared type
+ * allow-list, real magic bytes (never trust the declared MIME alone), and a
+ * decoded size cap so the businesses row cannot balloon.
+ */
+export function validateLogoDataUrl(dataUrl: string): string {
+  const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=\s]+)$/.exec(
+    dataUrl,
+  );
+  if (!match) {
+    throw new BadRequestError(
+      "Logo must be a base64 data URL for a PNG, JPEG or WebP image.",
+    );
+  }
+  const mime = match[1] ?? "";
+  const base64 = (match[2] ?? "").replace(/\s/g, "");
+  if (!mime || !base64) {
+    throw new BadRequestError(
+      "Logo must be a base64 data URL for a PNG, JPEG or WebP image.",
+    );
+  }
+  const buffer = Buffer.from(base64, "base64");
+  if (buffer.length === 0) {
+    throw new BadRequestError("Logo image is empty.");
+  }
+  if (buffer.length > LOGO_MAX_BYTES) {
+    throw new BadRequestError(
+      `Logo is too large — keep it under ${Math.round(LOGO_MAX_BYTES / 1024)} KB.`,
+    );
+  }
+  const signature = LOGO_SIGNATURES[mime];
+  if (!signature) {
+    throw new BadRequestError(
+      "Logo must be a PNG, JPEG or WebP image.",
+    );
+  }
+  const headerMatches =
+    signature.bytes.every((byte, i) => buffer[i] === byte) &&
+    (!signature.webp ||
+      buffer.subarray(8, 12).toString("ascii") === "WEBP");
+  if (!headerMatches) {
+    throw new BadRequestError(
+      "Logo file content does not match its declared image type.",
+    );
+  }
+  return `data:${mime};base64,${base64}`;
+}
+
+/**
+ * Store or replace the business logo (receipt customization branding).
+ * Membership is re-verified in-service the same way profile updates are.
+ */
+export async function setBusinessLogoForMembership(
+  userId: number,
+  businessId: number,
+  dataUrl: string,
+): Promise<BusinessDetail> {
+  const logoUrl = validateLogoDataUrl(dataUrl);
+  // Defense-in-depth: verify the membership before mutating.
+  await getBusinessForMembership(userId, businessId);
+
+  await db
+    .update(businesses)
+    .set({ logoUrl, updatedAt: new Date() })
+    .where(eq(businesses.id, businessId));
+
+  return getBusinessForMembership(userId, businessId);
+}
+
+export async function removeBusinessLogoForMembership(
+  userId: number,
+  businessId: number,
+): Promise<BusinessDetail> {
+  // Defense-in-depth: verify the membership before mutating.
+  await getBusinessForMembership(userId, businessId);
+
+  await db
+    .update(businesses)
+    .set({ logoUrl: null, updatedAt: new Date() })
+    .where(eq(businesses.id, businessId));
 
   return getBusinessForMembership(userId, businessId);
 }

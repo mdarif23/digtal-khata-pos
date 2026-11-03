@@ -26,6 +26,7 @@ import procurementRouter from "./modules/procurement/procurement.routes.js";
 import addProductRouter from "./modules/addProduct/product.routes.js";
 import contactRouter from "./modules/contact/contact.routes.js";
 import dueManagementRouter from "./modules/dueManagement/dueManagement.routes.js";
+import documentSettingsRouter from "./modules/documentSettings/documentSettings.routes.js";
 import reportsRouter from "./modules/reports/reports.routes.js";
 import subscriptionPlansRouter from "./modules/subscriptionPlans/subscriptionPlans.routes.js";
 import authRouter from "./modules/auth/auth.routes.js";
@@ -134,6 +135,7 @@ export function buildApp() {
   app.use("/", addProductRouter);
   app.use("/", contactRouter);
   app.use("/", dueManagementRouter);
+  app.use("/", documentSettingsRouter);
   app.use("/", reportsRouter);
   app.use("/", subscriptionPlansRouter);
   app.use("/", authRouter);
@@ -184,6 +186,16 @@ export function buildApp() {
       return res
         .status(400)
         .json({ success: false, message: "Invalid JSON body." });
+    }
+
+    // Bodies over the express.json limit (e.g. an oversized logo data URL)
+    // surface as body-parser's PayloadTooLargeError — a client error, not
+    // a server fault.
+    if ((err as { type?: string }).type === "entity.too.large") {
+      return res.status(413).json({
+        success: false,
+        message: "Request body is too large.",
+      });
     }
 
     // Fallback for standard Errors or unknown issues. Never return err.message
