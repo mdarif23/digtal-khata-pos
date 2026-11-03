@@ -41,6 +41,14 @@ export function LocationSwitcher() {
         onValueChange={(value) => {
           if (value !== null) switchLocation(Number(value));
         }}
+        // Base UI renders Select.Value as the RAW selected value unless the
+        // root knows the value->label mapping — without this the trigger
+        // shows the location id instead of its name.
+        items={locations.map((location) => ({
+          value: String(location.id),
+          label:
+            location.name + (location.status !== "active" ? " (inactive)" : ""),
+        }))}
       >
         <SelectTrigger
           size="sm"

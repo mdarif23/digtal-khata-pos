@@ -284,6 +284,15 @@ export function UsersPage() {
         <Select
           value={roleFilter}
           onValueChange={(value) => setRoleFilter(value ?? "all")}
+          // Base UI renders Select.Value as the RAW selected value unless the
+          // root knows the value->label mapping (role id -> role name).
+          items={[
+            { value: "all", label: "All roles" },
+            ...roles.map((role) => ({
+              value: String(role.id),
+              label: role.name,
+            })),
+          ]}
         >
           <SelectTrigger className="w-44">
             <SelectValue placeholder="All roles" />
@@ -300,6 +309,11 @@ export function UsersPage() {
         <Select
           value={statusFilter}
           onValueChange={(value) => setStatusFilter(value ?? "all")}
+          items={[
+            { value: "all", label: "All statuses" },
+            { value: "active", label: "Active" },
+            { value: "inactive", label: "Inactive" },
+          ]}
         >
           <SelectTrigger className="w-36">
             <SelectValue placeholder="All statuses" />

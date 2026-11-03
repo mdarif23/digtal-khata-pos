@@ -7,6 +7,7 @@ import {
   CardTitle,
 } from "@/components/ui/card.js";
 import { Badge } from "@/components/ui/badge.js";
+import { Input } from "@/components/ui/input.js";
 import { Skeleton } from "@/components/ui/skeleton.js";
 import { ReportHeader } from "../components/ReportHeader";
 import { useReportData } from "../hooks/useReportData";
@@ -22,12 +23,12 @@ const CHANNEL_LABELS: Record<string, string> = {
 
 /** Channel performance (Module 15): revenue and orders per sales channel. */
 export function ChannelPerformanceReport() {
-  const [filters] = useState({ period: "this_month" });
+  const [filters] = useState({ period: "this_month" } as const);
   const { data, loading, error, refetch } = useReportData(
     () => reportsApi.getChannelPerformance(filters),
     [filters],
   );
-  const rows = data?.data ?? [];
+  const rows = data ?? [];
   const total = rows.reduce((sum, r) => sum + r.revenue, 0);
 
   return (
@@ -103,7 +104,7 @@ export function CustomerLtvReport() {
     () => reportsApi.getCustomerLifetimeValue(),
     [],
   );
-  const rows = data?.data ?? [];
+  const rows = data ?? [];
 
   return (
     <div className="space-y-4">
@@ -174,7 +175,7 @@ export function CustomerRetentionReport() {
     () => reportsApi.getCustomerRetention(),
     [],
   );
-  const rows = data?.data ?? [];
+  const rows = data ?? [];
 
   return (
     <div className="space-y-4">
@@ -243,15 +244,19 @@ export function CustomerRetentionReport() {
 
 /** Staff performance (Module 15): revenue per cashier. */
 export function StaffPerformanceReport() {
+  const fmt = (date: Date) => date.toISOString().slice(0, 10);
   const [filters, setFilters] = useState({
-    startDate: new Date(Date.now() - 30 * 86_400_000).toISOString(),
-    endDate: new Date().toISOString(),
+    period: "custom" as const,
+    dateRange: {
+      startDate: fmt(new Date(Date.now() - 30 * 86_400_000)),
+      endDate: fmt(new Date()),
+    },
   });
   const { data, loading, error, refetch } = useReportData(
     () => reportsApi.getStaffPerformance(filters),
     [filters],
   );
-  const rows = data?.data ?? [];
+  const rows = data ?? [];
 
   return (
     <div className="space-y-4">
@@ -260,26 +265,33 @@ export function StaffPerformanceReport() {
         description="Revenue and baskets per cashier (POS sales with register attribution)."
         onRefresh={refetch}
         loading={loading}
-      >
-        <div className="flex items-center gap-2 text-sm">
-          <Input
-            type="date"
-            className="h-8 w-36"
-            value={filters.startDate.slice(0, 10)}
-            onChange={(e) =>
-              setFilters((f) => ({ ...f, startDate: new Date(e.target.value).toISOString() }))
-            }
-          />
-          <Input
-            type="date"
-            className="h-8 w-36"
-            value={filters.endDate.slice(0, 10)}
-            onChange={(e) =>
-              setFilters((f) => ({ ...f, endDate: new Date(e.target.value).toISOString() }))
-            }
-          />
-        </div>
-      </ReportHeader>
+        actions={
+          <div className="flex items-center gap-2 text-sm">
+            <Input
+              type="date"
+              className="h-8 w-36"
+              value={filters.dateRange.startDate}
+              onChange={(e) =>
+                setFilters((f) => ({
+                  ...f,
+                  dateRange: { ...f.dateRange, startDate: e.target.value },
+                }))
+              }
+            />
+            <Input
+              type="date"
+              className="h-8 w-36"
+              value={filters.dateRange.endDate}
+              onChange={(e) =>
+                setFilters((f) => ({
+                  ...f,
+                  dateRange: { ...f.dateRange, endDate: e.target.value },
+                }))
+              }
+            />
+          </div>
+        }
+      />
       {loading && <Skeleton className="h-48 w-full" />}
       {error && (
         <Card>
@@ -335,8 +347,8 @@ export function SalesForecastReport() {
     () => reportsApi.getSalesForecast(),
     [],
   );
-  const history = data?.data.history ?? [];
-  const projection = data?.data.projection;
+  const history = data?.history ?? [];
+  const projection = data?.projection;
 
   const recent = useMemo(() => history.slice(-30), [history]);
 
@@ -399,7 +411,7 @@ export function SalesForecastReport() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Last 30 days (actual)</CardTitle>
-              <CardDescription>{data?.data.method}</CardDescription>
+              <CardDescription>{data?.method}</CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto p-0">
               <table className="w-full text-sm">

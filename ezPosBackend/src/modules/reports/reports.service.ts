@@ -1667,6 +1667,7 @@ export async function getChannelPerformanceReport(
   params: DateRangeQuery,
   locationId?: number,
 ): Promise<ChannelPerformanceRow[]> {
+  const { start, end } = getDateBounds(params);
   const result = await db.execute(sql`
     SELECT s.channel::text AS channel,
            COUNT(*)::int AS orders,
@@ -1674,8 +1675,8 @@ export async function getChannelPerformanceReport(
     FROM sales s
     WHERE s.business_id = ${businessId}
       AND s.status IN ('completed', 'refunded')
-      AND s.purchase_date >= ${params.startDate}
-      AND s.purchase_date <= ${params.endDate}
+      AND s.purchase_date >= ${start}
+      AND s.purchase_date <= ${end}
       ${locationId !== undefined ? sql`AND s.location_id = ${locationId}` : sql``}
     GROUP BY s.channel
     ORDER BY revenue DESC
@@ -1801,6 +1802,7 @@ export async function getStaffPerformanceReport(
   params: DateRangeQuery,
   locationId?: number,
 ): Promise<StaffPerformanceRow[]> {
+  const { start, end } = getDateBounds(params);
   const result = await db.execute(sql`
     SELECT s.cashier_user_id AS "cashierUserId", u.full_name AS "cashierName",
            COUNT(*)::int AS orders,
@@ -1810,8 +1812,8 @@ export async function getStaffPerformanceReport(
     WHERE s.business_id = ${businessId}
       AND s.status IN ('completed', 'refunded')
       AND s.cashier_user_id IS NOT NULL
-      AND s.purchase_date >= ${params.startDate}
-      AND s.purchase_date <= ${params.endDate}
+      AND s.purchase_date >= ${start}
+      AND s.purchase_date <= ${end}
       ${locationId !== undefined ? sql`AND s.location_id = ${locationId}` : sql``}
     GROUP BY s.cashier_user_id, u.full_name
     ORDER BY revenue DESC

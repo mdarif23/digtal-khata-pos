@@ -141,3 +141,50 @@ export async function fetchSyncLogs(
     { method: "GET", businessId },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Storefront API keys (Phase 9.2) — for custom websites hitting the
+// /api/v1/storefront public API. The secret key is returned ONCE at creation.
+// ---------------------------------------------------------------------------
+
+export interface StorefrontKey {
+  id: number;
+  name: string;
+  publishableKey: string;
+  scopes: string[];
+  environment: string;
+  requestCount: number;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export async function fetchStorefrontKeys(
+  businessId: number,
+): Promise<ApiResult<StorefrontKey[]>> {
+  return request(`/api/businesses/${businessId}/storefront/keys`, {
+    method: "GET",
+    businessId,
+  });
+}
+
+export async function createStorefrontKey(
+  businessId: number,
+  input: { name: string; scopes: string[] },
+): Promise<ApiResult<{ id: number; publishableKey: string; secretKey: string }>> {
+  return request(`/api/businesses/${businessId}/storefront/keys`, {
+    method: "POST",
+    businessId,
+    body: JSON.stringify(input),
+  });
+}
+
+export async function revokeStorefrontKey(
+  businessId: number,
+  keyId: number,
+): Promise<ApiResult<unknown>> {
+  return request(
+    `/api/businesses/${businessId}/storefront/keys/${keyId}/revoke`,
+    { method: "POST", businessId },
+  );
+}

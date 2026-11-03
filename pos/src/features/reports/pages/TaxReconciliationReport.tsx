@@ -12,13 +12,14 @@ import { ReportHeader } from "../components/ReportHeader";
 import { ReportDateFilter } from "../components/ReportDateFilter";
 import { ReportMetricCard } from "../components/ReportMetricCard";
 import { ReportTable, type ReportColumn } from "../components/ReportTable";
+import { PlanUpgradeCard } from "../components/PlanUpgradeCard";
 
 export function TaxReconciliationReport() {
   const [filters, setFilters] = useState<ReportFilters>({
     period: "this_month",
   });
 
-  const { data, loading, error, refetch } = useReportData(
+  const { data, loading, error, entitlementError, refetch } = useReportData(
     () => reportsApi.getTaxReconciliation(filters),
     [filters]
   );
@@ -113,6 +114,8 @@ export function TaxReconciliationReport() {
       />
 
       <ReportDateFilter filters={filters} onFiltersChange={setFilters} />
+
+      {entitlementError && <PlanUpgradeCard gate={entitlementError} />}
 
       {/* Summary Metrics */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

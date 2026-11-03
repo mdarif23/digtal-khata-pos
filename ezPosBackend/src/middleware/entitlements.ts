@@ -1,6 +1,24 @@
 import type { NextFunction, Request, Response } from "express";
+import { eq } from "drizzle-orm";
 import { getEntitlements, type PlanFeatureKey } from "../services/entitlements.js";
 import { getBusinessId } from "./business.js";
+import { db } from "../db/schema/index.js";
+import { subscriptionPlans } from "../db/schema/subscriptionPlans.js";
+
+/**
+ * Names of the active plans whose feature flags include `feature` — so the
+ * 403 body can tell the user exactly which plan to upgrade to instead of a
+ * generic "not in your plan".
+ */
+async function plansWithFeature(feature: PlanFeatureKey): Promise<string[]> {
+  const rows = await db
+    .select({ name: subscriptionPlans.name, features: subscriptionPlans.features })
+    .from(subscriptionPlans)
+    .where(eq(subscriptionPlans.isActive, true));
+  return rows
+    .filter((row) => row.features?.[feature] === true)
+    .map((row) => row.name);
+}
 
 /**
  * Route-level feature gate: the business's current plan must include the
@@ -16,11 +34,13 @@ export function requireFeature(feature: PlanFeatureKey) {
         next();
         return;
       }
+      const upgradePlans = await plansWithFeature(feature);
       return res.status(403).json({
         success: false,
         code: "FEATURE_NOT_IN_PLAN",
         message:
           "This feature is not part of your current plan. Upgrade to unlock it.",
+        upgradePlans,
       });
     } catch (err) {
       console.error("Feature check failed:", err);

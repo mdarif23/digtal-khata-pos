@@ -1,9 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
 import { format } from "date-fns";
-import { reportsApi, type LocationComparisonData } from "../api/reports.api";
+import {
+  reportsApi,
+  type LocationComparisonData,
+} from "../api/reports.api";
 import type { ReportFilters } from "../types/report.types";
 import { ReportDateFilter } from "../components/ReportDateFilter";
-import { toast } from "@/components/ui/toast";
+import { PlanUpgradeCard } from "../components/PlanUpgradeCard";
+import type { EntitlementErrorInfo } from "../hooks/useReportData";
+
+/** Extracts the 403 FEATURE_NOT_IN_PLAN payload so the page can show the
+ *  upgrade prompt instead of a generic failure toast. */
+function extractGate(err: unknown): EntitlementErrorInfo | null {
+  const status = (err as { response?: { status?: number } })?.response?.status;
+  const body = (err as { response?: { data?: { code?: string; message?: string; upgradePlans?: string[] } } })
+    ?.response?.data;
+  if (status === 403 && body?.code === "FEATURE_NOT_IN_PLAN") {
+    return {
+      code: body.code,
+      message: body.message ?? "",
+      upgradePlans: Array.isArray(body.upgradePlans) ? body.upgradePlans : [],
+    };
+  }
+  return null;
+}
 
 /**
  * Owner view: sales, refunds, net and expenses per location for a period.
@@ -15,14 +35,21 @@ export function LocationComparisonReport() {
   });
   const [data, setData] = useState<LocationComparisonData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [gate, setGate] = useState<EntitlementErrorInfo | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setGate(null);
     try {
       const res = await reportsApi.getLocationComparison(filters);
       setData(res.data.data);
-    } catch {
-      toast.add({ title: "Unable to load the location comparison", type: "error" });
+    } catch (err) {
+      const gateError = extractGate(err);
+      if (gateError) {
+        setGate(gateError);
+      } else {
+        setData(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -49,6 +76,8 @@ export function LocationComparisonReport() {
         onFiltersChange={setFilters}
         showLocationFilter={false}
       />
+
+      {gate && <PlanUpgradeCard gate={gate} />}
 
       {loading ? (
         <p className="py-10 text-center text-slate-400">Loading comparison…</p>

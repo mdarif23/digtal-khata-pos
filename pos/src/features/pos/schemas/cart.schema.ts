@@ -29,6 +29,10 @@ export const cartSchema = z
       })
       .nullable(),
     vatPercent: z.number().nullable(),
+    // Coupon entry (Module 6): optional so the resolver keeps the value the
+    // CouponInput writes — without it zod strips the field and createSale
+    // never sees the code even though the quote preview showed it.
+    couponCode: z.string().trim().max(60).optional(),
   })
   .superRefine((data, ctx) => {
     data.payments.forEach((p, i) => {

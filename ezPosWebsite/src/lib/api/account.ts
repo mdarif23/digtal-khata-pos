@@ -55,6 +55,42 @@ export interface UpdateBusinessInput {
   country?: string;
   currency?: string;
   timezone?: string;
+  mode?: "physical_only" | "online_only" | "omnichannel";
+}
+
+export interface BusinessDetailPayload {
+  business: {
+    id: number;
+    name: string;
+    slug: string;
+    status: string;
+    mode: "physical_only" | "online_only" | "omnichannel";
+    subscription: {
+      status: string;
+      accessMode: "full" | "read_only";
+      trial: boolean;
+      currentPeriodEnd: string | null;
+    };
+    roleSlug: string;
+  };
+}
+
+export async function fetchBusiness(
+  businessId: number,
+): Promise<ApiResult<BusinessDetailPayload>> {
+  return request<BusinessDetailPayload>(`/api/businesses/${businessId}`, {
+    method: "GET",
+    businessId,
+  });
+}
+
+export async function deleteBusiness(
+  businessId: number,
+): Promise<ApiResult<unknown>> {
+  return request(`/api/businesses/${businessId}`, {
+    method: "DELETE",
+    businessId,
+  });
 }
 
 export async function updateBusiness(

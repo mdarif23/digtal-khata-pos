@@ -156,6 +156,10 @@ export function MessageDialog({
               onValueChange={(value) =>
                 setTemplateKey(value as MessageTemplateKey)
               }
+              items={templates.map((template) => ({
+                value: template.key,
+                label: template.label,
+              }))}
             >
               <SelectTrigger id="message-template" className="w-full">
                 <SelectValue placeholder="Choose a template" />

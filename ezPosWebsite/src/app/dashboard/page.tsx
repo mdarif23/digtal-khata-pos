@@ -3,14 +3,14 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ExternalLink, Plus, Store, LogOut } from "lucide-react";
+import { ExternalLink, Plus, Store, LogOut, Trash2 } from "lucide-react";
 import { Container } from "@/components/ui/container";
 import { Alert } from "@/components/ui/alert";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { TextField } from "@/components/forms/text-field";
 import { useAuth } from "@/components/providers/auth-provider";
 import { createBusiness } from "@/lib/api/auth";
-import { resendVerificationEmail } from "@/lib/api/account";
+import { deleteBusiness, resendVerificationEmail } from "@/lib/api/account";
 
 const POS_URL = process.env.NEXT_PUBLIC_POS_URL ?? "http://localhost:5173";
 
@@ -27,7 +27,7 @@ function subscriptionLabel(status: string, trial: boolean): string {
 function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { status, user, businesses, onSignedOut } = useAuth();
+  const { status, user, businesses, refresh, onSignedOut } = useAuth();
   const [businessName, setBusinessName] = useState(
     () => searchParams.get("create") ?? "",
   );
@@ -35,6 +35,13 @@ function DashboardContent() {
   const [createMessage, setCreateMessage] = useState<string | null>(null);
   const [createError, setCreateError] = useState(false);
   const [verificationSent, setVerificationSent] = useState(false);
+  // Delete confirmations are per-business: the id awaiting confirmation.
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState<{
+    text: string;
+    ok: boolean;
+  } | null>(null);
 
   // Anonymous visitors never see dashboard content.
   useEffect(() => {
@@ -70,6 +77,16 @@ function DashboardContent() {
     }
     setCreateMessage(result.message);
     setCreateError(!result.ok);
+  };
+
+  const onDelete = async (businessId: number) => {
+    setDeleting(true);
+    setDeleteMessage(null);
+    const result = await deleteBusiness(businessId);
+    setDeleting(false);
+    setDeleteTarget(null);
+    setDeleteMessage({ text: result.message, ok: result.ok });
+    if (result.ok) await refresh();
   };
 
   return (
@@ -171,6 +188,48 @@ function DashboardContent() {
                           <ExternalLink className="size-4" aria-hidden="true" />
                           Open POS
                         </ButtonLink>
+                        {business.roleSlug === "owner" ? (
+                          deleteTarget === business.businessId ? (
+                            <span className="flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1">
+                              <span className="text-xs font-medium text-red-800">
+                                Delete this business?
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={deleting}
+                                onClick={() =>
+                                  void onDelete(business.businessId)
+                                }
+                              >
+                                {deleting ? "Deleting…" : "Yes, delete"}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={deleting}
+                                onClick={() => setDeleteTarget(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </span>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setDeleteMessage(null);
+                                setDeleteTarget(business.businessId);
+                              }}
+                            >
+                              <Trash2
+                                className="size-4 text-red-600"
+                                aria-hidden="true"
+                              />
+                              Delete
+                            </Button>
+                          )
+                        ) : null}
                       </div>
                     </div>
                   </li>
@@ -189,6 +248,17 @@ function DashboardContent() {
                   A business without an active subscription can view its data
                   but not make changes. Plan selection opens when billing goes
                   live.
+                </Alert>
+              </div>
+            ) : null}
+
+            {deleteMessage ? (
+              <div className="mt-6">
+                <Alert
+                  tone={deleteMessage.ok ? "info" : "warning"}
+                  title={deleteMessage.ok ? "Business deleted" : "Delete failed"}
+                >
+                  {deleteMessage.text}
                 </Alert>
               </div>
             ) : null}

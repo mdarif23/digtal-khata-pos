@@ -336,6 +336,12 @@ export function StockTransfersPage() {
                 <Select
                   value={fromLocationId || undefined}
                   onValueChange={(value) => setFromLocationId(value ?? "")}
+                  // Base UI renders Select.Value as the RAW selected value
+                  // unless the root knows the value->label mapping.
+                  items={activeLocations.map((location) => ({
+                    value: String(location.id),
+                    label: location.name,
+                  }))}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Source location" />
@@ -354,6 +360,10 @@ export function StockTransfersPage() {
                 <Select
                   value={toLocationId || undefined}
                   onValueChange={(value) => setToLocationId(value ?? "")}
+                  items={activeLocations.map((location) => ({
+                    value: String(location.id),
+                    label: location.name,
+                  }))}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Destination location" />
@@ -384,6 +394,10 @@ export function StockTransfersPage() {
                         ),
                       )
                     }
+                    items={variantOptions.map((option) => ({
+                      value: String(option.variantId),
+                      label: `${option.label}${option.sku ? ` (${option.sku})` : ""}`,
+                    }))}
                   >
                     <SelectTrigger className="flex-1">
                       <SelectValue placeholder="Select product" />
