@@ -436,6 +436,10 @@ export function LocationsPage() {
                       locationType: value ?? "store",
                     }))
                   }
+                  items={LOCATION_TYPES.map((option) => ({
+                    value: String(option.value),
+                    label: option.label,
+                  }))}
                 >
                   <SelectTrigger id="edit-loc-type" className="w-full">
                     <SelectValue />

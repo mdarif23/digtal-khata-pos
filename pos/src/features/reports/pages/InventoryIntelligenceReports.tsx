@@ -29,8 +29,8 @@ export function InventoryAgingReport() {
     [filters],
   );
 
-  const rows = data?.data.rows ?? [];
-  const buckets = data?.data.buckets ?? {};
+  const rows = data?.rows ?? [];
+  const buckets = data?.buckets ?? {};
 
   return (
     <div className="space-y-4">
@@ -138,7 +138,7 @@ export function DeadStockReport() {
     [days],
   );
 
-  const rows = data?.data ?? [];
+  const rows = data ?? [];
   const totalValue = rows.reduce((sum, row) => sum + row.stockValue, 0);
 
   return (

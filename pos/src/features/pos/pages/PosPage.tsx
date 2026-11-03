@@ -73,6 +73,7 @@ function Pos() {
       payments: [],
       discount: null,
       vatPercent: null,
+      couponCode: undefined,
     },
   });
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);

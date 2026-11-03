@@ -12,13 +12,14 @@ import { ReportDateFilter } from "../components/ReportDateFilter";
 import { ReportMetricCard } from "../components/ReportMetricCard";
 import { ReportBarChart } from "../components/ReportChart";
 import { ReportTable, type ReportColumn } from "../components/ReportTable";
+import { PlanUpgradeCard } from "../components/PlanUpgradeCard";
 
 export function ProfitReport() {
   const [filters, setFilters] = useState<ReportFilters>({
     period: "this_month",
   });
 
-  const { data, loading, error, refetch } = useReportData(
+  const { data, loading, error, entitlementError, refetch } = useReportData(
     () => reportsApi.getProfit(filters),
     [filters]
   );
@@ -110,6 +111,8 @@ export function ProfitReport() {
       />
 
       <ReportDateFilter filters={filters} onFiltersChange={setFilters} />
+
+      {entitlementError && <PlanUpgradeCard gate={entitlementError} />}
 
       {/* Metric Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

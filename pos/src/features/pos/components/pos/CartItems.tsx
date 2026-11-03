@@ -36,13 +36,36 @@ const tk = (n: number) => `৳${n.toFixed(2)}`;
 // Server-authoritative: the backend computes the same totals createSale will
 // charge, including product tax rules the client cannot know. Local math
 // fills the gap instantly and keeps working offline / on quote failure.
-function useCartTotals(form: ShowCustomerInfoProps["form"]) {
+
+/** View shape: local getCartTotals fields plus the quote-only coupon fields. */
+interface CartTotalsView {
+  itemsBase: number;
+  itemDiscount: number;
+  itemsTotal: number;
+  cartDiscountAmount: number;
+  afterDiscount: number;
+  vatPercent: number;
+  vat: number;
+  finalTotal: number;
+  usesTaxRules?: boolean;
+  coupon?: { code: string; discountAmount: number; description: string | null } | null;
+  couponError?: string | null;
+}
+
+function useCartTotals(form: ShowCustomerInfoProps["form"]): CartTotalsView {
   const cart = useCartStore((state) => state.cart);
   const discount = useWatch({ control: form.control, name: "discount" });
   const vatPercent =
     useWatch({ control: form.control, name: "vatPercent" }) ?? 0;
   const couponCode = useWatch({ control: form.control, name: "couponCode" });
-  const customerId = useCustomerStore((s) => s.showCustomerInfo?.id ?? null);
+  // Walk-in has id 0 in the store — never send it to the server (the quote
+  // endpoint requires a positive customer id, so 0 would 400 every quote and
+  // silently break coupons + server totals).
+  const customerId =
+    useCustomerStore((s) => {
+      const id = s.showCustomerInfo?.id;
+      return id != null && id > 0 ? id : null;
+    });
 
   const localTotals = useMemo(
     () => getCartTotals(cart, discount, Number(vatPercent)),
@@ -117,7 +140,7 @@ function CartCustomerInfo() {
         if (!ignore) setDueByCustomers(res.data);
       })
       .catch((err) => console.error("Failed to load customer dues", err));
-    if (id != null) {
+    if (id != null && id > 0) {
       axios
         .get(`/customers/${id}/loyalty`)
         .then((res) => {
@@ -405,7 +428,7 @@ export function CartCalculation({
 function CartTextModal({
   totals,
 }: {
-  totals: ReturnType<typeof getCartTotals>;
+  totals: CartTotalsView;
 }) {
   const cart = useCartStore((state) => state.cart);
   const totalItemsCount = cart.length;
