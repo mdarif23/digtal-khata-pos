@@ -59,6 +59,15 @@ export const productSchema = z
     imageUrl: z.string().url().nullable(),
     imageFile: z.instanceof(File).nullable(),
     source: z.enum(["purchase", "opening"]),
+    // Shipping & packaging defaults (online order management §6.4). Optional —
+    // legacy payloads and products stay valid without them.
+    shippingWeightKg: z.coerce.number().min(0).nullable().optional(),
+    shippingLengthCm: z.coerce.number().min(0).nullable().optional(),
+    shippingWidthCm: z.coerce.number().min(0).nullable().optional(),
+    shippingHeightCm: z.coerce.number().min(0).nullable().optional(),
+    packagingInstructions: z.string().max(1000).nullable().optional(),
+    handlingInstructions: z.string().max(1000).nullable().optional(),
+    isFragile: z.boolean().optional(),
     variants: z.array(variantSchema),
   })
   .superRefine((data, ctx) => {

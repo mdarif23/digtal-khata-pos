@@ -318,6 +318,15 @@ async function insertProduct(tx: Tx, businessId: number, data: ProductType) {
       hasVariants: data.hasVariants,
       trackingType: data.trackingType,
       status: data.status,
+      // Shipping & packaging defaults (copied into sale packages at pack
+      // time — editing these never rewrites processed orders).
+      shippingWeightKg: data.shippingWeightKg ?? null,
+      shippingLengthCm: data.shippingLengthCm ?? null,
+      shippingWidthCm: data.shippingWidthCm ?? null,
+      shippingHeightCm: data.shippingHeightCm ?? null,
+      packagingInstructions: data.packagingInstructions ?? null,
+      handlingInstructions: data.handlingInstructions ?? null,
+      isFragile: data.isFragile ?? false,
     })
     .returning({ id: products.id });
   if (!productResult) {
@@ -735,6 +744,13 @@ export async function updateProduct(
         hasVariants: data.hasVariants,
         trackingType: data.trackingType,
         status: data.status,
+        shippingWeightKg: data.shippingWeightKg ?? null,
+        shippingLengthCm: data.shippingLengthCm ?? null,
+        shippingWidthCm: data.shippingWidthCm ?? null,
+        shippingHeightCm: data.shippingHeightCm ?? null,
+        packagingInstructions: data.packagingInstructions ?? null,
+        handlingInstructions: data.handlingInstructions ?? null,
+        isFragile: data.isFragile ?? false,
       })
       .where(and(eq(products.id, id), eq(products.businessId, businessId)));
 
