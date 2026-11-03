@@ -37,6 +37,8 @@ import { ReorderDashboardPage } from "@/features/procurement/pages/ReorderDashbo
 import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
 import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 import { AttendancePage } from "@/features/pos/pages/AttendancePage";
+import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
+import { OnlineOrderDetailsPage } from "@/features/online-orders/pages/OnlineOrderDetailsPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -45,6 +47,7 @@ const REPORTS_PERMISSIONS = [
   "reports.expense.view",
   "reports.inventory.view",
   "reports.financial.view",
+  "reports.online_profitability.view",
 ];
 
 const router = createBrowserRouter([
@@ -152,6 +155,22 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="sales.view">
             <Sales />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/online-orders",
+        element: (
+          <RequirePermission permission="orders.view">
+            <OnlineOrdersPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/online-orders/:orderId",
+        element: (
+          <RequirePermission permission="orders.view">
+            <OnlineOrderDetailsPage />
           </RequirePermission>
         ),
       },

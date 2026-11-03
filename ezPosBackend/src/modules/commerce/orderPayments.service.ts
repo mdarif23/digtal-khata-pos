@@ -263,7 +263,8 @@ export async function verifyOrderPayment(options: {
 
     // Ledger + order in ONE transaction: sale_payments row (per-business
     // reference uniqueness applies), sale paid, then FIFO stock consumption
-    // via the shared confirm workflow.
+    // via the shared confirm workflow. gatewayFee stays 0 unless the
+    // provider surface reports a processor fee (SSLCommerz does not).
     await tx.insert(salePayments).values({
       businessId: payment.businessId,
       saleId: sale.id,
@@ -271,6 +272,7 @@ export async function verifyOrderPayment(options: {
       amount: Number(payment.amount),
       paymentMethod: "sslcommerz",
       reference: outcome.transactionId ?? options.valId,
+      gatewayFee: 0,
       notes: `Online payment via ${payment.provider} (val_id ${options.valId})`,
     });
 

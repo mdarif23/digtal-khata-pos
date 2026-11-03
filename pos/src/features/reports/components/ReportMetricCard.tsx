@@ -8,10 +8,10 @@ interface ReportMetricCardProps {
   isCurrency?: boolean;
   isCount?: boolean;
   isPercentage?: boolean;
-  subtitle?: string;
+  subtitle?: string | undefined;
   icon?: LucideIcon;
   accent?: string;
-  valueClassName?: string;
+  valueClassName?: string | undefined;
 }
 
 export function ReportMetricCard({

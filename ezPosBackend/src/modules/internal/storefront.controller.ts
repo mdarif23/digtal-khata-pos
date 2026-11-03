@@ -388,6 +388,14 @@ export async function createCheckoutOrder(req: Request, res: Response) {
       paymentMethod: input.paymentMethod,
       deliveryFee,
       shopperId: shopper?.id ?? null,
+      // Structured shipping snapshot (module two §5.2) — kept separately from
+      // the customer record so later customer edits never rewrite the order.
+      shippingName: input.customer.name,
+      shippingPhone: input.customer.phone ?? null,
+      shippingAddress: input.customer.address ?? null,
+      shippingArea: input.customer.area ?? null,
+      shippingCity: input.customer.city ?? null,
+      deliveryInstructions: input.customer.note ?? null,
       note: `Storefront order — delivery: ${deliveryLabel}${
         deliveryFee > 0 ? ` (delivery ৳${deliveryFee})` : " (free delivery)"
       }${input.customer.note ? ` — ${input.customer.note}` : ""}`,
@@ -430,10 +438,14 @@ export async function createCheckoutOrder(req: Request, res: Response) {
     const result = await createOnlineOrder(orderInput);
 
     // COD is confirmed immediately: stock is consumed through the existing
-    // FIFO workflow and the order lands in the portal for fulfillment.
+    // FIFO workflow and the order lands in the portal for fulfillment. The
+    // sale stays UNPAID — cash on delivery is collected (and ledgered) when
+    // the order is delivered or explicitly marked paid.
     const confirmed = result.duplicated
       ? result
-      : await confirmOnlineOrder(storefront.businessId, result.saleId);
+      : await confirmOnlineOrder(storefront.businessId, result.saleId, {
+          paymentMode: "cod",
+        });
 
     res.status(201).json({
       success: true,

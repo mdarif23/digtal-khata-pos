@@ -29,16 +29,19 @@ export const salePayments = pgTable(
     paymentMethod: varchar("payment_method", { length: 50 }).notNull(), // cash | bangla_qr | card
     reference: varchar("reference", { length: 100 }),                   // digital transaction id
     tendered: numeric("tendered", { precision: 10, scale: 2, mode: "number" }), // cash only
+    /** Gateway/processor fee for this capture (online profitability input). */
+    gatewayFee: numeric("gateway_fee", { precision: 12, scale: 2, mode: "number" }).default(0),
     paymentDate: timestamp("payment_date", { mode: "string" }).defaultNow().notNull(),
     notes: text(),
   },
   (t) => [
     index("sale_payments_business_id_idx").on(t.businessId),
     check("sale_payments_amount_positive", sql`${t.amount} > 0`),
-    // sslcommerz: storefront/online order gateway capture (stage 5).
+    // Aligned with migration 0035 (live DB): ledger-internal methods plus
+    // sslcommerz for storefront/online order gateway capture (stage 5).
     check(
       "sale_payments_method_valid",
-      sql`${t.paymentMethod} in ('cash','bangla_qr','card','sslcommerz')`,
+      sql`${t.paymentMethod} in ('cash','bangla_qr','card','store_credit','loyalty_points','gift_card','sslcommerz')`,
     ),
     foreignKey({
       columns: [t.saleId, t.businessId],

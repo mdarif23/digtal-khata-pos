@@ -100,6 +100,23 @@ export const sales = pgTable(
       scale: 2,
       mode: "number",
     }).default(0),
+    /**
+     * Order-time shipping snapshot (online orders). NULL for POS sales and
+     * legacy online orders — the UI falls back to the customer record.
+     * Editing the customer never rewrites these.
+     */
+    shippingName: varchar("shipping_name", { length: 150 }),
+    shippingPhone: varchar("shipping_phone", { length: 30 }),
+    shippingAddress: text("shipping_address"),
+    shippingCity: varchar("shipping_city", { length: 100 }),
+    shippingArea: varchar("shipping_area", { length: 100 }),
+    deliveryInstructions: text("delivery_instructions"),
+    /** Commission charged by external channels (online profitability input). */
+    marketplaceCommission: numeric("marketplace_commission", {
+      precision: 10,
+      scale: 2,
+      mode: "number",
+    }).default(0),
     note: text(),
     customerId: integer("customer_id").references(() => customers.id),
     /** Shopper account that placed a storefront order (nullable; guest = null). */
@@ -113,6 +130,13 @@ export const sales = pgTable(
     }),
     index("sales_business_location_idx").on(table.businessId, table.locationId),
     index("sales_business_id_idx").on(table.businessId),
+    // Online order list + profitability scans filter by channel over a date
+    // range within a business.
+    index("sales_business_channel_date_idx").on(
+      table.businessId,
+      table.channel,
+      table.saleDate,
+    ),
     // Candidate key for composite FKs from sale_items / sale_payments /
     // sale_refunds / serial_numbers.
     unique("sales_id_business_uq").on(table.id, table.businessId),

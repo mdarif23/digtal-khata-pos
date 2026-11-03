@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { customers } from "../../db/schema/customers.js";
 import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
@@ -19,11 +19,16 @@ import {
   consumeStockFifo,
 } from "../sales/sales.service.js";
 import { emitWebhookEventInTx } from "../webhooks/webhookDelivery.service.js";
+import { salePayments } from "../../db/schema/salePayments.js";
+import { saleRefunds } from "../../db/schema/saleRefunds.js";
 import {
   confirmReservationsForSaleInTx,
   createReservationsInTx,
   releaseReservationsForSaleInTx,
 } from "./reservations.service.js";
+import { recordOrderEventInTx } from "./orderTimeline.service.js";
+import { publishRealtime } from "../realtime/realtime.service.js";
+import { pushFulfillmentToWoocommerce } from "../integrations/integrations.service.js";
 
 /**
  * Unified online orders (Phase 9.1). An online order IS a `sales` row —
@@ -76,6 +81,14 @@ export interface CreateOnlineOrderInput {
   deliveryFee?: number | undefined;
   /** Shopper account placing the order (null/undefined = guest checkout). */
   shopperId?: number | null | undefined;
+  /** Order-time shipping snapshot (module two). NULL fields fall back to the
+   * customer record in the UI; editing the customer never rewrites these. */
+  shippingName?: string | null | undefined;
+  shippingPhone?: string | null | undefined;
+  shippingAddress?: string | null | undefined;
+  shippingCity?: string | null | undefined;
+  shippingArea?: string | null | undefined;
+  deliveryInstructions?: string | null | undefined;
   note?: string | null;
 }
 
@@ -343,6 +356,12 @@ export async function createOnlineOrder(
         customerId,
         shopperId: input.shopperId ?? null,
         idempotencyKey: input.idempotencyKey,
+        shippingName: input.shippingName ?? null,
+        shippingPhone: input.shippingPhone ?? null,
+        shippingAddress: input.shippingAddress ?? null,
+        shippingCity: input.shippingCity ?? null,
+        shippingArea: input.shippingArea ?? null,
+        deliveryInstructions: input.deliveryInstructions ?? null,
         note:
           input.note ??
           (input.paymentMethod ? `Payment method: ${input.paymentMethod}` : null),
@@ -412,6 +431,24 @@ export async function createOnlineOrder(
       ),
     });
 
+    // Order timeline: reception from the channel (module two §7).
+    await recordOrderEventInTx(tx, {
+      businessId: input.businessId,
+      saleId: sale.id,
+      eventType: "created",
+      newStatus: "pending",
+      actorType: "integration",
+      actorLabel:
+        input.channel === "woocommerce"
+          ? "WooCommerce"
+          : "Storefront checkout",
+      note: input.note ?? null,
+      metadata: {
+        externalOrderId: input.externalOrderId ?? null,
+        paymentMethod: input.paymentMethod ?? null,
+      },
+    });
+
     const result = {
       saleId: sale.id,
       invoiceNumber: sale.invoiceNumber,
@@ -438,12 +475,20 @@ export async function createOnlineOrder(
  * FIFO/batch rules the POS uses, writes the movement, confirms the
  * reservations, and completes the sale — one transaction, locked against
  * concurrent confirmations.
+ *
+ * paymentMode: 'prepaid' (gateway verified — sale becomes paid) or 'cod'
+ * (cash on delivery — sale stays UNPAID until the collection is recorded as
+ * a sale_payments ledger row at mark-paid/delivery; payment and fulfillment
+ * are independent, module two §5.4).
  */
 export async function confirmOnlineOrder(
   businessId: number,
   saleId: number,
+  options: { paymentMode?: "prepaid" | "cod" | undefined } = {},
 ): Promise<OnlineOrderResult> {
-  return db.transaction((tx) => confirmOnlineOrderInTx(tx, businessId, saleId));
+  return db.transaction((tx) =>
+    confirmOnlineOrderInTx(tx, businessId, saleId, options),
+  );
 }
 
 /**
@@ -456,6 +501,7 @@ export async function confirmOnlineOrderInTx(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   businessId: number,
   saleId: number,
+  options: { paymentMode?: "prepaid" | "cod" | undefined } = {},
 ): Promise<OnlineOrderResult> {
   {
     const [sale] = await tx
@@ -546,11 +592,27 @@ export async function confirmOnlineOrderInTx(
       .update(sales)
       .set({
         status: "completed",
-        paymentStatus: "paid",
-        dueAmount: 0,
-        fulfillmentStatus: "processing",
+        // Prepaid: the gateway verify (or ledger row) already covers the
+        // total. COD: money has NOT moved — the sale stays unpaid until the
+        // collection is recorded (payment ≠ fulfillment, always).
+        ...(options.paymentMode === "cod"
+          ? { paymentStatus: "unpaid" as const }
+          : { paymentStatus: "paid" as const, dueAmount: 0 }),
+        // Business checks passed and stock is consumed — the order is
+        // CONFIRMED. Staff explicitly start processing (module two §6.3).
+        fulfillmentStatus: "confirmed",
       })
       .where(eq(sales.id, saleId));
+
+    await recordOrderEventInTx(tx, {
+      businessId,
+      saleId,
+      eventType: "confirmed",
+      previousStatus: "pending",
+      newStatus: "confirmed",
+      actorType: "user",
+    });
+    publishRealtime(businessId, null, { kind: "order.updated", saleId });
 
     const result = {
       saleId: sale.id,
@@ -573,7 +635,7 @@ export async function confirmOnlineOrderInTx(
 export async function cancelOnlineOrder(
   businessId: number,
   saleId: number,
-  reason?: string,
+  reason?: string | null,
 ): Promise<void> {
   return db.transaction(async (tx) => {
     const [sale] = await tx
@@ -592,11 +654,20 @@ export async function cancelOnlineOrder(
       .update(sales)
       .set({ status: "cancelled" })
       .where(eq(sales.id, saleId));
+    await recordOrderEventInTx(tx, {
+      businessId,
+      saleId,
+      eventType: "cancelled",
+      previousStatus: "pending",
+      newStatus: "cancelled",
+      actorType: "user",
+      note: reason ?? null,
+    });
+    publishRealtime(businessId, null, { kind: "order.updated", saleId });
     await emitWebhookEventInTx(tx, businessId, "order.cancelled", {
       orderId: saleId,
       reason: reason ?? null,
     });
-    void reason;
   });
 }
 
@@ -611,12 +682,13 @@ export interface UnifiedOrderRow {
   channel: "pos" | "woocommerce" | "custom_storefront";
   status: "pending" | "completed" | "held" | "cancelled" | "refunded";
   paymentStatus: "paid" | "unpaid" | "partial";
-  fulfillmentStatus: "unfulfilled" | "processing" | "shipped" | "delivered";
+  fulfillmentStatus: FulfillmentState;
   finalTotal: number | null;
   externalOrderNumber: string | null;
   customerName: string | null;
   locationName: string | null;
   createdAt: Date | null;
+  itemsCount: number;
 }
 
 export interface UnifiedOrderFilters {
@@ -624,6 +696,10 @@ export interface UnifiedOrderFilters {
   status?: string | undefined;
   fulfillmentStatus?: string | undefined;
   search?: string | undefined;
+  locationId?: number | undefined;
+  /** ISO dates (YYYY-MM-DD), inclusive. */
+  from?: string | undefined;
+  to?: string | undefined;
   page?: number | undefined;
   pageSize?: number | undefined;
 }
@@ -635,7 +711,13 @@ export async function listUnifiedOrders(
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 25));
 
-  const conditions = [eq(sales.businessId, businessId)];
+  // ONLINE orders only (module one §4): POS counter sales are fulfilled at
+  // the register and must never surface here — the summary endpoint and
+  // the fulfillment endpoints enforce the same boundary.
+  const conditions = [
+    eq(sales.businessId, businessId),
+    sql`${sales.channel} <> 'pos'`,
+  ];
   if (filters.channel) {
     conditions.push(eq(sales.channel, filters.channel));
   }
@@ -654,20 +736,22 @@ export async function listUnifiedOrders(
   }
   if (
     filters.fulfillmentStatus &&
-    ["unfulfilled", "processing", "shipped", "delivered"].includes(
-      filters.fulfillmentStatus,
+    FULFILLMENT_STATES.includes(
+      filters.fulfillmentStatus as FulfillmentState,
     )
   ) {
     conditions.push(
-      eq(
-        sales.fulfillmentStatus,
-        filters.fulfillmentStatus as
-          | "unfulfilled"
-          | "processing"
-          | "shipped"
-          | "delivered",
-      ),
+      eq(sales.fulfillmentStatus, filters.fulfillmentStatus as FulfillmentState),
     );
+  }
+  if (filters.locationId) {
+    conditions.push(eq(sales.locationId, filters.locationId));
+  }
+  if (filters.from) {
+    conditions.push(gte(sales.saleDate, new Date(`${filters.from}T00:00:00`)));
+  }
+  if (filters.to) {
+    conditions.push(lte(sales.saleDate, new Date(`${filters.to}T23:59:59.999`)));
   }
   if (filters.search) {
     conditions.push(
@@ -692,6 +776,7 @@ export async function listUnifiedOrders(
       customerName: customers.name,
       locationName: locations.name,
       createdAt: sales.createdAt,
+      itemsCount: sql<number>`(select coalesce(sum(${saleItems.quantity}), 0)::int from ${saleItems} where ${saleItems.saleId} = ${sales.id})`,
     })
     .from(sales)
     .leftJoin(customers, eq(customers.id, sales.customerId))
@@ -726,6 +811,7 @@ export interface OrderDetail {
   vat: number | null;
   finalTotal: number | null;
   dueAmount: number | null;
+  deliveryFee: number | null;
   note: string | null;
   externalOrderId: string | null;
   externalOrderNumber: string | null;
@@ -733,6 +819,13 @@ export interface OrderDetail {
   customerPhone: string | null;
   customerEmail: string | null;
   locationName: string | null;
+  /** Order-time shipping snapshot (falls back to the customer in the UI). */
+  shippingName: string | null;
+  shippingPhone: string | null;
+  shippingAddress: string | null;
+  shippingCity: string | null;
+  shippingArea: string | null;
+  deliveryInstructions: string | null;
   createdAt: Date | null;
   items: {
     id: number;
@@ -762,6 +855,7 @@ export async function getOrderDetail(
       vat: sales.vat,
       finalTotal: sales.finalTotal,
       dueAmount: sales.dueAmount,
+      deliveryFee: sales.deliveryFee,
       note: sales.note,
       externalOrderId: sales.externalOrderId,
       externalOrderNumber: sales.externalOrderNumber,
@@ -769,6 +863,12 @@ export async function getOrderDetail(
       customerPhone: customers.phone,
       customerEmail: customers.email,
       locationName: locations.name,
+      shippingName: sales.shippingName,
+      shippingPhone: sales.shippingPhone,
+      shippingAddress: sales.shippingAddress,
+      shippingCity: sales.shippingCity,
+      shippingArea: sales.shippingArea,
+      deliveryInstructions: sales.deliveryInstructions,
       createdAt: sales.createdAt,
     })
     .from(sales)
@@ -798,78 +898,325 @@ export async function getOrderDetail(
   return { ...order, items };
 }
 
-const FULFILLMENT_TRANSITIONS: Record<
-  string,
-  ("processing" | "shipped" | "delivered")[]
-> = {
-  unfulfilled: ["processing", "shipped", "delivered"],
-  processing: ["shipped", "delivered"],
+/**
+ * Forward-only fulfillment workflow (module two §6). Forward skips stay
+ * allowed (a courier order may go straight from packed to shipped); backward
+ * moves and no-ops are rejected. Return states (return_requested,
+ * partially_returned, returned) are set ONLY by the refund flow.
+ */
+export const FULFILLMENT_TRANSITIONS: Record<string, FulfillmentState[]> = {
+  unfulfilled: ["confirmed", "processing", "packed", "ready_to_ship", "shipped", "delivered"],
+  confirmed: ["processing", "packed", "ready_to_ship", "shipped", "delivered"],
+  processing: ["packed", "ready_to_ship", "shipped", "delivered"],
+  packed: ["ready_to_ship", "shipped", "delivered"],
+  ready_to_ship: ["shipped", "delivered"],
   shipped: ["delivered"],
   delivered: [],
+  return_requested: ["partially_returned", "returned"],
+  partially_returned: ["returned"],
+  returned: [],
 };
 
-/** COD / unpaid online orders: record payment and confirm the order. */
-export async function markOnlineOrderPaid(
+export type FulfillmentState =
+  | "unfulfilled"
+  | "confirmed"
+  | "processing"
+  | "packed"
+  | "ready_to_ship"
+  | "shipped"
+  | "delivered"
+  | "return_requested"
+  | "partially_returned"
+  | "returned";
+
+export const FULFILLMENT_STATES: FulfillmentState[] = [
+  "unfulfilled",
+  "confirmed",
+  "processing",
+  "packed",
+  "ready_to_ship",
+  "shipped",
+  "delivered",
+  "return_requested",
+  "partially_returned",
+  "returned",
+];
+
+/** Workflow states reachable through the public transition endpoint — return
+ * states are reserved for the refund flow. */
+export const WORKFLOW_FULFILLMENT_STATES: FulfillmentState[] = [
+  "confirmed",
+  "processing",
+  "packed",
+  "ready_to_ship",
+  "shipped",
+  "delivered",
+];
+
+export interface FulfillmentActor {
+  actorUserId?: number | null | undefined;
+  actorType?: "user" | "system" | "integration" | undefined;
+  actorLabel?: string | null | undefined;
+}
+
+/**
+ * Shared transition guard: locks the sale row, validates the transition, and
+ * writes the timeline event. Callers that already hold a transaction MUST
+ * pass it; standalone callers use `applyFulfillmentTransition`.
+ */
+export async function applyFulfillmentTransitionInTx(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   businessId: number,
   orderId: number,
+  next: FulfillmentState,
+  actor: FulfillmentActor = {},
 ): Promise<void> {
-  const [sale] = await db
+  const [sale] = await tx
     .select({
       id: sales.id,
       status: sales.status,
+      fulfillmentStatus: sales.fulfillmentStatus,
       channel: sales.channel,
+      locationId: sales.locationId,
     })
     .from(sales)
     .where(and(eq(sales.id, orderId), eq(sales.businessId, businessId)))
     .for("update");
   if (!sale) throw new NotFoundError("Order not found.");
   if (sale.channel === "pos") {
-    throw new BadRequestError("POS sales are paid at the counter.");
-  }
-  if (sale.status !== "pending") {
-    throw new ConflictError(
-      `Only pending orders can be marked paid (order is ${sale.status}).`,
+    throw new BadRequestError(
+      "POS sales are fulfilled at the counter; fulfillment tracking is for online orders.",
     );
   }
-  await confirmOnlineOrder(businessId, orderId);
+  if (sale.status !== "completed") {
+    throw new ConflictError("Only completed orders can be fulfilled.");
+  }
+  const allowed = FULFILLMENT_TRANSITIONS[sale.fulfillmentStatus] ?? [];
+  if (!allowed.includes(next)) {
+    throw new ConflictError(
+      `Cannot move fulfillment from ${sale.fulfillmentStatus} to ${next}.`,
+    );
+  }
+  await tx
+    .update(sales)
+    .set({ fulfillmentStatus: next })
+    .where(eq(sales.id, orderId));
+  await recordOrderEventInTx(tx, {
+    businessId,
+    saleId: orderId,
+    eventType: next,
+    previousStatus: sale.fulfillmentStatus,
+    newStatus: next,
+    actorType: actor.actorType ?? "user",
+    actorUserId: actor.actorUserId ?? null,
+    actorLabel: actor.actorLabel ?? null,
+  });
+  // Portal screens refresh via SSE; business webhooks carry shipped/delivered.
+  publishRealtime(businessId, null, { kind: "order.updated", saleId: orderId });
+  if (next === "shipped" || next === "delivered") {
+    await emitWebhookEventInTx(tx, businessId, `order.${next}`, {
+      orderId,
+      previousStatus: sale.fulfillmentStatus,
+    });
+  }
 }
 
-export async function updateFulfillmentStatus(
+export async function applyFulfillmentTransition(
   businessId: number,
   orderId: number,
-  next: "processing" | "shipped" | "delivered",
+  next: FulfillmentState,
+  actor: FulfillmentActor = {},
 ): Promise<void> {
-  return db.transaction(async (tx) => {
+  await db.transaction((tx) =>
+    applyFulfillmentTransitionInTx(tx, businessId, orderId, next, actor),
+  );
+  // Post-commit: mirror shipped/delivered back to the WooCommerce origin
+  // when the order came from there (best-effort, never blocks the portal).
+  if (next === "shipped" || next === "delivered") {
+    void pushFulfillmentToWoocommerce(businessId, orderId, next);
+  }
+}
+
+/** COD / unpaid online orders: record the collection as a real ledger row
+ * and confirm the order. Payment status is derived from the ledger, never
+ * from the fulfillment state (module two §5.4). */
+export async function markOnlineOrderPaid(
+  businessId: number,
+  orderId: number,
+  options: {
+    amount?: number | undefined;
+    method?: string | undefined;
+    reference?: string | null | undefined;
+    /** Processor fee for this collection, as recorded by the business. */
+    gatewayFee?: number | undefined;
+    actorUserId?: number | null | undefined;
+  } = {},
+): Promise<void> {
+  const method = options.method ?? "cash";
+  if (
+    !["cash", "bangla_qr", "card", "sslcommerz"].includes(method)
+  ) {
+    throw new BadRequestError(
+      "Collection method must be cash, bangla_qr, card or sslcommerz.",
+    );
+  }
+  await db.transaction(async (tx) => {
     const [sale] = await tx
       .select({
         id: sales.id,
         status: sales.status,
-        fulfillmentStatus: sales.fulfillmentStatus,
         channel: sales.channel,
+        dueAmount: sales.dueAmount,
+        customerId: sales.customerId,
       })
       .from(sales)
       .where(and(eq(sales.id, orderId), eq(sales.businessId, businessId)))
       .for("update");
     if (!sale) throw new NotFoundError("Order not found.");
     if (sale.channel === "pos") {
-      throw new BadRequestError(
-        "POS sales are fulfilled at the counter; fulfillment tracking is for online orders.",
-      );
+      throw new BadRequestError("POS sales are paid at the counter.");
     }
-    if (sale.status !== "completed") {
+    if (sale.status !== "pending") {
       throw new ConflictError(
-        "Only completed orders can be fulfilled.",
+        `Only pending orders can be marked paid (order is ${sale.status}).`,
       );
     }
-    const allowed = FULFILLMENT_TRANSITIONS[sale.fulfillmentStatus] ?? [];
-    if (!allowed.includes(next)) {
-      throw new ConflictError(
-        `Cannot move fulfillment from ${sale.fulfillmentStatus} to ${next}.`,
-      );
+    const amount = roundMoney(options.amount ?? Number(sale.dueAmount ?? 0));
+    if (amount <= 0) {
+      throw new BadRequestError("Collection amount must be positive.");
     }
-    await tx
-      .update(sales)
-      .set({ fulfillmentStatus: next })
-      .where(eq(sales.id, orderId));
+    const gatewayFee = roundMoney(options.gatewayFee ?? 0);
+    if (gatewayFee < 0) {
+      throw new BadRequestError("Gateway fee cannot be negative.");
+    }
+    // The collection becomes a first-class payment row — COD money-in is
+    // tracked in the SAME ledger as gateway captures (audit gap closed).
+    await tx.insert(salePayments).values({
+      businessId,
+      saleId: orderId,
+      customerId: sale.customerId ?? null,
+      amount,
+      paymentMethod: method,
+      reference: options.reference ?? null,
+      gatewayFee,
+      notes: "Online order payment collection",
+    });
+    await recordOrderEventInTx(tx, {
+      businessId,
+      saleId: orderId,
+      eventType: "payment_recorded",
+      actorType: "user",
+      actorUserId: options.actorUserId ?? null,
+      note: `${method} — ${amount.toFixed(2)}`,
+      metadata: { method, amount },
+    });
+    await confirmOnlineOrderInTx(tx, businessId, orderId);
   });
+}
+
+export async function updateFulfillmentStatus(
+  businessId: number,
+  orderId: number,
+  next: FulfillmentState,
+  actor: FulfillmentActor = {},
+): Promise<void> {
+  return applyFulfillmentTransition(businessId, orderId, next, actor);
+}
+
+// ---------------------------------------------------------------------------
+// Orders dashboard summary (module one §4.1) — honest KPI counts. All figures
+// are computed server-side over the same filters as the list.
+// ---------------------------------------------------------------------------
+
+export interface OrdersSummary {
+  total: number;
+  /** status='pending' — awaiting confirmation. */
+  newOrders: number;
+  confirmed: number;
+  processing: number;
+  packed: number;
+  readyToShip: number;
+  shipped: number;
+  delivered: number;
+  cancelled: number;
+  /** return_requested + partially_returned + returned. */
+  returnRequests: number;
+  /** status='completed' (confirmed onward, not cancelled). */
+  completed: number;
+  /** Σ final_total of completed orders — order value, NOT cash collected. */
+  grossSales: number;
+  /** Σ refund_total of refunds against online orders in range. */
+  refundedTotal: number;
+  /** grossSales − refundedTotal. */
+  netSales: number;
+  /** Completed orders still carrying a due (COD uncollected / partial). */
+  unpaidCount: number;
+}
+
+export async function getOrdersSummary(
+  businessId: number,
+  filters: Omit<UnifiedOrderFilters, "status" | "fulfillmentStatus" | "search" | "page" | "pageSize"> = {},
+): Promise<OrdersSummary> {
+  const conditions = [
+    eq(sales.businessId, businessId),
+    sql`${sales.channel} <> 'pos'`,
+  ];
+  if (filters.channel) conditions.push(eq(sales.channel, filters.channel));
+  if (filters.locationId) conditions.push(eq(sales.locationId, filters.locationId));
+  if (filters.from) conditions.push(gte(sales.saleDate, new Date(`${filters.from}T00:00:00`)));
+  if (filters.to) conditions.push(lte(sales.saleDate, new Date(`${filters.to}T23:59:59.999`)));
+
+  const [orderStats] = await db
+    .select({
+      total: sql<number>`count(*)::int`,
+      newOrders: sql<number>`count(*) filter (where ${sales.status} = 'pending')::int`,
+      confirmed: sql<number>`count(*) filter (where ${sales.fulfillmentStatus} = 'confirmed' and ${sales.status} = 'completed')::int`,
+      processing: sql<number>`count(*) filter (where ${sales.fulfillmentStatus} = 'processing' and ${sales.status} = 'completed')::int`,
+      packed: sql<number>`count(*) filter (where ${sales.fulfillmentStatus} = 'packed' and ${sales.status} = 'completed')::int`,
+      readyToShip: sql<number>`count(*) filter (where ${sales.fulfillmentStatus} = 'ready_to_ship' and ${sales.status} = 'completed')::int`,
+      shipped: sql<number>`count(*) filter (where ${sales.fulfillmentStatus} = 'shipped' and ${sales.status} = 'completed')::int`,
+      delivered: sql<number>`count(*) filter (where ${sales.fulfillmentStatus} = 'delivered' and ${sales.status} = 'completed')::int`,
+      cancelled: sql<number>`count(*) filter (where ${sales.status} = 'cancelled')::int`,
+      returnRequests: sql<number>`count(*) filter (where ${sales.fulfillmentStatus} in ('return_requested','partially_returned','returned'))::int`,
+      completed: sql<number>`count(*) filter (where ${sales.status} = 'completed')::int`,
+      grossSales: sql<number>`coalesce(sum(${sales.finalTotal}) filter (where ${sales.status} = 'completed'), 0)::float8`,
+      unpaidCount: sql<number>`count(*) filter (where ${sales.status} = 'completed' and ${sales.paymentStatus} <> 'paid')::int`,
+    })
+    .from(sales)
+    .where(and(...conditions));
+
+  const [refundStats] = await db
+    .select({
+      refundedTotal: sql<number>`coalesce(sum(${saleRefunds.refundTotal}), 0)::float8`,
+    })
+    .from(saleRefunds)
+    .innerJoin(sales, eq(sales.id, saleRefunds.saleId))
+    .where(
+      and(
+        eq(sales.businessId, businessId),
+        sql`${sales.channel} <> 'pos'`,
+        gte(saleRefunds.createdAt, filters.from ? new Date(`${filters.from}T00:00:00`) : new Date(0)),
+        lte(saleRefunds.createdAt, filters.to ? new Date(`${filters.to}T23:59:59.999`) : new Date()),
+      ),
+    );
+
+  const grossSales = orderStats?.grossSales ?? 0;
+  const refundedTotal = refundStats?.refundedTotal ?? 0;
+  return {
+    total: orderStats?.total ?? 0,
+    newOrders: orderStats?.newOrders ?? 0,
+    confirmed: orderStats?.confirmed ?? 0,
+    processing: orderStats?.processing ?? 0,
+    packed: orderStats?.packed ?? 0,
+    readyToShip: orderStats?.readyToShip ?? 0,
+    shipped: orderStats?.shipped ?? 0,
+    delivered: orderStats?.delivered ?? 0,
+    cancelled: orderStats?.cancelled ?? 0,
+    returnRequests: orderStats?.returnRequests ?? 0,
+    completed: orderStats?.completed ?? 0,
+    grossSales: Math.round(grossSales * 100) / 100,
+    refundedTotal: Math.round(refundedTotal * 100) / 100,
+    netSales: Math.round((grossSales - refundedTotal) * 100) / 100,
+    unpaidCount: orderStats?.unpaidCount ?? 0,
+  };
 }

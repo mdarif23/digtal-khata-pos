@@ -7,6 +7,8 @@ import {
   varchar,
   doublePrecision,
   boolean,
+  numeric,
+  text,
   timestamp,
   pgSequence,
 } from "drizzle-orm/pg-core";
@@ -35,6 +37,34 @@ export const products = pgTable(
     hasVariants: boolean("has_variants").default(false),
     trackingType: varchar("tracking_type", { length: 20 }),
     status: varchar({ length: 30 }),
+    /**
+     * Shipping & packaging defaults for online orders. COPIED into
+     * sale_packages at pack time — editing these never rewrites an
+     * already-processed order.
+     */
+    shippingWeightKg: numeric("shipping_weight_kg", {
+      precision: 10,
+      scale: 3,
+      mode: "number",
+    }),
+    shippingLengthCm: numeric("shipping_length_cm", {
+      precision: 10,
+      scale: 2,
+      mode: "number",
+    }),
+    shippingWidthCm: numeric("shipping_width_cm", {
+      precision: 10,
+      scale: 2,
+      mode: "number",
+    }),
+    shippingHeightCm: numeric("shipping_height_cm", {
+      precision: 10,
+      scale: 2,
+      mode: "number",
+    }),
+    packagingInstructions: text("packaging_instructions"),
+    handlingInstructions: text("handling_instructions"),
+    isFragile: boolean("is_fragile").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },

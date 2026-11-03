@@ -282,6 +282,83 @@ export interface SupplierPayablesReportData {
 
 // ---------------- Commercial Extensions ----------------
 
+// 0. Online Store Profitability (module three)
+export interface ProfitabilitySummary {
+  totalOrders: number;
+  completedOrders: number;
+  cancelledOrders: number;
+  refundCount: number;
+  grossProductSales: number;
+  discounts: number;
+  productRefunds: number;
+  netProductSales: number;
+  cogs: number;
+  restockedCost: number;
+  grossProfit: number;
+  shippingIncome: number;
+  courierExpense: number;
+  packagingExpense: number;
+  gatewayFees: number;
+  marketplaceCommission: number;
+  netContributionProfit: number;
+  grossMarginPercent: number | null;
+  contributionMarginPercent: number | null;
+}
+
+export interface ProfitabilityTrendPoint {
+  date: string;
+  netProductSales: number;
+  cogs: number;
+  grossProfit: number;
+  shippingIncome: number;
+  netContribution: number;
+  orders: number;
+}
+
+export interface ProfitabilityProductRow {
+  variantId: number;
+  productName: string;
+  sku: string;
+  categoryName: string | null;
+  quantitySold: number;
+  grossRevenue: number;
+  refundedRevenue: number;
+  netRevenue: number;
+  cogs: number;
+  restockedCost: number;
+  grossProfit: number;
+  marginPercent: number | null;
+  returnQuantity: number;
+}
+
+export interface ProfitabilityChannelRow {
+  channel: string;
+  orders: number;
+  netProductSales: number;
+  cogs: number;
+  grossProfit: number;
+  shippingIncome: number;
+  courierExpense: number;
+  packagingExpense: number;
+  gatewayFees: number;
+  marketplaceCommission: number;
+  netContribution: number;
+}
+
+export interface ProfitabilityExpenseRow {
+  categoryId: number | null;
+  categoryName: string | null;
+  channel: string | null;
+  amount: number;
+}
+
+export interface ProfitabilityProductsPage {
+  rows: ProfitabilityProductRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 // 1. Hourly Sales
 export interface HourlySalesRow {
   hourNum: number;

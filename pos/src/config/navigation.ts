@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   MapPin,
   Package,
+  PackageCheck,
   Tags,
   Users,
   BarChart3,
@@ -48,6 +49,7 @@ export const navigation = [
       "reports.expense.view",
       "reports.inventory.view",
       "reports.financial.view",
+      "reports.online_profitability.view",
     ],
     items: [
       {
@@ -60,6 +62,7 @@ export const navigation = [
           "reports.expense.view",
           "reports.inventory.view",
           "reports.financial.view",
+          "reports.online_profitability.view",
         ],
       },
       { title: "Shift Close (Z-Report)", url: "/reports?tab=register-close", permission: "reports.sales.view" },
@@ -69,6 +72,7 @@ export const navigation = [
       { title: "Product Sales", url: "/reports?tab=sales-products", permission: "reports.sales.view" },
       { title: "Payment Breakdown", url: "/reports?tab=sales-payments", permission: "reports.sales.view" },
       { title: "Gross Profit & Margins", url: "/reports?tab=profit", permission: "reports.profit.view" },
+      { title: "Online Store Profitability", url: "/reports?tab=online-profitability", permission: "reports.online_profitability.view" },
       { title: "Customer Receivables", url: "/reports?tab=receivables", permission: "reports.financial.view" },
       { title: "Channel Performance", url: "/reports?tab=analytics-channels", permission: "reports.financial.view" },
       { title: "Customer Lifetime Value", url: "/reports?tab=analytics-clv", permission: "reports.financial.view" },
@@ -106,6 +110,12 @@ export const navigation = [
     url: "/sales",
     icon: FcSalesPerformance,
     permission: "sales.view",
+  },
+  {
+    title: "Online Orders",
+    url: "/online-orders",
+    icon: PackageCheck,
+    permission: "orders.view",
   },
   {
     title: "Contacts",

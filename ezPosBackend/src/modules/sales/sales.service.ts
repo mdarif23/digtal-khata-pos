@@ -52,6 +52,7 @@ import type { CreateSalePayload } from "./schemas/sales.schema.js";
 import type { SaleRefundRequest } from "./schemas/sales.schema.js";
 import { customers } from "../../db/schema/customers.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
+import { recordOrderEventInTx } from "../commerce/orderTimeline.service.js";
 import { salePaymentIntents } from "../../db/schema/salePaymentIntents.js";
 import { resolveIntentProvider } from "../../services/payments/saleProviders.js";
 import {
@@ -1398,6 +1399,44 @@ async function applySaleRefund(
       .update(sales)
       .set({ status: "refunded" })
       .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)));
+  }
+
+  // Online orders: mirror the return on the fulfillment workflow (module
+  // two §6.8). Money-side truth stays in sale_refunds; POS sales keep their
+  // fulfillment state untouched. Forward-only — a returned order can never
+  // regress, so an order cannot be returned again in full.
+  const [refundSale] = await tx
+    .select({
+      channel: sales.channel,
+      fulfillmentStatus: sales.fulfillmentStatus,
+    })
+    .from(sales)
+    .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
+    .limit(1);
+  if (refundSale && refundSale.channel !== "pos") {
+    const current = refundSale.fulfillmentStatus;
+    if (current !== "returned") {
+      const fullyReturned =
+        allSaleItems.length > 0 &&
+        allSaleItems.every((saleItem) => refundedIds.has(saleItem.id));
+      const nextReturnState = fullyReturned
+        ? "returned"
+        : "partially_returned";
+      await tx
+        .update(sales)
+        .set({ fulfillmentStatus: nextReturnState })
+        .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)));
+      await recordOrderEventInTx(tx, {
+        businessId,
+        saleId,
+        eventType: nextReturnState,
+        previousStatus: current,
+        newStatus: nextReturnState,
+        actorType: "user",
+        note: `Refund recorded — ${refundTotal.toFixed(2)}`,
+        metadata: { refundId: refund.id, refundTotal },
+      });
+    }
   }
 
   return { refundId: refund.id, refundTotal };

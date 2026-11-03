@@ -145,6 +145,20 @@ export class WoocommerceClient {
     return { id: webhook.id };
   }
 
+  /** Re-fetches an order — used by the order_webhook_retry job so a missed
+   * webhook is recovered from the store itself, never silently lost. */
+  async getOrder(orderId: number | string): Promise<unknown> {
+    return this.request<unknown>("GET", `/orders/${orderId}`);
+  }
+
+  /** Order status push-back (fulfillment sync): ezPos → Woo. */
+  async updateOrderStatus(
+    orderId: number | string,
+    status: string,
+  ): Promise<void> {
+    await this.request("PUT", `/orders/${orderId}`, { status });
+  }
+
   async updateProductStock(
     externalProductId: string,
     stockQuantity: number,

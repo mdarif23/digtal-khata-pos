@@ -28,6 +28,7 @@ import {
 import { defaultValues } from "../constants/form-defaults.js";
 import { VariantsInfoCard } from "../components/addProductPage/VariantsInfoCard.js";
 import { GeneralInfoCard } from "../components/addProductPage/GeneralInfoCard.js";
+import { ShippingInfoCard } from "../components/addProductPage/ShippingInfoCard.js";
 import { RightColumnInfoCard } from "../components/addProductPage/RightColumnInfoCard.js";
 import { SaveAndUpdateActionsCard } from "../components/addProductPage/SaveAndUpdateActionsCard.js";
 import useProductStore from "@/features/products/useProductStore.js";
@@ -244,6 +245,7 @@ const ProductStockForm = () => {
           <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-3">
             <div className="space-y-6 lg:col-span-2">
               <GeneralInfoCard form={form} />
+              <ShippingInfoCard form={form} />
               <VariantsInfoCard
                 fields={fields}
                 form={form}

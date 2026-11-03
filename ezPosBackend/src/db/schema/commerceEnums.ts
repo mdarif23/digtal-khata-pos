@@ -15,11 +15,25 @@ export const saleChannelEnum = pgEnum("sale_channel", [
   "custom_storefront",
 ]);
 
+/**
+ * Online order fulfillment workflow (online order management module).
+ * Additive evolution of the original 4 values: POS rows keep
+ * 'unfulfilled'/'shipped'/'delivered'; online orders walk
+ * confirmed → processing → packed → ready_to_ship → shipped → delivered.
+ * Return states are driven by the refund flow; money-side truth stays in
+ * sale_refunds.
+ */
 export const fulfillmentStatusEnum = pgEnum("fulfillment_status", [
   "unfulfilled",
+  "confirmed",
   "processing",
+  "packed",
+  "ready_to_ship",
   "shipped",
   "delivered",
+  "return_requested",
+  "partially_returned",
+  "returned",
 ]);
 
 export const integrationPlatformEnum = pgEnum("integration_platform", [
