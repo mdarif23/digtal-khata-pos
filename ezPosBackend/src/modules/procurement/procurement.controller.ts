@@ -16,6 +16,7 @@ import {
   supplierIdParamSchema,
   supplierVariantTrendQuerySchema,
   updateObservationSchema,
+  updateOrderSettingsSchema,
 } from "./schemas/priceCheck.schema.js";
 import {
   priceHistoryQuerySchema,
@@ -307,5 +308,36 @@ export async function getReorderDashboard(req: Request, res: Response) {
     return res.status(200).json({ success: true, data: result });
   } catch (err) {
     return sendSafeError(res, err, "Failed to load the reorder dashboard.");
+  }
+}
+
+export async function updateSupplierOrderSettings(req: Request, res: Response) {
+  try {
+    const parsedParams = supplierIdParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      return res.status(400).json({
+        message: "Invalid supplier id",
+        errors: parsedParams.error.flatten(),
+      });
+    }
+    const parsed = updateOrderSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "Invalid order settings",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const result = await supplierMonitoringService.updateSupplierOrderSettings(
+      getBusinessId(req),
+      parsedParams.data.supplierId,
+      parsed.data,
+    );
+    return res.status(200).json({
+      success: true,
+      message: "Order settings saved",
+      data: result,
+    });
+  } catch (err) {
+    return sendSafeError(res, err, "Failed to save the order settings.");
   }
 }

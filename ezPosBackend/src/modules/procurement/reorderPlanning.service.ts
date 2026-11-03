@@ -68,6 +68,8 @@ export interface SupplierReorderGroup {
   estimatedValue: number;
   minimumOrderValue: number | null;
   targetOrderValue: number | null;
+  orderStatus: OrderValueStatus;
+  amountRemaining: number;
 }
 
 export type ReorderStatusFilter =
@@ -180,6 +182,47 @@ function searchFilterSql(search: string | undefined): SQL {
     : sql``;
 }
 
+function supplierFilterSql(supplierId: number | undefined): SQL {
+  return supplierId ? sql` AND m.last_supplier_id = ${supplierId}` : sql``;
+}
+
+/**
+ * Order-value status (Feature D), factual: how the group's estimated
+ * value compares to the supplier's minimum requirement and the business's
+ * own target. Minimum and target are independent — never derived from
+ * each other. The user can always proceed below the minimum; this is
+ * information, not a block.
+ */
+export type OrderValueStatus =
+  | "below_minimum"
+  | "minimum_reached"
+  | "target_reached"
+  | "above_target"
+  | "ready_for_review";
+
+export function orderValueStatus(
+  estimatedValue: number,
+  minimumOrderValue: number | null,
+  targetOrderValue: number | null,
+): { orderStatus: OrderValueStatus; amountRemaining: number } {
+  if (minimumOrderValue !== null && estimatedValue < minimumOrderValue) {
+    return {
+      orderStatus: "below_minimum",
+      amountRemaining: Number((minimumOrderValue - estimatedValue).toFixed(2)),
+    };
+  }
+  if (targetOrderValue !== null && estimatedValue > targetOrderValue) {
+    return { orderStatus: "above_target", amountRemaining: 0 };
+  }
+  if (targetOrderValue !== null && estimatedValue >= targetOrderValue) {
+    return { orderStatus: "target_reached", amountRemaining: 0 };
+  }
+  if (minimumOrderValue !== null) {
+    return { orderStatus: "minimum_reached", amountRemaining: 0 };
+  }
+  return { orderStatus: "ready_for_review", amountRemaining: 0 };
+}
+
 interface MetricsRow {
   variantId: number;
   productId: number;
@@ -256,6 +299,7 @@ export async function getReorderDashboard(
     limit: number;
     search?: string | undefined;
     status?: ReorderStatusFilter | undefined;
+    supplierId?: number | undefined;
   },
 ): Promise<{
   summary: ReorderDashboardSummary;
@@ -266,7 +310,7 @@ export async function getReorderDashboard(
   limit: number;
 }> {
   const base = reorderBaseCte(businessId, locationId);
-  const filters = sql`${statusFilterSql(params.status)}${searchFilterSql(params.search)}`;
+  const filters = sql`${statusFilterSql(params.status)}${searchFilterSql(params.search)}${supplierFilterSql(params.supplierId)}`;
 
   const page = params.page || 1;
   const limit = params.limit || 50;
@@ -348,7 +392,16 @@ export async function getReorderDashboard(
       totalEstimatedValue: Number(summaryRow?.totalEstimatedValue ?? 0),
       supplierCount: Number(summaryRow?.supplierCount ?? 0),
     },
-    suppliers: suppliersResult.rows as unknown as SupplierReorderGroup[],
+    suppliers: (
+      suppliersResult.rows as unknown as SupplierReorderGroup[]
+    ).map((group) => ({
+      ...group,
+      ...orderValueStatus(
+        group.estimatedValue,
+        group.minimumOrderValue,
+        group.targetOrderValue,
+      ),
+    })),
     data: rowsResult.rows as unknown as ReorderRow[],
     total: Number(countResult.rows[0]?.total ?? 0),
     page,

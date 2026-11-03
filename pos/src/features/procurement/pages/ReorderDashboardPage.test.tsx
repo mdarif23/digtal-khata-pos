@@ -36,6 +36,8 @@ const dashboard: ReorderDashboard = {
       estimatedValue: 200,
       minimumOrderValue: 10000,
       targetOrderValue: null,
+      orderStatus: "below_minimum",
+      amountRemaining: 9800,
     },
   ],
   data: [

@@ -12,6 +12,7 @@ import {
   getVariantPriceHistoryApi,
   listObservationsApi,
   updateAlertSettingsApi,
+  updateOrderSettingsApi,
   updateObservationApi,
   type AlertSettings,
   type ConvertSuggestionsInput,
@@ -22,6 +23,7 @@ import {
   type ReorderDashboardFilters,
   type SupplierHistoryFilters,
   type UpdateObservationInput,
+  type UpdateOrderSettingsInput,
 } from "../api/procurement.api";
 
 /** Query-key factory — follow the due-management convention. */
@@ -165,6 +167,20 @@ export function useConvertSuggestions() {
   return useMutation({
     mutationFn: (payload: ConvertSuggestionsInput) =>
       convertSuggestionsApi(payload),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateOrderSettings() {
+  const invalidate = useInvalidateProcurement();
+  return useMutation({
+    mutationFn: ({
+      supplierId,
+      payload,
+    }: {
+      supplierId: number;
+      payload: UpdateOrderSettingsInput;
+    }) => updateOrderSettingsApi(supplierId, payload),
     onSuccess: invalidate,
   });
 }

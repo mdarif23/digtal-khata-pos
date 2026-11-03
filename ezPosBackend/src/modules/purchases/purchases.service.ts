@@ -169,8 +169,13 @@ export async function createPurchase(
     // Insert them all in ONE single database query!
     await tx.insert(purchaseItems).values(itemsToInsert);
 
-    // 7. Return the new purchase so the frontend can use it
-    return { purchaseOrderNumber: newPurchase.purchaseOrderNumber };
+    // 7. Return the new purchase so the frontend can use it. The id was
+    // added in Phase 5 (Smart Procurement draft creation navigates to the
+    // created PO); consumers reading purchaseOrderNumber are unaffected.
+    return {
+      id: newPurchase.id,
+      purchaseOrderNumber: newPurchase.purchaseOrderNumber,
+    };
   });
 }
 export async function getPurchasesSummary(businessId: number) {

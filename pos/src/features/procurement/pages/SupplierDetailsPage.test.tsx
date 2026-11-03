@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useSessionStore } from "@/auth/sessionStore";
 import type { PaginatedPriceOverview, SupplierDetail } from "../api/procurement.api";
 import { SupplierDetailsPage } from "./SupplierDetailsPage";
 
@@ -10,6 +11,7 @@ vi.mock("../hooks/useProcurement", () => ({
   useSupplierDetail: vi.fn(),
   useSupplierPriceHistory: vi.fn(),
   useSupplierVariantTrend: vi.fn(() => ({ data: [], isLoading: false })),
+  useUpdateOrderSettings: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }));
 
 const { useSupplierDetail, useSupplierPriceHistory } = await import(
@@ -81,6 +83,7 @@ function renderPage() {
 
 describe("SupplierDetailsPage", () => {
   beforeEach(() => {
+    useSessionStore.setState({ permissions: [] });
     vi.mocked(useSupplierDetail).mockReset();
     vi.mocked(useSupplierPriceHistory).mockReset();
     vi.mocked(useSupplierDetail).mockReturnValue({
@@ -121,5 +124,27 @@ describe("SupplierDetailsPage", () => {
     renderPage();
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+
+  it("locks the order-settings editor without suppliers.edit", async () => {
+    useSessionStore.setState({ permissions: ["purchases.view"] });
+    renderPage();
+
+    expect(await screen.findByText("Order settings")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save settings" })).toBeDisabled();
+  });
+
+  it("enables order-settings editing with suppliers.edit", async () => {
+    useSessionStore.setState({ permissions: ["suppliers.edit"] });
+    renderPage();
+
+    expect(await screen.findByText("Order settings")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save settings" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByLabelText("Supplier minimum order value"),
+    ).toBeEnabled();
+    expect(screen.getByLabelText("Business target order value")).toBeEnabled();
   });
 });

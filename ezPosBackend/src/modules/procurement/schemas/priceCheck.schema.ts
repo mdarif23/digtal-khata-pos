@@ -64,3 +64,15 @@ export type AlertSettingsInput = z.infer<typeof alertSettingsSchema>;
 export const supplierVariantTrendQuerySchema = z.object({
   variantId: z.coerce.number().int().positive(),
 });
+
+// ---- Phase 5: supplier order-value settings ----
+
+const optionalMoney = z.coerce.number().min(0).max(99_999_999).nullable();
+
+export const updateOrderSettingsSchema = z.object({
+  minimumOrderValue: optionalMoney.optional(),
+  targetOrderValue: optionalMoney.optional(),
+  orderSettingsEnabled: z.boolean().optional(),
+  orderSettingsNotes: z.string().trim().max(300).nullable().optional(),
+});
+export type UpdateOrderSettingsInput = z.infer<typeof updateOrderSettingsSchema>;
