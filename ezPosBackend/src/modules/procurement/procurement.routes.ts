@@ -6,7 +6,10 @@ import {
   requireFullAccess,
 } from "../../middleware/business.js";
 import { requireLocationAccess } from "../../middleware/location.js";
-import { requirePermission } from "../../middleware/permissions.js";
+import {
+  requireAnyPermission,
+  requirePermission,
+} from "../../middleware/permissions.js";
 
 const router = express.Router();
 // Price intelligence is purchase-derived analytics: same access chain as
@@ -56,5 +59,42 @@ router.delete(
   ...write,
   requirePermission("purchases.price_check"),
   procurementController.deleteObservation,
+);
+
+// Supplier price monitoring (Phase 3). A supplier's price history is
+// purchase-derived, visible to anyone who can see purchases or suppliers.
+router.get(
+  "/api/procurement/suppliers/:supplierId",
+  ...read,
+  requireAnyPermission(["suppliers.view", "purchases.view"]),
+  procurementController.getSupplierDetail,
+);
+router.get(
+  "/api/procurement/suppliers/:supplierId/price-history",
+  ...read,
+  requireAnyPermission(["suppliers.view", "purchases.view"]),
+  procurementController.getSupplierPriceHistory,
+);
+router.get(
+  "/api/procurement/suppliers/:supplierId/trend",
+  ...read,
+  requireAnyPermission(["suppliers.view", "purchases.view"]),
+  procurementController.getSupplierVariantTrend,
+);
+
+// Business-wide price-increase alert configuration. Reading is open to
+// purchases.view; changing the threshold is its own key (owner-level by
+// default).
+router.get(
+  "/api/procurement/alert-settings",
+  ...read,
+  requirePermission("purchases.view"),
+  procurementController.getAlertSettings,
+);
+router.put(
+  "/api/procurement/alert-settings",
+  ...write,
+  requirePermission("purchases.manage_price_alerts"),
+  procurementController.updateAlertSettings,
 );
 export default router;

@@ -13,6 +13,11 @@ vi.mock("../hooks/useProcurement", () => ({
       ["procurement", "variant-price-history", id, filters],
   },
   usePriceOverview: vi.fn(),
+  useAlertSettings: vi.fn(() => ({
+    data: { enabled: false, increaseThresholdPercent: 10 },
+    isLoading: false,
+  })),
+  useUpdateAlertSettings: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }));
 
 const { usePriceOverview } = await import("../hooks/useProcurement");
@@ -37,6 +42,8 @@ const overviewRow: PaginatedPriceOverview = {
       lastSupplierId: 3,
       lastSupplierName: "Wholesale A",
       priceChangePercent: 20,
+      latestQuotation: null,
+      lastObservationDate: null,
     },
   ],
   total: 1,

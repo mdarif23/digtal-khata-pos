@@ -41,6 +41,9 @@ export interface PriceOverviewRow {
   lastSupplierId: number | null;
   lastSupplierName: string | null;
   priceChangePercent: number | null;
+  /** Latest recorded quotation (normalized per unit) for this row's scope. */
+  latestQuotation: number | null;
+  lastObservationDate: string | Date | null;
 }
 
 export interface SupplierPriceRow {
@@ -123,7 +126,7 @@ export interface PriceHistoryDetail {
  * Filters (date range, supplier) prune events before aggregation so the
  * comparison always answers "for this range / this supplier".
  */
-function receivedEventsCte(
+export function receivedEventsCte(
   businessId: number,
   params: { from?: string | undefined; to?: string | undefined; supplierId?: number | undefined },
 ): SQL {
@@ -205,6 +208,8 @@ export async function getPriceOverview(
       latest.supplier_id AS "lastSupplierId",
       latest.supplier_name AS "lastSupplierName",
       prev.unit_cost::float8 AS "previousPrice",
+      obs."latestQuotation",
+      obs."lastObservationDate",
       CASE
         WHEN prev.unit_cost IS NOT NULL AND prev.unit_cost > 0
         THEN ROUND(((latest.unit_cost - prev.unit_cost) / prev.unit_cost * 100)::numeric, 2)::float8
@@ -239,6 +244,19 @@ export async function getPriceOverview(
       ORDER BY e.purchase_date DESC, e.item_id DESC
       OFFSET 1 LIMIT 1
     ) prev ON true
+    LEFT JOIN LATERAL (
+      SELECT
+        ROUND(CASE WHEN po.package_quantity IS NOT NULL AND po.package_quantity > 0
+                   THEN po.quoted_price / po.package_quantity
+                   ELSE po.quoted_price END::numeric, 2)::float8 AS "latestQuotation",
+        po.observation_date AS "lastObservationDate"
+      FROM price_observations po
+      WHERE po.business_id = ${businessId}
+        AND po.variant_id = pv.id
+        ${params.supplierId ? sql`AND po.supplier_id = ${params.supplierId}` : sql``}
+      ORDER BY po.observation_date DESC, po.id DESC
+      LIMIT 1
+    ) obs ON true
     WHERE pv.business_id = ${businessId}${filters}
     ORDER BY prod.name ASC, pv.sku ASC
     LIMIT ${limit} OFFSET ${offset}

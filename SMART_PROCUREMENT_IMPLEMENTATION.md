@@ -60,7 +60,7 @@ Drizzle mirrors: `src/db/schema/priceObservations.ts`,
 | 0 | Architecture inspection + schema approval | ✅ Complete (2026-11-04) |
 | 1 | Product Price Intelligence | ✅ Complete (2026-11-04) — see §4 |
 | 2 | Wholesale Market Price Check (Quick Price Check) | ✅ Complete (2026-11-04) — see §5 |
-| 3 | Supplier Price Monitoring + increase alerts | ⬜ Not started |
+| 3 | Supplier Price Monitoring + increase alerts | ✅ Complete (2026-11-04) — see §6 |
 | 4 | Smart Reorder Planning (extend `modules/reorder`) | ⬜ Not started |
 | 5 | Supplier Order Value Management | ⬜ Not started |
 | 6 | Integration QA + regressions | ⬜ Not started |
@@ -254,15 +254,104 @@ received-purchase-line list `{ data, total, page, limit }`. Unknown variant
   total); full quotation pagination lives on the Price Check History
   page.
 
-## 6. Remaining work
+## 6. Phase 3 — Supplier Price Monitoring
+
+Committed history note: Phases 1–2 shipped as commit `316e51b`.
+
+### Backend
+
+- **`supplierMonitoring.service.ts`** — `getSupplierDetail` (profile incl.
+  order-value settings fields + received-value stats), and
+  `getSupplierPriceHistory` (reuses the price-overview aggregation with
+  the supplier filter forced on — rows aggregate only THIS supplier's
+  received purchases and THIS supplier's quotations), plus
+  `getSupplierVariantTrend` (chronological received unit costs for one
+  variant, capped at 200 events).
+- **`priceAlerts.service.ts`** — alert settings (get/upsert with defaults
+  `{enabled:false, threshold:10}`) and `checkPriceIncreasesInTx`, called
+  inside the purchase-receiving transaction from
+  `purchases.service.ts createReceivePurchase` (wrapped in try/catch —
+  alerting never blocks a legitimate receive). Compares each received
+  line's actual unit cost against that supplier's previous actual price
+  for the variant (excluding the current purchase), fires a factual
+  `price_increase` notification when `percentChange >= threshold`:
+  title `Price increase: {product}`, body `120.00 → 135.00 (+12.5%) from
+  Distributor A.`, payload `{variantId, supplierId, purchaseId,
+  previousPrice, currentPrice, percentChange}`.
+  **Duplicate prevention is two-layered**: the notification-center dedupe
+  (`UNIQUE(business_id, dedupe_key)`, day-suffixed) plus an explicit
+  existence check on the event key
+  `price_increase:{business}:{variant}:{supplier}:{purchase}` so a price
+  event alerts exactly once — ever, even across partial receives on
+  different days. Disabled by default; decreases and below-threshold
+  increases never alert; no supplier is ever labeled unreliable.
+- **Endpoints** (all tenancy-chained):
+  - `GET /api/procurement/suppliers/:supplierId` — detail + stats
+    (`anyOf suppliers.view, purchases.view`)
+  - `GET /api/procurement/suppliers/:supplierId/price-history` —
+    paginated, `search/from/to` (same permission)
+  - `GET /api/procurement/suppliers/:supplierId/trend?variantId=` — chart
+    events (same permission)
+  - `GET /api/procurement/alert-settings` (`purchases.view`)
+  - `PUT /api/procurement/alert-settings`
+    (`purchases.manage_price_alerts` — NEW key, owner-level: catalog +
+    frontend mirror only, deliberately NOT in staff role templates)
+- `price-overview` rows now carry supplier-aware `latestQuotation` /
+  `lastObservationDate` (when filtered by supplier, quotations from that
+  supplier; otherwise latest across suppliers).
+
+### Frontend
+
+- **SupplierDetailsPage** (`/procurement/suppliers/:supplierId`) —
+  profile + stat cards, supplier price history table (latest, latest
+  quotation + date, previous, change badge, low/high/avg, counts, last
+  purchase), and a per-product price trend chart (variant selector →
+  `ReportTrendChart`). Reached by clicking a row in the existing
+  Suppliers list (`SuppliersTable` rows now navigate).
+- **PriceMonitoringPage** — "Price increase alerts" settings card
+  (enable switch + threshold + save), editable only with
+  `purchases.manage_price_alerts`, read-only otherwise.
+- api/hooks extended (query-key factory + invalidation); `rbac.ts` mirror
+  gains `purchases.manage_price_alerts`. Alerts themselves surface in the
+  existing notification center (bell, SSE) — no new UI surface needed.
+
+### Business rules implemented
+
+- Alerts fire on the RECEIVE event (the moment an actual price lands),
+  compared per (supplier, variant) against the previous actual price.
+- One alert per price event ever; multi-day partial receives cannot
+  re-alert the same event.
+- Disabled by default; the owner opts in and sets the threshold.
+- Factual numbers only — the system never labels a supplier dishonest or
+  unreliable.
+
+### Test evidence (executed 2026-11-04)
+
+- Backend: tsc clean; `procurementSupplierMonitoring.integration.test.ts`
+  **6/6** — settings read/validate/permission-gate (owner PUT, accountant
+  403-PUT/200-GET), exactly one `price_increase` row with the exact
+  `120.00 → 135.00 (+12.5%)` event and payload, detail stats
+  (2760 received value / 5 purchases / 1 product), supplier-scoped
+  history (latest 100 vs previous 140 → −28.57%, avg 115, quotation 150),
+  chronological trend `[100,120,135,140,100]`, foreign-tenant 404s;
+  disabled-by-default silence and below-threshold/decrease silence are
+  baked into the fixture (5 purchases → exactly 1 alert). Full suite
+  **386/386** (380 + 6).
+- Frontend: **26/26** vitest (new SupplierDetailsPage tests; monitoring
+  page test mock extended); `tsc -b` 0 new-file errors; `vite build`
+  green.
+
+### Known limitations (Phase 3)
+
+- Quotation-only suppliers (no purchases) still appear only in the
+  observations list, not the purchase-based comparison table.
+- The trend chart caps at the 200 most recent events per variant.
+- Alerts are in-app notifications (bell + SSE); no email/push channel.
+
+## 7. Remaining work
 
 - **Phase 2**: ✅ shipped (see §5).
-- **Phase 3**: Supplier Details page (none exists today — suppliers have
-  no GET/PATCH by id), supplier price history/comparison/trend, alert
-  settings UI + receive-transaction detection + `price_increase`
-  notification kind (varchar kind — no migration needed), dedupe via
-  `price_increase:{variantId}:{supplierId}:{purchaseId}`, new permission
-  key `purchases.manage_price_alerts`.
+- **Phase 3**: ✅ shipped (see §6).
 - **Phase 4**: extend `modules/reorder` (net `reserved_quantity` +
   in-transit transfers; supplier-wise grouping; no-supplier / missing-price
   flags; estimated reorder value dashboard).

@@ -45,6 +45,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "purchases.receive", module: "purchases", description: "Receive purchased items into inventory" },
   { key: "purchases.return", module: "purchases", description: "Create and manage purchase returns" },
   { key: "purchases.price_check", module: "purchases", description: "Record, edit and delete market price check observations" },
+  { key: "purchases.manage_price_alerts", module: "purchases", description: "Configure price increase alert thresholds" },
 
   // Inventory
   { key: "inventory.view", module: "inventory", description: "View stock levels, batches and serials" },

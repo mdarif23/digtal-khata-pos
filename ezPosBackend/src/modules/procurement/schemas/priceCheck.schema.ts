@@ -39,3 +39,28 @@ export type ListObservationsQuery = z.infer<typeof listObservationsQuerySchema>;
 export const observationIdParamSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
+
+// ---- Phase 3: supplier monitoring + alert settings ----
+
+export const supplierIdParamSchema = z.object({
+  supplierId: z.coerce.number().int().positive(),
+});
+
+export const supplierHistoryQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  search: z.string().trim().max(100).optional(),
+  from: dateString.optional(),
+  to: dateString.optional(),
+});
+export type SupplierHistoryQuery = z.infer<typeof supplierHistoryQuerySchema>;
+
+export const alertSettingsSchema = z.object({
+  enabled: z.boolean(),
+  increaseThresholdPercent: z.coerce.number().min(0.01).max(1000),
+});
+export type AlertSettingsInput = z.infer<typeof alertSettingsSchema>;
+
+export const supplierVariantTrendQuerySchema = z.object({
+  variantId: z.coerce.number().int().positive(),
+});

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
+import { BellRing } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -17,6 +18,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { toast } from "@/components/ui/toast";
+import { usePermissions } from "@/hooks/usePermissions";
+import {
+  useAlertSettings,
+  useUpdateAlertSettings,
+} from "../hooks/useProcurement";
 import {
   Table,
   TableBody,
@@ -46,12 +54,61 @@ const PAGE_SIZE = 20;
  */
 export function PriceMonitoringPage() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canManageAlerts = hasPermission("purchases.manage_price_alerts");
   const categories = useProductStore(
     (state) => state.productSelectOptions.categories,
   );
   const supplierOptions = useProductStore(
     (state) => state.productSelectOptions.suppliers,
   );
+
+  const alertSettings = useAlertSettings();
+  const updateAlertSettings = useUpdateAlertSettings();
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [alertThreshold, setAlertThreshold] = useState("10");
+  const [alertsLoaded, setAlertsLoaded] = useState(false);
+
+  useEffect(() => {
+    if (alertSettings.data && !alertsLoaded) {
+      setAlertsEnabled(alertSettings.data.enabled);
+      setAlertThreshold(String(alertSettings.data.increaseThresholdPercent));
+      setAlertsLoaded(true);
+    }
+  }, [alertSettings.data, alertsLoaded]);
+
+  const saveAlertSettings = async () => {
+    const threshold = Number(alertThreshold);
+    if (!Number.isFinite(threshold) || threshold <= 0) {
+      toast.add({
+        type: "error",
+        title: "Invalid threshold",
+        description: "Enter a percentage above 0.",
+      });
+      return;
+    }
+    try {
+      const saved = await updateAlertSettings.mutateAsync({
+        enabled: alertsEnabled,
+        increaseThresholdPercent: threshold,
+      });
+      setAlertsEnabled(saved.enabled);
+      setAlertThreshold(String(saved.increaseThresholdPercent));
+      toast.add({
+        type: "success",
+        title: "Alert settings saved",
+        description: alertsEnabled
+          ? `You will be notified when a supplier raises a price by ${threshold}% or more.`
+          : "Price increase alerts are turned off.",
+      });
+    } catch (err) {
+      toast.add({
+        type: "error",
+        title: "Could not save alert settings",
+        description: getErrorMessage(err),
+      });
+    }
+  };
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -112,6 +169,59 @@ export function PriceMonitoringPage() {
 
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <BellRing aria-hidden className="size-4" />
+            Price increase alerts
+          </CardTitle>
+          <CardDescription>
+            Get a notification when a supplier raises a product's price by
+            your threshold over their previous actual price. Alerts are
+            factual — one per price event.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-6">
+          <label className="flex items-center gap-3 text-sm font-medium">
+            <Switch
+              checked={alertsEnabled}
+              disabled={!canManageAlerts || alertSettings.isLoading}
+              onCheckedChange={(checked) => setAlertsEnabled(checked === true)}
+            />
+            {alertsEnabled ? "Enabled" : "Disabled"}
+          </label>
+          <div className="flex items-end gap-2">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-slate-500">Threshold (%)</span>
+              <Input
+                aria-label="Alert threshold percentage"
+                type="number"
+                step="0.01"
+                min="0.01"
+                className="w-32"
+                value={alertThreshold}
+                disabled={!canManageAlerts}
+                onChange={(event) => setAlertThreshold(event.target.value)}
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!canManageAlerts || updateAlertSettings.isPending}
+              onClick={() => void saveAlertSettings()}
+            >
+              Save
+            </Button>
+          </div>
+          {!canManageAlerts ? (
+            <p className="text-xs text-slate-400 sm:ml-auto">
+              Only users with price alert permission can change these
+              settings.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-xl">Product Price Monitoring</CardTitle>

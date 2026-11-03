@@ -2,14 +2,21 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import {
   createObservationApi,
   deleteObservationApi,
+  getAlertSettingsApi,
   getPriceOverviewApi,
+  getSupplierDetailApi,
+  getSupplierPriceHistoryApi,
+  getSupplierVariantTrendApi,
   getVariantPriceHistoryApi,
   listObservationsApi,
+  updateAlertSettingsApi,
   updateObservationApi,
+  type AlertSettings,
   type CreateObservationInput,
   type PriceCheckFilters,
   type PriceHistoryFilters,
   type PriceOverviewFilters,
+  type SupplierHistoryFilters,
   type UpdateObservationInput,
 } from "../api/procurement.api";
 
@@ -22,6 +29,13 @@ export const procurementKeys = {
     [...procurementKeys.all, "variant-price-history", variantId, filters] as const,
   priceCheck: (filters: PriceCheckFilters) =>
     [...procurementKeys.all, "price-check", filters] as const,
+  supplierDetail: (supplierId: number) =>
+    [...procurementKeys.all, "supplier-detail", supplierId] as const,
+  supplierPriceHistory: (supplierId: number, filters: SupplierHistoryFilters) =>
+    [...procurementKeys.all, "supplier-price-history", supplierId, filters] as const,
+  supplierVariantTrend: (supplierId: number, variantId: number) =>
+    [...procurementKeys.all, "supplier-variant-trend", supplierId, variantId] as const,
+  alertSettings: () => [...procurementKeys.all, "alert-settings"] as const,
 };
 
 export function usePriceOverview(filters: PriceOverviewFilters) {
@@ -85,6 +99,49 @@ export function useDeleteObservation() {
   const invalidate = useInvalidateProcurement();
   return useMutation({
     mutationFn: (id: number) => deleteObservationApi(id),
+    onSuccess: invalidate,
+  });
+}
+
+export function useSupplierDetail(supplierId: number) {
+  return useQuery({
+    queryKey: procurementKeys.supplierDetail(supplierId),
+    queryFn: () => getSupplierDetailApi(supplierId),
+    enabled: supplierId > 0,
+  });
+}
+
+export function useSupplierPriceHistory(
+  supplierId: number,
+  filters: SupplierHistoryFilters,
+) {
+  return useQuery({
+    queryKey: procurementKeys.supplierPriceHistory(supplierId, filters),
+    queryFn: () => getSupplierPriceHistoryApi(supplierId, filters),
+    enabled: supplierId > 0,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useSupplierVariantTrend(supplierId: number, variantId: number) {
+  return useQuery({
+    queryKey: procurementKeys.supplierVariantTrend(supplierId, variantId),
+    queryFn: () => getSupplierVariantTrendApi(supplierId, variantId),
+    enabled: supplierId > 0 && variantId > 0,
+  });
+}
+
+export function useAlertSettings() {
+  return useQuery({
+    queryKey: procurementKeys.alertSettings(),
+    queryFn: getAlertSettingsApi,
+  });
+}
+
+export function useUpdateAlertSettings() {
+  const invalidate = useInvalidateProcurement();
+  return useMutation({
+    mutationFn: (payload: AlertSettings) => updateAlertSettingsApi(payload),
     onSuccess: invalidate,
   });
 }

@@ -1,12 +1,18 @@
 import type { Request, Response } from "express";
 import { getBusinessId } from "../../middleware/business.js";
 import { sendSafeError } from "../../utils/safeError.js";
+import * as priceAlertsService from "./priceAlerts.service.js";
 import * as priceCheckService from "./priceCheck.service.js";
 import * as priceHistoryService from "./priceHistory.service.js";
+import * as supplierMonitoringService from "./supplierMonitoring.service.js";
 import {
+  alertSettingsSchema,
   createObservationSchema,
   listObservationsQuerySchema,
   observationIdParamSchema,
+  supplierHistoryQuerySchema,
+  supplierIdParamSchema,
+  supplierVariantTrendQuerySchema,
   updateObservationSchema,
 } from "./schemas/priceCheck.schema.js";
 import {
@@ -165,5 +171,116 @@ export async function deleteObservation(req: Request, res: Response) {
     });
   } catch (err) {
     return sendSafeError(res, err, "Failed to delete the price observation.");
+  }
+}
+
+// ---- Phase 3: supplier monitoring + alert settings ----
+
+export async function getSupplierDetail(req: Request, res: Response) {
+  try {
+    const parsedParams = supplierIdParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      return res.status(400).json({
+        message: "Invalid supplier id",
+        errors: parsedParams.error.flatten(),
+      });
+    }
+    const result = await supplierMonitoringService.getSupplierDetail(
+      getBusinessId(req),
+      parsedParams.data.supplierId,
+    );
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    return sendSafeError(res, err, "Failed to load the supplier.");
+  }
+}
+
+export async function getSupplierPriceHistory(req: Request, res: Response) {
+  try {
+    const parsedParams = supplierIdParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      return res.status(400).json({
+        message: "Invalid supplier id",
+        errors: parsedParams.error.flatten(),
+      });
+    }
+    const parsedQuery = supplierHistoryQuerySchema.safeParse(req.query);
+    if (!parsedQuery.success) {
+      return res.status(400).json({
+        message: "Invalid query parameters",
+        errors: parsedQuery.error.flatten(),
+      });
+    }
+    const result = await supplierMonitoringService.getSupplierPriceHistory(
+      getBusinessId(req),
+      parsedParams.data.supplierId,
+      parsedQuery.data,
+    );
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    return sendSafeError(
+      res,
+      err,
+      "Failed to load the supplier price history.",
+    );
+  }
+}
+
+export async function getSupplierVariantTrend(req: Request, res: Response) {
+  try {
+    const parsedParams = supplierIdParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      return res.status(400).json({
+        message: "Invalid supplier id",
+        errors: parsedParams.error.flatten(),
+      });
+    }
+    const parsedQuery = supplierVariantTrendQuerySchema.safeParse(req.query);
+    if (!parsedQuery.success) {
+      return res.status(400).json({
+        message: "Invalid variant id",
+        errors: parsedQuery.error.flatten(),
+      });
+    }
+    const result = await supplierMonitoringService.getSupplierVariantTrend(
+      getBusinessId(req),
+      parsedParams.data.supplierId,
+      parsedQuery.data.variantId,
+    );
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    return sendSafeError(res, err, "Failed to load the price trend.");
+  }
+}
+
+export async function getAlertSettings(_req: Request, res: Response) {
+  try {
+    const result = await priceAlertsService.getAlertSettings(getBusinessId(_req));
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    return sendSafeError(res, err, "Failed to load alert settings.");
+  }
+}
+
+export async function updateAlertSettings(req: Request, res: Response) {
+  try {
+    const parsed = alertSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "Invalid alert settings",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const result = await priceAlertsService.updateAlertSettings(
+      getBusinessId(req),
+      parsed.data,
+    );
+    return res.status(200).json({
+      success: true,
+      message: "Alert settings saved",
+      data: result,
+    });
+  } catch (err) {
+    return sendSafeError(res, err, "Failed to save alert settings.");
   }
 }

@@ -38,6 +38,8 @@ export interface PriceOverviewRow {
   lastSupplierId: number | null;
   lastSupplierName: string | null;
   priceChangePercent: number | null;
+  latestQuotation: number | null;
+  lastObservationDate: string | null;
 }
 
 export interface PaginatedPriceOverview {
@@ -234,4 +236,98 @@ export async function updateObservationApi(
 
 export async function deleteObservationApi(id: number) {
   await api.delete(`/procurement/price-check/${id}`);
+}
+
+/** Supplier price monitoring (Phase 3). */
+
+export interface SupplierDetail {
+  supplier: {
+    id: number;
+    name: string;
+    phone: string | null;
+    email: string | null;
+    address: string | null;
+    status: string | null;
+    minimumOrderValue: number | null;
+    targetOrderValue: number | null;
+    orderSettingsEnabled: boolean;
+    orderSettingsNotes: string | null;
+  };
+  stats: {
+    purchaseCount: number;
+    totalReceivedValue: number;
+    productCount: number;
+    lastPurchaseDate: string | null;
+  };
+}
+
+export interface SupplierHistoryFilters {
+  search?: string | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
+  page?: number | undefined;
+  limit?: number | undefined;
+}
+
+export interface SupplierVariantEvent {
+  purchaseId: number;
+  purchaseOrderNumber: string;
+  purchaseDate: string;
+  unitCost: number;
+  receivedQuantity: number;
+}
+
+export interface AlertSettings {
+  enabled: boolean;
+  increaseThresholdPercent: number;
+}
+
+export async function getSupplierDetailApi(
+  supplierId: number,
+): Promise<SupplierDetail> {
+  const { data } = await api.get<{ success: boolean; data: SupplierDetail }>(
+    `/procurement/suppliers/${supplierId}`,
+  );
+  return data.data;
+}
+
+export async function getSupplierPriceHistoryApi(
+  supplierId: number,
+  filters: SupplierHistoryFilters = {},
+): Promise<PaginatedPriceOverview> {
+  const { data } = await api.get<{
+    success: boolean;
+    data: PaginatedPriceOverview;
+  }>(`/procurement/suppliers/${supplierId}/price-history${toQuery(filters)}`);
+  return data.data;
+}
+
+export async function getSupplierVariantTrendApi(
+  supplierId: number,
+  variantId: number,
+): Promise<SupplierVariantEvent[]> {
+  const { data } = await api.get<{
+    success: boolean;
+    data: SupplierVariantEvent[];
+  }>(`/procurement/suppliers/${supplierId}/trend`, {
+    params: { variantId },
+  });
+  return data.data;
+}
+
+export async function getAlertSettingsApi(): Promise<AlertSettings> {
+  const { data } = await api.get<{ success: boolean; data: AlertSettings }>(
+    "/procurement/alert-settings",
+  );
+  return data.data;
+}
+
+export async function updateAlertSettingsApi(
+  payload: AlertSettings,
+): Promise<AlertSettings> {
+  const { data } = await api.put<{ success: boolean; data: AlertSettings }>(
+    "/procurement/alert-settings",
+    payload,
+  );
+  return data.data;
 }

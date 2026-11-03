@@ -32,6 +32,7 @@ import { ReorderPage } from "@/features/purchases/pages/ReorderPage";
 import { PriceMonitoringPage } from "@/features/procurement/pages/PriceMonitoringPage";
 import { VariantPriceHistoryPage } from "@/features/procurement/pages/VariantPriceHistoryPage";
 import { PriceCheckPage } from "@/features/procurement/pages/PriceCheckPage";
+import { SupplierDetailsPage } from "@/features/procurement/pages/SupplierDetailsPage";
 import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
 import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 import { AttendancePage } from "@/features/pos/pages/AttendancePage";
@@ -278,6 +279,16 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="purchases.view">
             <PriceCheckPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/procurement/suppliers/:supplierId",
+        element: (
+          <RequirePermission
+            anyPermission={["suppliers.view", "purchases.view"]}
+          >
+            <SupplierDetailsPage />
           </RequirePermission>
         ),
       },
