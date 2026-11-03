@@ -55,6 +55,8 @@ jobs:
           cache: npm
           cache-dependency-path: pos/package-lock.json
       - run: npm ci
+      - name: Tests (vitest)
+        run: npm test
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=critical
 
