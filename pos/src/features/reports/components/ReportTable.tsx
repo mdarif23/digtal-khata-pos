@@ -21,17 +21,17 @@ export interface ReportColumn<T> {
 interface ReportTableProps<T> {
   columns: ReportColumn<T>[];
   data: T[];
-  loading?: boolean;
-  error?: string | null;
-  emptyMessage?: string;
-  sortBy?: string;
-  sortDir?: "asc" | "desc";
-  onSort?: (key: string) => void;
+  loading?: boolean | undefined;
+  error?: string | null | undefined;
+  emptyMessage?: string | undefined;
+  sortBy?: string | undefined;
+  sortDir?: "asc" | "desc" | undefined;
+  onSort?: ((key: string) => void) | undefined;
   keyExtractor: (row: T, index: number) => string | number;
-  page?: number;
-  limit?: number;
-  total?: number;
-  onPageChange?: (page: number) => void;
+  page?: number | undefined;
+  limit?: number | undefined;
+  total?: number | undefined;
+  onPageChange?: ((page: number) => void) | undefined;
 }
 
 export function ReportTable<T>({

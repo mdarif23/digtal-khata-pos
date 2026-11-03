@@ -53,6 +53,7 @@ import { PurchaseSummaryReport } from "./PurchaseSummaryReport";
 import { SupplierPayablesReport } from "./SupplierPayablesReport";
 import { LocationComparisonReport } from "./LocationComparisonReport";
 import { RegisterSessionsReport } from "./RegisterSessionsReport";
+import { OnlineStoreProfitabilityReport } from "./OnlineStoreProfitabilityReport";
 
 type ReportTabId =
   // Sales
@@ -71,6 +72,16 @@ type ReportTabId =
   | "receivables"
   | "tax"
   | "register-close"
+  // Online (module three)
+  | "online-profitability"
+  // Advanced analytics (sidebar-linked; also cased in the switch)
+  | "analytics-channels"
+  | "analytics-clv"
+  | "analytics-retention"
+  | "analytics-staff"
+  | "analytics-forecast"
+  | "inventory-aging"
+  | "dead-stock"
   // Inventory
   | "stock"
   | "stock-movements"
@@ -189,6 +200,19 @@ const REPORT_GROUPS: ReportGroup[] = [
     ],
   },
   {
+    name: "Online Store",
+    icon: Truck,
+    items: [
+      {
+        id: "online-profitability",
+        label: "Online Store Profitability",
+        icon: Calculator,
+        description:
+          "Product margin, shipping, packaging, gateway fees — net contribution by channel",
+      },
+    ],
+  },
+  {
     name: "Inventory Reports",
     icon: Package,
     items: [
@@ -271,6 +295,8 @@ export default function ReportsHub() {
         return <LocationComparisonReport />;
       case "profit":
         return <ProfitReport />;
+      case "online-profitability":
+        return <OnlineStoreProfitabilityReport />;
       case "expenses":
         return <ExpenseReport />;
       case "receivables":
