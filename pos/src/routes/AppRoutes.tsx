@@ -29,6 +29,9 @@ import { PaymentIntentReturn } from "@/features/pos/pages/PaymentIntentReturn";
 import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
 import { StockCountPage } from "@/features/products/pages/StockCountPage";
 import { ReorderPage } from "@/features/purchases/pages/ReorderPage";
+import { PriceMonitoringPage } from "@/features/procurement/pages/PriceMonitoringPage";
+import { VariantPriceHistoryPage } from "@/features/procurement/pages/VariantPriceHistoryPage";
+import { PriceCheckPage } from "@/features/procurement/pages/PriceCheckPage";
 import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
 import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 import { AttendancePage } from "@/features/pos/pages/AttendancePage";
@@ -251,6 +254,30 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="purchases.view">
             <ReorderPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/procurement/prices",
+        element: (
+          <RequirePermission permission="purchases.view">
+            <PriceMonitoringPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/procurement/prices/:variantId",
+        element: (
+          <RequirePermission permission="purchases.view">
+            <VariantPriceHistoryPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/procurement/price-check",
+        element: (
+          <RequirePermission permission="purchases.view">
+            <PriceCheckPage />
           </RequirePermission>
         ),
       },

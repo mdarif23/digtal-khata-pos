@@ -128,6 +128,8 @@ export const navigation = [
     anyPermission: ["purchases.view", "purchases.create"],
     items: [
       { title: "Reorder", url: "/reorder", permission: "purchases.view" },
+      { title: "Product Price Monitoring", url: "/procurement/prices", permission: "purchases.view" },
+      { title: "Price Check History", url: "/procurement/price-check", permission: "purchases.view" },
       { title: "All Purchases", url: "/purchases", permission: "purchases.create" },
       { title: "Purchases List", url: "/purchases-list", permission: "purchases.view" },
     ],

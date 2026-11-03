@@ -1,7 +1,9 @@
 import {
+  boolean,
   foreignKey,
   index,
   integer,
+  numeric,
   pgTable,
   serial,
   text,
@@ -22,6 +24,25 @@ export const suppliers = pgTable(
     email: varchar({ length: 255 }),
     address: text(),
     status: varchar({ length: 50 }).default("active"),
+    // Smart Procurement (supplier order-value management): the minimum
+    // order value is the supplier's requirement, the target order value is
+    // the business's own spending goal — the two are independent. Null =
+    // not configured; the flag disables the feature without deleting the
+    // values.
+    minimumOrderValue: numeric("minimum_order_value", {
+      precision: 12,
+      scale: 2,
+      mode: "number",
+    }),
+    targetOrderValue: numeric("target_order_value", {
+      precision: 12,
+      scale: 2,
+      mode: "number",
+    }),
+    orderSettingsEnabled: boolean("order_settings_enabled")
+      .notNull()
+      .default(false),
+    orderSettingsNotes: text("order_settings_notes"),
   },
   (table) => [
     index("suppliers_business_id_idx").on(table.businessId),
