@@ -55,3 +55,15 @@ router.get(
 );
 
 export default router;
+
+// DELETE /api/businesses/:businessId   (auth + active membership; OWNER only)
+// Soft-delete: business -> inactive, open subscription -> canceled, all
+// memberships -> suspended. Available regardless of subscription access
+// mode so an owner can always close a business.
+// 200 -> { success, message }
+router.delete(
+  "/api/businesses/:businessId",
+  requireAuth,
+  requireBusinessAccess(),
+  businessesController.deleteBusiness,
+);

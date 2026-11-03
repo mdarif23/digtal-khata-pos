@@ -11,7 +11,12 @@ import { subscriptions } from "../../db/schema/subscriptions.js";
 import { users } from "../../db/schema/users.js";
 import { env } from "../../config/env.js";
 import { addDays, slugifyBusinessName } from "../../utils/subscription.js";
-import { BadRequestError, ConflictError, NotFoundError } from "../../utils/handleError.js";
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "../../utils/handleError.js";
 import { computeSubscriptionState, type SubscriptionState } from "../../utils/subscription.js";
 import { createRoleWithPermissionsInTx, ensureDefaultRolesInTx } from "../roles/roles.service.js";
 import { recordEvent } from "../subscriptions/subscription.service.js";
@@ -352,6 +357,77 @@ export async function updateBusinessForMembership(
   }
 
   return getBusinessForMembership(userId, businessId);
+}
+
+/**
+ * Owner-initiated business deletion. Soft-delete by design: sales history
+ * cannot be cascade-deleted safely, so the business row and its data are
+ * kept — but access is fully revoked in one transaction:
+ * - business status -> "inactive" (hidden from any status-aware listing),
+ * - the open subscription is canceled (with a subscription event),
+ * - every membership is suspended, so the business disappears from the
+ *   dashboard's membership-driven list and requireBusinessAccess rejects
+ *   all further API access.
+ */
+export async function deleteBusinessForMembership(
+  userId: number,
+  businessId: number,
+): Promise<void> {
+  const [row] = await db
+    .select({ roleSlug: roles.slug })
+    .from(businessMemberships)
+    .innerJoin(roles, eq(roles.id, businessMemberships.roleId))
+    .where(
+      and(
+        eq(businessMemberships.businessId, businessId),
+        eq(businessMemberships.userId, userId),
+        eq(businessMemberships.status, "active"),
+      ),
+    );
+  if (!row) {
+    throw new NotFoundError("Business not found.");
+  }
+  if (row.roleSlug !== "owner") {
+    throw new ForbiddenError(
+      "Only the business owner can delete a business.",
+    );
+  }
+
+  await db.transaction(async (tx) => {
+    const now = new Date();
+    await tx
+      .update(businesses)
+      .set({ status: "inactive", updatedAt: now })
+      .where(eq(businesses.id, businessId));
+
+    const open = await tx
+      .select({ id: subscriptions.id, status: subscriptions.status })
+      .from(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.businessId, businessId),
+          inArray(subscriptions.status, [...OPEN_SUBSCRIPTION_STATUSES]),
+        ),
+      );
+    for (const subscription of open) {
+      await tx
+        .update(subscriptions)
+        .set({ status: "canceled", canceledAt: now })
+        .where(eq(subscriptions.id, subscription.id));
+      await recordEvent(tx, {
+        subscriptionId: subscription.id,
+        eventType: "business_deleted",
+        fromStatus: subscription.status,
+        toStatus: "canceled",
+        actor: { type: "customer", userId },
+      });
+    }
+
+    await tx
+      .update(businessMemberships)
+      .set({ status: "suspended" })
+      .where(eq(businessMemberships.businessId, businessId));
+  });
 }
 
 /**

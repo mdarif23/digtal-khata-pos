@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import {
   createBusinessForUser,
+  deleteBusinessForMembership,
   getBusinessForMembership,
   updateBusinessForMembership,
 } from "./businesses.service.js";
@@ -113,6 +114,28 @@ export async function updateBusiness(req: Request, res: Response) {
     return res.status(200).json({ success: true, business: detail });
   } catch (err) {
     return sendSafeError(res, err, "Unable to update the business right now.");
+  }
+}
+
+export async function deleteBusiness(req: Request, res: Response) {
+  try {
+    if (!req.user || !req.membership) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
+    }
+    // Deliberately available regardless of subscription access mode: an
+    // owner must always be able to close a business, even read-only ones.
+    await deleteBusinessForMembership(
+      req.user.id,
+      req.membership.businessId,
+    );
+    return res.status(200).json({
+      success: true,
+      message: "Business deleted. It no longer appears in your account.",
+    });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to delete the business right now.");
   }
 }
 
