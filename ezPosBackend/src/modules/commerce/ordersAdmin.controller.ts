@@ -26,7 +26,7 @@ import { getBusinessId } from "../../middleware/business.js";
 import { sendSafeError } from "../../utils/safeError.js";
 
 const listSchema = z.object({
-  channel: z.enum(["pos", "woocommerce", "custom_storefront"]).optional(),
+  channel: z.enum(["woocommerce", "custom_storefront"]).optional(),
   status: z.string().optional(),
   fulfillmentStatus: z.string().optional(),
   search: z.string().optional(),

@@ -270,7 +270,8 @@ describe("unified orders integration", { skip: !runIntegration }, () => {
     const variantId = await seedVariant(owner.businessId, 20);
 
     // A POS sale (created directly via SQL for isolation simplicity) and an
-    // online order via the WooCommerce webhook.
+    // online order via the WooCommerce webhook. POS sales never appear in
+    // the online orders list — the module is online-channels only.
     const wcPosSale = await pg!.query(
       `INSERT INTO sales (business_id, status, channel, subtotal, discount, vat, final_total, payment_status, due_amount)
        VALUES ($1, 'completed', 'pos', 500, 0, 0, 500, 'paid', 0) RETURNING id`,
@@ -286,15 +287,15 @@ describe("unified orders integration", { skip: !runIntegration }, () => {
 
     const all = await api(owner, "GET", `/api/businesses/${owner.businessId}/orders`);
     assert.equal(all.status, 200);
-    assert.equal(all.body.total, 2);
+    assert.equal(all.body.total, 1);
+    assert.equal(all.body.orders[0].channel, "woocommerce");
 
     const posOnly = await api(
       owner,
       "GET",
       `/api/businesses/${owner.businessId}/orders?channel=pos`,
     );
-    assert.equal(posOnly.body.total, 1);
-    assert.equal(posOnly.body.orders[0].channel, "pos");
+    assert.equal(posOnly.status, 400);
 
     const wcOnly = await api(
       owner,

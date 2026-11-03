@@ -711,7 +711,13 @@ export async function listUnifiedOrders(
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 25));
 
-  const conditions = [eq(sales.businessId, businessId)];
+  // ONLINE orders only (module one §4): POS counter sales are fulfilled at
+  // the register and must never surface here — the summary endpoint and
+  // the fulfillment endpoints enforce the same boundary.
+  const conditions = [
+    eq(sales.businessId, businessId),
+    sql`${sales.channel} <> 'pos'`,
+  ];
   if (filters.channel) {
     conditions.push(eq(sales.channel, filters.channel));
   }
