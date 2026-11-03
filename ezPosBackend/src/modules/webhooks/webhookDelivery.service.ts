@@ -24,6 +24,8 @@ export const WEBHOOK_EVENTS = [
   "order.created",
   "order.paid",
   "order.cancelled",
+  "order.shipped",
+  "order.delivered",
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -49,7 +51,7 @@ export async function emitWebhookEventInTx(
   data: Record<string, unknown>,
 ): Promise<void> {
   const endpoints = await tx
-    .select({ id: webhookEndpoints.id })
+    .select({ id: webhookEndpoints.id, events: webhookEndpoints.events })
     .from(webhookEndpoints)
     .where(
       and(
@@ -57,9 +59,14 @@ export async function emitWebhookEventInTx(
         eq(webhookEndpoints.status, "active"),
       ),
     );
-  if (endpoints.length === 0) return;
+  // Respect the endpoint's event subscription ("*" = everything).
+  const matching = endpoints.filter(
+    (endpoint) =>
+      endpoint.events.includes("*") || endpoint.events.includes(event),
+  );
+  if (matching.length === 0) return;
   await tx.insert(webhookDeliveries).values(
-    endpoints.map((endpoint) => ({
+    matching.map((endpoint) => ({
       businessId,
       endpointId: endpoint.id,
       event,
@@ -74,7 +81,7 @@ export async function emitWebhookEvent(
   data: Record<string, unknown>,
 ): Promise<void> {
   const endpoints = await db
-    .select({ id: webhookEndpoints.id })
+    .select({ id: webhookEndpoints.id, events: webhookEndpoints.events })
     .from(webhookEndpoints)
     .where(
       and(
@@ -82,9 +89,10 @@ export async function emitWebhookEvent(
         eq(webhookEndpoints.status, "active"),
       ),
     );
-  const matching = endpoints.filter(() =>
-    // Endpoint events array contains this event (or "*" for all).
-    true,
+  // Endpoint events array contains this event (or "*" for all).
+  const matching = endpoints.filter(
+    (endpoint) =>
+      endpoint.events.includes("*") || endpoint.events.includes(event),
   );
   if (matching.length === 0) return;
   const payload: WebhookPayload = {
@@ -214,9 +222,16 @@ export async function sendTestEvent(
       ),
     );
   if (!endpoint) throw new NotFoundError("Webhook endpoint not found.");
-  await emitWebhookEvent(businessId, "order.created", {
-    test: true,
-    message: "This is a test event from ezPos.",
+  // Target the SPECIFIC endpoint — a test ping must not fan out to every
+  // endpoint of the business.
+  await db.insert(webhookDeliveries).values({
+    businessId,
+    endpointId: endpoint.id,
+    event: "order.created",
+    payload: {
+      test: true,
+      message: "This is a test event from ezPos.",
+    },
   });
 }
 

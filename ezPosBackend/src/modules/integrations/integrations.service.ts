@@ -757,6 +757,65 @@ export async function processSyncJobs(now: Date = new Date()): Promise<{
           refundedTotal,
           orderTotal,
         );
+      } else if (job.jobType === "order_webhook_retry") {
+        // A failed order webhook is recovered from the STORE itself and
+        // re-run through the same processing core as the live webhook —
+        // idempotency (external mapping + terminal-state skip) makes a
+        // replay safe.
+        const wcOrderId = job.payload?.wcOrderId as string | number | undefined;
+        if (wcOrderId === undefined || wcOrderId === null) {
+          throw new Error("Retry job is missing wcOrderId.");
+        }
+        const [integration] = await db
+          .select({
+            id: integrations.id,
+            businessId: integrations.businessId,
+            webhookSecret: integrations.webhookSecret,
+            status: integrations.status,
+            locationId: integrations.locationId,
+          })
+          .from(integrations)
+          .where(eq(integrations.id, job.integrationId));
+        if (!integration) {
+          throw new Error("Integration no longer exists.");
+        }
+        if (integration.status !== "connected") {
+          throw new Error("Integration is not connected.");
+        }
+        const creds = await credentialsFor(job.integrationId);
+        const client = new WoocommerceClient({
+          storeUrl: creds.storeUrl,
+          consumerKey: creds.consumerKey,
+          consumerSecret: creds.consumerSecret,
+        });
+        const order = (await client.getOrder(wcOrderId)) as WcOrderPayload;
+        const [mapping] = await db
+          .select({
+            id: integrationOrderMappings.id,
+            saleId: integrationOrderMappings.saleId,
+            statusVersion: integrationOrderMappings.statusVersion,
+          })
+          .from(integrationOrderMappings)
+          .where(
+            and(
+              eq(integrationOrderMappings.integrationId, job.integrationId),
+              eq(integrationOrderMappings.externalOrderId, String(order.id)),
+            ),
+          );
+        const outcome = await processWcOrder(
+          integration,
+          order,
+          mapping,
+          String(order.status ?? "").toLowerCase(),
+        );
+        await logSync(job.integrationId, job.businessId, {
+          jobType: "order_webhook_retry",
+          direction: "webhook",
+          ...(mapping ? { entityType: "sale" as const } : {}),
+          entityId: outcome.saleId ?? null,
+          status: "success",
+          message: `Retry for order ${String(wcOrderId)}: ${outcome.action}.`,
+        });
       }
       await db
         .update(integrationSyncJobs)
@@ -855,69 +914,34 @@ interface WebhookOutcome {
   message?: string;
 }
 
-export async function processOrderWebhook(
-  integrationId: number,
-  rawBody: string,
-  signature: string | undefined,
+interface WcIntegrationRow {
+  id: number;
+  businessId: number;
+  webhookSecret: string | null;
+  status: string;
+  locationId: number | null;
+}
+
+interface WcOrderMapping {
+  id: number;
+  saleId: number;
+  statusVersion: number;
+}
+
+/**
+ * Channel-agnostic order processing core: create/confirm/cancel an ezPos
+ * order from a WooCommerce order payload. Shared by the live webhook
+ * (signature-verified) and the order_webhook_retry job (order re-fetched
+ * from the store), so a missed webhook is never silently lost.
+ */
+async function processWcOrder(
+  integration: WcIntegrationRow,
+  order: WcOrderPayload,
+  mapping: WcOrderMapping | undefined,
+  wcStatus: string,
 ): Promise<WebhookOutcome> {
-  const [integration] = await db
-    .select({
-      id: integrations.id,
-      businessId: integrations.businessId,
-      webhookSecret: integrations.webhookSecret,
-      status: integrations.status,
-      locationId: integrations.locationId,
-    })
-    .from(integrations)
-    .where(eq(integrations.id, integrationId));
-  if (!integration || !integration.webhookSecret) {
-    return { action: "ignored", message: "Unknown integration." };
-  }
-  if (
-    !signature ||
-    !verifyWebhookSignature(rawBody, integration.webhookSecret, signature)
-  ) {
-    return { action: "ignored", message: "Invalid webhook signature." };
-  }
-  if (integration.status !== "connected") {
-    return { action: "ignored", message: "Integration is not connected." };
-  }
-
-  const order = JSON.parse(rawBody) as WcOrderPayload;
   const businessId = integration.businessId;
-
-  const [mapping] = await db
-    .select({
-      id: integrationOrderMappings.id,
-      saleId: integrationOrderMappings.saleId,
-      statusVersion: integrationOrderMappings.statusVersion,
-    })
-    .from(integrationOrderMappings)
-    .where(
-      and(
-        eq(integrationOrderMappings.integrationId, integrationId),
-        eq(integrationOrderMappings.externalOrderId, String(order.id)),
-      ),
-    );
-
-  // Replay protection: ignore webhooks for already-terminal orders.
-  if (mapping) {
-    const [sale] = await db
-      .select({ id: sales.id, status: sales.status })
-      .from(sales)
-      .where(eq(sales.id, mapping.saleId));
-    if (sale && ["completed", "cancelled", "refunded"].includes(sale.status)) {
-      return {
-        action: "ignored",
-        saleId: sale.id,
-        message: "Order already reached a terminal state.",
-      };
-    }
-  }
-
-  const wcStatus = order.status.toLowerCase();
-
-  try {
+  const integrationId = integration.id;
     if (!mapping) {
       // Create the ezPos order from mapped line items.
       const lines: { variantId: number; quantity: number }[] = [];
@@ -1086,6 +1110,73 @@ export async function processOrderWebhook(
       return { action: "confirmed", saleId };
     }
     return { action: "ignored", saleId, message: `Status ${wcStatus} needs no change.` };
+}
+
+export async function processOrderWebhook(
+  integrationId: number,
+  rawBody: string,
+  signature: string | undefined,
+): Promise<WebhookOutcome> {
+  const [integration] = await db
+    .select({
+      id: integrations.id,
+      businessId: integrations.businessId,
+      webhookSecret: integrations.webhookSecret,
+      status: integrations.status,
+      locationId: integrations.locationId,
+    })
+    .from(integrations)
+    .where(eq(integrations.id, integrationId));
+  if (!integration || !integration.webhookSecret) {
+    return { action: "ignored", message: "Unknown integration." };
+  }
+  if (
+    !signature ||
+    !verifyWebhookSignature(rawBody, integration.webhookSecret, signature)
+  ) {
+    return { action: "ignored", message: "Invalid webhook signature." };
+  }
+  if (integration.status !== "connected") {
+    return { action: "ignored", message: "Integration is not connected." };
+  }
+
+  const order = JSON.parse(rawBody) as WcOrderPayload;
+  const businessId = integration.businessId;
+
+  const [mapping] = await db
+    .select({
+      id: integrationOrderMappings.id,
+      saleId: integrationOrderMappings.saleId,
+      statusVersion: integrationOrderMappings.statusVersion,
+    })
+    .from(integrationOrderMappings)
+    .where(
+      and(
+        eq(integrationOrderMappings.integrationId, integrationId),
+        eq(integrationOrderMappings.externalOrderId, String(order.id)),
+      ),
+    );
+
+  // Replay protection: ignore webhooks for already-terminal orders.
+  if (mapping) {
+    const [sale] = await db
+      .select({ id: sales.id, status: sales.status })
+      .from(sales)
+      .where(eq(sales.id, mapping.saleId));
+    if (sale && ["completed", "cancelled", "refunded"].includes(sale.status)) {
+      return {
+        action: "ignored",
+        saleId: sale.id,
+        message: "Order already reached a terminal state.",
+      };
+    }
+  }
+
+
+  const wcStatus = order.status.toLowerCase();
+
+  try {
+    return await processWcOrder(integration, order, mapping, wcStatus);
   } catch (err) {
     await logSync(integrationId, businessId, {
       jobType: "order_webhook",
@@ -1118,6 +1209,80 @@ function envBackendUrl(): string {
  * set the WC order status to 'refunded'; partial refunds add an order note
  * instead (WC has no partial-status concept).
  */
+/**
+ * Fulfillment push-back (module two §7): when an online order ships or is
+ * delivered, mirror the state to its WooCommerce origin ('shipped' →
+ * 'processing', 'delivered' → 'completed' — Woo has no shipped status).
+ * Fire-and-forget after commit; failures are logged, never thrown — manual
+ * tracking still works without any courier API.
+ */
+export async function pushFulfillmentToWoocommerce(
+  businessId: number,
+  saleId: number,
+  fulfillmentStatus: string,
+): Promise<void> {
+  let integrationId: number | null = null;
+  try {
+    const wcStatus =
+      fulfillmentStatus === "delivered"
+        ? "completed"
+        : fulfillmentStatus === "shipped"
+          ? "processing"
+          : null;
+    if (!wcStatus) return;
+    const [mapping] = await db
+      .select({
+        integrationId: integrationOrderMappings.integrationId,
+        externalOrderId: integrationOrderMappings.externalOrderId,
+        status: integrations.status,
+      })
+      .from(integrationOrderMappings)
+      .innerJoin(
+        integrations,
+        eq(integrations.id, integrationOrderMappings.integrationId),
+      )
+      .where(
+        and(
+          eq(integrationOrderMappings.saleId, saleId),
+          eq(integrationOrderMappings.businessId, businessId),
+        ),
+      )
+      .limit(1);
+    if (!mapping || mapping.status !== "connected" || !mapping.externalOrderId) {
+      return;
+    }
+    integrationId = mapping.integrationId;
+    const creds = await credentialsFor(mapping.integrationId);
+    const client = new WoocommerceClient({
+      storeUrl: creds.storeUrl,
+      consumerKey: creds.consumerKey,
+      consumerSecret: creds.consumerSecret,
+    });
+    await client.updateOrderStatus(mapping.externalOrderId, wcStatus);
+    await logSync(mapping.integrationId, businessId, {
+      jobType: "order_webhook",
+      direction: "push",
+      entityType: "sale",
+      entityId: saleId,
+      status: "success",
+      message: `Fulfillment ${fulfillmentStatus} pushed as ${wcStatus}.`,
+    });
+  } catch (err) {
+    // Push-back is best-effort — the order timeline already records the
+    // truth. Log the failure when we know the integration, never throw.
+    if (integrationId !== null) {
+      await logSync(integrationId, businessId, {
+        jobType: "order_webhook",
+        direction: "push",
+        entityType: "sale",
+        entityId: saleId,
+        status: "error",
+        message: `Fulfillment push-back failed: ${(err as Error).message}`,
+      }).catch(() => undefined);
+    }
+  }
+}
+
 export async function pushRefundToWoocommerce(
   businessId: number,
   saleId: number,
