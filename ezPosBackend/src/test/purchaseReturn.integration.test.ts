@@ -104,6 +104,7 @@ describe("purchase return integration", { skip: !runIntegration }, () => {
       const { status, body } = await postJson(baseUrl, ctx, "/api/purchases", {
         items: [{ variantId, quantity: qty, purchasePrice: unitCost }],
         supplierId: opts.supplierId,
+        purchaseDate: new Date().toISOString(),
       });
       assert.equal(status, 201, `purchase create failed: ${JSON.stringify(body)}`);
       return { id: Number(body.data.id) };

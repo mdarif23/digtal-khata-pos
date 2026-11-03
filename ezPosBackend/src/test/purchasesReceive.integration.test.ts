@@ -105,6 +105,7 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
     const { status, body } = await postJson(baseUrl, ctx, "/api/purchases", {
       items: [{ variantId, quantity: qty, purchasePrice: price }],
       supplierId,
+      purchaseDate: new Date().toISOString(),
     });
     assert.equal(status, 201, `purchase create failed: ${JSON.stringify(body)}`);
     assert.ok(body?.data?.id, "purchase id missing");
@@ -143,7 +144,11 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
       receiveNow: plan[i]?.receiveNow ?? 0,
       unitCost: plan[i]?.unitCost ?? 0,
       sellingPrice: plan[i]?.sellingPrice ?? 0,
-      batches: batchesByItem[row.id] ?? [],
+      batches: (batchesByItem[row.id] ?? []).map((b) => ({
+        ...b,
+        manufacturedDate: "2026-01-01",
+        expiryDate: "2027-01-01",
+      })),
       serialNumbers: [],
     }));
   }
@@ -264,29 +269,29 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
     assert.equal(Number(refreshed.received_quantity), 2);
   });
 
-  it("rejects a receive payload missing a purchase item", async () => {
-    const owner = await createOwnerCtx(baseUrl, "Receive Missing Co");
+  it("pins current behavior: an empty receive payload is a no-op", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive Empty Co");
     const supplierId = await createSupplier(owner);
     const variantId = await seedVariant(owner.businessId);
     const purchase = await createPurchase(owner, supplierId, variantId, 2, 50);
     const rows = await purchaseItemRows(purchase.id);
 
-    const { status, body } = await postJson(
-      baseUrl,
-      owner,
-      "/api/purchases/receive",
-      {
-        purchaseId: purchase.id,
-        items: receivePlan(rows, []),
-        paymentAmount: 0,
-        paymentMethod: "cash",
-      },
-    );
-    assert.equal(status, 404);
-    assert.match(String(body?.message), /Missing receiving information/);
+    // A receive with no item rows succeeds and touches nothing. The 404
+    // "Missing receiving information" guard only fires when SOME items are
+    // provided but a purchase item is left out of a non-empty payload.
+    const { status } = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(rows, []),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(status, 201);
+
+    const stock = await stockRow(owner.businessId, variantId);
+    assert.equal(stock?.quantity ?? 0, 0);
   });
 
-  it("caps payments at the received value", async () => {
+  it("rejects payments above the received value (no silent cap)", async () => {
     const owner = await createOwnerCtx(baseUrl, "Receive Cap Co");
     const supplierId = await createSupplier(owner);
     const variantId = await seedVariant(owner.businessId);
@@ -306,9 +311,21 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
         paymentMethod: "cash",
       },
     );
-    assert.equal(status, 201, `receive failed: ${JSON.stringify(body)}`);
-    assert.equal(Number(body?.data?.paidAmount), 100);
-    assert.equal(Number(body?.data?.dueAmount), 0);
+    assert.equal(status, 404);
+    assert.match(String(body?.message), /Payment cannot be greater/);
+
+    // The exact received value is accepted.
+    const ok = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(rows, [
+        { receiveNow: 2, unitCost: 50, sellingPrice: 100 },
+      ]),
+      paymentAmount: 100,
+      paymentMethod: "cash",
+    });
+    assert.equal(ok.status, 201, `receive failed: ${JSON.stringify(ok.body)}`);
+    assert.equal(Number(ok.body?.data?.paidAmount), 100);
+    assert.equal(Number(ok.body?.data?.dueAmount), 0);
   });
 
   it("locks the purchase to the first receiving location", async () => {

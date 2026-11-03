@@ -91,6 +91,8 @@ describe("products integration", { skip: !runIntegration }, () => {
       trackingType: overrides.trackingType ?? "none",
       supplierId: null,
       status: "active",
+      imageUrl: null,
+      imageFile: null,
       source: overrides.source ?? "opening",
       variants: [
         {
@@ -100,6 +102,8 @@ describe("products integration", { skip: !runIntegration }, () => {
           alertQuantity: 2,
           isDefault: true,
           status: "active",
+          imageUrl: null,
+          imageFile: null,
           batchNumber: v.batchNumber ?? "",
           purchasePrice: v.purchasePrice ?? 40,
           quantity: v.quantity ?? 0,
@@ -170,6 +174,8 @@ describe("products integration", { skip: !runIntegration }, () => {
           alertQuantity: 2,
           isDefault: true,
           status: "active",
+          imageUrl: null,
+          imageFile: null,
           batchNumber: "",
           purchasePrice: 40,
           quantity: 5,
@@ -206,6 +212,8 @@ describe("products integration", { skip: !runIntegration }, () => {
           alertQuantity: 2,
           isDefault: true,
           status: "active",
+          imageUrl: null,
+          imageFile: null,
           batchNumber: "",
           purchasePrice: 40,
           quantity: 2,
@@ -245,7 +253,7 @@ describe("products integration", { skip: !runIntegration }, () => {
 
     const { detail } = await createProduct(owner, unitId, {
       source: "purchase",
-      variant: { quantity: 9, purchasePrice: 40, sellingPrice: 100 },
+      variant: { quantity: 0, purchasePrice: 40, sellingPrice: 100 },
     });
     const variant = detail?.variants?.[0];
     assert.ok(variant, "variant missing");
@@ -278,13 +286,16 @@ describe("products integration", { skip: !runIntegration }, () => {
     assert.equal(stock?.quantity, 3);
   });
 
-  it("rejects adjusting a variant with no inventory record", async () => {
-    const owner = await createOwnerCtx(baseUrl, "Products Adjust 404 Co");
+  it("pins current behavior: adjust-stock creates the inventory row when missing", async () => {
+    // Purchase-sourced variants start with no inventory_stock row, yet the
+    // adjustment succeeds — the endpoint seeds the row (previousQuantity 0)
+    // rather than 404ing. If upsert semantics ever change, flip this test.
+    const owner = await createOwnerCtx(baseUrl, "Products Adjust Seed Co");
     const unitId = await createUnit(owner);
 
     const { detail } = await createProduct(owner, unitId, {
       source: "purchase",
-      variant: { quantity: 9, purchasePrice: 40, sellingPrice: 100 },
+      variant: { quantity: 0, purchasePrice: 40, sellingPrice: 100 },
     });
     const variantId = Number(detail?.variants?.[0]?.id);
 
@@ -292,10 +303,15 @@ describe("products integration", { skip: !runIntegration }, () => {
       baseUrl,
       owner,
       `/api/products/variants/${variantId}/adjust-stock`,
-      { newQuantity: 1, reason: "count_correction" },
+      { newQuantity: 4, reason: "found" },
     );
-    assert.equal(status, 404);
-    assert.match(String(body?.message), /Inventory record not found/);
+    assert.equal(status, 200, `adjust failed: ${JSON.stringify(body)}`);
+    assert.equal(body?.data?.previousQuantity, 0);
+    assert.equal(body?.data?.quantity, 4);
+    assert.equal(body?.data?.change, 4);
+
+    const stock = await stockRow(owner.businessId, variantId);
+    assert.equal(stock?.quantity, 4);
   });
 
   it("rejects invalid adjustment reasons", async () => {

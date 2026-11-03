@@ -28,6 +28,8 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/ezpos_test
       AUTH_JWT_SECRET: ci-only-secret-not-used-in-production-0123456789
+      # Suites register many users; the 20-req default trips 429s mid-suite.
+      AUTH_RATE_LIMIT_MAX: "10000"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
