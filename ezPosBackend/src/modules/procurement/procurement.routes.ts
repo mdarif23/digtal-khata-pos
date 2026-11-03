@@ -97,4 +97,13 @@ router.put(
   requirePermission("purchases.manage_price_alerts"),
   procurementController.updateAlertSettings,
 );
+
+// Smart Reorder Planning dashboard (Phase 4) — location-aware (the
+// X-Location-Id header or the business default scopes stock + transfers).
+router.get(
+  "/api/procurement/reorder-dashboard",
+  ...read,
+  requirePermission("purchases.view"),
+  procurementController.getReorderDashboard,
+);
 export default router;

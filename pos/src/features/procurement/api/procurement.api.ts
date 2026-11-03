@@ -331,3 +331,95 @@ export async function updateAlertSettingsApi(
   );
   return data.data;
 }
+
+/** Smart Reorder Planning (Phase 4). */
+
+export type ReorderStatus =
+  | "out_of_stock"
+  | "low_stock"
+  | "needs_reorder"
+  | "healthy";
+
+export interface ReorderRow {
+  variantId: number;
+  productId: number;
+  productName: string;
+  sku: string | null;
+  categoryName: string;
+  unitName: string | null;
+  currentStock: number;
+  reservedQuantity: number;
+  outstandingOnOrder: number;
+  inTransitQuantity: number;
+  availableQuantity: number;
+  reorderPoint: number | null;
+  reorderQuantity: number | null;
+  alertQuantity: number;
+  status: ReorderStatus;
+  suggestedQuantity: number | null;
+  lastUnitCost: number | null;
+  estimatedValue: number | null;
+  lastSupplierId: number | null;
+  lastSupplierName: string | null;
+}
+
+export interface ReorderDashboardSummary {
+  outOfStock: number;
+  lowStock: number;
+  needsReorder: number;
+  attentionCount: number;
+  noSupplierCount: number;
+  missingPriceCount: number;
+  totalEstimatedValue: number;
+  supplierCount: number;
+}
+
+export interface SupplierReorderGroup {
+  supplierId: number | null;
+  supplierName: string | null;
+  itemCount: number;
+  totalQuantity: number;
+  estimatedValue: number;
+  minimumOrderValue: number | null;
+  targetOrderValue: number | null;
+}
+
+export interface ReorderDashboard {
+  summary: ReorderDashboardSummary;
+  suppliers: SupplierReorderGroup[];
+  data: ReorderRow[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface ReorderDashboardFilters {
+  search?: string | undefined;
+  status?: "all" | "attention" | ReorderStatus | undefined;
+  page?: number | undefined;
+  limit?: number | undefined;
+}
+
+export interface ConvertSuggestionsInput {
+  supplierId: number | null;
+  items: { variantId: number; quantity?: number | undefined }[];
+  note?: string | null | undefined;
+}
+
+export async function getReorderDashboardApi(
+  filters: ReorderDashboardFilters = {},
+): Promise<ReorderDashboard> {
+  const { data } = await api.get<{ success: boolean; data: ReorderDashboard }>(
+    `/procurement/reorder-dashboard${toQuery(filters)}`,
+  );
+  return data.data;
+}
+
+/** Creates an unpaid ordered PO via the existing reorder conversion flow. */
+export async function convertSuggestionsApi(payload: ConvertSuggestionsInput) {
+  const { data } = await api.post<{
+    message?: string;
+    data?: { purchaseOrderNumber?: string };
+  }>("/reorder-suggestions/convert", payload);
+  return data.data ?? {};
+}

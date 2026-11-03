@@ -61,7 +61,7 @@ Drizzle mirrors: `src/db/schema/priceObservations.ts`,
 | 1 | Product Price Intelligence | ✅ Complete (2026-11-04) — see §4 |
 | 2 | Wholesale Market Price Check (Quick Price Check) | ✅ Complete (2026-11-04) — see §5 |
 | 3 | Supplier Price Monitoring + increase alerts | ✅ Complete (2026-11-04) — see §6 |
-| 4 | Smart Reorder Planning (extend `modules/reorder`) | ⬜ Not started |
+| 4 | Smart Reorder Planning (extend `modules/reorder`) | ✅ Complete (2026-11-04) — see §7 |
 | 5 | Supplier Order Value Management | ⬜ Not started |
 | 6 | Integration QA + regressions | ⬜ Not started |
 
@@ -348,13 +348,116 @@ Committed history note: Phases 1–2 shipped as commit `316e51b`.
 - The trend chart caps at the 200 most recent events per variant.
 - Alerts are in-app notifications (bell + SSE); no email/push channel.
 
-## 7. Remaining work
+## 7. Phase 4 — Smart Reorder Planning
+
+Committed history: Phases 1–2 = `316e51b`; Phase 3 = `0b0c81d`.
+
+### One computation, two surfaces (no conflicting inventory rules)
+
+`src/modules/procurement/reorderPlanning.service.ts` is now the single
+reorder computation; the pre-existing Module 2C
+(`modules/reorder/reorder.service.ts listReorderSuggestions`) **delegates
+to it** and maps the result onto its original response shape — existing
+`/reorder` frontend and convert flow unchanged. The rule:
+
+```
+available = (current stock − reserved) + outstanding POs + in-transit
+            transfers inbound to the location
+```
+
+- Outstanding POs: `quantity − received − cancelled` across purchases
+  `NOT IN ('received')` (the pre-existing netting, preserved).
+- **Reserved** (`inventory_stock.reserved_quantity`, online-channel
+  holds) now nets in — previously ignored.
+- **In-transit** (`quantity_shipped − quantity_received` on transfers in
+  `shipped`/`partially_received` with `to_location = location`) now nets
+  in — previously ignored entirely.
+- Monitored variants: `reorder_point IS NOT NULL OR alert_quantity > 0`
+  (LEFT JOIN stock so never-stocked variants still surface as out-of-
+  stock — an improvement over the old INNER JOIN).
+- Status classification in SQL (single source): `out_of_stock` >
+  `low_stock` (alert qty) > `needs_reorder` (available ≤ point) >
+  `healthy`.
+- **Suggested quantity**: configured `reorder_quantity` wins; otherwise
+  shortfall to the reorder point; with **neither configured, nothing is
+  invented** (null — the buyer decides), per spec.
+
+### Backend API
+
+`GET /api/procurement/reorder-dashboard` (`purchases.view`, read chain,
+location-aware via `requireLocationAccess`). Response:
+`{ summary, suppliers, data, total, page, limit }` —
+- `summary`: outOfStock / lowStock / needsReorder / attentionCount /
+  **totalEstimatedValue** / **noSupplierCount** / **missingPriceCount** /
+  supplierCount;
+- `suppliers`: attention products grouped by last supplier with item
+  counts, suggested totals, estimated value, and the supplier's
+  `minimum_order_value` / `target_order_value` displayed for reference
+  (status logic deferred to Phase 5);
+- `data` rows: stock, reserved, on-order, in-transit, available,
+  suggested qty, last unit cost, estimated value, last supplier, status.
+Filters: `search`, `status` (`all`/`attention`/per-status), pagination.
+
+### Frontend
+
+- **ReorderDashboardPage** (`/procurement/reorder`, nav "Smart Reorder
+  Planning" first under Purchases): six summary metric cards; supplier-
+  wise reorder summary table; product table with status badges, full
+  netting columns, checkbox selection (selectable = has a suggestion;
+  quantities editable inline), estimated unit cost/value; "Create draft
+  POs" opens a **preview dialog** (per-supplier breakdown) and only on
+  explicit confirmation calls the EXISTING
+  `POST /api/reorder-suggestions/convert` once per supplier — creating
+  unpaid `ordered` POs through the existing purchase workflow. Nothing
+  auto-submits, no auto-payments.
+- Flags surfaced per spec: "No supplier yet" (never purchased) and
+  "Missing purchase price" rows are counted and highlighted.
+- api/hooks added to the procurement feature (query-key factory,
+  invalidation); existing `/reorder` page remains reachable as before.
+
+### Business rules implemented
+
+- One netting rule shared by suggestions + dashboard (spec: "do not build
+  a separate, conflicting inventory calculation system").
+- Outstanding POs prevent double-ordering (existing rule, now tested at
+  the dashboard level too).
+- Reserved stock (online holds) and inbound in-transit transfers reduce
+  the reorder need.
+- The buyer always confirms: multi-select → preview → explicit create;
+  quantities editable; below-minimum handling and order-value statuses
+  land in Phase 5.
+
+### Test evidence (executed 2026-11-04)
+
+- Backend: tsc clean; `reorderPlanning.integration.test.ts` **7/7** —
+  classification + no-invented-quantities, cost-basis estimation +
+  supplier groups + suggestion delegation parity, reserved netting
+  (10 reserved → available 0), outstanding-PO netting (25 on order →
+  healthy), in-transit netting via a real warehouse receive + shipped
+  transfer (15 in transit → healthy), status/search filters + pagination
+  + validation, second-business isolation. Full suite **393/393** (386 +
+  7), including the untouched pre-existing reorder tests against the
+  refactored delegation.
+- Frontend: **30/30** vitest (4 new dashboard tests incl. "convert
+  mutation is never called until the buyer confirms"); `tsc -b` 0
+  new-file errors; `vite build` green.
+
+### Known limitations (Phase 4)
+
+- Reserved stock netting is exercised via a direct DB update in tests
+  (reserved quantities only arise from online-store reservations).
+- Supplier groups use the LAST supplier as the grouping key (no
+  preferred-supplier concept exists yet).
+- Draft creation currently requires a suggestion (reorder point) or a
+  buyer-entered quantity via the selectable rows; low-stock-only variants
+  without reorder config are visible but need Phase 5's draft editor for
+  ordering.
+
+## 8. Remaining work
 
 - **Phase 2**: ✅ shipped (see §5).
 - **Phase 3**: ✅ shipped (see §6).
-- **Phase 4**: extend `modules/reorder` (net `reserved_quantity` +
-  in-transit transfers; supplier-wise grouping; no-supplier / missing-price
-  flags; estimated reorder value dashboard).
+- **Phase 4**: ✅ shipped (see §7).
 - **Phase 5**: supplier order settings (columns ready), PATCH endpoint
   (permission `suppliers.edit`), order-value status indicators,
   below-minimum flow with warnings, draft creation via existing

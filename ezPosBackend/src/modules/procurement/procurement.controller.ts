@@ -1,9 +1,11 @@
 import type { Request, Response } from "express";
 import { getBusinessId } from "../../middleware/business.js";
+import { getLocationId } from "../../middleware/location.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import * as priceAlertsService from "./priceAlerts.service.js";
 import * as priceCheckService from "./priceCheck.service.js";
 import * as priceHistoryService from "./priceHistory.service.js";
+import * as reorderPlanningService from "./reorderPlanning.service.js";
 import * as supplierMonitoringService from "./supplierMonitoring.service.js";
 import {
   alertSettingsSchema,
@@ -20,6 +22,9 @@ import {
   priceOverviewQuerySchema,
   variantIdParamSchema,
 } from "./schemas/priceHistory.schema.js";
+import {
+  reorderDashboardQuerySchema,
+} from "./schemas/reorderPlanning.schema.js";
 
 export async function getPriceOverview(req: Request, res: Response) {
   try {
@@ -282,5 +287,25 @@ export async function updateAlertSettings(req: Request, res: Response) {
     });
   } catch (err) {
     return sendSafeError(res, err, "Failed to save alert settings.");
+  }
+}
+
+export async function getReorderDashboard(req: Request, res: Response) {
+  try {
+    const parsed = reorderDashboardQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "Invalid query parameters",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const result = await reorderPlanningService.getReorderDashboard(
+      getBusinessId(req),
+      getLocationId(req),
+      parsed.data,
+    );
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    return sendSafeError(res, err, "Failed to load the reorder dashboard.");
   }
 }

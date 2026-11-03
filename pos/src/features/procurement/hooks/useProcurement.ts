@@ -1,9 +1,11 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  convertSuggestionsApi,
   createObservationApi,
   deleteObservationApi,
   getAlertSettingsApi,
   getPriceOverviewApi,
+  getReorderDashboardApi,
   getSupplierDetailApi,
   getSupplierPriceHistoryApi,
   getSupplierVariantTrendApi,
@@ -12,10 +14,12 @@ import {
   updateAlertSettingsApi,
   updateObservationApi,
   type AlertSettings,
+  type ConvertSuggestionsInput,
   type CreateObservationInput,
   type PriceCheckFilters,
   type PriceHistoryFilters,
   type PriceOverviewFilters,
+  type ReorderDashboardFilters,
   type SupplierHistoryFilters,
   type UpdateObservationInput,
 } from "../api/procurement.api";
@@ -36,6 +40,8 @@ export const procurementKeys = {
   supplierVariantTrend: (supplierId: number, variantId: number) =>
     [...procurementKeys.all, "supplier-variant-trend", supplierId, variantId] as const,
   alertSettings: () => [...procurementKeys.all, "alert-settings"] as const,
+  reorderDashboard: (filters: ReorderDashboardFilters) =>
+    [...procurementKeys.all, "reorder-dashboard", filters] as const,
 };
 
 export function usePriceOverview(filters: PriceOverviewFilters) {
@@ -142,6 +148,23 @@ export function useUpdateAlertSettings() {
   const invalidate = useInvalidateProcurement();
   return useMutation({
     mutationFn: (payload: AlertSettings) => updateAlertSettingsApi(payload),
+    onSuccess: invalidate,
+  });
+}
+
+export function useReorderDashboard(filters: ReorderDashboardFilters) {
+  return useQuery({
+    queryKey: procurementKeys.reorderDashboard(filters),
+    queryFn: () => getReorderDashboardApi(filters),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useConvertSuggestions() {
+  const invalidate = useInvalidateProcurement();
+  return useMutation({
+    mutationFn: (payload: ConvertSuggestionsInput) =>
+      convertSuggestionsApi(payload),
     onSuccess: invalidate,
   });
 }

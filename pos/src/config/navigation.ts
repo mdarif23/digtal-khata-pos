@@ -127,6 +127,7 @@ export const navigation = [
     icon: Tags,
     anyPermission: ["purchases.view", "purchases.create"],
     items: [
+      { title: "Smart Reorder Planning", url: "/procurement/reorder", permission: "purchases.view" },
       { title: "Reorder", url: "/reorder", permission: "purchases.view" },
       { title: "Product Price Monitoring", url: "/procurement/prices", permission: "purchases.view" },
       { title: "Price Check History", url: "/procurement/price-check", permission: "purchases.view" },
