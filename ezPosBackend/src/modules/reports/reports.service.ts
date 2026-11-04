@@ -786,7 +786,7 @@ export async function getStockReport(businessId: number, params: DateRangeQuery,
       GROUP BY variant_id
     ) ist ON ist.variant_id = pv.id
     LEFT JOIN (
-      SELECT variant_id, SUM(quantity_remaining * purchase_price) AS stock_value
+      SELECT variant_id, SUM(quantity_remaining * landed_cost_per_unit) AS stock_value
       FROM inventory_batches
       WHERE business_id = ${businessId}${locationFilter("inventory_batches", locationId)}
       GROUP BY variant_id
@@ -802,7 +802,7 @@ export async function getStockReport(businessId: number, params: DateRangeQuery,
 
   const valuationQuery = await db.execute(sql`
     SELECT
-      COALESCE(SUM(quantity_remaining * purchase_price), 0)::numeric AS "totalValuation",
+      COALESCE(SUM(quantity_remaining * landed_cost_per_unit), 0)::numeric AS "totalValuation",
       COALESCE(SUM(quantity_remaining), 0)::int AS "totalUnits"
     FROM inventory_batches
     WHERE business_id = ${businessId}${locationFilter("inventory_batches", locationId)}
@@ -1378,7 +1378,7 @@ export async function getInventoryShrinkageReport(businessId: number, params: Da
     LEFT JOIN categories cat ON cat.id = p.category_id
     ${variantOptionsJoinSql("pv", "vol")}
     LEFT JOIN (
-      SELECT variant_id, AVG(purchase_price) AS purchase_price
+      SELECT variant_id, AVG(landed_cost_per_unit) AS purchase_price
       FROM inventory_batches
       WHERE business_id = ${businessId}
       GROUP BY variant_id
@@ -1401,7 +1401,7 @@ export async function getInventoryShrinkageReport(businessId: number, params: Da
     FROM inventory_movements im
     INNER JOIN product_variants pv ON pv.id = im.variant_id
     LEFT JOIN (
-      SELECT variant_id, AVG(purchase_price) AS purchase_price
+      SELECT variant_id, AVG(landed_cost_per_unit) AS purchase_price
       FROM inventory_batches
       WHERE business_id = ${businessId}
       GROUP BY variant_id
@@ -1426,7 +1426,7 @@ export async function getInventoryShrinkageReport(businessId: number, params: Da
     FROM inventory_movements im
     INNER JOIN product_variants pv ON pv.id = im.variant_id
     LEFT JOIN (
-      SELECT variant_id, AVG(purchase_price) AS purchase_price
+      SELECT variant_id, AVG(landed_cost_per_unit) AS purchase_price
       FROM inventory_batches
       WHERE business_id = ${businessId}
       GROUP BY variant_id
@@ -1780,7 +1780,7 @@ export async function getInventoryAgingReport(
            b.location_id AS "locationId",
            b.quantity_remaining AS "quantityRemaining",
            b.purchase_price AS "unitCost",
-           (b.quantity_remaining * b.purchase_price)::numeric AS "stockValue",
+           (b.quantity_remaining * b.landed_cost_per_unit)::numeric AS "stockValue",
            EXTRACT(DAY FROM now() - COALESCE(
              (SELECT pu.purchase_date FROM purchase_items pi
               JOIN purchases pu ON pu.id = pi.purchase_id
@@ -1856,7 +1856,7 @@ export async function getDeadStockReport(
            ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS "variantName",
            v.sku AS "sku",
            st.quantity AS "currentStock",
-           COALESCE((SELECT SUM(b.quantity_remaining * b.purchase_price)
+           COALESCE((SELECT SUM(b.quantity_remaining * b.landed_cost_per_unit)
              FROM inventory_batches b
              WHERE b.variant_id = st.variant_id AND b.business_id = ${businessId}
                AND b.quantity_remaining > 0

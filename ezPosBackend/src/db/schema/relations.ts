@@ -60,6 +60,15 @@ import {
   webhookEndpoints,
 } from "./webhooks.js";
 import { passwordResetTokens } from "./passwordResetTokens.js";
+import {
+  landedCosts,
+  landedCostExpenses,
+  landedCostAllocations,
+  landedCostAdjustments,
+  landedCostAuditLogs,
+  landedCostPostings,
+} from "./landedCosts.js";
+import { saleItemBatchConsumptions } from "./saleItemBatchConsumptions.js";
 import { businessInvitations } from "./businessInvitations.js";
 import { documentSequences } from "./documentSequences.js";
 
@@ -211,6 +220,7 @@ export const saleItemsRelations = relations(saleItems, ({ one }) => ({
 export const purchasesRelations = relations(purchases, ({ one, many }) => ({
   purchaseItems: many(purchaseItems),
   purchaseReturns: many(purchaseReturns),
+  landedCosts: many(landedCosts),
   supplier: one(suppliers, {
     fields: [purchases.supplierId],
     references: [suppliers.id],
@@ -746,6 +756,140 @@ export const documentSequencesRelations = relations(
     business: one(businesses, {
       fields: [documentSequences.businessId],
       references: [businesses.id],
+    }),
+  }),
+);
+
+export const landedCostsRelations = relations(landedCosts, ({ one, many }) => ({
+  business: one(businesses, {
+    fields: [landedCosts.businessId],
+    references: [businesses.id],
+  }),
+  purchase: one(purchases, {
+    fields: [landedCosts.purchaseId],
+    references: [purchases.id],
+  }),
+  location: one(locations, {
+    fields: [landedCosts.locationId],
+    references: [locations.id],
+  }),
+  createdByUser: one(users, {
+    fields: [landedCosts.createdBy],
+    references: [users.id],
+  }),
+  postedByUser: one(users, {
+    fields: [landedCosts.postedBy],
+    references: [users.id],
+  }),
+  expenses: many(landedCostExpenses),
+  allocations: many(landedCostAllocations),
+  adjustments: many(landedCostAdjustments),
+  auditLogs: many(landedCostAuditLogs),
+  postings: many(landedCostPostings),
+}));
+
+export const landedCostExpensesRelations = relations(
+  landedCostExpenses,
+  ({ one, many }) => ({
+    landedCost: one(landedCosts, {
+      fields: [landedCostExpenses.landedCostId],
+      references: [landedCosts.id],
+    }),
+    vendor: one(suppliers, {
+      fields: [landedCostExpenses.vendorId],
+      references: [suppliers.id],
+    }),
+    allocations: many(landedCostAllocations),
+  }),
+);
+
+export const landedCostAllocationsRelations = relations(
+  landedCostAllocations,
+  ({ one }) => ({
+    landedCost: one(landedCosts, {
+      fields: [landedCostAllocations.landedCostId],
+      references: [landedCosts.id],
+    }),
+    expense: one(landedCostExpenses, {
+      fields: [landedCostAllocations.expenseId],
+      references: [landedCostExpenses.id],
+    }),
+    purchaseItem: one(purchaseItems, {
+      fields: [landedCostAllocations.purchaseItemId],
+      references: [purchaseItems.id],
+    }),
+    batch: one(inventoryBatches, {
+      fields: [landedCostAllocations.inventoryBatchId],
+      references: [inventoryBatches.id],
+    }),
+    variant: one(productVariants, {
+      fields: [landedCostAllocations.variantId],
+      references: [productVariants.id],
+    }),
+  }),
+);
+
+export const landedCostAdjustmentsRelations = relations(
+  landedCostAdjustments,
+  ({ one, many }) => ({
+    landedCost: one(landedCosts, {
+      fields: [landedCostAdjustments.landedCostId],
+      references: [landedCosts.id],
+    }),
+    createdByUser: one(users, {
+      fields: [landedCostAdjustments.createdBy],
+      references: [users.id],
+    }),
+    postings: many(landedCostPostings),
+  }),
+);
+
+export const landedCostAuditLogsRelations = relations(
+  landedCostAuditLogs,
+  ({ one }) => ({
+    landedCost: one(landedCosts, {
+      fields: [landedCostAuditLogs.landedCostId],
+      references: [landedCosts.id],
+    }),
+    actor: one(users, {
+      fields: [landedCostAuditLogs.actorUserId],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const landedCostPostingsRelations = relations(
+  landedCostPostings,
+  ({ one }) => ({
+    landedCost: one(landedCosts, {
+      fields: [landedCostPostings.landedCostId],
+      references: [landedCosts.id],
+    }),
+    adjustment: one(landedCostAdjustments, {
+      fields: [landedCostPostings.adjustmentId],
+      references: [landedCostAdjustments.id],
+    }),
+  }),
+);
+
+export const saleItemBatchConsumptionsRelations = relations(
+  saleItemBatchConsumptions,
+  ({ one }) => ({
+    sale: one(sales, {
+      fields: [saleItemBatchConsumptions.saleId],
+      references: [sales.id],
+    }),
+    saleItem: one(saleItems, {
+      fields: [saleItemBatchConsumptions.saleItemId],
+      references: [saleItems.id],
+    }),
+    batch: one(inventoryBatches, {
+      fields: [saleItemBatchConsumptions.batchId],
+      references: [inventoryBatches.id],
+    }),
+    variant: one(productVariants, {
+      fields: [saleItemBatchConsumptions.variantId],
+      references: [productVariants.id],
     }),
   }),
 );

@@ -412,8 +412,23 @@ async function consumeStockFifoAtLocation(
     );
   }
 
+  // Explicit columns: keeps FIFO stable regardless of new batch columns
+  // (landed cost) added to the schema.
   const batches = await tx
-    .select()
+    .select({
+      id: inventoryBatches.id,
+      businessId: inventoryBatches.businessId,
+      variantId: inventoryBatches.variantId,
+      locationId: inventoryBatches.locationId,
+      purchaseItemId: inventoryBatches.purchaseItemId,
+      batchNumber: inventoryBatches.batchNumber,
+      purchasePrice: inventoryBatches.purchasePrice,
+      landedCostPerUnit: inventoryBatches.landedCostPerUnit,
+      quantityReceived: inventoryBatches.quantityReceived,
+      quantityRemaining: inventoryBatches.quantityRemaining,
+      manufacturedDate: inventoryBatches.manufacturedDate,
+      expiryDate: inventoryBatches.expiryDate,
+    })
     .from(inventoryBatches)
     .where(
       and(
@@ -435,7 +450,9 @@ async function consumeStockFifoAtLocation(
       .update(inventoryBatches)
       .set({ quantityRemaining: batch.quantityRemaining - take })
       .where(and(eq(inventoryBatches.id, batch.id), eq(inventoryBatches.businessId, businessId)));
-    totalCost += take * Number(batch.purchasePrice);
+    // Effective cost carries landed additions across locations (zero-diff
+    // while no landed cost has been allocated).
+    totalCost += take * Number(batch.landedCostPerUnit ?? batch.purchasePrice);
     remaining -= take;
   }
   if (remaining > 0) {

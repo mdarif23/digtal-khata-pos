@@ -59,6 +59,14 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "purchases.return", module: "purchases", description: "Create and manage purchase returns" },
   { key: "purchases.price_check", module: "purchases", description: "Record, edit and delete market price check observations" },
   { key: "purchases.manage_price_alerts", module: "purchases", description: "Configure price increase alert thresholds" },
+  // Landed Cost Management (Part J)
+  { key: "landed_cost.view", module: "landed_cost", description: "View landed-cost documents and allocations" },
+  { key: "landed_cost.create", module: "landed_cost", description: "Create landed-cost documents" },
+  { key: "landed_cost.edit", module: "landed_cost", description: "Edit draft landed-cost documents" },
+  { key: "landed_cost.calculate", module: "landed_cost", description: "Run landed-cost allocation previews" },
+  { key: "landed_cost.post", module: "landed_cost", description: "Post landed-cost allocations to inventory" },
+  { key: "landed_cost.adjust", module: "landed_cost", description: "Adjust posted landed-cost documents" },
+  { key: "landed_cost.reverse", module: "landed_cost", description: "Reverse posted landed-cost documents" },
 
   // Inventory
   { key: "inventory.view", module: "inventory", description: "View stock levels, batches and serials" },
@@ -193,6 +201,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "purchases.create",
     "purchases.edit",
     "purchases.receive",
+    "landed_cost.view",
+    "landed_cost.calculate",
     "purchases.return",
     "purchases.price_check",
     "inventory.view",

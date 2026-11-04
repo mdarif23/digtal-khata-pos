@@ -20,6 +20,7 @@ import { productVariants } from "../../db/schema/productVariants.js";
 import { units } from "../../db/schema/units.js";
 import type { ReceiveItemsFormValues } from "./schemas/receiveItem.schema.js";
 import { checkPriceIncreasesInTx } from "../procurement/priceAlerts.service.js";
+import { applyReceiveDeltaInTx } from "../landed-cost/landed-cost.lifecycle.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import {
   basicRequestValidation,
@@ -301,6 +302,7 @@ export async function createReceivePurchase(
   businessId: number,
   locationId: number,
   data: ReceiveItemsFormValues,
+  actorUserId?: number,
 ) {
   const { purchaseId, items, paymentAmount, paymentMethod, paymentNotes } =
     data;
@@ -419,6 +421,11 @@ export async function createReceivePurchase(
         );
       }
     }
+
+    // Landed-cost delta (Part F): a posted landed-cost document on this
+    // purchase adjusts incrementally in the SAME transaction — the new
+    // batches are visible to its target recomputation. No-op otherwise.
+    await applyReceiveDeltaInTx(tx, businessId, purchaseId, actorUserId ?? 0);
 
     const allPurchaseItems = await getAllPurchaseItems(
       tx,
