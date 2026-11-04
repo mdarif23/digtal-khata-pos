@@ -82,6 +82,32 @@ router.delete(
   requirePermission("expenses.delete"),
   expensesController.deleteExpensePayment,
 );
+// Attachments: presign (expenses.edit to add), register, and private
+// downloads (expenses.view) / delete (expenses.delete) by attachment id.
+router.post(
+  "/api/expenses/:id/attachments/presign",
+  ...write,
+  requirePermission("expenses.edit"),
+  expensesController.presignExpenseAttachment,
+);
+router.post(
+  "/api/expenses/:id/attachments",
+  ...write,
+  requirePermission("expenses.edit"),
+  expensesController.registerExpenseAttachment,
+);
+router.get(
+  "/api/attachments/:attachmentId/url",
+  ...read,
+  requirePermission("expenses.view"),
+  expensesController.getAttachmentDownloadUrl,
+);
+router.delete(
+  "/api/attachments/:attachmentId",
+  ...write,
+  requirePermission("expenses.delete"),
+  expensesController.deleteAttachment,
+);
 router.post(
   "/api/expense_categories",
   ...write,

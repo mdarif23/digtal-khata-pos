@@ -101,6 +101,35 @@ export type ExpensePaymentCreateInput = z.infer<
 
 export const expensePaymentIdSchema = z.coerce.number().int().positive();
 
+// ---------------------------------------------------------------------------
+// Attachments (Phase 4) — presigned-PUT flow; PDFs + images only.
+// ---------------------------------------------------------------------------
+
+export const attachmentContentTypes = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+] as const;
+
+export const attachmentPresignSchema = z.object({
+  fileName: z.string().trim().min(1).max(255),
+  contentType: z.enum(attachmentContentTypes),
+  sizeBytes: z.number().int().positive(),
+});
+
+export const attachmentRegisterSchema = z.object({
+  objectKey: z.string().trim().min(1).max(300),
+  fileName: z.string().trim().min(1).max(255),
+  contentType: z.enum(attachmentContentTypes),
+  bytes: z.number().int().positive(),
+});
+
+export const attachmentIdSchema = z.coerce.number().int().positive();
+
+export type AttachmentPresignInput = z.infer<typeof attachmentPresignSchema>;
+export type AttachmentRegisterInput = z.infer<typeof attachmentRegisterSchema>;
+
 export const expenseCategorySchema = z.object({
   categoryName: z.string().trim().min(1).max(100),
   description: z.string().trim().max(255).nullable().optional(),

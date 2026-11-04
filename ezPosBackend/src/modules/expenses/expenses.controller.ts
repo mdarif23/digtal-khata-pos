@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import * as expensesService from "./expenses.service.js";
+import * as attachmentsService from "./expenses.attachments.service.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { getBusinessId } from "../../middleware/business.js";
 import {
@@ -8,6 +9,9 @@ import {
 } from "../../middleware/location.js";
 import { WILDCARD_PERMISSION } from "../../rbac/permissions.js";
 import {
+  attachmentIdSchema,
+  attachmentPresignSchema,
+  attachmentRegisterSchema,
   expenseCategorySchema,
   expenseCategoryIdSchema,
   expenseIdSchema,
@@ -318,5 +322,87 @@ export async function deleteExpensePayment(req: Request, res: Response) {
     return res.json({ success: true, message: "Payment voided successfully" });
   } catch (err) {
     return sendSafeError(res, err, "Unable to void the payment.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Attachments (Phase 4) — presigned-PUT flow, bytes never touch the API.
+// ---------------------------------------------------------------------------
+
+export async function presignExpenseAttachment(req: Request, res: Response) {
+  try {
+    const id = expenseIdSchema.safeParse(req.params.id);
+    const parsed = attachmentPresignSchema.safeParse(req.body);
+    if (!id.success || !parsed.success) {
+      return validationError(res, "Invalid attachment data", {
+        id: id.success ? undefined : id.error.flatten(),
+        attachment: parsed.success ? undefined : parsed.error.flatten(),
+      });
+    }
+    const data = await attachmentsService.presignExpenseAttachment(
+      getBusinessId(req),
+      id.data,
+      parsed.data,
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to prepare the attachment upload.");
+  }
+}
+
+export async function registerExpenseAttachment(req: Request, res: Response) {
+  try {
+    const id = expenseIdSchema.safeParse(req.params.id);
+    const parsed = attachmentRegisterSchema.safeParse(req.body);
+    if (!id.success || !parsed.success) {
+      return validationError(res, "Invalid attachment data", {
+        id: id.success ? undefined : id.error.flatten(),
+        attachment: parsed.success ? undefined : parsed.error.flatten(),
+      });
+    }
+    const { userId } = actor(req);
+    const attachment = await attachmentsService.registerExpenseAttachment(
+      getBusinessId(req),
+      id.data,
+      userId,
+      parsed.data,
+    );
+    return res.status(201).json({ success: true, data: attachment });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to attach the file.");
+  }
+}
+
+export async function getAttachmentDownloadUrl(req: Request, res: Response) {
+  try {
+    const id = attachmentIdSchema.safeParse(req.params.attachmentId);
+    if (!id.success) {
+      return validationError(res, "Invalid attachment ID", undefined);
+    }
+    const data = await attachmentsService.getAttachmentDownloadUrl(
+      getBusinessId(req),
+      id.data,
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to open the attachment.");
+  }
+}
+
+export async function deleteAttachment(req: Request, res: Response) {
+  try {
+    const id = attachmentIdSchema.safeParse(req.params.attachmentId);
+    if (!id.success) {
+      return validationError(res, "Invalid attachment ID", undefined);
+    }
+    const { userId } = actor(req);
+    const deleted = await attachmentsService.deleteExpenseAttachment(
+      getBusinessId(req),
+      id.data,
+      userId,
+    );
+    return res.json({ success: true, data: deleted });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to delete the attachment.");
   }
 }

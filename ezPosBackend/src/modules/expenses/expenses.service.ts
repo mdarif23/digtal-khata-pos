@@ -30,6 +30,7 @@ import {
 } from "../../utils/handleError.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
 import type { Tx } from "../../services/audit.js";
+import { listExpenseAttachments } from "./expenses.attachments.service.js";
 import type {
   ExpenseCategoryWriteInput,
   ExpenseListQuery,
@@ -254,6 +255,7 @@ async function loadDetail(businessId: number, expense: ExpenseRow) {
         .limit(1)
     : [];
   const payments = await loadPayments(businessId, expense.id);
+  const attachments = await listExpenseAttachments(businessId, expense.id);
   const amount = Number(expense.amount);
   const paidAmount = Number(expense.paidAmount);
   return {
@@ -262,6 +264,7 @@ async function loadDetail(businessId: number, expense: ExpenseRow) {
     locationName: locationName?.name ?? null,
     dueAmount: Math.round((amount - paidAmount) * 100) / 100,
     payments,
+    attachments,
   };
 }
 
