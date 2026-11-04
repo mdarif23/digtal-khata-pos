@@ -89,7 +89,9 @@ export function exportToCsv(
   rows: (string | number | null | undefined)[][]
 ) {
   function csvCell(value: string | number | null | undefined): string {
-    const s = String(value ?? "").replace(/^[=+\-@]/, "'$&");
+    // Formula-injection guard: neutralise cells spreadsheet apps may execute,
+    // including whitespace-prefixed attempts like "  =cmd".
+    const s = String(value ?? "").replace(/^[\t\r ]*[=+\-@]/, "'$&");
     return `"${s.replace(/"/g, '""')}"`;
   }
   const lines = [headers, ...rows]

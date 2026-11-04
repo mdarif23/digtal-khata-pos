@@ -23,8 +23,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
 import { expenseSchema, type ExpenseFormInput, type ExpenseFormOutput } from "../expense.schema";
-import type { ExpenseCategory, ExpenseRecord } from "../expense.type";
-import { useExpenseStore } from "../useExpenseStore";
+import type { ExpenseCategory, ExpenseDraft, ExpenseRecord } from "../expense.type";
+import { useCreateExpense, useUpdateExpense } from "../hooks/useExpenses";
 
 function localDateValue() {
   const date = new Date();
@@ -50,8 +50,11 @@ function getDefaultValues(expense?: ExpenseRecord): ExpenseFormInput {
         ? "none"
         : String(expense.categoryId),
     paymentMethod: expense?.paymentMethod ?? "Cash",
+    payee: expense?.payee ?? "",
     referenceNo: expense?.referenceNo ?? "",
     note: expense?.note ?? "",
+    settlement: "full",
+    initialPaymentAmount: undefined,
   };
 }
 
@@ -64,9 +67,9 @@ export function ExpenseDialog({
 }: ExpenseDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
-  const createExpense = useExpenseStore((state) => state.createExpense);
-  const updateExpense = useExpenseStore((state) => state.updateExpense);
-  const saving = useExpenseStore((state) => state.saving);
+  const createExpense = useCreateExpense();
+  const updateExpense = useUpdateExpense();
+  const saving = createExpense.isPending || updateExpense.isPending;
   const form = useForm<ExpenseFormInput, unknown, ExpenseFormOutput>({
     resolver: zodResolver(expenseSchema),
     defaultValues: getDefaultValues(expense),
@@ -85,13 +88,26 @@ export function ExpenseDialog({
   }
 
   async function onSubmit(data: ExpenseFormOutput) {
+    const draft: ExpenseDraft = {
+      title: data.title,
+      expenseDate: data.expenseDate,
+      amount: data.amount,
+      categoryId: data.categoryId,
+      paymentMethod: data.paymentMethod,
+      payee: data.payee,
+      referenceNo: data.referenceNo,
+      note: data.note,
+      settlement: expense ? "full" : data.settlement,
+      initialPaymentAmount:
+        data.settlement === "partial" ? data.initialPaymentAmount : undefined,
+    };
     try {
       await createEntityPromiseToast({
-        data,
-        apiCall: (values) =>
+        data: draft,
+        apiCall: (d) =>
           expense
-            ? updateExpense(expense.id, values)
-            : createExpense(values),
+            ? updateExpense.mutateAsync({ id: expense.id, draft: d })
+            : createExpense.mutateAsync(d),
         entityName: expense ? "Expense update" : "Expense",
         displayName: data.title,
       });
@@ -103,6 +119,7 @@ export function ExpenseDialog({
   }
 
   const errors = form.formState.errors;
+  const watchSettlement = form.watch("settlement");
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -201,6 +218,68 @@ export function ExpenseDialog({
                 <FieldError>{errors.paymentMethod?.message}</FieldError>
               </Field>
             </div>
+            <Field data-invalid={Boolean(errors.payee)}>
+              <FieldLabel htmlFor="expense-payee">Payee</FieldLabel>
+              <Input
+                id="expense-payee"
+                placeholder="Optional vendor or person paid"
+                aria-invalid={Boolean(errors.payee)}
+                {...form.register("payee")}
+              />
+              <FieldError>{errors.payee?.message}</FieldError>
+            </Field>
+            {!expense ? (
+              <Field data-invalid={Boolean(errors.settlement)}>
+                <FieldLabel>Settlement</FieldLabel>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {(
+                    [
+                      ["full", "Paid in full", "Settles the whole amount now"],
+                      ["partial", "Partial", "Record a down payment now"],
+                      ["unpaid", "Unpaid", "Keep the full amount as due"],
+                    ] as const
+                  ).map(([value, label, hint]) => (
+                    <label
+                      key={value}
+                      className="flex cursor-pointer items-start gap-2 rounded-md border p-2.5 text-sm has-checked:border-primary has-checked:bg-primary/5"
+                    >
+                      <input
+                        type="radio"
+                        value={value}
+                        className="mt-0.5"
+                        {...form.register("settlement")}
+                      />
+                      <span>
+                        <span className="block font-medium">{label}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {hint}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <FieldError>{errors.settlement?.message}</FieldError>
+              </Field>
+            ) : null}
+            {!expense && watchSettlement === "partial" ? (
+              <Field data-invalid={Boolean(errors.initialPaymentAmount)}>
+                <FieldLabel htmlFor="expense-initial-payment">
+                  Amount settled now (৳)
+                </FieldLabel>
+                <Input
+                  id="expense-initial-payment"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  placeholder="0.00"
+                  aria-invalid={Boolean(errors.initialPaymentAmount)}
+                  {...form.register("initialPaymentAmount", {
+                    valueAsNumber: true,
+                  })}
+                />
+                <FieldError>{errors.initialPaymentAmount?.message}</FieldError>
+              </Field>
+            ) : null}
             <Field data-invalid={Boolean(errors.referenceNo)}>
               <FieldLabel htmlFor="expense-reference">Reference number</FieldLabel>
               <Input
