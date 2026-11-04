@@ -10,6 +10,7 @@ import {
   createExpenseCategoryApi,
   deleteAttachmentApi,
   exportExpensesApi,
+  getExpenseAnalyticsApi,
   getExpenseApi,
   getExpenseCategoriesApi,
   getExpensesApi,
@@ -41,6 +42,22 @@ export function useExpensesList(filters: ExpenseListFilters) {
   return useQuery({
     queryKey: expenseKeys.list(filters),
     queryFn: () => getExpensesApi(filters),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export interface ExpenseAnalyticsFilters {
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
+  granularity: "day" | "week" | "month";
+  locationId?: number | undefined;
+}
+
+/** Aggregated analytics — server-side over non-voided, scoped rows. */
+export function useExpenseAnalytics(filters: ExpenseAnalyticsFilters) {
+  return useQuery({
+    queryKey: [...expenseKeys.all, "analytics", filters] as const,
+    queryFn: () => getExpenseAnalyticsApi(filters),
     placeholderData: keepPreviousData,
   });
 }

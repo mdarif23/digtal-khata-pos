@@ -115,3 +115,50 @@ export interface ExpenseDraft {
   /** Required when settlement = "partial": the amount settled now. */
   initialPaymentAmount?: number | undefined;
 }
+
+// ---------------------------------------------------------------------------
+// Analytics (Phase 5)
+// ---------------------------------------------------------------------------
+
+export type ExpenseTrendGranularity = "day" | "week" | "month";
+
+export interface ExpenseAnalytics {
+  range: { from: string; to: string; granularity: ExpenseTrendGranularity };
+  totals: {
+    totalCount: number;
+    totalAmount: number;
+    totalPaid: number;
+    totalDue: number;
+    averageAmount: number;
+    unpaidCount: number;
+    partialCount: number;
+    paidCount: number;
+  };
+  comparison: {
+    currentMonth: string;
+    currentAmount: number;
+    previousAmount: number;
+    growthPercent: number | null;
+  };
+  series: Array<{ bucket: string; count: number; amount: number; paid: number }>;
+  categories: Array<{
+    categoryId: number | null;
+    categoryName: string | null;
+    amount: number;
+    paid: number;
+    count: number;
+  }>;
+  paymentMethods: Array<{
+    method: ExpensePaymentMethod | null;
+    amount: number;
+    paid: number;
+    count: number;
+  }>;
+  locations: Array<{
+    locationId: number | null;
+    locationName: string | null;
+    amount: number;
+    paid: number;
+    count: number;
+  }>;
+}

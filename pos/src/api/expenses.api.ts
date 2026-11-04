@@ -1,5 +1,6 @@
 import axios from "./axios.js";
 import type {
+  ExpenseAnalytics,
   ExpenseAttachment,
   ExpenseCategory,
   ExpenseDetail,
@@ -10,6 +11,7 @@ import type {
   ExpensePaymentMethod,
   ExpenseRecord,
 } from "@/features/Expense/expense.type";
+import type { ExpenseTrendGranularity } from "@/features/Expense/expense.type";
 
 /** Input for POST /expenses/:id/payments. */
 export interface ExpensePaymentPayload {
@@ -62,6 +64,25 @@ export async function exportExpensesApi(filters: ExpenseListFilters) {
 export async function getExpenseApi(id: number) {
   const { data } = await axios.get<{ success: boolean; data: ExpenseDetail }>(
     `/expenses/${id}`,
+  );
+  return data.data;
+}
+
+export async function getExpenseAnalyticsApi(filters: {
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
+  granularity: ExpenseTrendGranularity;
+  locationId?: number | undefined;
+}) {
+  const params: Record<string, string> = {
+    granularity: filters.granularity,
+  };
+  if (filters.dateFrom) params.date_from = filters.dateFrom;
+  if (filters.dateTo) params.date_to = filters.dateTo;
+  if (filters.locationId) params.locationId = String(filters.locationId);
+  const { data } = await axios.get<{ success: boolean; data: ExpenseAnalytics }>(
+    "/expenses/analytics",
+    { params },
   );
   return data.data;
 }

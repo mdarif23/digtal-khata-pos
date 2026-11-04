@@ -26,6 +26,7 @@ import { exportToCsv } from "@/features/reports/utils/reportUtils";
 import { useSessionStore } from "@/auth/sessionStore";
 import { ExpenseDialog } from "./components/ExpenseDialog";
 import { ExpenseCategoriesDialog } from "./components/ExpenseCategoriesDialog";
+import { ExpenseAnalyticsPanel } from "./components/ExpenseAnalyticsPanel";
 import { ExpensesTable, EXPENSE_SORT_OPTIONS } from "./components/ExpensesTable";
 import type {
   ExpenseListFilters,
@@ -447,6 +448,15 @@ export function Expense() {
             onPageChange={setPage}
           />
         )}
+        <ExpenseAnalyticsPanel
+          dateFrom={filters.dateFrom || undefined}
+          dateTo={filters.dateTo || undefined}
+          locationId={
+            filters.locationId === "all"
+              ? undefined
+              : Number(filters.locationId) || undefined
+          }
+        />
       </div>
     </ContactListLayout>
   );
