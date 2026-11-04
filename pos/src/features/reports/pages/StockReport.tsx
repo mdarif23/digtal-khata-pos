@@ -40,6 +40,7 @@ export function StockReport() {
   const handleExport = () => {
     const headers = [
       "Product Name",
+      "Variant",
       "SKU",
       "Barcode",
       "Category",
@@ -52,6 +53,7 @@ export function StockReport() {
     ];
     const exportRows = stockRows.map((r) => [
       r.productName,
+      r.variantOptions ?? "",
       r.sku,
       r.barcode,
       r.categoryName,
@@ -72,6 +74,9 @@ export function StockReport() {
       render: (r) => (
         <div>
           <p className="font-semibold text-slate-900">{r.productName}</p>
+          {r.variantOptions ? (
+            <p className="text-xs text-slate-500">{r.variantOptions}</p>
+          ) : null}
           <p className="text-xs text-slate-400 font-mono">
             SKU: {r.sku} {r.barcode !== "-" ? `| ${r.barcode}` : ""}
           </p>

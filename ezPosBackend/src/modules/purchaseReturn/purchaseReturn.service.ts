@@ -1,10 +1,18 @@
 import {
   and,
+  asc,
   eq,
   inArray,
   sql,
 } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
+import {
+  foldVariantOptionRows,
+  variantNameFromMap,
+  variantOptionsFromMap,
+} from "../../utils/variantDisplay.js";
+import { variantOptions } from "../../db/schema/variantOptions.js";
+import { variantValues } from "../../db/schema/variantValues.js";
 import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
 import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
@@ -369,12 +377,53 @@ export async function createPurchaseReturn(
 }
 
 export async function getPurchaseReturnItems(businessId: number) {
-  return db
+  const rows = await db
     .select({
       purchaseItemId: purchaseReturnItems.purchaseItemId,
+      variantId: purchaseItems.variantId,
+      productId: products.id,
+      productName: products.name,
+      variantSku: productVariants.sku,
       returnQuantity: sql<number>`COALESCE(SUM(${purchaseReturnItems.quantity}), 0)`,
     })
     .from(purchaseReturnItems)
+    .innerJoin(
+      purchaseItems,
+      eq(purchaseItems.id, purchaseReturnItems.purchaseItemId),
+    )
+    .innerJoin(
+      productVariants,
+      eq(productVariants.id, purchaseItems.variantId),
+    )
+    .innerJoin(products, eq(products.id, productVariants.productId))
     .where(eq(purchaseReturnItems.businessId, businessId))
-    .groupBy(purchaseReturnItems.purchaseItemId);
+    .groupBy(
+      purchaseReturnItems.purchaseItemId,
+      purchaseItems.variantId,
+      products.id,
+      products.name,
+      productVariants.sku,
+    );
+
+  // Option labels batched per distinct variant (a join would fan out rows).
+  const variantIds = [...new Set(rows.map((row) => row.variantId))];
+  let optionsByVariant = new Map<number, string[]>();
+  if (variantIds.length > 0) {
+    const optRows = await db
+      .select({
+        variantId: variantValues.variantId,
+        value: variantOptions.value,
+      })
+      .from(variantValues)
+      .innerJoin(variantOptions, eq(variantValues.optionId, variantOptions.id))
+      .where(inArray(variantValues.variantId, variantIds))
+      .orderBy(asc(variantValues.optionId));
+    optionsByVariant = foldVariantOptionRows(optRows);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    variantOptions: variantOptionsFromMap(optionsByVariant, row.variantId),
+    variantName: variantNameFromMap(optionsByVariant, row.variantId, row.productName),
+  }));
 }

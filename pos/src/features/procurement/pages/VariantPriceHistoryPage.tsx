@@ -106,7 +106,7 @@ export function VariantPriceHistoryPage() {
               <Skeleton className="h-6 w-64" />
             ) : (
               <>
-                {data?.variant.productName}
+                {data?.variant.variantName || data?.variant.productName}
                 <span className="ml-2 text-sm font-normal text-slate-400">
                   {data?.variant.sku ?? "—"}
                   {data?.variant.unitName ? ` · per ${data.variant.unitName}` : ""}

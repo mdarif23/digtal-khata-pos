@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { buildVariantName } from "@/lib/variantDisplay";
 import {
   Check,
   PackageCheck,
@@ -132,7 +133,7 @@ export function ShowVariants({
   };
 
   const variantName = selectedVariant
-    ? `${product.name} (${selectedVariant.options?.map((option) => option.value).join(", ")})`
+    ? buildVariantName(product.name, selectedVariant.options)
     : product.name;
   const variantPrice = selectedVariant
     ? isSale

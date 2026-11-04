@@ -365,7 +365,12 @@ export function OnlineOrderDetailsPage() {
                   return (
                     <tr key={item.id} className="border-t border-slate-100">
                       <td className="px-4 py-2 font-medium text-slate-800">
-                        {item.productName}
+                        {item.variantName || item.productName}
+                        {item.variantOptions && item.variantName ? (
+                          <span className="block text-xs font-normal text-slate-500">
+                            {item.productName} · {item.variantOptions}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="px-4 py-2 text-slate-500">{item.sku}</td>
                       <td className="px-4 py-2 text-center">{item.quantity}</td>

@@ -67,6 +67,7 @@ import type {
   PriceCheckFilters,
   UpdateObservationInput,
 } from "../api/procurement.api";
+import { buildVariantName } from "@/lib/variantDisplay";
 
 const PAGE_SIZE = 20;
 
@@ -154,7 +155,7 @@ export function PriceCheckPage() {
       for (const variant of product.variants ?? []) {
         options.push({
           value: String(variant.id),
-          label: `${product.name}${variant.sku ? ` · ${variant.sku}` : ""}`,
+          label: buildVariantName(product.name, variant.options),
           unitId: product.unitId ?? null,
         });
       }

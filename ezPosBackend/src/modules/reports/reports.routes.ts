@@ -64,6 +64,12 @@ router.get(
   requirePermission("reports.sales.view"),
   reportsController.getSaleRefunds,
 );
+router.get(
+  "/api/reports/sales/refund-items",
+  ...read,
+  requirePermission("reports.sales.view"),
+  reportsController.getSaleRefundItems,
+);
 
 // Financial Reports
 router.get(
@@ -177,6 +183,12 @@ router.get(
   ...read,
   requirePermission("reports.purchase.view"),
   reportsController.getPurchaseSummary,
+);
+router.get(
+  "/api/reports/purchases/items",
+  ...read,
+  requirePermission("reports.purchase.view"),
+  reportsController.getPurchaseItems,
 );
 router.get(
   "/api/reports/purchases/payables",

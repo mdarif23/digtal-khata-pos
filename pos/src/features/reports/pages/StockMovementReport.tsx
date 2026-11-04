@@ -32,6 +32,7 @@ export function StockMovementReport() {
       "Movement ID",
       "Date",
       "Product Name",
+      "Variant",
       "SKU",
       "Movement Type",
       "Quantity Changed",
@@ -42,6 +43,7 @@ export function StockMovementReport() {
       m.id,
       m.createdAt,
       m.productName,
+      m.variantOptions ?? "",
       m.sku,
       m.movementType,
       m.quantity,
@@ -63,10 +65,13 @@ export function StockMovementReport() {
     },
     {
       key: "productName",
-      header: "Product & SKU",
+      header: "Product & Variant",
       render: (r) => (
         <div>
           <p className="font-semibold text-slate-900">{r.productName}</p>
+          {r.variantOptions ? (
+            <p className="text-xs text-slate-500">{r.variantOptions}</p>
+          ) : null}
           <p className="text-xs text-slate-400 font-mono">SKU: {r.sku}</p>
         </div>
       ),

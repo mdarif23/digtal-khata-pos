@@ -53,7 +53,12 @@ export function AddToCart({ product }: { product: StorefrontProduct }) {
           >
             {product.variants.map((variant) => (
               <option key={variant.id} value={variant.id} disabled={variant.availability <= 0}>
-                {[variant.sku, formatPrice(variant.price)].filter(Boolean).join(" — ")}
+                {[
+                  variant.name || variant.options || variant.sku,
+                  formatPrice(variant.price),
+                ]
+                  .filter(Boolean)
+                  .join(" — ")}
                 {variant.availability <= 0 ? " (out of stock)" : ""}
               </option>
             ))}
@@ -101,7 +106,10 @@ export function AddToCart({ product }: { product: StorefrontProduct }) {
               variantId: selected.id,
               productId: product.id,
               name: product.name,
-              variantLabel: product.variants.length > 1 ? selected.sku : "",
+              variantLabel:
+                product.variants.length > 1
+                  ? selected.options || selected.sku
+                  : "",
               price: selected.price,
               image: product.images[0] ?? null,
               quantity,

@@ -158,6 +158,8 @@ function normalizeDashboard(response: SummaryResponse): DashboardData {
   ).map((row) => ({
     id: readNumber(row, "id"),
     productName: readText(row, "productName", "product_name"),
+    variantOptions: readText(row, "variantOptions", "variant_options") || null,
+    variantName: readText(row, "variantName", "variant_name") || null,
     sku: readText(row, "sku"),
     status: readText(row, "status"),
     quantity: readNumber(row, "quantity"),
@@ -167,6 +169,8 @@ function normalizeDashboard(response: SummaryResponse): DashboardData {
   ).map((row) => ({
     id: readNumber(row, "id"),
     productName: readText(row, "productName", "product_name"),
+    variantOptions: readText(row, "variantOptions", "variant_options") || null,
+    variantName: readText(row, "variantName", "variant_name") || null,
     sku: readText(row, "sku"),
     quantity: readNumber(row, "quantity"),
     lastSoldAt: readText(row, "lastSoldAt", "last_sold_at") || null,
@@ -191,7 +195,12 @@ function normalizeDashboard(response: SummaryResponse): DashboardData {
     readValue(response, "topItemsByGross", "top_items_by_gross"),
   ).map((row) => ({
     productName: readText(row, "productName", "product_name"),
+    variantId: readValue(row, "variantId", "variant_id") === undefined ? undefined : readNumber(row, "variantId", "variant_id"),
+    variantOptions: readText(row, "variantOptions", "variant_options") || null,
+    variantName: readText(row, "variantName", "variant_name") || null,
+    sku: readText(row, "sku") || null,
     currentGross: readNumber(row, "currentMonthGross", "current_month_gross"),
+    currentQuantity: readNumber(row, "currentMonthQuantity", "current_month_quantity"),
     trend: readText(row, "trend"),
   }));
   const topSoldProductsByCategory = readRows(
@@ -215,6 +224,10 @@ function normalizeDashboard(response: SummaryResponse): DashboardData {
   ).map((row) => ({
     id: readNumber(row, "id"),
     productName: readText(row, "productName", "product_name"),
+    variantId: readValue(row, "variantId", "variant_id") === undefined ? undefined : readNumber(row, "variantId", "variant_id"),
+    variantOptions: readText(row, "variantOptions", "variant_options") || null,
+    variantName: readText(row, "variantName", "variant_name") || null,
+    sku: readText(row, "sku") || null,
     unitsSold: readNumber(row, "topSelling", "top_selling"),
     soldPrice: readNumber(row, "soldPrice", "sold_price"),
     grossSales: readNumber(row, "grossSales", "gross_sales"),
@@ -495,7 +508,7 @@ export default function DashboardComponent() {
       ["Out of stock products", dashboard.productsSummary.stockOut],
       [`Slow-moving products (${staleDays}+ days)`, dashboard.staleStockProducts.length],
       ...dashboard.staleStockProducts.map((product) => [
-        `${product.productName} (${product.sku})`,
+        `${product.variantName || product.productName} (${product.sku ?? "No SKU"})`,
         `${product.quantity} units; ${product.daysSinceLastSale === null ? "never sold" : `${product.daysSinceLastSale} days since last sale`}; stock value ${currency.format(product.stockValue)}`,
       ] as [string, string]),
       ...dashboard.paymentBreakdown.map((payment) => [
@@ -957,7 +970,7 @@ export default function DashboardComponent() {
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-slate-800">
-                        {product.productName || "Unnamed product"}
+                        {product.variantName || product.productName || "Unnamed product"}
                       </p>
                       <p className="mt-1 truncate text-xs text-slate-500">
                         {product.sku || "No SKU"}
@@ -1094,7 +1107,7 @@ export default function DashboardComponent() {
                       </span>
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-slate-800">
-                          {product.productName || "Unnamed product"}
+                          {product.variantName || product.productName || "Unnamed product"}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
                           {product.unitsSold.toLocaleString("en-BD")} units sold
@@ -1180,20 +1193,27 @@ export default function DashboardComponent() {
           <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
             <SectionHeading
               title="Top items by gross"
-              description={`Highest grossing products · ${periodLabel.toLowerCase()}.`}
+              description={`Highest grossing items · ${periodLabel.toLowerCase()}.`}
             />
             {dashboard.topItemsByGross.length ? (
               <ul className="mt-4 divide-y divide-slate-100">
-                {dashboard.topItemsByGross.map((item) => (
+                {dashboard.topItemsByGross.map((item, index) => (
                   <li
-                    key={item.productName}
+                    key={item.variantId ?? `${item.productName}-${index}`}
                     className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
                   >
                     <span className="truncate text-sm font-medium text-slate-700">
-                      {item.productName}
+                      {item.variantName || item.productName}
                     </span>
-                    <span className="shrink-0 text-sm font-semibold text-slate-900">
-                      {currency.format(item.currentGross)}
+                    <span className="flex shrink-0 items-baseline gap-2">
+                      {item.currentQuantity ? (
+                        <span className="text-xs text-slate-400">
+                          {item.currentQuantity.toLocaleString("en-BD")} pcs
+                        </span>
+                      ) : null}
+                      <span className="text-sm font-semibold text-slate-900">
+                        {currency.format(item.currentGross)}
+                      </span>
                     </span>
                   </li>
                 ))}
@@ -1299,7 +1319,7 @@ export default function DashboardComponent() {
                     {dashboard.staleStockProducts.map((product) => (
                       <tr key={product.id}>
                         <td className="max-w-[240px] truncate py-3 pr-4 font-medium text-slate-800">
-                          {product.productName || "Unnamed product"}
+                          {product.variantName || product.productName || "Unnamed product"}
                         </td>
                         <td className="whitespace-nowrap py-3 pr-4 text-slate-500">
                           {product.sku || "No SKU"}

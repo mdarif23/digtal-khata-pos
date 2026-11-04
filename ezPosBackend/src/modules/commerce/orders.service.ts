@@ -1,5 +1,12 @@
-import { and, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
+import {
+  foldVariantOptionRows,
+  variantNameFromMap,
+  variantOptionsFromMap,
+} from "../../utils/variantDisplay.js";
+import { variantOptions } from "../../db/schema/variantOptions.js";
+import { variantValues } from "../../db/schema/variantValues.js";
 import { customers } from "../../db/schema/customers.js";
 import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
@@ -832,6 +839,8 @@ export interface OrderDetail {
     variantId: number;
     sku: string;
     productName: string;
+    variantOptions: string;
+    variantName: string;
     quantity: number;
     sellingPrice: number;
     lineTotal: number;
@@ -895,7 +904,30 @@ export async function getOrderDetail(
     .innerJoin(products, eq(products.id, productVariants.productId))
     .where(eq(saleItems.saleId, orderId));
 
-  return { ...order, items };
+  // Option labels batched per distinct variant (a join would fan out rows).
+  const variantIds = [...new Set(items.map((item) => item.variantId))];
+  let optionsByVariant = new Map<number, string[]>();
+  if (variantIds.length > 0) {
+    const optRows = await db
+      .select({
+        variantId: variantValues.variantId,
+        value: variantOptions.value,
+      })
+      .from(variantValues)
+      .innerJoin(variantOptions, eq(variantValues.optionId, variantOptions.id))
+      .where(inArray(variantValues.variantId, variantIds))
+      .orderBy(asc(variantValues.optionId));
+    optionsByVariant = foldVariantOptionRows(optRows);
+  }
+
+  return {
+    ...order,
+    items: items.map((item) => ({
+      ...item,
+      variantOptions: variantOptionsFromMap(optionsByVariant, item.variantId),
+      variantName: variantNameFromMap(optionsByVariant, item.variantId, item.productName),
+    })),
+  };
 }
 
 /**

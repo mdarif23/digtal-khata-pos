@@ -10,6 +10,7 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useState } from "react";
+import { buildVariantName } from "@/lib/variantDisplay";
 import { Button } from "@/components/ui/button";
 import { GroupedVariantOption, ShowVariantsProps } from "../../purchase.types";
 import { ProductCard } from "./ProductCard";
@@ -89,7 +90,7 @@ export function ShowVariants({
     });
   };
   const variantFullName = findVariant
-    ? `${product.name} (${findVariant.options?.map((opt) => opt.value).join(", ")})`
+    ? buildVariantName(product.name, findVariant.options)
     : "Select Variant";
   return (
     <Dialog>

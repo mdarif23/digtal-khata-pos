@@ -1,4 +1,5 @@
 import api from "../../api/axios.js";
+import { buildVariantName } from "@/lib/variantDisplay";
 
 export type TransferStatus =
   | "draft"
@@ -12,6 +13,8 @@ export interface TransferItem {
   variantId: number;
   sku: string | null;
   productName: string | null;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   quantity: number;
   quantityShipped: number;
   quantityReceived: number;
@@ -112,7 +115,11 @@ export async function getVariantOptionsApi(): Promise<VariantOption[]> {
     {
       id: number;
       name: string;
-      variants: { id: number; sku: string | null }[];
+      variants: {
+        id: number;
+        sku: string | null;
+        options?: { typeName: string; value: string }[] | null;
+      }[];
     }[]
   >("/products");
   const options: VariantOption[] = [];
@@ -120,7 +127,7 @@ export async function getVariantOptionsApi(): Promise<VariantOption[]> {
     for (const variant of product.variants ?? []) {
       options.push({
         variantId: variant.id,
-        label: product.name,
+        label: buildVariantName(product.name, variant.options),
         sku: variant.sku,
       });
     }

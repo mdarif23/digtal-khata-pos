@@ -56,6 +56,11 @@ import { recordOrderEventInTx } from "../commerce/orderTimeline.service.js";
 import { salePaymentIntents } from "../../db/schema/salePaymentIntents.js";
 import { resolveIntentProvider } from "../../services/payments/saleProviders.js";
 import {
+  foldVariantOptionRows,
+  variantNameFromMap,
+  variantOptionsFromMap,
+} from "../../utils/variantDisplay.js";
+import {
   consumeStoreCreditInTx,
   grantStoreCreditInTx,
 } from "../../services/storeCredit.js";
@@ -136,6 +141,8 @@ export async function getSalesData(businessId: number) {
       id: products.id,
       variantId: productVariants.id,
       productName: products.name,
+      sku: productVariants.sku,
+      barcode: productVariants.barcode,
       category: categories.name,
       cost: saleItems.costAtSale,
       price: productVariants.sellingPrice,
@@ -158,6 +165,20 @@ export async function getSalesData(businessId: number) {
     );
 
   if (rows.length === 0) return [];
+
+  // Variant option labels (one batched query for every variant on the page —
+  // joining variant_values directly would fan the item rows out per option).
+  const variantIds = [...new Set(rows.map((row) => row.variantId))];
+  const optRows = await db
+    .select({
+      variantId: variantValues.variantId,
+      value: variantOptions.value,
+    })
+    .from(variantValues)
+    .innerJoin(variantOptions, eq(variantValues.optionId, variantOptions.id))
+    .where(inArray(variantValues.variantId, variantIds))
+    .orderBy(asc(variantValues.optionId));
+  const optionsByVariant = foldVariantOptionRows(optRows);
 
   const returnedRows = await db
     .select({
@@ -199,6 +220,8 @@ export async function getSalesData(businessId: number) {
     const returned = returnsByItem.get(row.saleItemsId);
     return {
       ...row,
+      variantOptions: variantOptionsFromMap(optionsByVariant, row.variantId),
+      variantName: variantNameFromMap(optionsByVariant, row.variantId, row.productName),
       returnedQuantity: returned?.quantity ?? 0,
       returnReason: returned?.reasons.join(", ") ?? null,
       returnDisposition: returned?.dispositions.at(-1) ?? null,
@@ -438,7 +461,7 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
     .orderBy(asc(saleItems.id));
 
   const variantIds = items.map((i) => i.variantId);
-  const optionsMap = new Map<number, string[]>();
+  let optionsMap = new Map<number, string[]>();
 
   if (variantIds.length > 0) {
     const optRows = await db
@@ -448,13 +471,9 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
       })
       .from(variantValues)
       .innerJoin(variantOptions, eq(variantValues.optionId, variantOptions.id))
-      .where(inArray(variantValues.variantId, variantIds));
-
-    for (const opt of optRows) {
-      const list = optionsMap.get(opt.variantId) ?? [];
-      list.push(opt.value);
-      optionsMap.set(opt.variantId, list);
-    }
+      .where(inArray(variantValues.variantId, variantIds))
+      .orderBy(asc(variantValues.optionId));
+    optionsMap = foldVariantOptionRows(optRows);
   }
 
   const payments = await db
@@ -509,9 +528,8 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
     business: branding,
     documentSettings,
     items: items.map((item) => {
-      const optValues = optionsMap.get(item.variantId);
-      const variantName =
-        optValues && optValues.length > 0 ? optValues.join(' / ') : (item.sku || null);
+      const optLabel = variantOptionsFromMap(optionsMap, item.variantId);
+      const variantName = optLabel !== "" ? optLabel : (item.sku || null);
       return {
         id: item.id,
         variantId: item.variantId,

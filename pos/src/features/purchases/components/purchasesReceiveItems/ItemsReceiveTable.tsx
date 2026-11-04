@@ -79,12 +79,17 @@ function ReceiveItemRow({
   return (
     <tr className="align-top">
       <td className="px-4 py-3">
-        <p className="font-medium">{item.productName}</p>
-        {item.variantId && (
+        <p className="font-medium">
+          {item.variantName || item.productName}
+        </p>
+        {item.variantOptions ? (
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Variant #{item.variantId}
+            {item.variantOptions}
           </p>
-        )}
+        ) : null}
+        {item.variantSku ? (
+          <p className="text-xs text-muted-foreground">SKU: {item.variantSku}</p>
+        ) : null}
       </td>
       <td className="px-3 py-3 text-muted-foreground">
         {item.productUnit || "—"}
@@ -96,7 +101,7 @@ function ReceiveItemRow({
         <NumberField
           form={form}
           name={`items.${index}.receiveNow`}
-          label={`${item.productName} receive quantity`}
+          label={`${item.variantName || item.productName} receive quantity`}
           disabled={disabled}
           min={0}
           max={remaining}
@@ -113,7 +118,7 @@ function ReceiveItemRow({
         <NumberField
           form={form}
           name={`items.${index}.unitCost`}
-          label={`${item.productName} unit cost`}
+          label={`${item.variantName || item.productName} unit cost`}
           disabled={disabled}
           min={0}
           step="0.01"
@@ -123,7 +128,7 @@ function ReceiveItemRow({
         <NumberField
           form={form}
           name={`items.${index}.sellingPrice`}
-          label={`${item.productName} selling price`}
+          label={`${item.variantName || item.productName} selling price`}
           disabled={disabled}
           min={0}
           step="0.01"

@@ -39,6 +39,7 @@ export function BatchExpiryReport() {
     const headers = [
       "Batch Number",
       "Product Name",
+      "Variant",
       "SKU",
       "Purchase Price (BDT)",
       "Received Qty",
@@ -50,6 +51,7 @@ export function BatchExpiryReport() {
     const exportRows = batches.map((b) => [
       b.batchNumber,
       b.productName,
+      b.variantOptions ?? "",
       b.sku,
       b.purchasePrice,
       b.quantityReceived,
@@ -73,10 +75,13 @@ export function BatchExpiryReport() {
     },
     {
       key: "productName",
-      header: "Product & SKU",
+      header: "Product & Variant",
       render: (r) => (
         <div>
           <p className="font-semibold text-slate-900">{r.productName}</p>
+          {r.variantOptions ? (
+            <p className="text-xs text-slate-500">{r.variantOptions}</p>
+          ) : null}
           <p className="text-xs text-slate-400 font-mono">SKU: {r.sku}</p>
         </div>
       ),

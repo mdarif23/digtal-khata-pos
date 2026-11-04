@@ -1,5 +1,12 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
+import {
+  foldVariantOptionRows,
+  variantNameFromMap,
+  variantOptionsFromMap,
+} from "../../utils/variantDisplay.js";
+import { variantOptions } from "../../db/schema/variantOptions.js";
+import { variantValues } from "../../db/schema/variantValues.js";
 import {
   stockCountLines,
   stockCountSessions,
@@ -188,8 +195,31 @@ export async function getStockCountSession(
     .where(eq(stockCountLines.sessionId, sessionId))
     .orderBy(stockCountLines.id);
 
+  // Option labels batched per distinct variant — sibling variants of one
+  // product must be distinguishable on the count screen.
+  const variantIds = [...new Set(lines.map((l) => l.variantId))];
+  let optionsByVariant = new Map<number, string[]>();
+  if (variantIds.length > 0) {
+    const optRows = await db
+      .select({
+        variantId: variantValues.variantId,
+        value: variantOptions.value,
+      })
+      .from(variantValues)
+      .innerJoin(variantOptions, eq(variantValues.optionId, variantOptions.id))
+      .where(inArray(variantValues.variantId, variantIds))
+      .orderBy(asc(variantValues.optionId));
+    optionsByVariant = foldVariantOptionRows(optRows);
+  }
+
+  const linesWithLabels = lines.map((line) => ({
+    ...line,
+    variantOptions: variantOptionsFromMap(optionsByVariant, line.variantId),
+    variantName: variantNameFromMap(optionsByVariant, line.variantId, line.productName),
+  }));
+
   const counted = lines.filter((l) => l.countedQuantity !== null).length;
-  return { session, lines, counted, total: lines.length };
+  return { session, lines: linesWithLabels, counted, total: lines.length };
 }
 
 /** Submits physical quantities for a set of lines (partial counts fine). */

@@ -115,7 +115,7 @@ export function BatchesDialog({
         <DialogHeader>
           <DialogTitle>Batch Information</DialogTitle>
           <DialogDescription>
-            {item.productName} · Assign {receiveNow} units across batches.{" "}
+            {item.variantName || item.productName} · Assign {receiveNow} units across batches.{" "}
             {remainingQuantity} remaining.
           </DialogDescription>
         </DialogHeader>

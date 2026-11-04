@@ -88,7 +88,14 @@ export function InventoryAgingReport() {
                 <tbody>
                   {rows.map((row) => (
                     <tr key={row.batchId} className="border-t">
-                      <td className="p-2">{row.productName}</td>
+                      <td className="p-2">
+                        {row.productName}
+                        {row.variantOptions ? (
+                          <span className="block text-xs text-slate-500">
+                            {row.variantOptions}
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="p-2 font-mono text-xs">
                         {row.batchNumber}
                       </td>
@@ -196,7 +203,14 @@ export function DeadStockReport() {
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.variantId} className="border-t">
-                    <td className="p-2">{row.productName}</td>
+                    <td className="p-2">
+                      {row.productName}
+                      {row.variantOptions ? (
+                        <span className="block text-xs text-slate-500">
+                          {row.variantOptions}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="p-2 text-right font-mono">
                       {row.currentStock}
                     </td>

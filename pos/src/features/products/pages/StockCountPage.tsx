@@ -27,6 +27,7 @@ interface CountLine {
   id: number;
   variantId: number;
   productName: string;
+  variantName?: string | null | undefined;
   sku: string | null;
   barcode: string | null;
   expectedQuantity: number;
@@ -292,7 +293,9 @@ export function StockCountPage() {
             )}
             {scanMatch && detail.status === "open" && (
               <div className="rounded-md border border-primary/40 bg-primary/5 p-2 text-sm">
-                <span className="font-medium">{scanMatch.productName}</span>{" "}
+                <span className="font-medium">
+                  {scanMatch.variantName || scanMatch.productName}
+                </span>{" "}
                 <span className="text-muted-foreground">
                   expected {scanMatch.expectedQuantity}
                 </span>
@@ -325,7 +328,7 @@ export function StockCountPage() {
                   {detail.lines.map((line) => (
                     <tr key={line.id} className="border-t">
                       <td className="p-2">
-                        {line.productName}
+                        {line.variantName || line.productName}
                         {line.sku && (
                           <span className="ml-1 text-xs text-muted-foreground">
                             {line.sku}

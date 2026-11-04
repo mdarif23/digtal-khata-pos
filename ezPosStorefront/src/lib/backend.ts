@@ -65,6 +65,10 @@ export interface StorefrontProduct {
     sku: string;
     price: number;
     isDefault: boolean;
+    /** Comma-joined option values from the backend, e.g. "Red, Large". */
+    options?: string;
+    /** Display label "Football (Small)" from the backend. */
+    name?: string;
     availability: number;
   }>;
 }

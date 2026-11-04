@@ -89,7 +89,7 @@ export function SerialsDialog({
         <DialogHeader>
           <DialogTitle>Serial Numbers</DialogTitle>
           <DialogDescription>
-            {item.productName} · Enter one serial number for each unit received.
+            {item.variantName || item.productName} · Enter one serial number for each unit received.
           </DialogDescription>
         </DialogHeader>
         {serialError && (

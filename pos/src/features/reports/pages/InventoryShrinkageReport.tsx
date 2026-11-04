@@ -41,6 +41,7 @@ export function InventoryShrinkageReport() {
     const headers = [
       "Date",
       "Product Name",
+      "Variant",
       "SKU",
       "Category",
       "Shrinkage Reason",
@@ -52,6 +53,7 @@ export function InventoryShrinkageReport() {
     const exportRows = incidents.map((i) => [
       i.createdAt,
       i.productName,
+      i.variantOptions ?? "",
       i.sku,
       i.categoryName,
       i.reason,
@@ -75,10 +77,13 @@ export function InventoryShrinkageReport() {
     },
     {
       key: "productName",
-      header: "Product & SKU",
+      header: "Product & Variant",
       render: (r) => (
         <div>
           <p className="font-semibold text-slate-900">{r.productName}</p>
+          {r.variantOptions ? (
+            <p className="text-xs text-slate-500">{r.variantOptions}</p>
+          ) : null}
           <p className="text-xs text-slate-400 font-mono">SKU: {r.sku}</p>
         </div>
       ),

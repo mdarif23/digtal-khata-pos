@@ -32,6 +32,10 @@ export interface PurchaseCart extends Omit<ProductType, "variants"> {
 }
 export interface PurchasesItems {
   productName: string;
+  /** Variant identity from the API. */
+  variantSku?: string | null | undefined;
+  variantOptions?: string | undefined;
+  variantName?: string | undefined;
   productUnit: string | null;
   sellingPrice: number;
   id: number;
@@ -51,6 +55,13 @@ export interface PurchasesItems {
 export interface PurchasesReturnItems {
   purchaseItemId: number;
   returnQuantity: number;
+  /** Identity fields from the variant-aware API. */
+  variantId?: number | undefined;
+  productId?: number;
+  productName?: string;
+  variantSku?: string | null | undefined;
+  variantOptions?: string | undefined;
+  variantName?: string | undefined;
 }
 export interface ChangedItems {
   purchaseItemId: number;

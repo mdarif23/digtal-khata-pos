@@ -27,16 +27,20 @@ export function ProductSalesReport() {
   const products = data?.data || [];
   const total = data?.total || 0;
 
-  const topProductsChart = products.slice(0, 10).map((p) => ({
-    name: p.productName.length > 15 ? p.productName.slice(0, 15) + "…" : p.productName,
-    qtySold: p.qtySold,
-    grossSales: p.grossSales,
-    profit: p.grossProfit,
-  }));
+  const topProductsChart = products.slice(0, 10).map((p) => {
+    const label = p.variantName || p.productName;
+    return {
+      name: label.length > 20 ? label.slice(0, 20) + "…" : label,
+      qtySold: p.qtySold,
+      grossSales: p.grossSales,
+      profit: p.grossProfit,
+    };
+  });
 
   const handleExport = () => {
     const headers = [
       "Product Name",
+      "Variant",
       "SKU",
       "Category",
       "Brand",
@@ -50,6 +54,7 @@ export function ProductSalesReport() {
     ];
     const exportRows = products.map((p) => [
       p.productName,
+      p.variantOptions ?? "",
       p.sku,
       p.categoryName,
       p.brandName,
@@ -71,6 +76,9 @@ export function ProductSalesReport() {
       render: (r) => (
         <div>
           <p className="font-semibold text-slate-900">{r.productName}</p>
+          {r.variantOptions ? (
+            <p className="text-xs text-slate-500">{r.variantOptions}</p>
+          ) : null}
           <p className="text-xs text-slate-400 font-mono">SKU: {r.sku}</p>
         </div>
       ),

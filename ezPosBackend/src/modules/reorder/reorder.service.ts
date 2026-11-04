@@ -25,6 +25,8 @@ export interface ReorderSuggestion {
   variantId: number;
   productId: number;
   productName: string;
+  variantOptions: string | null;
+  variantName: string | null;
   sku: string | null;
   currentStock: number;
   outstandingOnOrder: number;

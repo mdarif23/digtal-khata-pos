@@ -1,12 +1,19 @@
-import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { priceObservations } from "../../db/schema/priceObservations.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { products } from "../../db/schema/products.js";
+import { variantOptions } from "../../db/schema/variantOptions.js";
+import { variantValues } from "../../db/schema/variantValues.js";
 import { suppliers } from "../../db/schema/suppliers.js";
 import { units } from "../../db/schema/units.js";
 import { recordAuditInTx } from "../../services/audit.js";
 import { BadRequestError, NotFoundError } from "../../utils/handleError.js";
+import {
+  foldVariantOptionRows,
+  variantNameFromMap,
+  variantOptionsFromMap,
+} from "../../utils/variantDisplay.js";
 import type {
   CreateObservationInput,
   ListObservationsQuery,
@@ -26,6 +33,8 @@ export interface ObservationRow {
   id: number;
   variantId: number;
   productName: string;
+  variantOptions: string;
+  variantName: string;
   sku: string | null;
   unitName: string | null;
   supplierId: number | null;
@@ -44,6 +53,28 @@ export interface Paginated<T> {
   total: number;
   page: number;
   limit: number;
+}
+
+/** Attaches variant option labels, batched per distinct variant. */
+async function withVariantLabels<T extends { variantId: number; productName: string }>(
+  rows: T[],
+): Promise<(T & { variantOptions: string; variantName: string })[]> {
+  const variantIds = [...new Set(rows.map((r) => r.variantId))];
+  if (variantIds.length === 0) {
+    return rows.map((r) => ({ ...r, variantOptions: "", variantName: r.productName }));
+  }
+  const optRows = await db
+    .select({ variantId: variantValues.variantId, value: variantOptions.value })
+    .from(variantValues)
+    .innerJoin(variantOptions, eq(variantValues.optionId, variantOptions.id))
+    .where(inArray(variantValues.variantId, variantIds))
+    .orderBy(asc(variantValues.optionId));
+  const map = foldVariantOptionRows(optRows);
+  return rows.map((r) => ({
+    ...r,
+    variantOptions: variantOptionsFromMap(map, r.variantId),
+    variantName: variantNameFromMap(map, r.variantId, r.productName),
+  }));
 }
 
 function toUnitPrice(quotedPrice: number, packageQuantity: number | null): number | null {
@@ -199,13 +230,15 @@ export async function listObservations(
     .where(and(...conditions));
 
   return {
-    data: rows.map((row) => ({
-      ...row,
-      quotedPrice: Number(row.quotedPrice),
-      packageQuantity:
-        row.packageQuantity === null ? null : Number(row.packageQuantity),
-      unitPrice: toUnitPrice(Number(row.quotedPrice), row.packageQuantity === null ? null : Number(row.packageQuantity)),
-    })),
+    data: await withVariantLabels(
+      rows.map((row) => ({
+        ...row,
+        quotedPrice: Number(row.quotedPrice),
+        packageQuantity:
+          row.packageQuantity === null ? null : Number(row.packageQuantity),
+        unitPrice: toUnitPrice(Number(row.quotedPrice), row.packageQuantity === null ? null : Number(row.packageQuantity)),
+      })),
+    ),
     total: countRow?.total ?? 0,
     page,
     limit,
@@ -335,10 +368,14 @@ async function fetchOne(businessId: number, id: number): Promise<ObservationRow>
   if (!row) throw new NotFoundError("Price observation not found.");
   const packageQuantity =
     row.packageQuantity === null ? null : Number(row.packageQuantity);
-  return {
-    ...row,
-    quotedPrice: Number(row.quotedPrice),
-    packageQuantity,
-    unitPrice: toUnitPrice(Number(row.quotedPrice), packageQuantity),
-  };
+  const [labeled] = await withVariantLabels([
+    {
+      ...row,
+      quotedPrice: Number(row.quotedPrice),
+      packageQuantity,
+      unitPrice: toUnitPrice(Number(row.quotedPrice), packageQuantity),
+    },
+  ]);
+  if (!labeled) throw new NotFoundError("Price observation not found.");
+  return labeled;
 }

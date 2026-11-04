@@ -86,6 +86,10 @@ export interface SalesInvoiceRow {
 export interface ProductSalesRow {
   productId: number;
   productName: string;
+  /** Rows are per variant since the variant-aware API. */
+  variantId?: number | undefined;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   categoryName: string;
   brandName: string;
   sku: string;
@@ -121,6 +125,25 @@ export interface RefundRow {
   customerName: string;
   reason: string;
   status: string;
+  refundTotal: number;
+}
+
+export interface RefundItemRow {
+  id: number;
+  refundId: number;
+  refundedAt: string;
+  invoiceNumber: string;
+  customerName: string;
+  disposition: string;
+  reason: string | null;
+  productId: number;
+  productName: string;
+  variantId: number;
+  variantOptions: string | null;
+  variantName: string | null;
+  sku: string;
+  quantityReturned: number;
+  refundPrice: number;
   refundTotal: number;
 }
 
@@ -190,6 +213,8 @@ export interface CustomerReceivablesReportData {
 export interface StockRow {
   productId: number;
   productName: string;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   categoryName: string;
   brandName: string;
   variantId: number;
@@ -215,6 +240,9 @@ export interface StockMovementRow {
   id: number;
   createdAt: string;
   productName: string;
+  variantId?: number | undefined;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   sku: string;
   movementType: string;
   quantity: number;
@@ -226,6 +254,9 @@ export interface BatchRow {
   id: number;
   batchNumber: string;
   productName: string;
+  variantId?: number | undefined;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   sku: string;
   purchasePrice: number;
   quantityReceived: number;
@@ -233,6 +264,27 @@ export interface BatchRow {
   manufacturedDate: string | null;
   expiryDate: string | null;
   expiryStatus: "no_expiry" | "expired" | "expiring_soon" | "valid";
+}
+
+export interface PurchaseItemRow {
+  id: number;
+  purchaseId: number;
+  purchaseOrderNumber: string;
+  purchaseDate: string;
+  supplierName: string;
+  productId: number;
+  productName: string;
+  variantId: number;
+  variantOptions: string | null;
+  variantName: string | null;
+  sku: string;
+  categoryName: string;
+  quantityOrdered: number;
+  quantityReceived: number;
+  unitCost: number;
+  discount: number;
+  tax: number;
+  lineTotal: number;
 }
 
 // ---------------- Purchases ----------------
@@ -318,6 +370,8 @@ export interface ProfitabilityTrendPoint {
 export interface ProfitabilityProductRow {
   variantId: number;
   productName: string;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   sku: string;
   categoryName: string | null;
   quantitySold: number;
@@ -417,6 +471,9 @@ export interface ShrinkageRow {
   id: number;
   createdAt: string;
   productName: string;
+  variantId?: number | undefined;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   sku: string;
   categoryName: string;
   reason: string;

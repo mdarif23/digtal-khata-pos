@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
+import { variantOptionsJoinSql, variantNameSql } from "../../utils/variantDisplay.js";
 
 // Every function takes the caller's server-verified businessId (from
 // requireBusinessContext) and injects it into every raw-SQL fragment so no
@@ -134,9 +135,17 @@ export function getProfitByCategory(businessId: number, period: DashboardPeriod,
 
 
 export function getTopItemsByGross(businessId: number, period: DashboardPeriod, locationId?: number) {
+  // Variant-level: each row is one variant (Football (Small)), so the gross
+  // of Small/Medium/Big stays distinguishable. The frontend aggregates the
+  // rows per product when it wants a product-level rollup.
   return db.execute(sql`
     SELECT
+      p.id AS product_id,
       p.name AS product_name,
+      pv.id AS variant_id,
+      ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS variant_name,
+      vol.option_label AS variant_options,
+      pv.sku AS sku,
       COALESCE(SUM(
         CASE
           WHEN s.created_at >= ${getCurrentPeriodStart(period)}
@@ -145,6 +154,14 @@ export function getTopItemsByGross(businessId: number, period: DashboardPeriod, 
           ELSE 0
         END
       ), 0) AS current_month_gross,
+      COALESCE(SUM(
+        CASE
+          WHEN s.created_at >= ${getCurrentPeriodStart(period)}
+            AND s.created_at < ${getCurrentPeriodEnd(period)}
+          THEN si.quantity
+          ELSE 0
+        END
+      ), 0) AS current_month_quantity,
       COALESCE(SUM(
         CASE
           WHEN s.created_at >= ${getPreviousPeriodStart(period)}
@@ -190,13 +207,14 @@ export function getTopItemsByGross(businessId: number, period: DashboardPeriod, 
     INNER JOIN sales s ON s.id = si.sale_id
     INNER JOIN product_variants pv ON pv.id = si.variant_id
     INNER JOIN products p ON p.id = pv.product_id
+    ${variantOptionsJoinSql("pv", "vol")}
     WHERE s.business_id = ${businessId}${locFilter("s", locationId)}
       AND s.status IN ('completed', 'refunded')
       AND s.created_at >= ${getPreviousPeriodStart(period)}
       AND s.created_at < ${getCurrentPeriodEnd(period)}
-    GROUP BY p.id, p.name
+    GROUP BY p.id, p.name, pv.id, pv.sku, vol.option_label
     ORDER BY current_month_gross DESC
-    LIMIT 5
+    LIMIT 10
   `);
 }
 
@@ -205,18 +223,23 @@ export function getProductsSummary(businessId: number, locationId?: number) {
   return db.execute(sql`
     WITH stock_summary AS (
       SELECT
-        COUNT(*) FILTER (
+        COUNT(pv.id) FILTER (
           WHERE COALESCE(stock.quantity, 0) > 0
             AND COALESCE(stock.quantity, 0) <= COALESCE(pv.alert_quantity, 0)
         ) AS low_stock,
-        COUNT(*) FILTER (
+        COUNT(pv.id) FILTER (
           WHERE COALESCE(stock.quantity, 0) <= 0
         ) AS stock_out,
         COALESCE(SUM(COALESCE(stock.quantity, 0)), 0) AS total_items
       FROM product_variants pv
-      LEFT JOIN inventory_stock stock ON stock.variant_id = pv.id
-        AND stock.business_id = ${businessId}
-        ${locFilter("stock", locationId)}
+      LEFT JOIN (
+        -- Pre-aggregated per variant so a variant stocked in several
+        -- locations is counted once, not once per stock row.
+        SELECT variant_id, SUM(quantity) AS quantity
+        FROM inventory_stock
+        WHERE business_id = ${businessId}${locFilter("inventory_stock", locationId)}
+        GROUP BY variant_id
+      ) stock ON stock.variant_id = pv.id
       WHERE pv.business_id = ${businessId}
     ),
     stock_valuation AS (
@@ -555,15 +578,24 @@ export function getLowStockSummary(businessId: number, locationId?: number) {
   return db.execute(sql`
     SELECT
       pv.id,
+      p.id AS product_id,
       p.name AS product_name,
+      vol.option_label AS variant_options,
+      ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS variant_name,
       pv.sku,
       COALESCE(p.status, 'active') AS status,
       COALESCE(stock.quantity, 0) AS quantity
     FROM product_variants pv
     INNER JOIN products p ON p.id = pv.product_id
-    LEFT JOIN inventory_stock stock ON stock.variant_id = pv.id
-      AND stock.business_id = ${businessId}
-      ${locFilter("stock", locationId)}
+    ${variantOptionsJoinSql("pv", "vol")}
+    LEFT JOIN (
+      -- One row per variant: a variant stocked in several locations must not
+      -- duplicate the alert row.
+      SELECT variant_id, SUM(quantity) AS quantity
+      FROM inventory_stock
+      WHERE business_id = ${businessId}${locFilter("inventory_stock", locationId)}
+      GROUP BY variant_id
+    ) stock ON stock.variant_id = pv.id
     WHERE pv.business_id = ${businessId}
       AND COALESCE(stock.quantity, 0) <= COALESCE(pv.alert_quantity, 0)
     ORDER BY COALESCE(stock.quantity, 0) ASC
@@ -599,7 +631,10 @@ export function getStaleStockSummary(
     )
     SELECT
       pv.id,
+      p.id AS product_id,
       p.name AS product_name,
+      vol.option_label AS variant_options,
+      ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS variant_name,
       pv.sku,
       stock.quantity,
       last_sold.last_sold_at,
@@ -613,9 +648,14 @@ export function getStaleStockSummary(
       COALESCE(stock_value.value, 0) AS stock_value
     FROM product_variants pv
     INNER JOIN products p ON p.id = pv.product_id
-    INNER JOIN inventory_stock stock ON stock.variant_id = pv.id
-      AND stock.business_id = ${businessId}
-      ${locFilter("stock", locationId)}
+    ${variantOptionsJoinSql("pv", "vol")}
+    INNER JOIN (
+      -- One row per variant (stock summed across locations under the scope).
+      SELECT variant_id, SUM(quantity) AS quantity
+      FROM inventory_stock
+      WHERE business_id = ${businessId}${locFilter("inventory_stock", locationId)}
+      GROUP BY variant_id
+    ) stock ON stock.variant_id = pv.id
     LEFT JOIN last_sold ON last_sold.variant_id = pv.id
     LEFT JOIN stock_value ON stock_value.variant_id = pv.id
     WHERE pv.business_id = ${businessId}
@@ -631,26 +671,46 @@ export function getStaleStockSummary(
 
 
 export function getTopSellingProducts(businessId: number, period: DashboardPeriod, locationId?: number) {
+  // Variant-level rows, net of refunds: a fully refunded line is no longer a
+  // "top selling" item (refund money per sale_item — the POS-005 money
+  // convention — is subtracted from gross too).
   return db.execute(sql`
+    WITH refund_per_item AS (
+      SELECT
+        sri.sale_item_id,
+        SUM(sri.quantity) AS refunded_qty,
+        SUM(sri.refund_total) AS refunded_money
+      FROM sale_refund_items sri
+      INNER JOIN sale_refunds sr ON sr.id = sri.refund_id
+      WHERE sr.business_id = ${businessId}${locFilter("sr", locationId)}
+      GROUP BY sri.sale_item_id
+    )
     SELECT
-      p.id,
+      p.id AS product_id,
       p.name AS product_name,
-      COALESCE(SUM(si.quantity), 0) AS top_selling,
-      COALESCE(SUM(si.line_total), 0) AS gross_sales,
+      pv.id AS variant_id,
+      vol.option_label AS variant_options,
+      ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS variant_name,
+      pv.sku AS sku,
+      COALESCE(SUM(si.quantity - COALESCE(rf.refunded_qty, 0)), 0) AS top_selling,
+      COALESCE(SUM(si.line_total - COALESCE(rf.refunded_money, 0)), 0) AS gross_sales,
       COALESCE(
-        SUM(si.selling_price * si.quantity) / NULLIF(SUM(si.quantity), 0),
+        SUM(si.line_total - COALESCE(rf.refunded_money, 0))
+          / NULLIF(SUM(si.quantity - COALESCE(rf.refunded_qty, 0)), 0),
         0
       ) AS sold_price
     FROM sale_items si
     INNER JOIN sales s ON s.id = si.sale_id
     INNER JOIN product_variants pv ON pv.id = si.variant_id
     INNER JOIN products p ON p.id = pv.product_id
+    ${variantOptionsJoinSql("pv", "vol")}
+    LEFT JOIN refund_per_item rf ON rf.sale_item_id = si.id
     WHERE s.business_id = ${businessId}${locFilter("s", locationId)}
       AND s.status IN ('completed', 'refunded')
       AND s.created_at >= ${getCurrentPeriodStart(period)}
       AND s.created_at < ${getCurrentPeriodEnd(period)}
-    GROUP BY p.id, p.name
+    GROUP BY p.id, p.name, pv.id, pv.sku, vol.option_label
     ORDER BY top_selling DESC
-    LIMIT 5
+    LIMIT 8
   `);
 }
