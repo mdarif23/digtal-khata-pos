@@ -9,6 +9,11 @@ vi.mock("@/api/expenses.api", () => ({
   recordExpensePaymentApi: vi.fn(),
   voidExpensePaymentApi: vi.fn(),
   getCurrentRegisterSessionApi: vi.fn(() => Promise.resolve(null)),
+  getAttachmentUrlApi: vi.fn(),
+  deleteAttachmentApi: vi.fn(),
+  uploadExpenseAttachmentApi: vi.fn(),
+  ATTACHMENT_ACCEPT: ".pdf,.jpg,.jpeg,.png,.webp",
+  ATTACHMENT_MAX_MB: 10,
 }));
 
 // The test session holds no permissions — render guarded buttons directly so
@@ -55,6 +60,7 @@ const detail = (overrides: Partial<ExpenseDetail>): ExpenseDetail => ({
   createdAt: null,
   dueAmount: 300,
   payments: [],
+  attachments: [],
   createdBy: null,
   updatedBy: null,
   deletedAt: null,

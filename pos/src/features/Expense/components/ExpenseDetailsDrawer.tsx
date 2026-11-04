@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -13,17 +13,32 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PermissionButton } from "@/components/common/PermissionGuard";
 import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
 import { formatCurrency, formatDate } from "@/features/reports/utils/reportUtils";
-import { Trash2 } from "lucide-react";
-import { useVoidExpensePayment } from "../hooks/useExpenses";
+import {
+  getAttachmentUrlApi,
+  ATTACHMENT_ACCEPT,
+  ATTACHMENT_MAX_MB,
+} from "@/api/expenses.api";
+import { Paperclip, Trash2, Upload } from "lucide-react";
+import { toast } from "@/components/ui/toast";
+import {
+  useDeleteExpenseAttachment,
+  useUploadExpenseAttachment,
+  useVoidExpensePayment,
+} from "../hooks/useExpenses";
 import { ExpensePaymentDialog } from "./ExpensePaymentDialog";
 import { useExpenseDetail } from "../hooks/useExpenses";
-import type { ExpensePaymentStatus } from "../expense.type";
+import type { ExpenseAttachment, ExpensePaymentStatus } from "../expense.type";
 
 const STATUS_LABELS: Record<ExpensePaymentStatus, string> = {
   paid: "Paid",
   partial: "Partial",
   unpaid: "Unpaid",
 };
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
 
 interface ExpenseDetailsDrawerProps {
   expenseId: number;
@@ -49,11 +64,66 @@ export function ExpenseDetailsDrawer({
     open ? expenseId : 0,
   );
   const voidPayment = useVoidExpensePayment();
+  const uploadAttachment = useUploadExpenseAttachment();
+  const deleteAttachment = useDeleteExpenseAttachment();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [voidTarget, setVoidTarget] = useState<{
     id: number;
     amount: number;
   } | null>(null);
+  const [attachmentTarget, setAttachmentTarget] = useState<
+    ExpenseAttachment | null
+  >(null);
+
+  function validateFile(file: File): string | null {
+    const allowed = [
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+    ];
+    if (!allowed.includes(file.type)) {
+      return "Only PDF, JPEG, PNG and WebP files are supported";
+    }
+    if (file.size > ATTACHMENT_MAX_MB * 1024 * 1024) {
+      return `Files can be up to ${ATTACHMENT_MAX_MB} MB`;
+    }
+    return null;
+  }
+
+  async function handleFileSelected(file: File) {
+    if (!expense) return;
+    const error = validateFile(file);
+    if (error) {
+      toast.add({ title: error, type: "error" });
+      return;
+    }
+    try {
+      await toast.promise(
+        uploadAttachment.mutateAsync({ expenseId: expense.id, file }),
+        {
+          loading: "Uploading attachment…",
+          success: `${file.name} attached`,
+          error: (err: { response?: { data?: { message?: string } }; message?: string }) =>
+            err?.response?.data?.message ??
+            err?.message ??
+            "Could not upload attachment",
+        },
+      );
+    } catch {
+      // The promise toast displays the API error.
+    }
+  }
+
+  async function handleOpenAttachment(attachment: ExpenseAttachment) {
+    try {
+      const { downloadUrl } = await getAttachmentUrlApi(attachment.id);
+      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+    } catch {
+      toast.add({ title: "Could not open the attachment", type: "error" });
+    }
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -198,6 +268,80 @@ export function ExpenseDetailsDrawer({
                   </p>
                 )}
               </section>
+
+              <Separator />
+
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    Attachments
+                  </h3>
+                  <PermissionButton
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    permission="expenses.edit"
+                    disabled={uploadAttachment.isPending}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload />
+                    Attach file
+                  </PermissionButton>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={ATTACHMENT_ACCEPT}
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (file) void handleFileSelected(file);
+                    }}
+                  />
+                </div>
+                {expense.attachments.length ? (
+                  <ul className="space-y-2">
+                    {expense.attachments.map((attachment) => (
+                      <li
+                        key={attachment.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border p-2.5"
+                      >
+                        <button
+                          type="button"
+                          className="flex min-w-0 items-center gap-2.5 text-left"
+                          onClick={() => void handleOpenAttachment(attachment)}
+                        >
+                          <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium">
+                              {attachment.fileName}
+                            </span>
+                            <span className="block text-xs text-muted-foreground">
+                              {formatBytes(Number(attachment.bytes))} ·{" "}
+                              {formatDate(attachment.createdAt)}
+                            </span>
+                          </span>
+                        </button>
+                        <PermissionButton
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          permission="expenses.delete"
+                          aria-label={`Delete ${attachment.fileName}`}
+                          onClick={() => setAttachmentTarget(attachment)}
+                        >
+                          <Trash2 className="text-destructive" />
+                        </PermissionButton>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No receipts or invoices attached yet (PDF or images up to{" "}
+                    {ATTACHMENT_MAX_MB} MB).
+                  </p>
+                )}
+              </section>
             </>
           )}
         </div>
@@ -238,6 +382,21 @@ export function ExpenseDetailsDrawer({
               paymentId: voidTarget.id,
             });
             setVoidTarget(null);
+          }}
+        />
+
+        <ConfirmDeleteDialog
+          open={attachmentTarget !== null}
+          onOpenChange={(next) => {
+            if (!next) setAttachmentTarget(null);
+          }}
+          title="Delete this attachment?"
+          description={`"${attachmentTarget?.fileName ?? ""}" will be removed from this expense. The deletion is recorded in the audit log.`}
+          entityName="Attachment"
+          onConfirm={async () => {
+            if (!attachmentTarget) return;
+            await deleteAttachment.mutateAsync(attachmentTarget.id);
+            setAttachmentTarget(null);
           }}
         />
       </SheetContent>

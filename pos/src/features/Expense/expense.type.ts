@@ -43,10 +43,20 @@ export interface ExpenseRecord {
   createdAt: string | null;
 }
 
+export interface ExpenseAttachment {
+  id: number;
+  fileName: string;
+  contentType: string;
+  bytes: number;
+  uploadedBy: number | null;
+  createdAt: string | null;
+}
+
 /** Detail shape returned by GET /expenses/:id (adds the payment ledger). */
 export interface ExpenseDetail extends ExpenseRecord {
   dueAmount: number;
   payments: ExpensePayment[];
+  attachments: ExpenseAttachment[];
   createdBy: number | null;
   updatedBy: number | null;
   deletedAt: string | null;

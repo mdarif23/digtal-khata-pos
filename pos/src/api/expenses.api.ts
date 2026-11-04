@@ -1,5 +1,6 @@
 import axios from "./axios.js";
 import type {
+  ExpenseAttachment,
   ExpenseCategory,
   ExpenseDetail,
   ExpenseDraft,
@@ -231,4 +232,64 @@ export async function getCurrentRegisterSessionApi(): Promise<{
     // No open session (or endpoint unavailable) — payments still record.
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Attachments (Phase 4) — presigned PUT straight to object storage.
+// ---------------------------------------------------------------------------
+
+export const ATTACHMENT_ACCEPT =
+  ".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp";
+/** Keep in sync with the backend's MEDIA_MAX_UPLOAD_MB default. */
+export const ATTACHMENT_MAX_MB = 10;
+
+export async function getAttachmentUrlApi(attachmentId: number) {
+  const { data } = await axios.get<{
+    success: boolean;
+    data: { id: number; fileName: string; downloadUrl: string; expiresIn: number };
+  }>(`/attachments/${attachmentId}/url`);
+  return data.data;
+}
+
+export async function deleteAttachmentApi(attachmentId: number) {
+  await axios.delete(`/attachments/${attachmentId}`);
+}
+
+/**
+ * Three-step upload: presign → browser PUT → register. Returns the created
+ * attachment metadata row.
+ */
+export async function uploadExpenseAttachmentApi(
+  expenseId: number,
+  file: File,
+): Promise<ExpenseAttachment> {
+  const presign = await axios.post<{
+    success: boolean;
+    data: { objectKey: string; uploadUrl: string; expiresIn: number };
+  }>(`/expenses/${expenseId}/attachments/presign`, {
+    fileName: file.name,
+    contentType: file.type || "application/pdf",
+    sizeBytes: file.size,
+  });
+  const { objectKey, uploadUrl } = presign.data.data;
+
+  const put = await fetch(uploadUrl, {
+    method: "PUT",
+    body: file,
+    headers: { "Content-Type": file.type || "application/pdf" },
+  });
+  if (!put.ok) {
+    throw new Error(`Upload failed (${String(put.status)})`);
+  }
+
+  const register = await axios.post<{
+    success: boolean;
+    data: ExpenseAttachment;
+  }>(`/expenses/${expenseId}/attachments`, {
+    objectKey,
+    fileName: file.name,
+    contentType: file.type || "application/pdf",
+    bytes: file.size,
+  });
+  return register.data.data;
 }

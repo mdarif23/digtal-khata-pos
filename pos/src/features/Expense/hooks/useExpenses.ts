@@ -8,6 +8,7 @@ import {
   archiveExpenseCategoryApi,
   createExpenseApi,
   createExpenseCategoryApi,
+  deleteAttachmentApi,
   exportExpensesApi,
   getExpenseApi,
   getExpenseCategoriesApi,
@@ -16,6 +17,7 @@ import {
   restoreExpenseCategoryApi,
   updateExpenseApi,
   updateExpenseCategoryApi,
+  uploadExpenseAttachmentApi,
   voidExpenseApi,
   voidExpensePaymentApi,
 } from "@/api/expenses.api";
@@ -149,6 +151,25 @@ export function useRestoreExpenseCategory() {
   const invalidate = useInvalidateExpenses();
   return useMutation({
     mutationFn: (id: number) => restoreExpenseCategoryApi(id),
+    onSuccess: invalidate,
+  });
+}
+
+/** Three-step attachment upload (presign → PUT → register). */
+export function useUploadExpenseAttachment() {
+  const invalidate = useInvalidateExpenses();
+  return useMutation({
+    mutationFn: (input: { expenseId: number; file: File }) =>
+      uploadExpenseAttachmentApi(input.expenseId, input.file),
+    onSuccess: invalidate,
+  });
+}
+
+/** Attachment soft delete (expenses.delete permission server-side). */
+export function useDeleteExpenseAttachment() {
+  const invalidate = useInvalidateExpenses();
+  return useMutation({
+    mutationFn: (attachmentId: number) => deleteAttachmentApi(attachmentId),
     onSuccess: invalidate,
   });
 }
