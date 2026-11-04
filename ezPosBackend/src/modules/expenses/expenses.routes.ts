@@ -20,12 +20,19 @@ const read = [
 ] as const;
 const write = [...read, requireFullAccess] as const;
 
-// Static segments first — /export and /categories must not be captured by /:id.
+// Static segments first — /export, /analytics and /categories must not be
+// captured by /:id.
 router.get(
   "/api/expenses",
   ...read,
   requirePermission("expenses.view"),
   expensesController.getExpenses,
+);
+router.get(
+  "/api/expenses/analytics",
+  ...read,
+  requirePermission("expenses.view"),
+  expensesController.getExpenseAnalytics,
 );
 router.get(
   "/api/expenses/export",

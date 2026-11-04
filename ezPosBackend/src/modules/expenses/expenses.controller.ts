@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import * as expensesService from "./expenses.service.js";
 import * as attachmentsService from "./expenses.attachments.service.js";
+import * as analyticsService from "./expenses.analytics.service.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { getBusinessId } from "../../middleware/business.js";
 import {
@@ -12,6 +13,7 @@ import {
   attachmentIdSchema,
   attachmentPresignSchema,
   attachmentRegisterSchema,
+  expenseAnalyticsQuerySchema,
   expenseCategorySchema,
   expenseCategoryIdSchema,
   expenseIdSchema,
@@ -241,6 +243,28 @@ export async function getExpense(req: Request, res: Response) {
     return res.json({ success: true, data: expense });
   } catch (err) {
     return sendSafeError(res, err, "Unable to load the expense.");
+  }
+}
+
+export async function getExpenseAnalytics(req: Request, res: Response) {
+  try {
+    const parsed = expenseAnalyticsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return validationError(
+        res,
+        "Invalid analytics filters",
+        parsed.error.flatten(),
+      );
+    }
+    const locationId = await resolveOptionalLocationParam(req);
+    const data = await analyticsService.getExpenseAnalytics(
+      getBusinessId(req),
+      locationId,
+      parsed.data,
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to load expense analytics.");
   }
 }
 

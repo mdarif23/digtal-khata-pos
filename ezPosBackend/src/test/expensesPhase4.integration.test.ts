@@ -22,8 +22,7 @@ describe("expenses phase 4 integration", { skip: !runIntegration }, () => {
   let server: import("node:http").Server | undefined;
   let baseUrl = "";
   let storageReachable = false;
-  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-  let buildApp: () => import("../app.js").Express;
+  let application: import("express").Express | undefined;
 
   before(async () => {
     const { default: pg } = await import("pg");
@@ -69,11 +68,10 @@ describe("expenses phase 4 integration", { skip: !runIntegration }, () => {
     const { ensureRbacSeed } = await import("../rbac/seed.js");
     await ensureRbacSeed();
     const appModule = await import("../app.js");
-    buildApp = appModule.buildApp;
+    application = appModule.buildApp();
 
-    const app = buildApp();
-    server = app.listen(0);
-    const address = server.address() as AddressInfo;
+    server = application.listen(0);
+    const address = server!.address() as AddressInfo;
     baseUrl = `http://127.0.0.1:${address.port}`;
   });
 
@@ -219,9 +217,9 @@ describe("expenses phase 4 integration", { skip: !runIntegration }, () => {
       data?: { objectKey?: string; uploadUrl?: string; expiresIn?: number };
     };
     assert.ok(body.data?.objectKey?.startsWith(`businesses/${String(owner.businessId)}/expenses/`));
-    assert.ok(body.data.objectKey.endsWith(".pdf"));
-    assert.ok(body.data.uploadUrl?.includes("X-Amz-Algorithm=AWS4-HMAC-SHA256"));
-    assert.equal(body.data.expiresIn, 600);
+    assert.ok(body.data?.objectKey?.endsWith(".pdf"));
+    assert.ok(body.data?.uploadUrl?.includes("X-Amz-Algorithm=AWS4-HMAC-SHA256"));
+    assert.equal(body.data?.expiresIn, 600);
   });
 
   it("rejects unsupported types and oversized files", async () => {

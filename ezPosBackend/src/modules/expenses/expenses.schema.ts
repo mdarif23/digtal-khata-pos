@@ -78,6 +78,19 @@ export type ExpenseListQuery = z.infer<typeof expenseListQuerySchema> & {
   locationId?: number | undefined;
 };
 
+export const expenseAnalyticsQuerySchema = z
+  .object({
+    date_from: z.iso.date().optional(),
+    date_to: z.iso.date().optional(),
+    granularity: z.enum(["day", "week", "month"]).default("month"),
+  })
+  .refine(
+    (q) => !q.date_from || !q.date_to || q.date_from <= q.date_to,
+    { message: "date_from must be on or before date_to", path: ["date_from"] },
+  );
+
+export type ExpenseAnalyticsQuery = z.infer<typeof expenseAnalyticsQuerySchema>;
+
 export const expenseVoidSchema = z.object({
   reason: z.string().trim().max(500).optional(),
 });
