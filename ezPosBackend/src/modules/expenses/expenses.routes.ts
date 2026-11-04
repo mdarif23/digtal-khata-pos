@@ -115,6 +115,70 @@ router.delete(
   requirePermission("expenses.delete"),
   expensesController.deleteAttachment,
 );
+// Recurring templates: manage = expenses.create (they generate future
+// expenses); archive = expenses.edit; manual generation = expenses.create.
+// The background scheduler runs the same service without HTTP.
+router.get(
+  "/api/expense_templates",
+  ...read,
+  requirePermission("expenses.view"),
+  expensesController.getExpenseTemplates,
+);
+router.post(
+  "/api/expense_templates",
+  ...write,
+  requirePermission("expenses.create"),
+  expensesController.createExpenseTemplate,
+);
+router.patch(
+  "/api/expense_templates/:id",
+  ...write,
+  requirePermission("expenses.edit"),
+  expensesController.updateExpenseTemplate,
+);
+router.post(
+  "/api/expense_templates/:id/archive",
+  ...write,
+  requirePermission("expenses.edit"),
+  expensesController.archiveExpenseTemplate,
+);
+router.post(
+  "/api/expense_templates/:id/generate",
+  ...write,
+  requirePermission("expenses.create"),
+  expensesController.runExpenseTemplate,
+);
+// Budgets: plans, not financial records — manage = expenses.edit.
+router.get(
+  "/api/expense_budgets",
+  ...read,
+  requirePermission("expenses.view"),
+  expensesController.getExpenseBudgets,
+);
+router.get(
+  "/api/expense_budgets/usage",
+  ...read,
+  requirePermission("expenses.view"),
+  expensesController.getExpenseBudgetUsage,
+);
+router.post(
+  "/api/expense_budgets",
+  ...write,
+  requirePermission("expenses.edit"),
+  expensesController.createExpenseBudget,
+);
+router.patch(
+  "/api/expense_budgets/:id",
+  ...write,
+  requirePermission("expenses.edit"),
+  expensesController.updateExpenseBudget,
+);
+router.delete(
+  "/api/expense_budgets/:id",
+  ...write,
+  requirePermission("expenses.edit"),
+  expensesController.deleteExpenseBudget,
+);
 router.post(
   "/api/expense_categories",
   ...write,

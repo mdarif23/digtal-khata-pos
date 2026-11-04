@@ -143,6 +143,49 @@ export const attachmentIdSchema = z.coerce.number().int().positive();
 export type AttachmentPresignInput = z.infer<typeof attachmentPresignSchema>;
 export type AttachmentRegisterInput = z.infer<typeof attachmentRegisterSchema>;
 
+// ---------------------------------------------------------------------------
+// Recurring templates + budgets (Phase 6)
+// ---------------------------------------------------------------------------
+
+export const expenseTemplateWriteSchema = z.object({
+  title: z.string().trim().min(1).max(255),
+  amount: z.number().finite().positive(),
+  category_id: z.number().int().positive().nullable(),
+  payment_method: z.enum(EXPENSE_PAYMENT_METHODS),
+  payee: z.string().trim().max(150).nullable().optional(),
+  note: z.string().trim().max(500).nullable().optional(),
+  /** Owning outlet; NULL = the business default at generation time is NOT used —
+   * templates record against this outlet explicitly. */
+  location_id: z.number().int().positive().nullable().optional(),
+  channel: z.enum(EXPENSE_CHANNELS).nullable().optional(),
+  frequency: z.enum(["weekly", "monthly", "yearly"]),
+  start_date: z.iso.date(),
+  end_date: z.iso.date().nullable().optional(),
+  is_active: z.boolean().nullable().optional(),
+});
+
+export type ExpenseTemplateWriteInput = z.infer<
+  typeof expenseTemplateWriteSchema
+>;
+
+export const expenseTemplateIdSchema = z.coerce.number().int().positive();
+
+export const expenseBudgetWriteSchema = z.object({
+  category_id: z.number().int().positive().nullable(),
+  location_id: z.number().int().positive().nullable().optional(),
+  /** First day of the budgeted month (YYYY-MM-01). */
+  month: z.iso.date(),
+  amount: z.number().finite().positive(),
+});
+
+export type ExpenseBudgetWriteInput = z.infer<typeof expenseBudgetWriteSchema>;
+
+export const expenseBudgetIdSchema = z.coerce.number().int().positive();
+
+export const expenseBudgetListQuerySchema = z.object({
+  month: z.iso.date().optional(),
+});
+
 export const expenseCategorySchema = z.object({
   categoryName: z.string().trim().min(1).max(100),
   description: z.string().trim().max(255).nullable().optional(),

@@ -2,6 +2,8 @@ import type { Request, Response } from "express";
 import * as expensesService from "./expenses.service.js";
 import * as attachmentsService from "./expenses.attachments.service.js";
 import * as analyticsService from "./expenses.analytics.service.js";
+import * as templatesService from "./expenses.templates.service.js";
+import * as budgetsService from "./expenses.budgets.service.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { getBusinessId } from "../../middleware/business.js";
 import {
@@ -14,12 +16,17 @@ import {
   attachmentPresignSchema,
   attachmentRegisterSchema,
   expenseAnalyticsQuerySchema,
+  expenseBudgetIdSchema,
+  expenseBudgetListQuerySchema,
+  expenseBudgetWriteSchema,
   expenseCategorySchema,
   expenseCategoryIdSchema,
   expenseIdSchema,
   expenseListQuerySchema,
   expensePaymentCreateSchema,
   expensePaymentIdSchema,
+  expenseTemplateIdSchema,
+  expenseTemplateWriteSchema,
   expenseVoidSchema,
   expenseWriteSchema,
 } from "./expenses.schema.js";
@@ -428,5 +435,205 @@ export async function deleteAttachment(req: Request, res: Response) {
     return res.json({ success: true, data: deleted });
   } catch (err) {
     return sendSafeError(res, err, "Unable to delete the attachment.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Recurring templates (Phase 6)
+// ---------------------------------------------------------------------------
+
+export async function getExpenseTemplates(req: Request, res: Response) {
+  try {
+    const includeInactive = req.query.include_inactive === "true";
+    const templates = await templatesService.listExpenseTemplates(
+      getBusinessId(req),
+      includeInactive,
+    );
+    return res.json({ success: true, data: templates });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to load expense templates.");
+  }
+}
+
+export async function createExpenseTemplate(req: Request, res: Response) {
+  try {
+    const parsed = expenseTemplateWriteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return validationError(
+        res,
+        "Invalid expense template",
+        parsed.error.flatten(),
+      );
+    }
+    const { userId } = actor(req);
+    const template = await templatesService.createExpenseTemplate(
+      getBusinessId(req),
+      userId,
+      parsed.data,
+    );
+    return res.status(201).json({ success: true, data: template });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to create the expense template.");
+  }
+}
+
+export async function updateExpenseTemplate(req: Request, res: Response) {
+  try {
+    const id = expenseTemplateIdSchema.safeParse(req.params.id);
+    const parsed = expenseTemplateWriteSchema.safeParse(req.body);
+    if (!id.success || !parsed.success) {
+      return validationError(res, "Invalid expense template data", {
+        id: id.success ? undefined : id.error.flatten(),
+        template: parsed.success ? undefined : parsed.error.flatten(),
+      });
+    }
+    const { userId } = actor(req);
+    const template = await templatesService.updateExpenseTemplate(
+      getBusinessId(req),
+      id.data,
+      userId,
+      parsed.data,
+    );
+    return res.json({ success: true, data: template });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to update the expense template.");
+  }
+}
+
+export async function archiveExpenseTemplate(req: Request, res: Response) {
+  try {
+    const id = expenseTemplateIdSchema.safeParse(req.params.id);
+    if (!id.success) {
+      return validationError(res, "Invalid expense template ID", undefined);
+    }
+    const { userId } = actor(req);
+    const template = await templatesService.archiveExpenseTemplate(
+      getBusinessId(req),
+      id.data,
+      userId,
+    );
+    return res.json({ success: true, data: template });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to archive the expense template.");
+  }
+}
+
+export async function runExpenseTemplate(req: Request, res: Response) {
+  try {
+    const id = expenseTemplateIdSchema.safeParse(req.params.id);
+    if (!id.success) {
+      return validationError(res, "Invalid expense template ID", undefined);
+    }
+    const generated = await templatesService.generateForTemplate(
+      getBusinessId(req),
+      id.data,
+    );
+    return res.json({ success: true, data: { generated } });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to generate expenses.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Budgets (Phase 6)
+// ---------------------------------------------------------------------------
+
+export async function getExpenseBudgets(req: Request, res: Response) {
+  try {
+    const parsed = expenseBudgetListQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return validationError(res, "Invalid month filter", parsed.error.flatten());
+    }
+    const month =
+      parsed.data.month ?? new Date().toISOString().slice(0, 8) + "01";
+    const budgets = await budgetsService.listExpenseBudgets(
+      getBusinessId(req),
+      month,
+    );
+    return res.json({ success: true, data: budgets });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to load expense budgets.");
+  }
+}
+
+export async function createExpenseBudget(req: Request, res: Response) {
+  try {
+    const parsed = expenseBudgetWriteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return validationError(
+        res,
+        "Invalid expense budget",
+        parsed.error.flatten(),
+      );
+    }
+    const { userId } = actor(req);
+    const budget = await budgetsService.createExpenseBudget(
+      getBusinessId(req),
+      userId,
+      parsed.data,
+    );
+    return res.status(201).json({ success: true, data: budget });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to create the expense budget.");
+  }
+}
+
+export async function updateExpenseBudget(req: Request, res: Response) {
+  try {
+    const id = expenseBudgetIdSchema.safeParse(req.params.id);
+    const parsed = expenseBudgetWriteSchema.safeParse(req.body);
+    if (!id.success || !parsed.success) {
+      return validationError(res, "Invalid expense budget data", {
+        id: id.success ? undefined : id.error.flatten(),
+        budget: parsed.success ? undefined : parsed.error.flatten(),
+      });
+    }
+    const { userId } = actor(req);
+    const budget = await budgetsService.updateExpenseBudget(
+      getBusinessId(req),
+      id.data,
+      userId,
+      parsed.data,
+    );
+    return res.json({ success: true, data: budget });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to update the expense budget.");
+  }
+}
+
+export async function deleteExpenseBudget(req: Request, res: Response) {
+  try {
+    const id = expenseBudgetIdSchema.safeParse(req.params.id);
+    if (!id.success) {
+      return validationError(res, "Invalid expense budget ID", undefined);
+    }
+    const { userId } = actor(req);
+    const deleted = await budgetsService.deleteExpenseBudget(
+      getBusinessId(req),
+      id.data,
+      userId,
+    );
+    return res.json({ success: true, data: deleted });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to delete the expense budget.");
+  }
+}
+
+export async function getExpenseBudgetUsage(req: Request, res: Response) {
+  try {
+    const monthsRaw = Number(req.query.months);
+    const months =
+      Number.isInteger(monthsRaw) && monthsRaw >= 1 && monthsRaw <= 24
+        ? monthsRaw
+        : 6;
+    const locationId = await resolveOptionalLocationParam(req);
+    const usage = await budgetsService.getBudgetUsage(
+      getBusinessId(req),
+      months,
+      locationId,
+    );
+    return res.json({ success: true, data: usage });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to load budget usage.");
   }
 }
