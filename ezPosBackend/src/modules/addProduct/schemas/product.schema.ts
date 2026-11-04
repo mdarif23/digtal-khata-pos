@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { gtinCheckDigitIsValid } from "../../barcodes/barcodes.validation.js";
 const serialNumberSchema = z.object({
   serial: z.string().min(1, { message: "Serial number is required" }),
 });
@@ -19,7 +20,21 @@ const variantSchema = z.object({
     .string()
     .max(100)
     .nullable()
-    .transform((val) => (val?.trim() === "" ? null : val)),
+    .transform((val) => (val?.trim() === "" ? null : val))
+    // Format-aware validation: a GTIN-shaped code (digits-only, EAN-8 /
+    // UPC-A / EAN-13 length) must carry a valid GS1 check digit — a bad
+    // check digit means the printed symbol would never scan back to this
+    // record. Free-form codes (CODE128/CODE39) pass untouched.
+    .refine(
+      (val) =>
+        val === null ||
+        !/^\d{8}$|^\d{12}$|^\d{13}$/.test(val) ||
+        gtinCheckDigitIsValid(val),
+      {
+        message:
+          "Invalid check digit — this looks like an EAN-8/UPC-A/EAN-13 code but fails GS1 validation. Verify the number or use it as a CODE128/CODE39 code instead.",
+      },
+    ),
   sellingPrice: z.coerce.number().min(0),
   alertQuantity: z.coerce.number().min(0),
   isDefault: z.boolean(),

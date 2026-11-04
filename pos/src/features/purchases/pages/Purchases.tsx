@@ -178,7 +178,7 @@ export function PurchasesOrder() {
     );
   };
 
-  const handleBarcodeSearch = () => {
+  const handleBarcodeSearch = async () => {
     const query = searchProducts.trim().toLowerCase();
     if (!query) return;
     const product = activeProducts.find(
@@ -209,6 +209,32 @@ export function PurchasesOrder() {
         variants: [matchingVariant.variant],
       });
       setSearchProducts("");
+      return;
+    }
+
+    // Scan miss → resolve aliases / newer codes against the server, then
+    // match again over the (refreshed) local catalog.
+    try {
+      const { lookupBarcodeApi } = await import(
+        "@/features/barcodes/barcode.api"
+      );
+      const result = await lookupBarcodeApi(query);
+      if ("variantId" in result) {
+        const refreshed = activeProducts
+          .flatMap((item) =>
+            item.variants.map((variant) => ({ product: item, variant })),
+          )
+          .find(({ variant }) => variant.id === result.variantId);
+        if (refreshed) {
+          handleAddPurchase({
+            ...refreshed.product,
+            variants: [refreshed.variant],
+          });
+          setSearchProducts("");
+        }
+      }
+    } catch {
+      // Lookup is best-effort — a failed resolve just leaves the cart alone.
     }
   };
 

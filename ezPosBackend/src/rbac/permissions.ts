@@ -50,6 +50,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "products.delete", module: "products", description: "Delete products and catalog entries" },
   { key: "products.view_cost", module: "products", description: "View purchase cost and cost-based valuations" },
   { key: "products.manage_variants", module: "products", description: "Manage product variants and variant options" },
+  { key: "products.print_labels", module: "products", description: "Print barcode labels and record print jobs" },
 
   // Purchases
   { key: "purchases.view", module: "purchases", description: "View purchase orders and purchase records" },
@@ -189,6 +190,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "products.edit",
     "products.delete",
     "products.manage_variants",
+    "products.print_labels",
     "purchases.view",
     "purchases.create",
     "purchases.edit",

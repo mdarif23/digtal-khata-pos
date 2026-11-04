@@ -6,6 +6,8 @@ import { Controller, useForm, useWatch } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
+import { toast } from "@/components/ui/toast";
+import { Barcode } from "lucide-react";
 import { SummaryCard } from "../components/purchasesReceiveItems/SummaryCard";
 import { ItemsReceiveTable } from "../components/purchasesReceiveItems/ItemsReceiveTable";
 import type { PaymentsInfoCard } from "../purchase.types";
@@ -176,6 +178,51 @@ export const ReceiveItems = () => {
     },
   ];
 
+  const [scanValue, setScanValue] = useState("");
+  const [scanBusy, setScanBusy] = useState(false);
+
+  /** Scan-to-line: resolve a barcode to the matching PO line and focus its
+   * quantity field. Server lookup covers alias barcodes. */
+  const handleReceiveScan = async () => {
+    const code = scanValue.trim();
+    if (!code || scanBusy) return;
+    setScanBusy(true);
+    try {
+      const { lookupBarcodeApi } = await import(
+        "@/features/barcodes/barcode.api"
+      );
+      const result = await lookupBarcodeApi(code);
+      if (!("variantId" in result)) {
+        toast.add({
+          type: "error",
+          description: "No product matches that barcode.",
+        });
+        return;
+      }
+      const lineIndex = receiveItems.findIndex(
+        (item) => item.variantId === result.variantId,
+      );
+      const line = lineIndex >= 0 ? receiveItems[lineIndex] : undefined;
+      if (!line) {
+        toast.add({
+          type: "error",
+          description: "This item is not on this purchase order.",
+        });
+        return;
+      }
+      form.setFocus(`items.${lineIndex}.receiveNow`);
+      toast.add({
+        type: "success",
+        description: `Found: ${line.variantName ?? line.variantSku ?? `line ${lineIndex + 1}`}`,
+      });
+      setScanValue("");
+    } catch {
+      toast.add({ type: "error", description: "Lookup failed — try again." });
+    } finally {
+      setScanBusy(false);
+    }
+  };
+
   const onSubmit = async (data: ReceiveItemsFormValues) => {
     try {
       await createEntityPromiseToast({
@@ -298,10 +345,31 @@ export const ReceiveItems = () => {
               </div>
             </div>
             {receiveItems.length ? (
+              <>
+              <div className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
+                <Barcode className="size-4 text-muted-foreground" />
+                <Input
+                  value={scanValue}
+                  onChange={(event) => setScanValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleReceiveScan();
+                    }
+                  }}
+                  placeholder="Scan a barcode to jump to its line…"
+                  aria-label="Scan barcode to find a purchase line"
+                  className="h-9 border-0 shadow-none focus-visible:ring-0"
+                />
+                {scanBusy ? (
+                  <span className="text-xs text-muted-foreground">Looking up…</span>
+                ) : null}
+              </div>
               <ItemsReceiveTable
                 receivePurchasesItems={receiveItems}
                 form={form}
               />
+              </>
             ) : (
               <p className="p-8 text-center text-sm text-muted-foreground">
                 No items were found on this purchase order.

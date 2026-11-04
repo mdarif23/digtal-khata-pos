@@ -97,6 +97,7 @@ export const navigation = [
     items: [
       { title: "All Products", url: "/product", permission: "products.view" },
       { title: "Add Product", url: "/product/addproduct", permission: "products.create" },
+      { title: "Barcode Generator", url: "/barcode-generator", permission: "products.view" },
       { title: "Stock Adjustment", url: "/product/stock-adjustment", permission: "inventory.adjust" },
       { title: "Categories", url: "/categories", permission: "products.view" },
       { title: "Brands", url: "/brands", permission: "products.view" },

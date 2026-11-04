@@ -22,6 +22,12 @@ export const productVariants = pgTable(
     productId: integer("product_id").notNull(),
     sku: varchar({ length: 100 }).notNull(),
     barcode: varchar({ length: 100 }),
+    /**
+     * Symbology of the primary barcode (migration 0044): ean13 | ean8 |
+     * upca | code128 | code39 | qr. NULL = unclassified/legacy — rendering
+     * then auto-detects. Alias symbologies live on the alias rows.
+     */
+    barcodeFormat: varchar("barcode_format", { length: 20 }),
     sellingPrice: numeric("selling_price", {
       precision: 12,
       scale: 2,

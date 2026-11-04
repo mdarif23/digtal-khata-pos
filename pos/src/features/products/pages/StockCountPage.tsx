@@ -119,7 +119,8 @@ export function StockCountPage() {
     }
   }
 
-  // Scan/entry: resolve barcode | SKU | name against the session's lines.
+  // Scan/entry: resolve barcode | SKU | name against the session's lines;
+  // an exact miss falls back to the server barcode resolver (aliases).
   const scanMatch = useMemo(() => {
     const query = scan.trim().toLowerCase();
     if (query.length < 3 || !detail) return null;
@@ -132,6 +133,41 @@ export function StockCountPage() {
       ) ?? null
     );
   }, [scan, detail]);
+
+  const [scannedVariantId, setScannedVariantId] = useState<number | null>(null);
+  useEffect(() => {
+    if (scanMatch || scan.trim().length < 3 || !detail) {
+      setScannedVariantId(null);
+      return;
+    }
+    let cancelled = false;
+    const query = scan.trim();
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const { lookupBarcodeApi } = await import(
+            "@/features/barcodes/barcode.api"
+          );
+          const result = await lookupBarcodeApi(query);
+          if (!cancelled && "variantId" in result) {
+            setScannedVariantId(result.variantId);
+          }
+        } catch {
+          // Alias lookup is best-effort; local matching already ran.
+        }
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [scan, scanMatch, detail]);
+
+  const scannedLine =
+    scannedVariantId !== null && detail
+      ? (detail.lines.find((l) => l.variantId === scannedVariantId) ?? null)
+      : null;
+  const effectiveScanMatch = scanMatch ?? scannedLine;
 
   async function submitCounts() {
     if (activeId === null || !detail) return;
@@ -291,13 +327,13 @@ export function StockCountPage() {
                 onChange={(e) => setScan(e.target.value)}
               />
             )}
-            {scanMatch && detail.status === "open" && (
+            {effectiveScanMatch && detail.status === "open" && (
               <div className="rounded-md border border-primary/40 bg-primary/5 p-2 text-sm">
                 <span className="font-medium">
-                  {scanMatch.variantName || scanMatch.productName}
+                  {effectiveScanMatch.variantName || effectiveScanMatch.productName}
                 </span>{" "}
                 <span className="text-muted-foreground">
-                  expected {scanMatch.expectedQuantity}
+                  expected {effectiveScanMatch.expectedQuantity}
                 </span>
                 <Button
                   size="sm"
@@ -306,7 +342,7 @@ export function StockCountPage() {
                   onClick={() =>
                     setCounts((c) => ({
                       ...c,
-                      [scanMatch.variantId]: c[scanMatch.variantId] ?? "",
+                      [effectiveScanMatch.variantId]: c[effectiveScanMatch.variantId] ?? "",
                     }))
                   }
                 >
