@@ -79,7 +79,10 @@ import {
   type Items,
 } from "./sales.validation.js";
 import { roundMoney } from "../../utils/roundMoney.js";
-import { recordCashSaleInTx } from "../cashRegisters/cashRegisters.service.js";
+import {
+  recordCashRefundInTx,
+  recordCashSaleInTx,
+} from "../cashRegisters/cashRegisters.service.js";
 import { units } from "../../db/schema/units.js";
 import { users } from "../../db/schema/users.js";
 import {
@@ -1461,7 +1464,7 @@ async function applySaleRefund(
     }
   }
 
-  return { refundId: refund.id, refundTotal };
+  return { refundId: refund.id, refundTotal, locationId: sale.locationId };
 }
 
 export async function createSingleRefund(
@@ -1505,13 +1508,22 @@ export async function createSingleRefund(
       throw new ConflictError("This sale item has already been returned");
     }
 
-    const { refundId, refundTotal } = await applySaleRefund(
-      tx,
-      businessId,
-      saleItem.saleId,
-      [saleItem],
-      options,
-    );
+    const { refundId, refundTotal, locationId: refundLocationId } =
+      await applySaleRefund(tx, businessId, saleItem.saleId, [saleItem], options);
+    // Counter payout: a cash refund (or an un-specified one — the schema
+    // defaults it to cash) physically leaves the drawer, so the actor's
+    // open session must absorb it transactionally. original_payment and
+    // store_credit never touch drawer cash.
+    if (options.refundMethod === undefined || options.refundMethod === "cash") {
+      await recordCashRefundInTx(
+        tx,
+        businessId,
+        actorUserId,
+        refundLocationId,
+        refundTotal,
+        refundId,
+      );
+    }
     await recordAuditInTx(tx, {
       businessId,
       actorUserId,
@@ -1599,13 +1611,20 @@ export async function createMultipleRefunds(
       throw new ConflictError("All items in this sale have already been returned");
     }
 
-    const { refundId, refundTotal } = await applySaleRefund(
-      tx,
-      businessId,
-      id,
-      refundableItems,
-      options,
-    );
+    const { refundId, refundTotal, locationId: refundLocationId } =
+      await applySaleRefund(tx, businessId, id, refundableItems, options);
+    // Counter payout (see createSingleRefund): cash refunds leave the
+    // drawer transactionally; original_payment/store_credit never do.
+    if (options.refundMethod === undefined || options.refundMethod === "cash") {
+      await recordCashRefundInTx(
+        tx,
+        businessId,
+        actorUserId,
+        refundLocationId,
+        refundTotal,
+        refundId,
+      );
+    }
     await recordAuditInTx(tx, {
       businessId,
       actorUserId,
@@ -2189,6 +2208,27 @@ export async function createSaleExchange(
           exchangeSale.id,
         );
       }
+    }
+
+    // Surplus payout in cash: when the returned value exceeds the
+    // replacement and the customer takes the difference as counter cash,
+    // that payout leaves the drawer. The returned value itself is NOT a
+    // cash movement — it nets against the replacement sale. A payout to
+    // the original instrument (gateway) never touches drawer cash.
+    const cashSurplusPayout =
+      difference < -0.01 &&
+      (payload.refundMethod === undefined || payload.refundMethod === "cash")
+        ? roundMoney(-difference)
+        : 0;
+    if (cashSurplusPayout > 0) {
+      await recordCashRefundInTx(
+        tx,
+        businessId,
+        actorUserId,
+        exchangeLocationId,
+        cashSurplusPayout,
+        refundId,
+      );
     }
 
     await recordAuditInTx(tx, {

@@ -33,7 +33,14 @@ const openSchema = z.object({
 });
 
 const movementSchema = z.object({
-  type: z.enum(["cash_in", "cash_out"]),
+  type: z.enum([
+    "cash_in",
+    "cash_out",
+    "safe_deposit",
+    "safe_withdrawal",
+    "adjustment_in",
+    "adjustment_out",
+  ]),
   amount: z.number().finite().positive(),
   note: z.string().trim().max(500).optional(),
 });

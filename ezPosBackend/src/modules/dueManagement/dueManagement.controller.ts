@@ -121,6 +121,7 @@ export async function recordCustomerPayment(
     const result = await dueManagementService.recordCustomerPayment(
       getBusinessId(req),
       payload,
+      req.user?.id ?? null,
     );
     res.status(201).json({ success: true, data: result });
   } catch (err) {

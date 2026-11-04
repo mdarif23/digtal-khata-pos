@@ -295,6 +295,13 @@
       "when": 1793960000000,
       "tag": "0041_expense_recurring_budgets",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793965000000,
+      "tag": "0042_register_cash_management",
+      "breakpoints": true
     }
   ]
 }
