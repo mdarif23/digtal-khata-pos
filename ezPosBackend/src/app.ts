@@ -20,6 +20,7 @@ import notificationsRouter from "./modules/notifications/notifications.routes.js
 import hardwareRouter from "./modules/hardware/hardware.routes.js";
 import customersRouter from "./modules/customers/customers.routes.js";
 import expenseRouter from "./modules/expenses/expenses.routes.js";
+import landedCostRouter from "./modules/landed-cost/landed-cost.routes.js";
 import purchasesRouter from "./modules/purchases/purchases.routes.js";
 import purchasesReturnRouter from "./modules/purchaseReturn/purchaseReturn.routes.js";
 import procurementRouter from "./modules/procurement/procurement.routes.js";
@@ -129,6 +130,7 @@ export function buildApp() {
   app.use("/", hardwareRouter);
   app.use("/", customersRouter);
   app.use("/", expenseRouter);
+  app.use("/", landedCostRouter);
   app.use("/", purchasesRouter);
   app.use("/", purchasesReturnRouter);
   app.use("/", procurementRouter);

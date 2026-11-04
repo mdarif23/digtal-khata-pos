@@ -1,4 +1,5 @@
 import {
+  check,
   foreignKey,
   index,
   integer,
@@ -9,6 +10,7 @@ import {
   varchar,
   boolean,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { products } from "./products.js";
 import { businesses } from "./businesses.js";
 
@@ -38,6 +40,17 @@ export const productVariants = pgTable(
     alertQuantity: integer("alert_quantity").default(0),
     isDefault: boolean("is_default").default(false),
     status: varchar({ length: 30 }),
+
+    /**
+     * Variant unit weight for landed-cost weight allocation (Landed Cost
+     * Management). NULL = not set; allocation then falls back to the
+     * product-level `products.shipping_weight_kg` (kg) and errors only when
+     * neither exists. Normalized to kg before allocation math.
+     */
+    weight: numeric("weight", { precision: 12, scale: 4, mode: "number" }),
+    // No default on purpose (drizzle INSERTs defaulted columns; see
+    // inventory_batches.additional_cost_per_unit). Services default to kg.
+    weightUnit: varchar("weight_unit", { length: 5 }),
   },
   (table) => [
     index("product_variants_business_id_idx").on(table.businessId),
@@ -50,6 +63,10 @@ export const productVariants = pgTable(
     unique("product_variants_business_barcode_unique").on(
       table.businessId,
       table.barcode,
+    ),
+    check(
+      "product_variants_weight_unit_check",
+      sql`${table.weightUnit} IS NULL OR ${table.weightUnit} IN ('kg', 'g', 'lb', 'oz')`,
     ),
     foreignKey({
       columns: [table.productId, table.businessId],

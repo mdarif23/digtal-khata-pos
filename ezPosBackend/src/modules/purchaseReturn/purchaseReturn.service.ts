@@ -24,6 +24,7 @@ import { purchaseReturns } from "../../db/schema/purchaseReturns.js";
 import { purchases } from "../../db/schema/purchases.js";
 import { serialNumbers } from "../../db/schema/serialNumbers.js";
 import { supplierLedger } from "../../db/schema/supplierLedger.js";
+import { reverseForPurchaseReturnInTx } from "../landed-cost/landed-cost.lifecycle.js";
 import { BadRequestError, NotFoundError } from "../../utils/handleError.js";
 import type { CreatePurchaseReturnInput } from "./purchaseReturn.schema.js";
 
@@ -36,6 +37,7 @@ export async function createPurchaseReturn(
     changedItems,
     reason,
   }: CreatePurchaseReturnInput,
+  actorUserId?: number,
 ) {
   const purchaseItemIds = changedItems.map((item) => item.purchaseItemId);
   if (new Set(purchaseItemIds).size !== purchaseItemIds.length) {
@@ -192,6 +194,10 @@ export async function createPurchaseReturn(
           ).toFixed(2),
         ),
       );
+    // Landed-cost reversal tracking (Part F): every unit taken from a batch
+    // carries its per-unit landed cost out of inventory.
+    const landedConsumed: { batchId: number; quantity: number }[] = [];
+
     for (const item of items) {
       const quantity = requestedByItem.get(item.id) ?? 0;
       const trackingType = item.trackingType;
@@ -227,6 +233,7 @@ export async function createPurchaseReturn(
             ),
           );
         remainingToRemove -= removed;
+        landedConsumed.push({ batchId: batch.id, quantity: removed });
       }
 
       if (remainingToRemove > 0 && trackingType !== "none") {
@@ -344,6 +351,17 @@ export async function createPurchaseReturn(
       credit: totalAmount,
       note: reason?.trim() || `Purchase return #${purchaseReturn.id}`,
     });
+
+    // Landed-cost reversal (Part F): returned units take their allocated
+    // landed cost out of inventory — traceable, never silent.
+    await reverseForPurchaseReturnInTx(
+      tx,
+      businessId,
+      purchase.id,
+      purchaseReturn.id,
+      landedConsumed,
+      actorUserId ?? 0,
+    );
 
     const updatedDueAmount = Math.max(
       0,

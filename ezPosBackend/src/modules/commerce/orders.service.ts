@@ -13,6 +13,7 @@ import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { products } from "../../db/schema/products.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { saleItems } from "../../db/schema/saleItems.js";
+import { saleItemBatchConsumptions } from "../../db/schema/saleItemBatchConsumptions.js";
 import { sales } from "../../db/schema/sales.js";
 import { businesses } from "../../db/schema/businesses.js";
 import {
@@ -24,6 +25,7 @@ import { integrations } from "../../db/schema/integrations.js";
 import { locations } from "../../db/schema/locations.js";
 import {
   consumeStockFifo,
+  insertSaleItemConsumptions,
 } from "../sales/sales.service.js";
 import { emitWebhookEventInTx } from "../webhooks/webhookDelivery.service.js";
 import { salePayments } from "../../db/schema/salePayments.js";
@@ -564,6 +566,16 @@ export async function confirmOnlineOrderInTx(
         .update(saleItems)
         .set({ costAtSale: cost.costAtSale })
         .where(eq(saleItems.id, item.id));
+      if (cost.consumed?.length) {
+        await insertSaleItemConsumptions(
+          tx,
+          businessId,
+          saleId,
+          item.id,
+          item.variantId,
+          cost.consumed,
+        );
+      }
 
       const updated = await tx
         .update(inventoryStock)

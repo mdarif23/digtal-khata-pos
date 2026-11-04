@@ -411,6 +411,16 @@ function PurchaseOrderRow({
               Receive
             </Button>
           )}
+          {purchase.status !== "ordered" && (
+            <Button
+              nativeButton={false}
+              size="sm"
+              variant="outline"
+              render={<Link to={`/purchases/landed-cost/${purchase.id}`} />}
+            >
+              Landed cost
+            </Button>
+          )}
           {purchase.status !== "ordered" && purchase.supplierId !== null && (
             <Button
               nativeButton={false}

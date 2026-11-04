@@ -40,6 +40,7 @@ import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
 import { OnlineOrderDetailsPage } from "@/features/online-orders/pages/OnlineOrderDetailsPage";
+import { LandedCostPage } from "@/features/landed-cost/pages/LandedCostPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -212,6 +213,14 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="purchases.receive">
             <ReceiveItems />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/purchases/landed-cost/:purchaseId",
+        element: (
+          <RequirePermission permission="landed_cost.view">
+            <LandedCostPage />
           </RequirePermission>
         ),
       },
