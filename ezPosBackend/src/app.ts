@@ -18,6 +18,8 @@ import promotionsRouter from "./modules/promotions/promotions.routes.js";
 import attendanceRouter from "./modules/attendance/attendance.routes.js";
 import notificationsRouter from "./modules/notifications/notifications.routes.js";
 import hardwareRouter from "./modules/hardware/hardware.routes.js";
+import terminalsRouter from "./modules/hardware/terminals.routes.js";
+import bridgeRouter from "./modules/hardware/bridge.routes.js";
 import customersRouter from "./modules/customers/customers.routes.js";
 import expenseRouter from "./modules/expenses/expenses.routes.js";
 import purchasesRouter from "./modules/purchases/purchases.routes.js";
@@ -127,6 +129,8 @@ export function buildApp() {
   app.use("/", attendanceRouter);
   app.use("/", notificationsRouter);
   app.use("/", hardwareRouter);
+  app.use("/", terminalsRouter);
+  app.use("/", bridgeRouter);
   app.use("/", customersRouter);
   app.use("/", expenseRouter);
   app.use("/", purchasesRouter);
