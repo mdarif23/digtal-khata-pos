@@ -288,6 +288,13 @@
       "when": 1793950000000,
       "tag": "0040_expense_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793960000000,
+      "tag": "0041_expense_recurring_budgets",
+      "breakpoints": true
     }
   ]
 }

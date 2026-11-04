@@ -16,6 +16,8 @@ import { purchases } from "./purchases.js";
 import { expenses } from "./expenses.js";
 import { expensePayments } from "./expensePayments.js";
 import { expenseAttachments } from "./expenseAttachments.js";
+import { expenseTemplates } from "./expenseTemplates.js";
+import { expenseBudgets } from "./expenseBudgets.js";
 import { expenseCategories } from "./expenseCategories.js";
 import { productVariants } from "./productVariants.js";
 import { categories } from "./categories.js";
@@ -230,6 +232,34 @@ export const expenseAttachmentsRelations = relations(
     expense: one(expenses, {
       fields: [expenseAttachments.expenseId],
       references: [expenses.id],
+    }),
+  }),
+);
+
+export const expenseTemplatesRelations = relations(
+  expenseTemplates,
+  ({ one }) => ({
+    expenseCategory: one(expenseCategories, {
+      fields: [expenseTemplates.categoryId],
+      references: [expenseCategories.id],
+    }),
+    location: one(locations, {
+      fields: [expenseTemplates.locationId],
+      references: [locations.id],
+    }),
+  }),
+);
+
+export const expenseBudgetsRelations = relations(
+  expenseBudgets,
+  ({ one }) => ({
+    expenseCategory: one(expenseCategories, {
+      fields: [expenseBudgets.categoryId],
+      references: [expenseCategories.id],
+    }),
+    location: one(locations, {
+      fields: [expenseBudgets.locationId],
+      references: [locations.id],
     }),
   }),
 );
