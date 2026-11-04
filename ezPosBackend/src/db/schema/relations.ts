@@ -14,6 +14,10 @@ import { purchaseItems } from "./purchaseItems.js";
 import { products } from "./products.js";
 import { purchases } from "./purchases.js";
 import { expenses } from "./expenses.js";
+import { expensePayments } from "./expensePayments.js";
+import { expenseAttachments } from "./expenseAttachments.js";
+import { expenseTemplates } from "./expenseTemplates.js";
+import { expenseBudgets } from "./expenseBudgets.js";
 import { expenseCategories } from "./expenseCategories.js";
 import { productVariants } from "./productVariants.js";
 import { categories } from "./categories.js";
@@ -213,10 +217,57 @@ export const purchasesRelations = relations(purchases, ({ one, many }) => ({
   }),
 }));
 
-export const expensesRelations = relations(expenses, ({ one }) => ({
+export const expensesRelations = relations(expenses, ({ one, many }) => ({
   expenseCategory: one(expenseCategories, {
     fields: [expenses.categoryId],
     references: [expenseCategories.id],
+  }),
+  payments: many(expensePayments),
+  attachments: many(expenseAttachments),
+}));
+
+export const expenseAttachmentsRelations = relations(
+  expenseAttachments,
+  ({ one }) => ({
+    expense: one(expenses, {
+      fields: [expenseAttachments.expenseId],
+      references: [expenses.id],
+    }),
+  }),
+);
+
+export const expenseTemplatesRelations = relations(
+  expenseTemplates,
+  ({ one }) => ({
+    expenseCategory: one(expenseCategories, {
+      fields: [expenseTemplates.categoryId],
+      references: [expenseCategories.id],
+    }),
+    location: one(locations, {
+      fields: [expenseTemplates.locationId],
+      references: [locations.id],
+    }),
+  }),
+);
+
+export const expenseBudgetsRelations = relations(
+  expenseBudgets,
+  ({ one }) => ({
+    expenseCategory: one(expenseCategories, {
+      fields: [expenseBudgets.categoryId],
+      references: [expenseCategories.id],
+    }),
+    location: one(locations, {
+      fields: [expenseBudgets.locationId],
+      references: [locations.id],
+    }),
+  }),
+);
+
+export const expensePaymentsRelations = relations(expensePayments, ({ one }) => ({
+  expense: one(expenses, {
+    fields: [expensePayments.expenseId],
+    references: [expenses.id],
   }),
 }));
 

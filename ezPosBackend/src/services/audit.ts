@@ -22,7 +22,8 @@ export interface AuditEntry {
   metadata?: Record<string, unknown>;
 }
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+/** Transaction handle type for recordAuditInTx callers (shared). */
+export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export async function recordAuditInTx(tx: Tx, entry: AuditEntry): Promise<void> {
   await tx.insert(auditLog).values({

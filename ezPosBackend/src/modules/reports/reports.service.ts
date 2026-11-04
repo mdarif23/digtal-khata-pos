@@ -625,6 +625,7 @@ export async function getExpenseReport(businessId: number, params: DateRangeQuer
     SELECT COUNT(e.id)::int AS total
     FROM expenses e
     WHERE e.business_id = ${businessId}${locationFilter("e", locationId)}
+      AND e.deleted_at IS NULL
       AND e.expense_date >= ${startDateOnly}::date
       AND e.expense_date <= ${endDateOnly}::date
   `);
@@ -642,6 +643,7 @@ export async function getExpenseReport(businessId: number, params: DateRangeQuer
     FROM expenses e
     LEFT JOIN expense_categories ec ON ec.id = e.category_id
     WHERE e.business_id = ${businessId}${locationFilter("e", locationId)}
+      AND e.deleted_at IS NULL
       AND e.expense_date >= ${startDateOnly}::date
       AND e.expense_date <= ${endDateOnly}::date
     ORDER BY e.expense_date DESC, e.id DESC
@@ -656,6 +658,7 @@ export async function getExpenseReport(businessId: number, params: DateRangeQuer
     FROM expenses e
     LEFT JOIN expense_categories ec ON ec.id = e.category_id
     WHERE e.business_id = ${businessId}${locationFilter("e", locationId)}
+      AND e.deleted_at IS NULL
       AND e.expense_date >= ${startDateOnly}::date
       AND e.expense_date <= ${endDateOnly}::date
     GROUP BY ec.category_name
@@ -668,6 +671,7 @@ export async function getExpenseReport(businessId: number, params: DateRangeQuer
       COALESCE(SUM(e.amount), 0)::numeric AS "grandTotal"
     FROM expenses e
     WHERE e.business_id = ${businessId}${locationFilter("e", locationId)}
+      AND e.deleted_at IS NULL
       AND e.expense_date >= ${startDateOnly}::date
       AND e.expense_date <= ${endDateOnly}::date
   `);
@@ -1339,14 +1343,17 @@ export async function getRegisterCloseReport(
 
   const cashExpenses = await db.execute(sql`
     SELECT
-      COALESCE(SUM(amount), 0)::numeric AS "cashExpenseTotal",
-      COUNT(id)::int AS "expenseCount"
-    FROM expenses
-    WHERE payment_method = 'Cash'
-      AND business_id = ${businessId}
-      AND expense_date >= ${startDateOnly}::date
-      AND expense_date <= ${endDateOnly}::date
-      ${locationFilter("expenses", locationId)}
+      COALESCE(SUM(p.amount), 0)::numeric AS "cashExpenseTotal",
+      COUNT(p.id)::int AS "expenseCount"
+    FROM expense_payments p
+    INNER JOIN expenses e ON e.id = p.expense_id
+      AND e.business_id = p.business_id
+      AND e.deleted_at IS NULL
+    WHERE p.payment_method = 'Cash'
+      AND p.business_id = ${businessId}
+      AND p.payment_date >= ${startDateOnly}::date
+      AND p.payment_date <= ${endDateOnly}::date
+      ${locationFilter("p", locationId)}
   `);
 
   const salesSummary = await db.execute(sql`
@@ -1456,6 +1463,7 @@ export async function getLocationComparisonReport(
         COALESCE(SUM(e.amount), 0)::numeric AS expenses
       FROM expenses e
       WHERE e.business_id = ${businessId}
+        AND e.deleted_at IS NULL
         AND e.expense_date >= ${start}::date
         AND e.expense_date <= ${end}::date
       GROUP BY e.location_id

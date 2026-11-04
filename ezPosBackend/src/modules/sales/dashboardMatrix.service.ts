@@ -398,7 +398,8 @@ export function getNetProfit(businessId: number, period: DashboardPeriod, locati
             AND expense_date < (${getCurrentPeriodStart(period)})::date
         ), 0) AS previous_expenses
       FROM expenses
-      WHERE business_id = ${businessId}${locFilter("expenses", locationId)}
+      WHERE business_id = ${businessId}
+        AND deleted_at IS NULL${locFilter("expenses", locationId)}
     ),
     net_profit AS (
       SELECT
@@ -450,7 +451,8 @@ export function getExpensesSummary(businessId: number, period: DashboardPeriod, 
             AND expense_date < (${getCurrentPeriodStart(period)})::date
         ), 0) AS previous_expenses
       FROM expenses
-      WHERE business_id = ${businessId}${locFilter("expenses", locationId)}
+      WHERE business_id = ${businessId}
+        AND deleted_at IS NULL${locFilter("expenses", locationId)}
     )
     SELECT
       current_expenses,

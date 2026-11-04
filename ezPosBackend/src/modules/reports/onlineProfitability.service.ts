@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { expenses } from "../../db/schema/expenses.js";
 import { expenseCategories } from "../../db/schema/expenseCategories.js";
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 
 /**
  * Online Store Profitability (module three). All figures derive from
@@ -534,7 +534,11 @@ export async function getProfitabilityExpenses(
   businessId: number,
   filters: ProfitabilityFilters,
 ): Promise<{ rows: ChannelExpenseRow[]; total: number }> {
-  const conditions = [eq(expenses.businessId, businessId)];
+  const conditions = [
+    eq(expenses.businessId, businessId),
+    // Soft-voided expenses never count toward channel profitability.
+    isNull(expenses.deletedAt),
+  ];
   if (filters.from) conditions.push(gte(expenses.expenseDate, filters.from));
   if (filters.to) conditions.push(lte(expenses.expenseDate, filters.to));
   // Scope: explicit channel, else all (NULL = shared across channels).

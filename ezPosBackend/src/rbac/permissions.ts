@@ -79,6 +79,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "expenses.create", module: "expenses", description: "Record expenses" },
   { key: "expenses.edit", module: "expenses", description: "Edit expenses" },
   { key: "expenses.delete", module: "expenses", description: "Delete expenses" },
+  { key: "expenses.pay", module: "expenses", description: "Record expense payments" },
 
   // Reports
   { key: "reports.sales.view", module: "reports", description: "View sales reports" },
@@ -246,6 +247,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "expenses.view",
     "expenses.create",
     "expenses.edit",
+    "expenses.pay",
     "reports.sales.view",
     "reports.purchase.view",
     "reports.profit.view",
