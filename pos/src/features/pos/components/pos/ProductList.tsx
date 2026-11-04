@@ -61,17 +61,42 @@ export function ProductList() {
     (category) => category.status === "active",
   );
 
-  const handleScan = (code: string) => {
+  const handleScan = async (code: string) => {
     const normalizedCode = code.trim().toLowerCase();
-    const match = products
-      .flatMap((product) =>
-        product.variants.map((variant) => ({ product, variant })),
-      )
-      .find(
-        ({ variant }) =>
-          variant.barcode?.trim().toLowerCase() === normalizedCode ||
-          variant.sku.trim().toLowerCase() === normalizedCode,
-      );
+    const findMatch = (catalog: ProductType[]) =>
+      catalog
+        .flatMap((product) =>
+          product.variants.map((variant) => ({ product, variant })),
+        )
+        .find(
+          ({ variant }) =>
+            variant.barcode?.trim().toLowerCase() === normalizedCode ||
+            variant.sku.trim().toLowerCase() === normalizedCode,
+        );
+
+    let match = findMatch(products);
+
+    // Scan miss → resolve against the server (alias barcodes, codes newer
+    // than the loaded catalog). The lookup returns only the variant id;
+    // the cart entry is still built from the full local catalog row.
+    if (!match) {
+      try {
+        const { lookupBarcodeApi } = await import(
+          "@/features/barcodes/barcode.api"
+        );
+        const result = await lookupBarcodeApi(code.trim());
+        if ("variantId" in result) {
+          let refreshed = findMatch(products);
+          if (!refreshed) {
+            await useProductStore.getState().getProducts();
+            refreshed = findMatch(useProductStore.getState().products);
+          }
+          match = refreshed;
+        }
+      } catch {
+        // Lookup is best-effort — fall through to the not-found toast.
+      }
+    }
 
     if (!match) {
       if (filteredProducts.length === 0) {

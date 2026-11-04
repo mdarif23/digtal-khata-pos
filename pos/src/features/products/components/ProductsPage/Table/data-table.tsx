@@ -160,6 +160,7 @@ export function DataTable({
                               <TableRow>
                                 <TableHead>Variant</TableHead>
                                 <TableHead>SKU</TableHead>
+                                <TableHead>Barcode</TableHead>
                                 <TableHead className="text-center">
                                   Cost
                                 </TableHead>
@@ -228,6 +229,13 @@ export function ProductVariantRow({
         {buildVariantOptionsLabel(variant.options) || "Default variant"}
       </TableCell>
       <TableCell>{variant.sku}</TableCell>
+      <TableCell>
+        {variant.barcode ? (
+          <span className="font-mono text-xs">{variant.barcode}</span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </TableCell>
       <TableCell className="text-center">{variant.purchaseCost ?? 0}</TableCell>
       <TableCell className="text-center">৳{variant.sellingPrice}</TableCell>
       <TableCell className="text-center">{variant.quantity}</TableCell>

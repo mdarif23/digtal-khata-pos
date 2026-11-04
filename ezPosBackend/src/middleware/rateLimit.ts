@@ -1,4 +1,4 @@
-import { rateLimit } from "express-rate-limit";
+import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import { env } from "../config/env.js";
 
 const jsonMessage = (message: string) => ({
@@ -72,7 +72,10 @@ export const drawerCommandRateLimit = rateLimit({
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => String(req.user?.id ?? req.ip ?? "anonymous"),
+  keyGenerator: (req) =>
+    req.user?.id !== undefined
+      ? String(req.user.id)
+      : ipKeyGenerator(req.ip ?? "anonymous"),
   message: jsonMessage("Too many drawer commands — wait a moment."),
 });
 
@@ -86,10 +89,10 @@ export const bridgePollRateLimit = rateLimit({
   limit: 240,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
+  keyGenerator: (req, res) => {
     const raw = req.headers["x-terminal-id"];
     const id = Array.isArray(raw) ? raw[0] : raw;
-    return id ? `terminal-${id}` : (req.ip ?? "anonymous");
+    return id ? `terminal-${id}` : ipKeyGenerator(req.ip ?? "anonymous");
   },
   message: jsonMessage("Too many bridge requests — check the bridge poll interval."),
 });

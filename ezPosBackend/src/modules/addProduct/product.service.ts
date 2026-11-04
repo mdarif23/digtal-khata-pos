@@ -27,6 +27,8 @@ import type { PgTransaction } from "drizzle-orm/pg-core";
 import type { NodePgQueryResultHKT } from "drizzle-orm/node-postgres";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { assertWithinProductLimit } from "../../services/entitlements.js";
+import { recordAuditInTx } from "../../services/audit.js";
+import { detectBarcodeFormat } from "../barcodes/barcodes.validation.js";
 import type { AddCategorySchemaType } from "./schemas/category.schema.js";
 import type { BrandSchemaType } from "./schemas/brand.schema.js";
 import type { UnitSchemaType } from "./schemas/unit.schema.js";
@@ -341,13 +343,17 @@ async function insertVariant(
   variant: VariantType,
   sku: string,
 ) {
+  const barcode = variant.barcode?.trim() || null;
   const [variantResult] = await tx
     .insert(productVariants)
     .values({
       businessId,
       productId,
       sku,
-      barcode: variant.barcode,
+      barcode,
+      // Symbology recorded for label printing / validation (0044); NULL for
+      // legacy free-form codes the detector cannot classify.
+      barcodeFormat: barcode ? detectBarcodeFormat(barcode) : null,
       sellingPrice: variant.sellingPrice,
       alertQuantity: variant.alertQuantity,
       isDefault: variant.isDefault,
@@ -358,6 +364,21 @@ async function insertVariant(
     .returning({ id: productVariants.id });
   if (!variantResult) {
     throw new NotFoundError("variant could not be created");
+  }
+  if (barcode) {
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId: null,
+      action: "barcode.assigned",
+      entityType: "variant",
+      entityId: variantResult.id,
+      metadata: {
+        barcode,
+        format: detectBarcodeFormat(barcode),
+        target: "primary",
+        via: "product_create",
+      },
+    });
   }
   return variantResult;
 }
@@ -510,8 +531,27 @@ export async function createProduct(
     });
   } catch (err) {
     console.error(err);
-    throw err;
+    throw mapVariantUniqueViolation(err);
   }
+}
+
+/** PG 23505 on the per-business SKU/barcode indexes → a human 409. */
+export function mapVariantUniqueViolation(err: unknown): unknown {
+  const code = (err as { code?: string }).code;
+  const constraint = (err as { constraint?: string }).constraint ?? "";
+  if (code === "23505") {
+    if (constraint.includes("barcode")) {
+      return new ConflictError(
+        "This barcode is already used by another product in your business.",
+      );
+    }
+    if (constraint.includes("sku")) {
+      return new ConflictError(
+        "This SKU is already used by another product in your business.",
+      );
+    }
+  }
+  return err;
 }
 export async function getProductForEdit(businessId: number, id: number) {
   const [product] = await db
@@ -633,7 +673,11 @@ export async function updateProduct(
     await validateVariantRulesAndRef(tx, businessId, data);
 
     const existingVariants = await tx
-      .select({ id: productVariants.id })
+      .select({
+        id: productVariants.id,
+        barcode: productVariants.barcode,
+        barcodeFormat: productVariants.barcodeFormat,
+      })
       .from(productVariants)
       .where(
         and(
@@ -774,11 +818,14 @@ export async function updateProduct(
         continue;
       }
 
+      const nextBarcode = variant.barcode?.trim() || null;
+      const previous = existingVariants.find((row) => row.id === variantId);
       await tx
         .update(productVariants)
         .set({
           sku: variant.sku.trim() || (await generateSku(tx, businessId)),
-          barcode: variant.barcode?.trim() || null,
+          barcode: nextBarcode,
+          barcodeFormat: nextBarcode ? detectBarcodeFormat(nextBarcode) : null,
           sellingPrice: variant.sellingPrice,
           alertQuantity: variant.alertQuantity,
           isDefault: variant.isDefault,
@@ -793,6 +840,28 @@ export async function updateProduct(
             eq(productVariants.businessId, businessId),
           ),
         );
+      // Barcode history: the old code is archived before it disappears —
+      // the master prompt requires traceable barcode changes.
+      if (
+        previous &&
+        (previous.barcode ?? null) !== nextBarcode &&
+        (previous.barcode !== null || nextBarcode !== null)
+      ) {
+        await recordAuditInTx(tx, {
+          businessId,
+          actorUserId: null,
+          action: nextBarcode === null ? "barcode.removed" : "barcode.changed",
+          entityType: "variant",
+          entityId: variantId,
+          metadata: {
+            oldBarcode: previous.barcode,
+            oldFormat: previous.barcodeFormat,
+            newBarcode: nextBarcode,
+            newFormat: nextBarcode ? detectBarcodeFormat(nextBarcode) : null,
+            via: "product_edit",
+          },
+        });
+      }
 
       await tx
         .delete(variantValues)
@@ -814,6 +883,8 @@ export async function updateProduct(
     }
 
     return { productId: id, addedVariants };
+  }).catch((err: unknown) => {
+    throw mapVariantUniqueViolation(err);
   });
 }
 export async function createCategory(

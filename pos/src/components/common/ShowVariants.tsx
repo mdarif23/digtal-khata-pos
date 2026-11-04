@@ -3,6 +3,7 @@ import { buildVariantName } from "@/lib/variantDisplay";
 import {
   Check,
   PackageCheck,
+  Barcode,
   ScanBarcode,
   ShoppingBag,
 } from "lucide-react";
@@ -241,6 +242,14 @@ export function ShowVariants({
                         {isSale ? "available" : "in stock"}
                       </span>
                     </div>
+                    {selectedVariant.barcode && (
+                      <div className="flex items-center gap-2">
+                        <Barcode className="size-4 text-muted-foreground" />
+                        <span className="font-mono text-sm">
+                          {selectedVariant.barcode}
+                        </span>
+                      </div>
+                    )}
                     {selectedVariant.sku && (
                       <div className="mt-2 flex items-center justify-between gap-3 text-sm">
                         <span className="flex items-center gap-1.5 text-muted-foreground">

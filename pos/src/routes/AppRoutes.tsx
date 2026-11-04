@@ -43,6 +43,7 @@ import { OnlineOrderDetailsPage } from "@/features/online-orders/pages/OnlineOrd
 import { LandedCostPage } from "@/features/landed-cost/pages/LandedCostPage";
 import { RegisterPage } from "@/features/cashRegisters/RegisterPage";
 import { HardwareSettingsPage } from "@/features/hardware/pages/HardwareSettingsPage";
+import { BarcodeGeneratorPage } from "@/features/barcodes/pages/BarcodeGeneratorPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -367,6 +368,14 @@ const router = createBrowserRouter([
             ]}
           >
             <HardwareSettingsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/barcode-generator",
+        element: (
+          <RequirePermission permission="products.view">
+            <BarcodeGeneratorPage />
           </RequirePermission>
         ),
       },
