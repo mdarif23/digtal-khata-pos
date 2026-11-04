@@ -1,0 +1,30 @@
+{
+  "name": "ezpos-hardware-bridge",
+  "version": "0.1.0",
+  "description": "Local Windows hardware bridge for ezPos: pairs with the ezPos backend and opens cash drawers through receipt printers (ESC/POS drawer kick).",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts run",
+    "pair": "tsx src/index.ts pair",
+    "doctor": "tsx src/index.ts doctor",
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "optionalDependencies": {
+    "koffi": "^2.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
