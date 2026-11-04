@@ -26,6 +26,7 @@ import { exportToCsv } from "@/features/reports/utils/reportUtils";
 import { useSessionStore } from "@/auth/sessionStore";
 import { ExpenseDialog } from "./components/ExpenseDialog";
 import { ExpenseCategoriesDialog } from "./components/ExpenseCategoriesDialog";
+import { RecurringTemplatesDialog } from "./components/RecurringTemplatesDialog";
 import { ExpenseAnalyticsPanel } from "./components/ExpenseAnalyticsPanel";
 import { ExpensesTable, EXPENSE_SORT_OPTIONS } from "./components/ExpensesTable";
 import type {
@@ -216,6 +217,7 @@ export function Expense() {
             {exporting ? "Exporting…" : "Export CSV"}
           </Button>
           <ExpenseCategoriesDialog />
+          <RecurringTemplatesDialog categories={categoriesQuery.data ?? []} />
           <ExpenseDialog categories={categoriesQuery.data ?? []} />
         </div>
       }
@@ -456,6 +458,7 @@ export function Expense() {
               ? undefined
               : Number(filters.locationId) || undefined
           }
+          categoryOptions={categoriesQuery.data ?? []}
         />
       </div>
     </ContactListLayout>

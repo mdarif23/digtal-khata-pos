@@ -14,11 +14,12 @@ import {
 } from "@/features/reports/components/ReportChart";
 import { formatCurrency } from "@/features/reports/utils/reportUtils";
 import { cn } from "@/lib/utils";
+import { BudgetsSection } from "./ExpenseBudgets";
 import {
   useExpenseAnalytics,
   type ExpenseAnalyticsFilters,
 } from "../hooks/useExpenses";
-import type { ExpenseTrendGranularity } from "../expense.type";
+import type { ExpenseCategory, ExpenseTrendGranularity } from "../expense.type";
 
 const GRANULARITY_LABELS: Record<ExpenseTrendGranularity, string> = {
   day: "Daily",
@@ -43,12 +44,14 @@ interface ExpenseAnalyticsPanelProps {
   dateFrom?: string | undefined;
   dateTo?: string | undefined;
   locationId?: number | undefined;
+  categoryOptions?: ExpenseCategory[];
 }
 
 export function ExpenseAnalyticsPanel({
   dateFrom,
   dateTo,
   locationId,
+  categoryOptions = [],
 }: ExpenseAnalyticsPanelProps) {
   const [granularity, setGranularity] =
     useState<ExpenseTrendGranularity>("month");
@@ -253,6 +256,8 @@ export function ExpenseAnalyticsPanel({
             </div>
           </div>
         ) : null}
+
+        <BudgetsSection categories={categoryOptions} locationId={locationId} />
       </CardContent>
     </Card>
   );

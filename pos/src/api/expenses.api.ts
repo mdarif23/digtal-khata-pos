@@ -2,6 +2,8 @@ import axios from "./axios.js";
 import type {
   ExpenseAnalytics,
   ExpenseAttachment,
+  ExpenseBudgetDraft,
+  ExpenseBudgetUsage,
   ExpenseCategory,
   ExpenseDetail,
   ExpenseDraft,
@@ -10,6 +12,8 @@ import type {
   ExpensePayment,
   ExpensePaymentMethod,
   ExpenseRecord,
+  ExpenseTemplate,
+  ExpenseTemplateDraft,
 } from "@/features/Expense/expense.type";
 import type { ExpenseTrendGranularity } from "@/features/Expense/expense.type";
 
@@ -313,4 +317,117 @@ export async function uploadExpenseAttachmentApi(
     bytes: file.size,
   });
   return register.data.data;
+}
+
+// ---------------------------------------------------------------------------
+// Recurring templates + budgets (Phase 6)
+// ---------------------------------------------------------------------------
+
+function templatePayload(draft: ExpenseTemplateDraft) {
+  return {
+    title: draft.title,
+    amount: draft.amount,
+    category_id: draft.categoryId,
+    payment_method: draft.paymentMethod,
+    payee: draft.payee || null,
+    note: draft.note || null,
+    location_id: draft.locationId,
+    frequency: draft.frequency,
+    start_date: draft.startDate,
+    end_date: draft.endDate || null,
+  };
+}
+
+export async function getExpenseTemplatesApi(includeInactive = false) {
+  const { data } = await axios.get<{
+    success: boolean;
+    data: ExpenseTemplate[];
+  }>("/expense_templates", {
+    params: includeInactive ? { include_inactive: "true" } : undefined,
+  });
+  return data.data;
+}
+
+export async function createExpenseTemplateApi(draft: ExpenseTemplateDraft) {
+  const { data } = await axios.post<{ success: boolean; data: { id: number } }>(
+    "/expense_templates",
+    templatePayload(draft),
+  );
+  return data.data;
+}
+
+export async function updateExpenseTemplateApi(
+  id: number,
+  draft: ExpenseTemplateDraft,
+  isActive: boolean,
+) {
+  const { data } = await axios.patch<{ success: boolean; data: { id: number } }>(
+    `/expense_templates/${id}`,
+    { ...templatePayload(draft), is_active: isActive },
+  );
+  return data.data;
+}
+
+export async function archiveExpenseTemplateApi(id: number) {
+  await axios.post(`/expense_templates/${id}/archive`);
+}
+
+export async function generateExpenseTemplateApi(id: number) {
+  const { data } = await axios.post<{
+    success: boolean;
+    data: { generated: number };
+  }>(`/expense_templates/${id}/generate`);
+  return data.data.generated;
+}
+
+export async function getExpenseBudgetsApi(month: string) {
+  const { data } = await axios.get<{
+    success: boolean;
+    data: ExpenseBudgetUsage[];
+  }>("/expense_budgets", { params: { month } });
+  return data.data;
+}
+
+export async function getBudgetUsageApi(
+  months: number,
+  locationId?: number,
+) {
+  const { data } = await axios.get<{
+    success: boolean;
+    data: Array<
+      Pick<ExpenseBudgetUsage, "id" | "categoryName" | "locationName" | "month" | "amount" | "actualAmount" | "utilizationPercent" | "overBudget">
+    >;
+  }>("/expense_budgets/usage", {
+    params: { months, ...(locationId ? { locationId: String(locationId) } : {}) },
+  });
+  return data.data;
+}
+
+export async function createExpenseBudgetApi(draft: ExpenseBudgetDraft) {
+  const { data } = await axios.post<{ success: boolean; data: { id: number } }>(
+    "/expense_budgets",
+    {
+      category_id: draft.categoryId,
+      location_id: draft.locationId,
+      month: draft.month,
+      amount: draft.amount,
+    },
+  );
+  return data.data;
+}
+
+export async function updateExpenseBudgetApi(
+  id: number,
+  draft: ExpenseBudgetDraft,
+) {
+  await axios.patch(`/expense_budgets/${id}`, {
+    category_id: draft.categoryId,
+    location_id: draft.locationId,
+    month: draft.month,
+    amount: draft.amount,
+  });
+}
+
+export async function deleteExpenseBudgetApi(id: number) {
+  await axios.delete(`/expense_budgets/${id}`);
 }

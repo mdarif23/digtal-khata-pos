@@ -6,10 +6,18 @@ import {
 } from "@tanstack/react-query";
 import {
   archiveExpenseCategoryApi,
+  archiveExpenseTemplateApi,
   createExpenseApi,
+  createExpenseBudgetApi,
   createExpenseCategoryApi,
+  createExpenseTemplateApi,
   deleteAttachmentApi,
+  deleteExpenseBudgetApi,
   exportExpensesApi,
+  generateExpenseTemplateApi,
+  getBudgetUsageApi,
+  getExpenseBudgetsApi,
+  getExpenseTemplatesApi,
   getExpenseAnalyticsApi,
   getExpenseApi,
   getExpenseCategoriesApi,
@@ -17,11 +25,17 @@ import {
   recordExpensePaymentApi,
   restoreExpenseCategoryApi,
   updateExpenseApi,
+  updateExpenseBudgetApi,
   updateExpenseCategoryApi,
+  updateExpenseTemplateApi,
   uploadExpenseAttachmentApi,
   voidExpenseApi,
   voidExpensePaymentApi,
 } from "@/api/expenses.api";
+import type {
+  ExpenseBudgetDraft,
+  ExpenseTemplateDraft,
+} from "../expense.type";
 import type {
   ExpenseDraft,
   ExpenseListFilters,
@@ -195,5 +209,82 @@ export function useDeleteExpenseAttachment() {
 export function useExportExpenses() {
   return useMutation({
     mutationFn: (filters: ExpenseListFilters) => exportExpensesApi(filters),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Recurring templates + budgets (Phase 6)
+// ---------------------------------------------------------------------------
+
+export function useExpenseTemplates(includeInactive = false) {
+  return useQuery({
+    queryKey: [...expenseKeys.all, "templates", includeInactive] as const,
+    queryFn: () => getExpenseTemplatesApi(includeInactive),
+  });
+}
+
+export function useCreateExpenseTemplate() {
+  const invalidate = useInvalidateExpenses();
+  return useMutation({
+    mutationFn: (draft: ExpenseTemplateDraft) => createExpenseTemplateApi(draft),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateExpenseTemplate() {
+  const invalidate = useInvalidateExpenses();
+  return useMutation({
+    mutationFn: (input: { id: number; draft: ExpenseTemplateDraft; isActive: boolean }) =>
+      updateExpenseTemplateApi(input.id, input.draft, input.isActive),
+    onSuccess: invalidate,
+  });
+}
+
+export function useArchiveExpenseTemplate() {
+  const invalidate = useInvalidateExpenses();
+  return useMutation({
+    mutationFn: (id: number) => archiveExpenseTemplateApi(id),
+    onSuccess: invalidate,
+  });
+}
+
+/** Manual "generate due periods now" for one template (idempotent). */
+export function useGenerateExpenseTemplate() {
+  const invalidate = useInvalidateExpenses();
+  return useMutation({
+    mutationFn: (id: number) => generateExpenseTemplateApi(id),
+    onSuccess: invalidate,
+  });
+}
+
+export function useExpenseBudgets(month: string) {
+  return useQuery({
+    queryKey: [...expenseKeys.all, "budgets", month] as const,
+    queryFn: () => getExpenseBudgetsApi(month),
+  });
+}
+
+export function useCreateExpenseBudget() {
+  const invalidate = useInvalidateExpenses();
+  return useMutation({
+    mutationFn: (draft: ExpenseBudgetDraft) => createExpenseBudgetApi(draft),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateExpenseBudget() {
+  const invalidate = useInvalidateExpenses();
+  return useMutation({
+    mutationFn: (input: { id: number; draft: ExpenseBudgetDraft }) =>
+      updateExpenseBudgetApi(input.id, input.draft),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteExpenseBudget() {
+  const invalidate = useInvalidateExpenses();
+  return useMutation({
+    mutationFn: (id: number) => deleteExpenseBudgetApi(id),
+    onSuccess: invalidate,
   });
 }

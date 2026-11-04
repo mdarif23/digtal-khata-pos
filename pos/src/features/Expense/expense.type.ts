@@ -162,3 +162,64 @@ export interface ExpenseAnalytics {
     count: number;
   }>;
 }
+
+// ---------------------------------------------------------------------------
+// Recurring templates + budgets (Phase 6)
+// ---------------------------------------------------------------------------
+
+export type ExpenseFrequency = "weekly" | "monthly" | "yearly";
+
+export interface ExpenseTemplate {
+  id: number;
+  title: string;
+  amount: number;
+  categoryId: number | null;
+  categoryName: string | null;
+  paymentMethod: ExpensePaymentMethod;
+  payee: string | null;
+  note: string | null;
+  locationId: number | null;
+  channel: ExpenseChannel | null;
+  frequency: ExpenseFrequency;
+  startDate: string;
+  endDate: string | null;
+  nextGenerationDate: string;
+  lastGeneratedDate: string | null;
+  isActive: boolean;
+  createdAt: string | null;
+}
+
+export interface ExpenseTemplateDraft {
+  title: string;
+  amount: number;
+  categoryId: number | null;
+  paymentMethod: ExpensePaymentMethod;
+  payee: string | null;
+  note: string | null;
+  locationId: number | null;
+  frequency: ExpenseFrequency;
+  startDate: string;
+  endDate: string | null;
+}
+
+export interface ExpenseBudgetUsage {
+  id: number;
+  categoryId: number | null;
+  categoryName: string | null;
+  locationId: number | null;
+  locationName: string | null;
+  month: string;
+  amount: number;
+  actualAmount: number;
+  remainingAmount: number;
+  utilizationPercent: number | null;
+  overBudget: boolean;
+  expenseCount: number;
+}
+
+export interface ExpenseBudgetDraft {
+  categoryId: number | null;
+  locationId: number | null;
+  month: string;
+  amount: number;
+}
