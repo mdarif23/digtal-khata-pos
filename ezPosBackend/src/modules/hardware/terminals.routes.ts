@@ -24,9 +24,20 @@ const manage = [
   requireFullAccess,
   requirePermission("pos_terminal.manage"),
 ] as const;
+// Drawer operators (cash_drawer.open) may list terminals so the POS can
+// target the right drawer; registry detail and command history stay
+// pos_terminal.view.
+const operatorView = [
+  ...locationRead,
+  requireAnyPermission([
+    "pos_terminal.view",
+    "cash_drawer.open",
+    "cash_drawer.open_without_sale",
+  ]),
+] as const;
 const view = [...locationRead, requirePermission("pos_terminal.view")] as const;
 
-router.get("/api/terminals", ...view, terminalsController.getTerminals);
+router.get("/api/terminals", ...operatorView, terminalsController.getTerminals);
 router.get(
   "/api/terminals/:terminalId",
   ...view,

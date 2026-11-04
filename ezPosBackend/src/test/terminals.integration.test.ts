@@ -336,6 +336,19 @@ describe("pos terminals integration", { skip: !runIntegration }, () => {
 
     const denied = await api(cashier, "POST", "/api/terminals/pairing-code");
     assert.equal(denied.status, 403);
+
+    // Drawer operators may still LIST terminals (the POS needs the list to
+    // target the right drawer) — cash_drawer.open covers it.
+    const list = await api(cashier, "GET", "/api/terminals");
+    assert.equal(list.status, 200, JSON.stringify(list.body));
+    assert.ok(
+      payload<{ data: { id: number }[] }>(list).data.some(
+        (t) => t.id === bridge.terminalId,
+      ),
+    );
+    // …but command history remains a pos_terminal.view capability.
+    const history = await api(cashier, "GET", `/api/terminals/${bridge.terminalId}/commands`);
+    assert.equal(history.status, 403);
   });
 
   it("businesses cannot see or target each other's terminals", async () => {
