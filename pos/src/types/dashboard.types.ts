@@ -7,6 +7,12 @@ export interface SalesOverview {
 export interface LowStockProduct {
   id: number;
   productName: string;
+  /** Variant identity from the API — absent on older payloads. */
+  variantId?: number | undefined;
+  /** Comma-joined option values, e.g. "Small". */
+  variantOptions?: string | null | undefined;
+  /** Full display label, e.g. "Football (Small)". */
+  variantName?: string | null | undefined;
   sku: string;
   status: string;
   quantity: number;
@@ -15,6 +21,9 @@ export interface LowStockProduct {
 export interface StaleStockProduct {
   id: number;
   productName: string;
+  variantId?: number | undefined;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   sku: string;
   quantity: number;
   lastSoldAt: string | null;
@@ -53,7 +62,14 @@ export interface DashboardData {
   };
   topItemsByGross: {
     productName: string;
+    /** Variant identity — variant-level rows since the variant-aware API. */
+    variantId?: number | undefined;
+    variantOptions?: string | null | undefined;
+    variantName?: string | null | undefined;
+    sku?: string | null;
     currentGross: number;
+    /** Units sold in the current period (variant-aware API). */
+    currentQuantity?: number;
     trend: string;
   }[];
   topSoldProductsByCategory: {
@@ -98,6 +114,11 @@ export interface DashboardData {
   topSellingProducts: {
     id: number;
     productName: string;
+    /** Variant identity — variant-level rows since the variant-aware API. */
+    variantId?: number | undefined;
+    variantOptions?: string | null | undefined;
+    variantName?: string | null | undefined;
+    sku?: string | null;
     unitsSold: number;
     soldPrice: number;
     grossSales: number;

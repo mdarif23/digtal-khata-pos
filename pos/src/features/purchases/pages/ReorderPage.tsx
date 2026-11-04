@@ -24,6 +24,8 @@ interface Suggestion {
   variantId: number;
   productId: number;
   productName: string;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   sku: string | null;
   currentStock: number;
   outstandingOnOrder: number;
@@ -189,7 +191,7 @@ export function ReorderPage() {
                         />
                       </td>
                       <td className="p-2">
-                        {s.productName}
+                        {s.variantName || s.productName}
                         {s.sku && (
                           <span className="ml-1 text-xs text-muted-foreground">
                             {s.sku}

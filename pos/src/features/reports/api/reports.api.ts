@@ -8,6 +8,8 @@ import type {
   CustomerSalesRow,
   PaymentMethodRow,
   RefundRow,
+  RefundItemRow,
+  PurchaseItemRow,
   ProfitReportData,
   ExpenseReportData,
   CustomerReceivablesReportData,
@@ -180,6 +182,12 @@ export const reportsApi = {
       params: buildParams(filters),
     }),
 
+  getSaleRefundItems: (filters: Partial<ReportFilters> = {}) =>
+    api.get<{ success: boolean; data: PaginatedResponse<RefundItemRow> }>(
+      "/reports/sales/refund-items",
+      { params: buildParams(filters) },
+    ),
+
   // Financial
   getProfit: (filters: Partial<ReportFilters> = {}) =>
     api.get<{ success: boolean; data: ProfitReportData }>("/reports/financial/profit", {
@@ -228,6 +236,12 @@ export const reportsApi = {
     }),
 
   // Purchases
+  getPurchaseItems: (filters: Partial<ReportFilters> = {}) =>
+    api.get<{ success: boolean; data: PaginatedResponse<PurchaseItemRow> }>(
+      "/reports/purchases/items",
+      { params: buildParams(filters) },
+    ),
+
   getPurchaseSummary: (filters: Partial<ReportFilters> = {}) =>
     api.get<{ success: boolean; data: PurchaseReportData }>("/reports/purchases/summary", {
       params: buildParams(filters),
@@ -243,6 +257,8 @@ export interface InventoryAgingRow {
   batchId: number;
   variantId: number;
   productName: string;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   sku: string | null;
   batchNumber: string;
   quantityRemaining: number;
@@ -261,6 +277,8 @@ export interface DeadStockRow {
   variantId: number;
   productId: number;
   productName: string;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   sku: string | null;
   currentStock: number;
   stockValue: number;

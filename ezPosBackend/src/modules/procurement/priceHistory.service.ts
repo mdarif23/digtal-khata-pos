@@ -3,6 +3,7 @@ import { db } from "../../db/schema/index.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { products } from "../../db/schema/products.js";
 import { units } from "../../db/schema/units.js";
+import { buildVariantNameFromLabel } from "../../utils/variantDisplay.js";
 import { NotFoundError } from "../../utils/handleError.js";
 import type {
   PriceHistoryQuery,
@@ -28,6 +29,8 @@ export interface PriceOverviewRow {
   sku: string | null;
   productId: number;
   productName: string;
+  variantOptions: string | null;
+  variantName: string | null;
   categoryName: string;
   unitName: string | null;
   latestPrice: number | null;
@@ -96,6 +99,8 @@ export interface PriceHistoryDetail {
     variantId: number;
     productId: number;
     productName: string;
+    variantOptions: string;
+    variantName: string;
     sku: string | null;
     unitName: string | null;
     sellingPrice: number;
@@ -192,74 +197,83 @@ export async function getPriceOverview(
   const listQuery = await db.execute(sql`
     ${events}
     SELECT
-      pv.id AS "variantId",
-      pv.sku,
-      prod.id AS "productId",
-      prod.name AS "productName",
-      COALESCE(cat.name, 'Uncategorized') AS "categoryName",
-      u.name AS "unitName",
-      agg."lowestPrice",
-      agg."highestPrice",
-      agg."averagePrice",
-      agg."purchaseCount",
-      agg."totalReceivedQuantity",
-      latest.unit_cost::float8 AS "latestPrice",
-      latest.purchase_date AS "lastPurchaseDate",
-      latest.supplier_id AS "lastSupplierId",
-      latest.supplier_name AS "lastSupplierName",
-      prev.unit_cost::float8 AS "previousPrice",
-      obs."latestQuotation",
-      obs."lastObservationDate",
-      CASE
-        WHEN prev.unit_cost IS NOT NULL AND prev.unit_cost > 0
-        THEN ROUND(((latest.unit_cost - prev.unit_cost) / prev.unit_cost * 100)::numeric, 2)::float8
-        ELSE NULL
-      END AS "priceChangePercent"
-    FROM product_variants pv
-    JOIN products prod ON prod.id = pv.product_id
-    LEFT JOIN categories cat ON cat.id = prod.category_id
-    LEFT JOIN units u ON u.id = prod.unit_id
-    JOIN (
-      SELECT variant_id,
-             MIN(unit_cost)::float8 AS "lowestPrice",
-             MAX(unit_cost)::float8 AS "highestPrice",
-             ROUND((SUM(unit_cost * received_quantity) / NULLIF(SUM(received_quantity), 0))::numeric, 2)::float8 AS "averagePrice",
-             COUNT(*)::int AS "purchaseCount",
-             SUM(received_quantity)::float8 AS "totalReceivedQuantity"
-      FROM events
-      GROUP BY variant_id
-    ) agg ON agg.variant_id = pv.id
-    LEFT JOIN LATERAL (
-      SELECT e.unit_cost, e.purchase_date, e.supplier_id, s.name AS supplier_name
-      FROM events e
-      LEFT JOIN suppliers s ON s.id = e.supplier_id
-      WHERE e.variant_id = pv.id
-      ORDER BY e.purchase_date DESC, e.item_id DESC
-      LIMIT 1
-    ) latest ON true
-    LEFT JOIN LATERAL (
-      SELECT e.unit_cost
-      FROM events e
-      WHERE e.variant_id = pv.id
-      ORDER BY e.purchase_date DESC, e.item_id DESC
-      OFFSET 1 LIMIT 1
-    ) prev ON true
-    LEFT JOIN LATERAL (
+      q.*,
+      concat(q."productName", CASE WHEN q."variantOptions" IS NOT NULL AND btrim(q."variantOptions") <> '' THEN concat(' (', q."variantOptions", ')') ELSE '' END) AS "variantName"
+    FROM (
       SELECT
-        ROUND(CASE WHEN po.package_quantity IS NOT NULL AND po.package_quantity > 0
-                   THEN po.quoted_price / po.package_quantity
-                   ELSE po.quoted_price END::numeric, 2)::float8 AS "latestQuotation",
-        po.observation_date AS "lastObservationDate"
-      FROM price_observations po
-      WHERE po.business_id = ${businessId}
-        AND po.variant_id = pv.id
-        ${params.supplierId ? sql`AND po.supplier_id = ${params.supplierId}` : sql``}
-      ORDER BY po.observation_date DESC, po.id DESC
-      LIMIT 1
-    ) obs ON true
-    WHERE pv.business_id = ${businessId}${filters}
-    ORDER BY prod.name ASC, pv.sku ASC
-    LIMIT ${limit} OFFSET ${offset}
+        pv.id AS "variantId",
+        pv.sku,
+        prod.id AS "productId",
+        prod.name AS "productName",
+        (SELECT string_agg(vo.value, ', ' ORDER BY vv.option_id)
+         FROM variant_values vv
+         JOIN variant_options vo ON vo.id = vv.option_id
+         WHERE vv.variant_id = pv.id) AS "variantOptions",
+        COALESCE(cat.name, 'Uncategorized') AS "categoryName",
+        u.name AS "unitName",
+        agg."lowestPrice",
+        agg."highestPrice",
+        agg."averagePrice",
+        agg."purchaseCount",
+        agg."totalReceivedQuantity",
+        latest.unit_cost::float8 AS "latestPrice",
+        latest.purchase_date AS "lastPurchaseDate",
+        latest.supplier_id AS "lastSupplierId",
+        latest.supplier_name AS "lastSupplierName",
+        prev.unit_cost::float8 AS "previousPrice",
+        obs."latestQuotation",
+        obs."lastObservationDate",
+        CASE
+          WHEN prev.unit_cost IS NOT NULL AND prev.unit_cost > 0
+          THEN ROUND(((latest.unit_cost - prev.unit_cost) / prev.unit_cost * 100)::numeric, 2)::float8
+          ELSE NULL
+        END AS "priceChangePercent"
+      FROM product_variants pv
+      JOIN products prod ON prod.id = pv.product_id
+      LEFT JOIN categories cat ON cat.id = prod.category_id
+      LEFT JOIN units u ON u.id = prod.unit_id
+      JOIN (
+        SELECT variant_id,
+               MIN(unit_cost)::float8 AS "lowestPrice",
+               MAX(unit_cost)::float8 AS "highestPrice",
+               ROUND((SUM(unit_cost * received_quantity) / NULLIF(SUM(received_quantity), 0))::numeric, 2)::float8 AS "averagePrice",
+               COUNT(*)::int AS "purchaseCount",
+               SUM(received_quantity)::float8 AS "totalReceivedQuantity"
+        FROM events
+        GROUP BY variant_id
+      ) agg ON agg.variant_id = pv.id
+      LEFT JOIN LATERAL (
+        SELECT e.unit_cost, e.purchase_date, e.supplier_id, s.name AS supplier_name
+        FROM events e
+        LEFT JOIN suppliers s ON s.id = e.supplier_id
+        WHERE e.variant_id = pv.id
+        ORDER BY e.purchase_date DESC, e.item_id DESC
+        LIMIT 1
+      ) latest ON true
+      LEFT JOIN LATERAL (
+        SELECT e.unit_cost
+        FROM events e
+        WHERE e.variant_id = pv.id
+        ORDER BY e.purchase_date DESC, e.item_id DESC
+        OFFSET 1 LIMIT 1
+      ) prev ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          ROUND(CASE WHEN po.package_quantity IS NOT NULL AND po.package_quantity > 0
+                     THEN po.quoted_price / po.package_quantity
+                     ELSE po.quoted_price END::numeric, 2)::float8 AS "latestQuotation",
+          po.observation_date AS "lastObservationDate"
+        FROM price_observations po
+        WHERE po.business_id = ${businessId}
+          AND po.variant_id = pv.id
+          ${params.supplierId ? sql`AND po.supplier_id = ${params.supplierId}` : sql``}
+        ORDER BY po.observation_date DESC, po.id DESC
+        LIMIT 1
+      ) obs ON true
+      WHERE pv.business_id = ${businessId}${filters}
+      ORDER BY prod.name ASC, pv.sku ASC
+      LIMIT ${limit} OFFSET ${offset}
+    ) q
   `);
 
   return {
@@ -280,6 +294,12 @@ export async function getVariantPriceHistory(
       variantId: productVariants.id,
       productId: products.id,
       productName: products.name,
+      variantOptions: sql<string | null>`(
+        SELECT string_agg(vo.value, ', ' ORDER BY vv.option_id)
+        FROM variant_values vv
+        JOIN variant_options vo ON vo.id = vv.option_id
+        WHERE vv.variant_id = ${productVariants.id}
+      )`,
       sku: productVariants.sku,
       unitName: units.name,
       sellingPrice: productVariants.sellingPrice,
@@ -295,6 +315,7 @@ export async function getVariantPriceHistory(
     )
     .limit(1);
   if (!variant) throw new NotFoundError("Variant not found.");
+  const variantLabel = buildVariantNameFromLabel(variant.productName, variant.variantOptions);
 
   const events = receivedEventsCte(businessId, params);
 
@@ -441,6 +462,8 @@ export async function getVariantPriceHistory(
       variantId: variant.variantId,
       productId: variant.productId,
       productName: variant.productName,
+      variantOptions: variant.variantOptions ?? "",
+      variantName: variantLabel,
       sku: variant.sku,
       unitName: variant.unitName,
       sellingPrice: Number(variant.sellingPrice),

@@ -25,6 +25,8 @@ export interface PriceOverviewRow {
   sku: string | null;
   productId: number;
   productName: string;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   categoryName: string;
   unitName: string | null;
   latestPrice: number | null;
@@ -92,6 +94,8 @@ export interface VariantPriceHistory {
     variantId: number;
     productId: number;
     productName: string;
+    variantOptions?: string | undefined;
+    variantName?: string | undefined;
     sku: string | null;
     unitName: string | null;
     sellingPrice: number;
@@ -128,6 +132,8 @@ export interface ObservationRow {
   id: number;
   variantId: number;
   productName: string;
+  variantOptions?: string | undefined;
+  variantName?: string | undefined;
   sku: string | null;
   unitName: string | null;
   supplierId: number | null;
@@ -362,6 +368,8 @@ export interface ReorderRow {
   variantId: number;
   productId: number;
   productName: string;
+  variantOptions?: string | null | undefined;
+  variantName?: string | null | undefined;
   sku: string | null;
   categoryName: string;
   unitName: string | null;

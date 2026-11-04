@@ -26,6 +26,7 @@ import {
   ConflictError,
   NotFoundError,
 } from "../../utils/handleError.js";
+import { buildVariantNameFromLabel } from "../../utils/variantDisplay.js";
 
 // Every function takes the caller's server-verified businessId (from
 // requireBusinessContext) and scopes all reads and writes to it.
@@ -48,7 +49,14 @@ export async function adjustVariantStock(
     const [variant] = await tx
       .select({
         id: productVariants.id,
+        productName: products.name,
         trackingType: products.trackingType,
+        variantOptions: sql<string | null>`(
+          SELECT string_agg(vo.value, ', ' ORDER BY vv.option_id)
+          FROM variant_values vv
+          JOIN variant_options vo ON vo.id = vv.option_id
+          WHERE vv.variant_id = ${productVariants.id}
+        )`,
       })
       .from(productVariants)
       .innerJoin(products, eq(products.id, productVariants.productId))
@@ -84,7 +92,13 @@ export async function adjustVariantStock(
     const previousQuantity = stock.quantity ?? 0;
     const change = adjustment.newQuantity - previousQuantity;
     if (change === 0) {
-      return { variantId, previousQuantity, quantity: previousQuantity, change };
+      return {
+        variantId,
+        productName: buildVariantNameFromLabel(variant.productName, variant.variantOptions),
+        previousQuantity,
+        quantity: previousQuantity,
+        change,
+      };
     }
     if (
       change > 0 &&
@@ -353,6 +367,7 @@ export async function adjustVariantStock(
 
     return {
       variantId,
+      productName: buildVariantNameFromLabel(variant.productName, variant.variantOptions),
       previousQuantity,
       quantity: updatedStock.quantity,
       change,

@@ -2,6 +2,7 @@ import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { PurchaseCart } from "../../purchase.types";
+import { buildVariantOptionsLabel } from "@/lib/variantDisplay";
 
 type PurchaseLineField =
   | "purchaseQty"
@@ -51,9 +52,9 @@ export function PurchaseTable({
                       SKU: {variant.sku}
                     </p>
                   )}
-                  {variant.options && variant.options.length > 0 && (
+                  {buildVariantOptionsLabel(variant.options) !== "" && (
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {variant.options.map((option) => option.value).join(" / ")}
+                      {buildVariantOptionsLabel(variant.options)}
                     </p>
                   )}
                 </td>

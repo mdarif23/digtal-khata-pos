@@ -12,8 +12,10 @@ import {
   FileText,
   GitCompare,
   Landmark,
+  Boxes,
   Layers,
   Package,
+  PackageOpen,
   Receipt,
   RotateCcw,
   ShoppingCart,
@@ -28,6 +30,8 @@ import { ProductSalesReport } from "./ProductSalesReport";
 import { CustomerSalesReport } from "./CustomerSalesReport";
 import { PaymentMethodReport } from "./PaymentMethodReport";
 import { SaleRefundsReport } from "./SaleRefundsReport";
+import { SaleRefundItemsReport } from "./SaleRefundItemsReport";
+import { PurchaseItemsReport } from "./PurchaseItemsReport";
 import { HourlySalesReport } from "./HourlySalesReport";
 import { ProfitReport } from "./ProfitReport";
 import { ExpenseReport } from "./ExpenseReport";
@@ -64,6 +68,7 @@ type ReportTabId =
   | "sales-customers"
   | "sales-payments"
   | "sales-refunds"
+  | "sales-refund-items"
   // Financial
   | "location-comparison"
   | "register-sessions"
@@ -89,6 +94,7 @@ type ReportTabId =
   | "shrinkage"
   // Purchases
   | "purchases-summary"
+  | "purchases-items"
   | "supplier-payables";
 
 interface ReportGroup {
@@ -148,6 +154,12 @@ const REPORT_GROUPS: ReportGroup[] = [
         label: "Returns & Refunds",
         icon: RotateCcw,
         description: "Customer return records, reasons, and totals",
+      },
+      {
+        id: "sales-refund-items",
+        label: "Returned Items",
+        icon: PackageOpen,
+        description: "Variant-level refunded lines with quantities",
       },
     ],
   },
@@ -253,6 +265,12 @@ const REPORT_GROUPS: ReportGroup[] = [
         description: "Orders, supplier disbursements, and receiving status",
       },
       {
+        id: "purchases-items",
+        label: "Purchase Items",
+        icon: Boxes,
+        description: "Variant-level purchase lines with historical costs",
+      },
+      {
         id: "supplier-payables",
         label: "Supplier Payables",
         icon: AlertCircle,
@@ -287,6 +305,8 @@ export default function ReportsHub() {
         return <PaymentMethodReport />;
       case "sales-refunds":
         return <SaleRefundsReport />;
+      case "sales-refund-items":
+        return <SaleRefundItemsReport />;
       case "register-close":
         return <RegisterCloseReport />;
       case "register-sessions":
@@ -327,6 +347,8 @@ export default function ReportsHub() {
         return <DeadStockReport />;
       case "purchases-summary":
         return <PurchaseSummaryReport />;
+      case "purchases-items":
+        return <PurchaseItemsReport />;
       case "supplier-payables":
         return <SupplierPayablesReport />;
       default:

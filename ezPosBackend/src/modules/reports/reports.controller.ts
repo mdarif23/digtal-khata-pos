@@ -51,6 +51,36 @@ export async function getSalesByInvoice(req: Request, res: Response) {
   }
 }
 
+export async function getSaleRefundItems(req: Request, res: Response) {
+  try {
+    const params = getValidatedParams(req);
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getSaleRefundItemsReport(
+      getBusinessId(req),
+      params,
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}
+
+export async function getPurchaseItems(req: Request, res: Response) {
+  try {
+    const params = getValidatedParams(req);
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getPurchaseItemsReport(
+      getBusinessId(req),
+      params,
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}
+
 export async function getProductSales(req: Request, res: Response) {
   try {
     const params = getValidatedParams(req);
@@ -160,7 +190,7 @@ export async function getStock(req: Request, res: Response) {
   try {
     const params = getValidatedParams(req);
     const locationId = await resolveReportLocation(req);
-    const data = await reportsService.getStockReport(getBusinessId(req), params);
+    const data = await reportsService.getStockReport(getBusinessId(req), params, locationId);
     res.status(200).json({ success: true, data });
   } catch (err) {
     sendSafe(err, res);

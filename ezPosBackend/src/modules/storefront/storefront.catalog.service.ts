@@ -8,6 +8,13 @@ import { productVariants } from "../../db/schema/productVariants.js";
 import { products } from "../../db/schema/products.js";
 import { integrations } from "../../db/schema/integrations.js";
 import { storefrontProductVisibility } from "../../db/schema/storefrontProductVisibility.js";
+import { variantOptions } from "../../db/schema/variantOptions.js";
+import { variantValues } from "../../db/schema/variantValues.js";
+import {
+  buildVariantName,
+  buildVariantOptionsLabel,
+  foldVariantOptionRows,
+} from "../../utils/variantDisplay.js";
 import { getOnlineAvailability } from "../commerce/reservations.service.js";
 import type { StorefrontContext } from "../../middleware/storefront.js";
 
@@ -23,6 +30,10 @@ export interface StorefrontVariant {
   sku: string;
   price: number;
   isDefault: boolean;
+  /** Comma-joined option values, e.g. "Red, Large" — "" for option-less variants. */
+  options: string;
+  /** Display label "Football (Small)" — the variant the shopper is picking. */
+  name: string;
   availability: number;
 }
 
@@ -128,6 +139,9 @@ async function loadProducts(
         sku: row.sku ?? "",
         price: Number(row.price ?? 0),
         isDefault: row.isDefault === true,
+        // Filled in with the option labels below, after the batched fetch.
+        options: "",
+        name: "",
         availability: 0,
       });
       variantIds.push(row.variantId);
@@ -147,6 +161,29 @@ async function loadProducts(
         variantIds,
       )
     : new Map<number, number>();
+
+  // Option labels batched per distinct variant — the shopper must be able to
+  // tell "Football (Small)" from "Football (Big)".
+  let optionsByVariant = new Map<number, string[]>();
+  if (variantIds.length > 0) {
+    const optRows = await db
+      .select({
+        variantId: variantValues.variantId,
+        value: variantOptions.value,
+      })
+      .from(variantValues)
+      .innerJoin(variantOptions, eq(variantValues.optionId, variantOptions.id))
+      .where(inArray(variantValues.variantId, variantIds))
+      .orderBy(asc(variantValues.optionId));
+    optionsByVariant = foldVariantOptionRows(optRows);
+  }
+  for (const product of productsMap.values()) {
+    for (const variant of product.variants) {
+      const rawOptions = optionsByVariant.get(variant.id);
+      variant.options = buildVariantOptionsLabel(rawOptions);
+      variant.name = buildVariantName(product.name, rawOptions);
+    }
+  }
   for (const product of productsMap.values()) {
     for (const variant of product.variants) {
       variant.availability = availability.get(variant.id) ?? 0;

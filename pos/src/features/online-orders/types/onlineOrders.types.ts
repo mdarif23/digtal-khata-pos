@@ -103,6 +103,8 @@ export interface OrderDetailItem {
   variantId: number;
   sku: string;
   productName: string;
+  variantOptions?: string | undefined;
+  variantName?: string | undefined;
   quantity: number;
   sellingPrice: number;
   lineTotal: number;
@@ -186,6 +188,8 @@ export interface OrderFulfillmentItem {
   saleItemId: number;
   variantId: number;
   productName: string;
+  variantOptions?: string | undefined;
+  variantName?: string | undefined;
   sku: string | null;
   quantity: number;
   stockAtLocation: number | null;

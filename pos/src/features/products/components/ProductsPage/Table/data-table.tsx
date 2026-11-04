@@ -35,6 +35,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { isAxiosError } from "axios";
+import { buildVariantOptionsLabel } from "@/lib/variantDisplay";
 
 interface DataTableProps {
   columns: ColumnDef<DataTableFeatures, ProductType>[];
@@ -224,7 +225,7 @@ export function ProductVariantRow({
   return (
     <TableRow key={variant.id}>
       <TableCell>
-        {variant.options?.map((option) => option.value).join("-")}
+        {buildVariantOptionsLabel(variant.options) || "Default variant"}
       </TableCell>
       <TableCell>{variant.sku}</TableCell>
       <TableCell className="text-center">{variant.purchaseCost ?? 0}</TableCell>

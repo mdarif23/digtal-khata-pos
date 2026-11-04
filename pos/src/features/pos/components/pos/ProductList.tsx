@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { PackageSearch } from "lucide-react";
+import { buildVariantName } from "@/lib/variantDisplay";
 import { ProductHeader } from "./ProductHeader";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
 import useProductStore from "@/features/products/useProductStore";
@@ -97,9 +98,7 @@ export function ProductList() {
       return;
     }
 
-    const variantName = variant.options?.length
-      ? `${product.name} (${variant.options.map((option) => option.value).join(", ")})`
-      : product.name;
+    const variantName = buildVariantName(product.name, variant.options);
     addToCart({ ...product, name: variantName, variants: [variant] });
     setSearchProducts("");
     toast.add({ description: `${variantName} added to cart.` });

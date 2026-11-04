@@ -5,8 +5,15 @@ import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { locations } from "../../db/schema/locations.js";
 import { productVariants } from "../../db/schema/productVariants.js";
+import { variantOptions } from "../../db/schema/variantOptions.js";
+import { variantValues } from "../../db/schema/variantValues.js";
 import { stockTransferItems } from "../../db/schema/stockTransfers.js";
 import { stockTransfers } from "../../db/schema/stockTransfers.js";
+import {
+  foldVariantOptionRows,
+  variantNameFromMap,
+  variantOptionsFromMap,
+} from "../../utils/variantDisplay.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 import { nextDocumentNumber } from "../../utils/documentSequence.js";
 import {
@@ -28,6 +35,8 @@ export interface TransferItemView {
   variantId: number;
   sku: string | null;
   productName: string | null;
+  variantOptions: string | null;
+  variantName: string | null;
   quantity: number;
   quantityShipped: number;
   quantityReceived: number;
@@ -263,7 +272,29 @@ async function listTransferItemsInTx(
       ),
     )
     .orderBy(asc(stockTransferItems.id));
-  return rows.map((row) => ({ ...row, unitCost: Number(row.unitCost) }));
+
+  // Option labels batched per distinct variant (a join would fan out rows).
+  const variantIds = [...new Set(rows.map((row) => row.variantId))];
+  let optionsByVariant = new Map<number, string[]>();
+  if (variantIds.length > 0) {
+    const optRows = await tx
+      .select({
+        variantId: variantValues.variantId,
+        value: variantOptions.value,
+      })
+      .from(variantValues)
+      .innerJoin(variantOptions, eq(variantValues.optionId, variantOptions.id))
+      .where(inArray(variantValues.variantId, variantIds))
+      .orderBy(asc(variantValues.optionId));
+    optionsByVariant = foldVariantOptionRows(optRows);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    unitCost: Number(row.unitCost),
+    variantOptions: variantOptionsFromMap(optionsByVariant, row.variantId),
+    variantName: variantNameFromMap(optionsByVariant, row.variantId, row.productName),
+  }));
 }
 
 /**

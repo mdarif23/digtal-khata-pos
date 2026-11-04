@@ -360,7 +360,14 @@ export const PurchaseViewItems = () => {
                     return (
                       <tr key={item.id}>
                         <td className="px-4 py-3">
-                          <p className="font-medium">{item.productName}</p>
+                          <p className="font-medium">
+                            {item.variantName || item.productName}
+                          </p>
+                          {item.variantOptions && item.variantName ? (
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {item.productName} · {item.variantOptions}
+                            </p>
+                          ) : null}
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {item.trackingType} tracking
                           </p>
@@ -380,7 +387,7 @@ export const PurchaseViewItems = () => {
                         </td>
                         <td className="px-3 py-2">
                           <Input
-                            aria-label={`Return quantity for ${item.productName}`}
+                            aria-label={`Return quantity for ${item.variantName || item.productName}`}
                             type="number"
                             min={0}
                             max={maxReturn}

@@ -1,7 +1,14 @@
 import { db } from "../../db/schema/index.js";
+import {
+  foldVariantOptionRows,
+  variantNameFromMap,
+  variantOptionsFromMap,
+} from "../../utils/variantDisplay.js";
+import { variantOptions } from "../../db/schema/variantOptions.js";
+import { variantValues } from "../../db/schema/variantValues.js";
 import { purchaseItems } from "../../db/schema/purchaseItems.js";
 import { purchases } from "../../db/schema/purchases.js";
-import { and, eq, getTableColumns, inArray } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, inArray } from "drizzle-orm";
 import { products } from "../../db/schema/products.js";
 import {
   ConflictError,
@@ -232,40 +239,62 @@ export async function getPurchasesItems(
   businessId: number,
   locationId: number,
 ) {
-  return (
-    db
-      .select({
-        // 1. Spread the table to get all its columns
-        ...getTableColumns(purchaseItems),
+  const rows = await db
+    .select({
+      // 1. Spread the table to get all its columns
+      ...getTableColumns(purchaseItems),
 
-        // 2. Select specific related columns
-        productName: products.name,
-        productUnit: units.name,
-        sellingPrice: productVariants.sellingPrice,
-        productId: products.id,
-        trackingType: products.trackingType,
-        availableStock: inventoryStock.quantity,
+      // 2. Select specific related columns
+      productName: products.name,
+      productUnit: units.name,
+      sellingPrice: productVariants.sellingPrice,
+      productId: products.id,
+      variantSku: productVariants.sku,
+      trackingType: products.trackingType,
+      availableStock: inventoryStock.quantity,
+    })
+    .from(purchaseItems)
+    // 3. Join Variant (Purchase Items link to Variants, not directly to Products!)
+    .innerJoin(
+      productVariants,
+      eq(purchaseItems.variantId, productVariants.id),
+    )
+    // 4. Join Product (Variants link to Products)
+    .innerJoin(products, eq(productVariants.productId, products.id))
+    // 5. Join Unit (Products link to Units)
+    .leftJoin(units, eq(units.id, products.unitId))
+    .leftJoin(
+      inventoryStock,
+      and(
+        eq(inventoryStock.variantId, productVariants.id),
+        eq(inventoryStock.businessId, businessId),
+        eq(inventoryStock.locationId, locationId),
+      ),
+    )
+    .where(eq(purchaseItems.businessId, businessId)); // leftJoin is safer in case a product has no unit
+
+  // Option labels batched per distinct variant — a direct join would fan out
+  // one row per option value.
+  const variantIds = [...new Set(rows.map((row) => row.variantId))];
+  let optionsByVariant = new Map<number, string[]>();
+  if (variantIds.length > 0) {
+    const optRows = await db
+      .select({
+        variantId: variantValues.variantId,
+        value: variantOptions.value,
       })
-      .from(purchaseItems)
-      // 3. Join Variant (Purchase Items link to Variants, not directly to Products!)
-      .innerJoin(
-        productVariants,
-        eq(purchaseItems.variantId, productVariants.id),
-      )
-      // 4. Join Product (Variants link to Products)
-      .innerJoin(products, eq(productVariants.productId, products.id))
-      // 5. Join Unit (Products link to Units)
-      .leftJoin(units, eq(units.id, products.unitId))
-      .leftJoin(
-        inventoryStock,
-        and(
-          eq(inventoryStock.variantId, productVariants.id),
-          eq(inventoryStock.businessId, businessId),
-          eq(inventoryStock.locationId, locationId),
-        ),
-      )
-      .where(eq(purchaseItems.businessId, businessId))
-  ); // leftJoin is safer in case a product has no unit
+      .from(variantValues)
+      .innerJoin(variantOptions, eq(variantValues.optionId, variantOptions.id))
+      .where(inArray(variantValues.variantId, variantIds))
+      .orderBy(asc(variantValues.optionId));
+    optionsByVariant = foldVariantOptionRows(optRows);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    variantOptions: variantOptionsFromMap(optionsByVariant, row.variantId),
+    variantName: variantNameFromMap(optionsByVariant, row.variantId, row.productName),
+  }));
 }
 
 export async function createReceivePurchase(

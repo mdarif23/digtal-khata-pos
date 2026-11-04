@@ -137,10 +137,13 @@ export function OnlineStoreProfitabilityReport() {
   const productColumns: ReportColumn<ProfitabilityProductRow>[] = [
     {
       key: "productName",
-      header: "Product",
+      header: "Product & Variant",
       render: (row) => (
         <div>
           <p className="font-medium text-slate-800">{row.productName}</p>
+          {row.variantOptions ? (
+            <p className="text-xs text-slate-500">{row.variantOptions}</p>
+          ) : null}
           <p className="text-xs text-slate-400">
             {row.sku}
             {row.categoryName ? ` · ${row.categoryName}` : ""}

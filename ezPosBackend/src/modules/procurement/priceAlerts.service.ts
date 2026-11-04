@@ -4,6 +4,7 @@ import { priceAlertSettings } from "../../db/schema/priceAlertSettings.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { products } from "../../db/schema/products.js";
 import { suppliers } from "../../db/schema/suppliers.js";
+import { buildVariantNameFromLabel } from "../../utils/variantDisplay.js";
 import type { DbTransaction } from "../purchases/purchase.types.js";
 import { notifyInTx } from "../../services/notifications.js";
 
@@ -116,7 +117,16 @@ export async function checkPriceIncreasesInTx(
 
   const variantIds = [...new Set(received.map((item) => item.variantId))];
   const nameRows = await tx
-    .select({ id: productVariants.id, productName: products.name })
+    .select({
+      id: productVariants.id,
+      productName: products.name,
+      variantOptions: sql<string | null>`(
+        SELECT string_agg(vo.value, ', ' ORDER BY vv.option_id)
+        FROM variant_values vv
+        JOIN variant_options vo ON vo.id = vv.option_id
+        WHERE vv.variant_id = ${productVariants.id}
+      )`,
+    })
     .from(productVariants)
     .innerJoin(products, eq(products.id, productVariants.productId))
     .where(
@@ -125,7 +135,12 @@ export async function checkPriceIncreasesInTx(
         inArray(productVariants.id, variantIds),
       ),
     );
-  const productNames = new Map(nameRows.map((row) => [row.id, row.productName]));
+  const productNames = new Map(
+    nameRows.map((row) => [
+      row.id,
+      buildVariantNameFromLabel(row.productName, row.variantOptions),
+    ]),
+  );
 
   const [supplier] = await tx
     .select({ name: suppliers.name })

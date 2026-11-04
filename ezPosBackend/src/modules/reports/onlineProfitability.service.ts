@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
+import { variantOptionsJoinSql } from "../../utils/variantDisplay.js";
 import { expenses } from "../../db/schema/expenses.js";
 import { expenseCategories } from "../../db/schema/expenseCategories.js";
 import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
@@ -72,6 +73,8 @@ export interface TrendPoint {
 export interface ProductProfitRow {
   variantId: number;
   productName: string;
+  variantOptions: string | null;
+  variantName: string | null;
   sku: string;
   categoryName: string | null;
   quantitySold: number;
@@ -401,6 +404,8 @@ export async function getProfitabilityProducts(
     select count(*) over () as total_rows,
       sa.variant_id,
       p.name as product_name,
+      vol.option_label as variant_options,
+      concat(p.name, case when vol.option_label is not null and btrim(vol.option_label) <> '' then concat(' (', vol.option_label, ')') else '' end) as variant_name,
       pv.sku,
       c.name as category_name,
       sa.qty_sold - coalesce(ra.return_qty, 0) as quantity_sold,
@@ -414,6 +419,7 @@ export async function getProfitabilityProducts(
     join product_variants pv on pv.id = sa.variant_id and pv.business_id = ${businessId}
     join products p on p.id = pv.product_id and p.business_id = ${businessId}
     left join categories c on c.id = p.category_id
+    ${variantOptionsJoinSql("pv", "vol")}
     left join refund_agg ra on ra.variant_id = sa.variant_id
     left join restock_agg st on st.variant_id = sa.variant_id
     ${orderClause}
@@ -429,6 +435,8 @@ export async function getProfitabilityProducts(
     return {
       variantId: num(row.variant_id),
       productName: String(row.product_name ?? "—"),
+      variantOptions: (row.variant_options as string | null) ?? null,
+      variantName: (row.variant_name as string | null) ?? null,
       sku: String(row.sku ?? "—"),
       categoryName: row.category_name ? String(row.category_name) : null,
       quantitySold: num(row.quantity_sold),

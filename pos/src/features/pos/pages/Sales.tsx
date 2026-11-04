@@ -230,7 +230,9 @@ export function Sales() {
         String(sale.id).includes(normalizedQuery) ||
         sale.invoiceNumber.toLocaleLowerCase().includes(normalizedQuery) ||
         sale.items.some((item) =>
-          item.productName.toLocaleLowerCase().includes(normalizedQuery),
+          item.productName.toLocaleLowerCase().includes(normalizedQuery) ||
+          (item.variantName ?? "").toLocaleLowerCase().includes(normalizedQuery) ||
+          (item.sku ?? "").toLocaleLowerCase().includes(normalizedQuery),
         )
       );
     });
@@ -460,7 +462,14 @@ export function Sales() {
                     {selectedSale.items.map((item) => (
                       <TableRow key={item.saleItemsId}>
                         <TableCell>
-                          <div className="font-medium">{item.productName}</div>
+                          <div className="font-medium">
+                            {item.variantName || item.productName}
+                          </div>
+                          {item.variantOptions && item.variantName ? (
+                            <div className="text-xs text-muted-foreground">
+                              {item.productName} · {item.variantOptions}
+                            </div>
+                          ) : null}
                           <div className="text-xs text-muted-foreground">
                             {item.category || "Uncategorized"}
                           </div>

@@ -518,7 +518,7 @@ export function StockTransfersPage() {
                     return (
                       <TableRow key={item.id}>
                         <TableCell>
-                          {item.productName ?? "—"}
+                          {item.variantName || item.productName || "—"}
                           {item.sku ? (
                             <span className="block text-xs text-muted-foreground">
                               {item.sku}

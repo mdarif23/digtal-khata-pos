@@ -355,7 +355,7 @@ export function PriceMonitoringPage() {
                             <TableCell>
                               <div className="flex flex-col">
                                 <span className="font-medium">
-                                  {row.productName}
+                                  {row.variantName || row.productName}
                                 </span>
                                 <span className="text-xs text-slate-400">
                                   {row.sku ?? "—"}

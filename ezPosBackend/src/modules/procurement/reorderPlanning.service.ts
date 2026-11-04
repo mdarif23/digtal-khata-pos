@@ -30,6 +30,8 @@ export interface ReorderRow {
   variantId: number;
   productId: number;
   productName: string;
+  variantOptions: string | null;
+  variantName: string | null;
   sku: string | null;
   categoryName: string;
   unitName: string | null;
@@ -88,6 +90,10 @@ function reorderBaseCte(businessId: number, locationId: number): SQL {
         pv.id AS variant_id,
         prod.id AS product_id,
         prod.name AS product_name,
+        (SELECT string_agg(vo.value, ', ' ORDER BY vv.option_id)
+         FROM variant_values vv
+         JOIN variant_options vo ON vo.id = vv.option_id
+         WHERE vv.variant_id = pv.id) AS variant_options,
         pv.sku,
         COALESCE(cat.name, 'Uncategorized') AS category_name,
         u.name AS unit_name,
@@ -227,6 +233,8 @@ interface MetricsRow {
   variantId: number;
   productId: number;
   productName: string;
+  variantOptions: string | null;
+  variantName: string | null;
   sku: string | null;
   categoryName: string;
   unitName: string | null;
@@ -251,6 +259,8 @@ const METRICS_SELECT = sql`
     m.variant_id AS "variantId",
     m.product_id AS "productId",
     m.product_name AS "productName",
+    m.variant_options AS "variantOptions",
+    concat(m.product_name, CASE WHEN m.variant_options IS NOT NULL AND btrim(m.variant_options) <> '' THEN concat(' (', m.variant_options, ')') ELSE '' END) AS "variantName",
     m.sku,
     m.category_name AS "categoryName",
     m.unit_name AS "unitName",
@@ -423,6 +433,8 @@ export function rowsToSuggestions(
       variantId: row.variantId,
       productId: row.productId,
       productName: row.productName,
+      variantOptions: row.variantOptions,
+      variantName: row.variantName,
       sku: row.sku,
       currentStock: row.currentStock,
       outstandingOnOrder: row.outstandingOnOrder,

@@ -5,6 +5,14 @@ export interface SalesStoreType {
   saleItemsId: number;
   saleId: number;
   productName: string;
+  /** Variant identity from the API — null-safe for older payloads. */
+  variantId?: number | undefined;
+  sku?: string | null;
+  barcode?: string | null;
+  /** Comma-joined option values, e.g. "Small". */
+  variantOptions?: string | undefined;
+  /** Full display label, e.g. "Football (Small)". */
+  variantName?: string | undefined;
   soldQuantity: number;
   cost: number;
   price: number;

@@ -9,6 +9,7 @@ import useProductStore from "../useProductStore.js";
 import type { ProductType } from "../product.schema.js";
 import { calculateProductStats } from "../utils/calculateProductStats.js";
 import { getProductStockState } from "../utils/getProductStockState.js";
+import { buildVariantOptionsLabel } from "@/lib/variantDisplay";
 
 type ProductStatusFilter = "all" | "active" | "draft" | "inactive";
 type StockFilter = "all" | "in-stock" | "low-stock" | "out-of-stock";
@@ -69,7 +70,7 @@ function downloadProductsCsv(
         product.status,
         category,
         brand,
-        variant.options?.map((option) => option.value).join(" / ") ?? "",
+        buildVariantOptionsLabel(variant.options),
         variant.sku,
         variant.barcode,
         variant.quantity,

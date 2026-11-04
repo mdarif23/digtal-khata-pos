@@ -54,7 +54,7 @@ export const SAMPLE_RECEIPT: SaleReceiptData = {
       id: 0,
       variantId: 0,
       productName: "Cotton T-Shirt",
-      variantName: "Black / L",
+      variantName: "Black, L",
       sku: "TSH-BLK-L",
       barcode: "885000000927",
       unitName: "Pcs",

@@ -15,6 +15,7 @@ import { quoteSaleApi } from "../../quote.api.js";
 import { useSalesStore } from "../../stores/useSalesStore.js";
 import { useProductStore } from "@/features/products/usedashboardProductStore.js";
 import type { SalesStoreType } from "../types/sales.types.js";
+import { buildVariantName } from "@/lib/variantDisplay";
 import { useEffect } from "react";
 
 const tk = (n: number) => `৳${n.toFixed(2)}`;
@@ -204,7 +205,7 @@ export function ExchangeDialog({
                     }
                   />
                   <span className="flex-1">
-                    {item.productName} × {item.soldQuantity}
+                    {item.variantName || item.productName} × {item.soldQuantity}
                   </span>
                   <span className="font-mono">
                     {tk(Number(item.lineTotal))}
@@ -224,46 +225,50 @@ export function ExchangeDialog({
             />
             {searchResults.length > 0 && (
               <div className="mt-1 max-h-32 space-y-1 overflow-y-auto rounded-md border p-2">
-                {searchResults.map((product) => {
-                  const variant = product.variants?.[0];
-                  if (!variant) return null;
-                  return (
-                    <button
-                      key={variant.id}
-                      type="button"
-                      className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-sm hover:bg-muted"
-                      onClick={() => {
-                        setReplacements((current) => {
-                          const existing = current.find(
-                            (r) => r.variantId === variant.id,
-                          );
-                          if (existing) {
-                            return current.map((r) =>
-                              r.variantId === variant.id
-                                ? { ...r, quantity: r.quantity + 1 }
-                                : r,
+                {searchResults.flatMap((product) =>
+                  (product.variants ?? []).map((variant) => {
+                    const variantLabel = buildVariantName(
+                      product.productName,
+                      variant.options,
+                    );
+                    return (
+                      <button
+                        key={variant.id}
+                        type="button"
+                        className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-sm hover:bg-muted"
+                        onClick={() => {
+                          setReplacements((current) => {
+                            const existing = current.find(
+                              (r) => r.variantId === variant.id,
                             );
-                          }
-                          return [
-                            ...current,
-                            {
-                              variantId: variant.id,
-                              name: product.productName,
-                              quantity: 1,
-                              unitPrice: Number(variant.sellingPrice),
-                            },
-                          ];
-                        });
-                        setSearch("");
-                      }}
-                    >
-                      <span>{product.productName}</span>
-                      <span className="font-mono">
-                        {tk(Number(variant.sellingPrice))}
-                      </span>
-                    </button>
-                  );
-                })}
+                            if (existing) {
+                              return current.map((r) =>
+                                r.variantId === variant.id
+                                  ? { ...r, quantity: r.quantity + 1 }
+                                  : r,
+                              );
+                            }
+                            return [
+                              ...current,
+                              {
+                                variantId: variant.id,
+                                name: variantLabel,
+                                quantity: 1,
+                                unitPrice: Number(variant.sellingPrice),
+                              },
+                            ];
+                          });
+                          setSearch("");
+                        }}
+                      >
+                        <span>{variantLabel}</span>
+                        <span className="font-mono">
+                          {tk(Number(variant.sellingPrice))}
+                        </span>
+                      </button>
+                    );
+                  }),
+                )}
               </div>
             )}
             {replacements.length > 0 && (

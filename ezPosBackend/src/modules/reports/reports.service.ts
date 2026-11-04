@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { roundMoney } from "../../utils/roundMoney.js";
+import { variantOptionsJoinSql, variantNameSql } from "../../utils/variantDisplay.js";
 import { db } from "../../db/schema/index.js";
 import type { DateRangeQuery } from "./reports.validation.js";
 
@@ -85,43 +86,41 @@ function locationFilter(alias: string, locationId: number | undefined) {
 export async function getSalesSummaryReport(businessId: number, params: DateRangeQuery, locationId?: number) {
   const { start, end } = getDateBounds(params);
 
+  // Refund impact uses the POS-005 definition (refund money out, COGS back
+  // only for restocked goods) and is attributed to the refund's own date —
+  // the money leaves on the day the refund happens. Same convention as the
+  // dashboard's net-profit widget and the Profit report, so period totals
+  // reconcile across widgets.
   const dailyResult = await db.execute(sql`
-    WITH sale_level AS (
-      SELECT 
-        s.id,
-        DATE(s.created_at)::text AS sale_date,
-        s.final_total,
-        s.discount,
-        COALESCE(sr.refund_total, 0) AS refund_total
-      FROM sales s
-      LEFT JOIN (
-        SELECT sale_id, SUM(refund_total) AS refund_total
-        FROM sale_refunds
-        WHERE business_id = ${businessId}
-        GROUP BY sale_id
-      ) sr ON sr.sale_id = s.id
-      WHERE s.status IN ('completed', 'refunded')
-        AND s.business_id = ${businessId}${locationFilter("s", locationId)}
-        AND s.created_at >= ${start}::timestamp 
-        AND s.created_at <= ${end}::timestamp
-    ),
-    items_cost AS (
-      SELECT 
+    WITH items_cost AS (
+      SELECT
         si.sale_id,
         SUM((si.selling_price - si.cost_at_sale) * si.quantity) AS profit
       FROM sale_items si
       INNER JOIN sales s ON s.id = si.sale_id
       WHERE s.status IN ('completed', 'refunded')
         AND s.business_id = ${businessId}${locationFilter("s", locationId)}
-        AND s.created_at >= ${start}::timestamp 
+        AND s.created_at >= ${start}::timestamp
         AND s.created_at <= ${end}::timestamp
       GROUP BY si.sale_id
     ),
-    refund_impact AS (
-      -- Same definition as the Profit report: refund money out, COGS back
-      -- only for restocked goods.
+    sale_stream AS (
       SELECT
-        sr.sale_id,
+        s.id,
+        DATE(s.created_at)::text AS bucket_date,
+        s.final_total,
+        s.discount,
+        COALESCE(ic.profit, 0) AS item_profit
+      FROM sales s
+      LEFT JOIN items_cost ic ON ic.sale_id = s.id
+      WHERE s.status IN ('completed', 'refunded')
+        AND s.business_id = ${businessId}${locationFilter("s", locationId)}
+        AND s.created_at >= ${start}::timestamp
+        AND s.created_at <= ${end}::timestamp
+    ),
+    refund_stream AS (
+      SELECT
+        DATE(sr.created_at)::text AS bucket_date,
         COALESCE(SUM(sri.refund_total), 0) AS refund_money,
         COALESCE(SUM(
           CASE WHEN sr.status = 'restock'
@@ -132,59 +131,46 @@ export async function getSalesSummaryReport(businessId: number, params: DateRang
       FROM sale_refunds sr
       INNER JOIN sale_refund_items sri ON sri.refund_id = sr.id
       INNER JOIN sale_items si ON si.id = sri.sale_item_id
-      WHERE sr.business_id = ${businessId}
-        AND sr.sale_id IN (
-          SELECT id FROM sales
-          WHERE business_id = ${businessId}${locationFilter("sales", locationId)}
-            AND status IN ('completed', 'refunded')
-            AND created_at >= ${start}::timestamp
-            AND created_at <= ${end}::timestamp
-        )
-      GROUP BY sr.sale_id
+      WHERE sr.business_id = ${businessId}${locationFilter("sr", locationId)}
+        AND sr.created_at >= ${start}::timestamp
+        AND sr.created_at <= ${end}::timestamp
+      GROUP BY 1
+    ),
+    sales_by_day AS (
+      SELECT
+        bucket_date,
+        COUNT(id)::int AS invoice_count,
+        COALESCE(SUM(final_total), 0)::numeric AS gross_sales,
+        COALESCE(SUM(discount), 0)::numeric AS total_discount,
+        COALESCE(SUM(item_profit), 0)::numeric AS item_profit
+      FROM sale_stream
+      GROUP BY bucket_date
     )
-    SELECT 
-      sl.sale_date,
-      COUNT(sl.id)::int AS invoice_count,
-      COALESCE(SUM(sl.final_total), 0)::numeric AS gross_sales,
-      COALESCE(SUM(sl.discount), 0)::numeric AS total_discount,
-      COALESCE(SUM(sl.refund_total), 0)::numeric AS total_refunds,
-      COALESCE(SUM(sl.final_total - sl.refund_total), 0)::numeric AS net_sales,
-      COALESCE(SUM(ic.profit - COALESCE(ri.refund_money, 0) + COALESCE(ri.restocked_cost, 0)), 0)::numeric AS gross_profit
-    FROM sale_level sl
-    LEFT JOIN items_cost ic ON ic.sale_id = sl.id
-    LEFT JOIN refund_impact ri ON ri.sale_id = sl.id
-    GROUP BY sl.sale_date
-    ORDER BY sl.sale_date ASC
+    SELECT
+      d.bucket_date AS sale_date,
+      COALESCE(d.invoice_count, 0)::int AS invoice_count,
+      COALESCE(d.gross_sales, 0)::numeric AS gross_sales,
+      COALESCE(d.total_discount, 0)::numeric AS total_discount,
+      COALESCE(r.refund_money, 0)::numeric AS total_refunds,
+      (COALESCE(d.gross_sales, 0) - COALESCE(r.refund_money, 0))::numeric AS net_sales,
+      (COALESCE(d.item_profit, 0) - COALESCE(r.refund_money, 0) + COALESCE(r.restocked_cost, 0))::numeric AS gross_profit
+    FROM sales_by_day d
+    FULL OUTER JOIN refund_stream r ON r.bucket_date = d.bucket_date
+    ORDER BY 1 ASC
   `);
 
   const totalsResult = await db.execute(sql`
-    WITH sale_level AS (
-      SELECT 
-        s.id,
-        s.final_total,
-        s.discount,
-        COALESCE(sr.refund_total, 0) AS refund_total
-      FROM sales s
-      LEFT JOIN (
-        SELECT sale_id, SUM(refund_total) AS refund_total
-        FROM sale_refunds
-        WHERE business_id = ${businessId}
-        GROUP BY sale_id
-      ) sr ON sr.sale_id = s.id
-      WHERE s.status IN ('completed', 'refunded')
-        AND s.business_id = ${businessId}${locationFilter("s", locationId)}
-        AND s.created_at >= ${start}::timestamp 
-        AND s.created_at <= ${end}::timestamp
-    ),
-    items_cost AS (
-      SELECT 
+    WITH items_cost AS (
+      SELECT
+        si.sale_id,
         SUM((si.selling_price - si.cost_at_sale) * si.quantity) AS profit
       FROM sale_items si
       INNER JOIN sales s ON s.id = si.sale_id
       WHERE s.status IN ('completed', 'refunded')
         AND s.business_id = ${businessId}${locationFilter("s", locationId)}
-        AND s.created_at >= ${start}::timestamp 
+        AND s.created_at >= ${start}::timestamp
         AND s.created_at <= ${end}::timestamp
+      GROUP BY si.sale_id
     ),
     refund_impact AS (
       SELECT
@@ -198,29 +184,38 @@ export async function getSalesSummaryReport(businessId: number, params: DateRang
       FROM sale_refunds sr
       INNER JOIN sale_refund_items sri ON sri.refund_id = sr.id
       INNER JOIN sale_items si ON si.id = sri.sale_item_id
-      WHERE sr.business_id = ${businessId}
-        AND sr.sale_id IN (
-          SELECT id FROM sales
-          WHERE business_id = ${businessId}${locationFilter("sales", locationId)}
-            AND status IN ('completed', 'refunded')
-            AND created_at >= ${start}::timestamp
-            AND created_at <= ${end}::timestamp
-        )
+      WHERE sr.business_id = ${businessId}${locationFilter("sr", locationId)}
+        AND sr.created_at >= ${start}::timestamp
+        AND sr.created_at <= ${end}::timestamp
+    ),
+    sale_totals AS (
+      SELECT
+        COUNT(s.id)::int AS total_invoices,
+        COALESCE(SUM(s.final_total), 0)::numeric AS total_gross_sales,
+        COALESCE(SUM(s.discount), 0)::numeric AS total_discount,
+        COALESCE(SUM(COALESCE(ic.profit, 0)), 0)::numeric AS total_item_profit
+      FROM sales s
+      LEFT JOIN items_cost ic ON ic.sale_id = s.id
+      WHERE s.status IN ('completed', 'refunded')
+        AND s.business_id = ${businessId}${locationFilter("s", locationId)}
+        AND s.created_at >= ${start}::timestamp
+        AND s.created_at <= ${end}::timestamp
     )
-    SELECT 
-      COUNT(sl.id)::int AS total_invoices,
-      COALESCE(SUM(sl.final_total), 0)::numeric AS total_gross_sales,
-      COALESCE(SUM(sl.discount), 0)::numeric AS total_discount,
-      COALESCE(SUM(sl.refund_total), 0)::numeric AS total_refunds,
-      COALESCE(SUM(sl.final_total - sl.refund_total), 0)::numeric AS total_net_sales,
-      COALESCE(MAX(ic.profit), 0) - COALESCE(MAX(ri.refund_money), 0) + COALESCE(MAX(ri.restocked_cost), 0) AS total_gross_profit,
-      CASE 
-        WHEN COALESCE(SUM(sl.final_total), 0) > 0 
-        THEN ROUND((COALESCE(MAX(ic.profit), 0) / SUM(sl.final_total)) * 100, 2)
+    SELECT
+      st.total_invoices,
+      st.total_gross_sales,
+      st.total_discount,
+      COALESCE(ri.refund_money, 0)::numeric AS total_refunds,
+      (st.total_gross_sales - COALESCE(ri.refund_money, 0))::numeric AS total_net_sales,
+      (st.total_item_profit - COALESCE(ri.refund_money, 0) + COALESCE(ri.restocked_cost, 0))::numeric AS total_gross_profit,
+      CASE
+        WHEN COALESCE(st.total_gross_sales, 0) > 0
+        THEN ROUND(
+          (st.total_item_profit - COALESCE(ri.refund_money, 0) + COALESCE(ri.restocked_cost, 0))
+            / st.total_gross_sales * 100, 2)
         ELSE 0
       END AS overall_profit_margin
-    FROM sale_level sl
-    CROSS JOIN items_cost ic
+    FROM sale_totals st
     CROSS JOIN refund_impact ri
   `);
 
@@ -329,9 +324,12 @@ export async function getProductSalesReport(businessId: number, params: DateRang
   `);
 
   const listQuery = await db.execute(sql`
-    SELECT 
+    SELECT
       p.id AS "productId",
       p.name AS "productName",
+      pv.id AS "variantId",
+      vol.option_label AS "variantOptions",
+      ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS "variantName",
       COALESCE(cat.name, 'Uncategorized') AS "categoryName",
       COALESCE(b.name, '-') AS "brandName",
       pv.sku,
@@ -341,10 +339,10 @@ export async function getProductSalesReport(businessId: number, params: DateRang
       COALESCE(SUM(si.line_total), 0)::numeric AS "netSales",
       COALESCE(SUM(si.cost_at_sale * si.quantity), 0)::numeric AS "totalCost",
       COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0)::numeric AS "grossProfit",
-      CASE 
-        WHEN COALESCE(SUM(si.line_total), 0) > 0 
+      CASE
+        WHEN COALESCE(SUM(si.line_total), 0) > 0
         THEN ROUND(COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0) / SUM(si.line_total) * 100, 2)
-        ELSE 0 
+        ELSE 0
       END AS "profitMargin"
     FROM sale_items si
     INNER JOIN sales s ON s.id = si.sale_id
@@ -352,14 +350,15 @@ export async function getProductSalesReport(businessId: number, params: DateRang
     INNER JOIN products p ON p.id = pv.product_id
     LEFT JOIN categories cat ON cat.id = p.category_id
     LEFT JOIN brands b ON b.id = p.brand_id
+    ${variantOptionsJoinSql("pv", "vol")}
     WHERE s.status IN ('completed', 'refunded')
       AND s.business_id = ${businessId}${locationFilter("s", locationId)}
-      AND s.created_at >= ${start}::timestamp 
+      AND s.created_at >= ${start}::timestamp
       AND s.created_at <= ${end}::timestamp
       ${params.categoryId ? sql`AND p.category_id = ${params.categoryId}` : sql``}
       ${params.brandId ? sql`AND p.brand_id = ${params.brandId}` : sql``}
       ${searchFilter ? sql`AND (p.name ILIKE ${searchFilter} OR pv.sku ILIKE ${searchFilter})` : sql``}
-    GROUP BY p.id, p.name, cat.name, b.name, pv.sku
+    GROUP BY p.id, p.name, pv.id, pv.sku, cat.name, b.name, vol.option_label
     ORDER BY "qtySold" DESC
     LIMIT ${limit} OFFSET ${offset}
   `);
@@ -423,13 +422,16 @@ export async function getCustomerSalesReport(businessId: number, params: DateRan
 export async function getPaymentMethodReport(businessId: number, params: DateRangeQuery, locationId?: number) {
   const { start, end } = getDateBounds(params);
 
+  // sale_payments carries no location: when a location scope is requested it
+  // is applied through the payment's sale.
   const result = await db.execute(sql`
-    SELECT 
+    SELECT
       sp.payment_method AS "paymentMethod",
       COUNT(*)::int AS "paymentCount",
       COALESCE(SUM(sp.amount), 0)::numeric AS "totalAmount"
     FROM sale_payments sp
-    WHERE sp.business_id = ${businessId}${locationFilter("sp", locationId)}${locationFilter("p", locationId)}
+    INNER JOIN sales s ON s.id = sp.sale_id AND s.business_id = sp.business_id
+    WHERE sp.business_id = ${businessId}${locationFilter("s", locationId)}
       AND sp.payment_date >= ${start}::timestamp
       AND sp.payment_date <= ${end}::timestamp
     GROUP BY sp.payment_method
@@ -749,20 +751,22 @@ export async function getStockReport(businessId: number, params: DateRangeQuery,
   `);
 
   const listQuery = await db.execute(sql`
-    SELECT 
+    SELECT
       p.id AS "productId",
       p.name AS "productName",
+      pv.id AS "variantId",
+      vol.option_label AS "variantOptions",
+      ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS "variantName",
       COALESCE(cat.name, 'Uncategorized') AS "categoryName",
       COALESCE(b.name, '-') AS "brandName",
-      pv.id AS "variantId",
       pv.sku,
       COALESCE(pv.barcode, '-') AS barcode,
       pv.selling_price::numeric AS "sellingPrice",
       COALESCE(pv.alert_quantity, 0)::int AS "alertQuantity",
       COALESCE(ist.quantity, 0)::int AS "currentStock",
       COALESCE(ist.reserved_quantity, 0)::int AS reserved,
-      COALESCE(SUM(ib.quantity_remaining * ib.purchase_price), 0)::numeric AS "stockValue",
-      CASE 
+      COALESCE(ib.stock_value, 0)::numeric AS "stockValue",
+      CASE
         WHEN COALESCE(ist.quantity, 0) <= 0 THEN 'out_of_stock'
         WHEN COALESCE(ist.quantity, 0) <= COALESCE(pv.alert_quantity, 0) THEN 'low_stock'
         ELSE 'in_stock'
@@ -771,26 +775,37 @@ export async function getStockReport(businessId: number, params: DateRangeQuery,
     INNER JOIN products p ON p.id = pv.product_id
     LEFT JOIN categories cat ON cat.id = p.category_id
     LEFT JOIN brands b ON b.id = p.brand_id
-    LEFT JOIN inventory_stock ist ON ist.variant_id = pv.id
-      AND ist.business_id = ${businessId}${locationFilter("ist", locationId)}
-    LEFT JOIN inventory_batches ib ON ib.variant_id = pv.id
-      AND ib.business_id = ${businessId}${locationFilter("ib", locationId)}
+    ${variantOptionsJoinSql("pv", "vol")}
+    LEFT JOIN (
+      -- Pre-aggregated per variant: joining inventory_stock rows directly
+      -- duplicates batch valuation rows (and splits the variant into one row
+      -- per location) once a variant is stocked in more than one location.
+      SELECT variant_id, SUM(quantity) AS quantity, SUM(reserved_quantity) AS reserved_quantity
+      FROM inventory_stock
+      WHERE business_id = ${businessId}${locationFilter("inventory_stock", locationId)}
+      GROUP BY variant_id
+    ) ist ON ist.variant_id = pv.id
+    LEFT JOIN (
+      SELECT variant_id, SUM(quantity_remaining * purchase_price) AS stock_value
+      FROM inventory_batches
+      WHERE business_id = ${businessId}${locationFilter("inventory_batches", locationId)}
+      GROUP BY variant_id
+    ) ib ON ib.variant_id = pv.id
     WHERE p.business_id = ${businessId}${locationFilter("p", locationId)}
       AND (p.status != 'deleted' OR p.status IS NULL)
       ${params.categoryId ? sql`AND p.category_id = ${params.categoryId}` : sql``}
       ${params.brandId ? sql`AND p.brand_id = ${params.brandId}` : sql``}
       ${searchFilter ? sql`AND (p.name ILIKE ${searchFilter} OR pv.sku ILIKE ${searchFilter} OR pv.barcode ILIKE ${searchFilter})` : sql``}
-    GROUP BY p.id, p.name, cat.name, b.name, pv.id, pv.sku, pv.barcode, pv.selling_price, pv.alert_quantity, ist.quantity, ist.reserved_quantity
     ORDER BY p.name ASC, pv.sku ASC
     LIMIT ${limit} OFFSET ${offset}
   `);
 
   const valuationQuery = await db.execute(sql`
-    SELECT 
+    SELECT
       COALESCE(SUM(quantity_remaining * purchase_price), 0)::numeric AS "totalValuation",
       COALESCE(SUM(quantity_remaining), 0)::int AS "totalUnits"
     FROM inventory_batches
-    WHERE business_id = ${businessId}
+    WHERE business_id = ${businessId}${locationFilter("inventory_batches", locationId)}
   `);
 
   return {
@@ -817,10 +832,14 @@ export async function getStockMovementReport(businessId: number, params: DateRan
   `);
 
   const listQuery = await db.execute(sql`
-    SELECT 
+    SELECT
       im.id,
       im.created_at AS "createdAt",
+      p.id AS "productId",
       p.name AS "productName",
+      pv.id AS "variantId",
+      vol.option_label AS "variantOptions",
+      ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS "variantName",
       pv.sku,
       im.movement_type AS "movementType",
       im.quantity::int,
@@ -829,6 +848,7 @@ export async function getStockMovementReport(businessId: number, params: DateRan
     FROM inventory_movements im
     INNER JOIN product_variants pv ON pv.id = im.variant_id
     INNER JOIN products p ON p.id = pv.product_id
+    ${variantOptionsJoinSql("pv", "vol")}
     WHERE im.business_id = ${businessId}${locationFilter("im", locationId)}
       AND im.created_at >= ${start}::timestamp
       AND im.created_at <= ${end}::timestamp
@@ -857,17 +877,21 @@ export async function getBatchExpiryReport(businessId: number, params: DateRange
   `);
 
   const listQuery = await db.execute(sql`
-    SELECT 
+    SELECT
       ib.id,
       ib.batch_number AS "batchNumber",
+      p.id AS "productId",
       p.name AS "productName",
+      pv.id AS "variantId",
+      vol.option_label AS "variantOptions",
+      ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS "variantName",
       pv.sku,
       ib.purchase_price::numeric AS "purchasePrice",
       ib.quantity_received::int AS "quantityReceived",
       ib.quantity_remaining::int AS "quantityRemaining",
       ib.manufactured_date AS "manufacturedDate",
       ib.expiry_date AS "expiryDate",
-      CASE 
+      CASE
         WHEN ib.expiry_date IS NULL THEN 'no_expiry'
         WHEN ib.expiry_date < CURRENT_DATE THEN 'expired'
         WHEN ib.expiry_date < CURRENT_DATE + INTERVAL '30 days' THEN 'expiring_soon'
@@ -876,6 +900,7 @@ export async function getBatchExpiryReport(businessId: number, params: DateRange
     FROM inventory_batches ib
     INNER JOIN product_variants pv ON pv.id = ib.variant_id
     INNER JOIN products p ON p.id = pv.product_id
+    ${variantOptionsJoinSql("pv", "vol")}
     WHERE ib.business_id = ${businessId}${locationFilter("ib", locationId)}
       AND ib.quantity_remaining > 0
     ORDER BY ib.expiry_date ASC NULLS LAST
@@ -893,6 +918,153 @@ export async function getBatchExpiryReport(businessId: number, params: DateRange
 // ----------------------------------------------------
 // 4. PURCHASE REPORTS
 // ----------------------------------------------------
+
+/**
+ * Purchase item report: one row per purchase line (variant-level), with the
+ * supplier, order and the line's own historical unit cost.
+ */
+export async function getPurchaseItemsReport(businessId: number, params: DateRangeQuery, locationId?: number) {
+  const { start, end } = getDateBounds(params);
+  const page = params.page || 1;
+  const limit = params.limit || 50;
+  const offset = (page - 1) * limit;
+
+  const searchFilter = params.search ? `%${params.search}%` : null;
+
+  const whereClause = sql`
+    WHERE pi.business_id = ${businessId}
+      AND pu.purchase_date >= ${start}::timestamp
+      AND pu.purchase_date <= ${end}::timestamp
+      ${locationFilter("pu", locationId)}
+      ${params.supplierId ? sql`AND pu.supplier_id = ${params.supplierId}` : sql``}
+      ${params.categoryId ? sql`AND prod.category_id = ${params.categoryId}` : sql``}
+      ${searchFilter
+        ? sql`AND (prod.name ILIKE ${searchFilter} OR pv.sku ILIKE ${searchFilter} OR pu.purchase_order_number ILIKE ${searchFilter})`
+        : sql``}
+  `;
+
+  const countQuery = await db.execute(sql`
+    SELECT COUNT(pi.id)::int AS total
+    FROM purchase_items pi
+    INNER JOIN purchases pu ON pu.id = pi.purchase_id AND pu.business_id = pi.business_id
+    INNER JOIN product_variants pv ON pv.id = pi.variant_id
+    INNER JOIN products prod ON prod.id = pv.product_id
+    ${whereClause}
+  `);
+
+  const listQuery = await db.execute(sql`
+    SELECT
+      pi.id,
+      pu.id AS "purchaseId",
+      pu.purchase_order_number AS "purchaseOrderNumber",
+      pu.purchase_date AS "purchaseDate",
+      COALESCE(sup.name, '-') AS "supplierName",
+      prod.id AS "productId",
+      prod.name AS "productName",
+      pv.id AS "variantId",
+      vol.option_label AS "variantOptions",
+      ${variantNameSql(sql`prod.name`, sql`vol.option_label`)} AS "variantName",
+      pv.sku,
+      COALESCE(cat.name, 'Uncategorized') AS "categoryName",
+      pi.quantity::float8 AS "quantityOrdered",
+      pi.received_quantity::float8 AS "quantityReceived",
+      pi.unit_cost::numeric AS "unitCost",
+      pi.discount::numeric AS "discount",
+      pi.tax::numeric AS "tax",
+      pi.total::numeric AS "lineTotal"
+    FROM purchase_items pi
+    INNER JOIN purchases pu ON pu.id = pi.purchase_id AND pu.business_id = pi.business_id
+    INNER JOIN product_variants pv ON pv.id = pi.variant_id
+    INNER JOIN products prod ON prod.id = pv.product_id
+    LEFT JOIN suppliers sup ON sup.id = pu.supplier_id
+    LEFT JOIN categories cat ON cat.id = prod.category_id
+    ${variantOptionsJoinSql("pv", "vol")}
+    ${whereClause}
+    ORDER BY pu.purchase_date DESC, pi.id DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `);
+
+  return {
+    data: listQuery.rows,
+    total: Number(countQuery.rows[0]?.total || 0),
+    page,
+    limit,
+  };
+}
+
+/**
+ * Sales return (refund) item report: one row per refunded line. The refunded
+ * variant comes through sale_refund_items.sale_item_id → sale_items — the
+ * only reliable variant reference on refund rows.
+ */
+export async function getSaleRefundItemsReport(businessId: number, params: DateRangeQuery, locationId?: number) {
+  const { start, end } = getDateBounds(params);
+  const page = params.page || 1;
+  const limit = params.limit || 50;
+  const offset = (page - 1) * limit;
+
+  const searchFilter = params.search ? `%${params.search}%` : null;
+
+  const whereClause = sql`
+    WHERE sr.business_id = ${businessId}
+      AND sr.created_at >= ${start}::timestamp
+      AND sr.created_at <= ${end}::timestamp
+      ${locationFilter("sr", locationId)}
+      ${params.customerId ? sql`AND s.customer_id = ${params.customerId}` : sql``}
+      ${searchFilter
+        ? sql`AND (prod.name ILIKE ${searchFilter} OR pv.sku ILIKE ${searchFilter} OR s.invoice_number ILIKE ${searchFilter})`
+        : sql``}
+  `;
+
+  const countQuery = await db.execute(sql`
+    SELECT COUNT(sri.id)::int AS total
+    FROM sale_refund_items sri
+    INNER JOIN sale_refunds sr ON sr.id = sri.refund_id
+    INNER JOIN sales s ON s.id = sr.sale_id
+    INNER JOIN sale_items si ON si.id = sri.sale_item_id
+    INNER JOIN product_variants pv ON pv.id = si.variant_id
+    INNER JOIN products prod ON prod.id = pv.product_id
+    ${whereClause}
+  `);
+
+  const listQuery = await db.execute(sql`
+    SELECT
+      sri.id,
+      sr.id AS "refundId",
+      sr.created_at AS "refundedAt",
+      s.invoice_number AS "invoiceNumber",
+      COALESCE(c.name, 'Walk-in Customer') AS "customerName",
+      COALESCE(sr.status, 'completed') AS "disposition",
+      sr.reason,
+      prod.id AS "productId",
+      prod.name AS "productName",
+      pv.id AS "variantId",
+      vol.option_label AS "variantOptions",
+      ${variantNameSql(sql`prod.name`, sql`vol.option_label`)} AS "variantName",
+      pv.sku,
+      sri.quantity::float8 AS "quantityReturned",
+      sri.refund_price::numeric AS "refundPrice",
+      sri.refund_total::numeric AS "refundTotal"
+    FROM sale_refund_items sri
+    INNER JOIN sale_refunds sr ON sr.id = sri.refund_id
+    INNER JOIN sales s ON s.id = sr.sale_id
+    LEFT JOIN customers c ON c.id = s.customer_id
+    INNER JOIN sale_items si ON si.id = sri.sale_item_id
+    INNER JOIN product_variants pv ON pv.id = si.variant_id
+    INNER JOIN products prod ON prod.id = pv.product_id
+    ${variantOptionsJoinSql("pv", "vol")}
+    ${whereClause}
+    ORDER BY sr.created_at DESC, sri.id DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `);
+
+  return {
+    data: listQuery.rows,
+    total: Number(countQuery.rows[0]?.total || 0),
+    page,
+    limit,
+  };
+}
 
 export async function getPurchaseSummaryReport(businessId: number, params: DateRangeQuery, locationId?: number) {
   const { start, end } = getDateBounds(params);
@@ -1000,56 +1172,85 @@ export async function getSupplierPayablesReport(businessId: number, locationId?:
 export async function getHourlySalesReport(businessId: number, params: DateRangeQuery, locationId?: number) {
   const { start, end } = getDateBounds(params);
 
+  // Sales totals and item counts are aggregated in separate CTEs: joining
+  // sale_items into the sales aggregate multiplies SUM(final_total) by each
+  // sale's item count.
   const hourlyData = await db.execute(sql`
     WITH hours AS (
       SELECT generate_series(0, 23) AS hour_num
     ),
     hourly_sales AS (
-      SELECT 
+      SELECT
         EXTRACT(HOUR FROM s.created_at)::int AS hour_num,
-        COUNT(DISTINCT s.id)::int AS transaction_count,
-        COALESCE(SUM(s.final_total), 0)::numeric AS gross_sales,
-        COALESCE(SUM(si.quantity), 0)::int AS items_sold
+        COUNT(*)::int AS transaction_count,
+        COALESCE(SUM(s.final_total), 0)::numeric AS gross_sales
       FROM sales s
-      LEFT JOIN sale_items si ON si.sale_id = s.id
       WHERE s.status IN ('completed', 'refunded')
         AND s.business_id = ${businessId}${locationFilter("s", locationId)}
-        AND s.created_at >= ${start}::timestamp 
+        AND s.created_at >= ${start}::timestamp
+        AND s.created_at <= ${end}::timestamp
+      GROUP BY EXTRACT(HOUR FROM s.created_at)
+    ),
+    hourly_items AS (
+      SELECT
+        EXTRACT(HOUR FROM s.created_at)::int AS hour_num,
+        COALESCE(SUM(si.quantity), 0)::int AS items_sold
+      FROM sale_items si
+      INNER JOIN sales s ON s.id = si.sale_id
+      WHERE s.status IN ('completed', 'refunded')
+        AND s.business_id = ${businessId}${locationFilter("s", locationId)}
+        AND s.created_at >= ${start}::timestamp
         AND s.created_at <= ${end}::timestamp
       GROUP BY EXTRACT(HOUR FROM s.created_at)
     )
-    SELECT 
+    SELECT
       h.hour_num AS "hourNum",
       TO_CHAR(TO_TIMESTAMP(h.hour_num::text, 'HH24'), 'HH12:00 AM') || ' - ' || TO_CHAR(TO_TIMESTAMP(((h.hour_num + 1) % 24)::text, 'HH24'), 'HH12:00 AM') AS "hourLabel",
       COALESCE(hs.transaction_count, 0)::int AS "transactionCount",
       COALESCE(hs.gross_sales, 0)::numeric AS "grossSales",
-      COALESCE(hs.items_sold, 0)::int AS "itemsSold",
-      CASE 
-        WHEN COALESCE(hs.transaction_count, 0) > 0 
+      COALESCE(hi.items_sold, 0)::int AS "itemsSold",
+      CASE
+        WHEN COALESCE(hs.transaction_count, 0) > 0
         THEN ROUND(COALESCE(hs.gross_sales, 0) / hs.transaction_count, 2)
-        ELSE 0 
+        ELSE 0
       END AS "averageOrderValue"
     FROM hours h
     LEFT JOIN hourly_sales hs ON hs.hour_num = h.hour_num
+    LEFT JOIN hourly_items hi ON hi.hour_num = h.hour_num
     ORDER BY h.hour_num ASC
   `);
 
   const summary = await db.execute(sql`
-    SELECT 
-      COUNT(DISTINCT s.id)::int AS "totalTransactions",
-      COALESCE(SUM(s.final_total), 0)::numeric AS "totalSales",
-      COALESCE(SUM(si.quantity), 0)::int AS "totalItemsSold",
-      CASE 
-        WHEN COUNT(DISTINCT s.id) > 0 
-        THEN ROUND(COALESCE(SUM(s.final_total), 0) / COUNT(DISTINCT s.id), 2)
-        ELSE 0 
+    WITH sale_totals AS (
+      SELECT
+        COUNT(*)::int AS "totalTransactions",
+        COALESCE(SUM(s.final_total), 0)::numeric AS "totalSales"
+      FROM sales s
+      WHERE s.status IN ('completed', 'refunded')
+        AND s.business_id = ${businessId}${locationFilter("s", locationId)}
+        AND s.created_at >= ${start}::timestamp
+        AND s.created_at <= ${end}::timestamp
+    ),
+    item_totals AS (
+      SELECT COALESCE(SUM(si.quantity), 0)::int AS "totalItemsSold"
+      FROM sale_items si
+      INNER JOIN sales s ON s.id = si.sale_id
+      WHERE s.status IN ('completed', 'refunded')
+        AND s.business_id = ${businessId}${locationFilter("s", locationId)}
+        AND s.created_at >= ${start}::timestamp
+        AND s.created_at <= ${end}::timestamp
+    )
+    SELECT
+      st."totalTransactions",
+      st."totalSales",
+      COALESCE(it."totalItemsSold", 0) AS "totalItemsSold",
+      CASE
+        WHEN st."totalTransactions" > 0
+        THEN ROUND(st."totalSales" / st."totalTransactions", 2)
+        ELSE 0
       END AS "overallAOV"
-    FROM sales s
-    LEFT JOIN sale_items si ON si.sale_id = s.id
-    WHERE s.status IN ('completed', 'refunded')
-      AND s.business_id = ${businessId}${locationFilter("s", locationId)}
-      AND s.created_at >= ${start}::timestamp 
-      AND s.created_at <= ${end}::timestamp
+    FROM sale_totals st
+    CROSS JOIN item_totals it
   `);
 
   return {
@@ -1151,14 +1352,18 @@ export async function getInventoryShrinkageReport(businessId: number, params: Da
   `);
 
   const listQuery = await db.execute(sql`
-    SELECT 
+    SELECT
       im.id,
       im.created_at AS "createdAt",
+      p.id AS "productId",
       p.name AS "productName",
+      pv.id AS "variantId",
+      vol.option_label AS "variantOptions",
+      ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS "variantName",
       pv.sku,
       COALESCE(cat.name, 'Uncategorized') AS "categoryName",
-      CASE 
-        WHEN im.reference_type LIKE 'stock_adjustment:%' 
+      CASE
+        WHEN im.reference_type LIKE 'stock_adjustment:%'
         THEN SUBSTRING(im.reference_type FROM 18)
         ELSE 'correction'
       END AS reason,
@@ -1171,6 +1376,7 @@ export async function getInventoryShrinkageReport(businessId: number, params: Da
     INNER JOIN product_variants pv ON pv.id = im.variant_id
     INNER JOIN products p ON p.id = pv.product_id
     LEFT JOIN categories cat ON cat.id = p.category_id
+    ${variantOptionsJoinSql("pv", "vol")}
     LEFT JOIN (
       SELECT variant_id, AVG(purchase_price) AS purchase_price
       FROM inventory_batches
@@ -1286,11 +1492,18 @@ export async function getRegisterCloseReport(
     INNER JOIN users u ON u.id = rs.user_id
     LEFT JOIN register_transactions rt ON rt.session_id = rs.id
     LEFT JOIN LATERAL (
+      -- Non-cash payments of the sales rung up by this session's cashier at
+      -- this location during the shift. sale_payments has no session link, so
+      -- the sale's location + cashier + window is the scope (same convention
+      -- as the refunds LATERAL below) — never the business-wide total.
       SELECT COALESCE(SUM(sp.amount) FILTER (WHERE sp.payment_method <> 'cash'), 0) AS "nonCashSales"
       FROM sale_payments sp
-      WHERE sp.business_id = rs.business_id
-        AND sp.payment_date >= rs.opened_at
-        AND sp.payment_date <= COALESCE(rs.closed_at, now())
+      INNER JOIN sales s ON s.id = sp.sale_id AND s.business_id = sp.business_id
+      WHERE s.business_id = rs.business_id
+        AND s.location_id = r.location_id
+        AND s.cashier_user_id = rs.user_id
+        AND s.created_at >= rs.opened_at
+        AND s.created_at <= COALESCE(rs.closed_at, now())
     ) ncs ON TRUE
     LEFT JOIN LATERAL (
       SELECT COALESCE(SUM(sr.refund_total), 0) AS refunds
@@ -1522,6 +1735,8 @@ export interface InventoryAgingRow {
   batchId: number;
   variantId: number;
   productName: string;
+  variantOptions: string | null;
+  variantName: string | null;
   sku: string | null;
   batchNumber: string;
   locationId: number;
@@ -1543,6 +1758,8 @@ export async function getInventoryAgingReport(
 ): Promise<{ rows: InventoryAgingRow[]; buckets: Record<string, { quantity: number; value: number }> }> {
   const result = await db.execute(sql`
     SELECT b.id AS "batchId", b.variant_id AS "variantId", p.name AS "productName",
+           vol.option_label AS "variantOptions",
+           ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS "variantName",
            v.sku AS "sku", b.batch_number AS "batchNumber",
            b.location_id AS "locationId",
            b.quantity_remaining AS "quantityRemaining",
@@ -1556,6 +1773,7 @@ export async function getInventoryAgingReport(
     FROM inventory_batches b
     JOIN product_variants v ON v.id = b.variant_id
     JOIN products p ON p.id = v.product_id
+    ${variantOptionsJoinSql("v", "vol")}
     WHERE b.business_id = ${businessId}
       AND b.quantity_remaining > 0
       ${locationId !== undefined ? sql`AND b.location_id = ${locationId}` : sql``}
@@ -1569,6 +1787,8 @@ export async function getInventoryAgingReport(
       batchId: Number(row.batchId),
       variantId: Number(row.variantId),
       productName: String(row.productName ?? ""),
+      variantOptions: (row.variantOptions as string | null) ?? null,
+      variantName: (row.variantName as string | null) ?? null,
       sku: (row.sku as string | null) ?? null,
       batchNumber: String(row.batchNumber ?? ""),
       locationId: Number(row.locationId),
@@ -1593,6 +1813,8 @@ export interface DeadStockRow {
   variantId: number;
   productId: number;
   productName: string;
+  variantOptions: string | null;
+  variantName: string | null;
   sku: string | null;
   currentStock: number;
   stockValue: number;
@@ -1603,7 +1825,9 @@ export interface DeadStockRow {
 
 /**
  * Dead stock: stocked variants with no sales in the given window (or never
- * sold), valued at batch cost — capital sitting on the shelf.
+ * sold), valued at batch cost — capital sitting on the shelf. One row per
+ * variant; stock is summed across in-scope locations so a multi-location
+ * variant is not reported twice.
  */
 export async function getDeadStockReport(
   businessId: number,
@@ -1612,6 +1836,8 @@ export async function getDeadStockReport(
 ): Promise<DeadStockRow[]> {
   const result = await db.execute(sql`
     SELECT st.variant_id AS "variantId", p.id AS "productId", p.name AS "productName",
+           vol.option_label AS "variantOptions",
+           ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS "variantName",
            v.sku AS "sku",
            st.quantity AS "currentStock",
            COALESCE((SELECT SUM(b.quantity_remaining * b.purchase_price)
@@ -1622,9 +1848,17 @@ export async function getDeadStockReport(
            ), 0)::numeric AS "stockValue",
            last_sale.last_sold_at AS "lastSoldAt",
            NULL::int AS "daysOnShelf"
-    FROM inventory_stock st
+    FROM (
+      SELECT variant_id, SUM(quantity) AS quantity
+      FROM inventory_stock
+      WHERE business_id = ${businessId}
+        AND quantity > 0
+        ${locationId !== undefined ? sql`AND location_id = ${locationId}` : sql``}
+      GROUP BY variant_id
+    ) st
     JOIN product_variants v ON v.id = st.variant_id
     JOIN products p ON p.id = v.product_id
+    ${variantOptionsJoinSql("v", "vol")}
     LEFT JOIN (
       SELECT si.variant_id, MAX(s.purchase_date) AS last_sold_at
       FROM sale_items si
@@ -1633,11 +1867,8 @@ export async function getDeadStockReport(
         AND s.status IN ('completed', 'refunded')
       GROUP BY si.variant_id
     ) last_sale ON last_sale.variant_id = st.variant_id
-    WHERE st.business_id = ${businessId}
-      AND st.quantity > 0
-      ${locationId !== undefined ? sql`AND st.location_id = ${locationId}` : sql``}
-      AND (last_sale.last_sold_at IS NULL
-           OR last_sale.last_sold_at < now() - (${days} || ' days')::interval)
+    WHERE last_sale.last_sold_at IS NULL
+       OR last_sale.last_sold_at < now() - (${days} || ' days')::interval
     ORDER BY "stockValue" DESC
   `);
   return (result.rows as Record<string, unknown>[]).map((row) => {
@@ -1646,6 +1877,8 @@ export async function getDeadStockReport(
       variantId: Number(row.variantId),
       productId: Number(row.productId),
       productName: String(row.productName ?? ""),
+      variantOptions: (row.variantOptions as string | null) ?? null,
+      variantName: (row.variantName as string | null) ?? null,
       sku: (row.sku as string | null) ?? null,
       currentStock: Number(row.currentStock ?? 0),
       stockValue: Number(row.stockValue ?? 0),

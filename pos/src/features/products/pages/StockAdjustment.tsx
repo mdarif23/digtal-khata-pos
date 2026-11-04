@@ -17,6 +17,7 @@ import { ProductType } from "@/features/products/product.schema";
 import { ProductVariantType } from "@/features/products/product.schema";
 import { StockAdjustmentInput } from "@/features/products/product.types";
 import useProductStore from "@/features/products/useProductStore";
+import { buildVariantOptionsLabel } from "@/lib/variantDisplay";
 
 const reasons: { value: StockAdjustmentInput["reason"]; label: string }[] = [
   { value: "count_correction", label: "Stock count correction" },
@@ -27,7 +28,7 @@ const reasons: { value: StockAdjustmentInput["reason"]; label: string }[] = [
 ];
 
 function getVariantLabel(variant: ProductVariantType) {
-  const options = variant.options?.map((option) => option.value).join(" / ");
+  const options = buildVariantOptionsLabel(variant.options);
   return [options, variant.sku].filter(Boolean).join(" · ") || "Default variant";
 }
 
