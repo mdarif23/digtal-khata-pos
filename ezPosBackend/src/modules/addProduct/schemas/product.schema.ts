@@ -44,6 +44,8 @@ const variantSchema = z.object({
   batchNumber: z.string().max(100),
   purchasePrice: z.coerce.number().min(0),
   quantity: z.coerce.number().int().min(0),
+  weight: z.coerce.number().min(0).nullable().optional(),
+  weightUnit: z.enum(["kg", "g", "lb", "oz"]).nullish(),
   expiryDate: z.date().nullable(),
   serialNumbers: z.array(serialNumberSchema).optional(),
 });

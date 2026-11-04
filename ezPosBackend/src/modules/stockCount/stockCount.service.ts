@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import {
   foldVariantOptionRows,
@@ -12,6 +12,7 @@ import {
   stockCountSessions,
 } from "../../db/schema/stockCount.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
+import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { products } from "../../db/schema/products.js";
 import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
@@ -333,6 +334,68 @@ export async function approveStockCount(
       const current = Number(stock.quantity ?? 0);
       const delta = (line.countedQuantity as number) - current;
       if (delta === 0) continue;
+
+      // Q5 fix: keep batch quantities in step with the stock row so cost
+      // truth (batches) never diverges from quantity truth (stock).
+      // Decreases consume the location's batches FIFO (shrinkage leaves
+      // with their own landed cost); increases enter as a new ADJ batch
+      // valued at the variant's average landed cost.
+      if (delta < 0) {
+        const batches = await tx
+          .select({
+            id: inventoryBatches.id,
+            quantityRemaining: inventoryBatches.quantityRemaining,
+          })
+          .from(inventoryBatches)
+          .where(
+            and(
+              eq(inventoryBatches.variantId, line.variantId),
+              eq(inventoryBatches.businessId, businessId),
+              eq(inventoryBatches.locationId, locationId),
+              gt(inventoryBatches.quantityRemaining, 0),
+            ),
+          )
+          .orderBy(asc(inventoryBatches.id))
+          .for("update");
+        let toRemove = -delta;
+        for (const batch of batches) {
+          if (toRemove <= 0) break;
+          const take = Math.min(batch.quantityRemaining, toRemove);
+          await tx
+            .update(inventoryBatches)
+            .set({ quantityRemaining: batch.quantityRemaining - take })
+            .where(
+              and(
+                eq(inventoryBatches.id, batch.id),
+                eq(inventoryBatches.businessId, businessId),
+              ),
+            );
+          toRemove -= take;
+        }
+      } else {
+        const [avgRow] = await tx
+          .select({
+            avgCost: sql<string | null>`SUM(${inventoryBatches.quantityRemaining} * ${inventoryBatches.landedCostPerUnit}) / NULLIF(SUM(${inventoryBatches.quantityRemaining}), 0)`,
+          })
+          .from(inventoryBatches)
+          .where(
+            and(
+              eq(inventoryBatches.variantId, line.variantId),
+              eq(inventoryBatches.businessId, businessId),
+            ),
+          );
+        const unitCost = Number(avgRow?.avgCost ?? 0);
+        await tx.insert(inventoryBatches).values({
+          businessId,
+          variantId: line.variantId,
+          locationId,
+          batchNumber: `ADJ-${Date.now()}-${line.variantId}`,
+          purchasePrice: unitCost,
+          quantityReceived: delta,
+          quantityRemaining: delta,
+        });
+      }
+
       await tx
         .update(inventoryStock)
         .set({ quantity: current + delta })

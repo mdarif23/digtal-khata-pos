@@ -59,6 +59,7 @@ export async function createReceivePurchase(req: Request, res: Response) {
       getBusinessId(req),
       getLocationId(req),
       result.data,
+      req.user?.id,
     );
     res.status(201).json({
       message: "Purchase order updated successfully",

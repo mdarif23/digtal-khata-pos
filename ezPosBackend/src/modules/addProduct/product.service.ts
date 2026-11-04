@@ -358,6 +358,8 @@ async function insertVariant(
       alertQuantity: variant.alertQuantity,
       isDefault: variant.isDefault,
       status: variant.status,
+      weight: variant.weight ?? null,
+      weightUnit: variant.weightUnit ?? null,
     })
     .returning({ id: productVariants.id });
   if (!variantResult) {
@@ -828,6 +830,8 @@ export async function updateProduct(
           alertQuantity: variant.alertQuantity,
           isDefault: variant.isDefault,
           status: variant.status,
+          weight: variant.weight ?? null,
+          weightUnit: variant.weightUnit ?? null,
         })
         .where(
           and(

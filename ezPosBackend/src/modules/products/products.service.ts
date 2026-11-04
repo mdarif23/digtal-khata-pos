@@ -142,8 +142,22 @@ export async function adjustVariantStock(
       );
     }
 
+    // Explicit columns: keeps FIFO stable regardless of new batch columns
+    // (landed cost) added to the schema.
     const batches = await tx
-      .select()
+      .select({
+      id: inventoryBatches.id,
+      businessId: inventoryBatches.businessId,
+      variantId: inventoryBatches.variantId,
+      locationId: inventoryBatches.locationId,
+      purchaseItemId: inventoryBatches.purchaseItemId,
+      batchNumber: inventoryBatches.batchNumber,
+      purchasePrice: inventoryBatches.purchasePrice,
+      quantityReceived: inventoryBatches.quantityReceived,
+      quantityRemaining: inventoryBatches.quantityRemaining,
+      manufacturedDate: inventoryBatches.manufacturedDate,
+      expiryDate: inventoryBatches.expiryDate,
+    })
       .from(inventoryBatches)
       .where(
         and(
@@ -394,7 +408,7 @@ export async function getAllProducts(businessId: number, locationId: number) {
             'purchaseCost', (
                             SELECT
                               SUM(
-                                ${inventoryBatches.purchasePrice} *
+                                ${inventoryBatches.landedCostPerUnit} *
                                 ${inventoryBatches.quantityRemaining}
                               ) / NULLIF(
                                 SUM(${inventoryBatches.quantityRemaining}),

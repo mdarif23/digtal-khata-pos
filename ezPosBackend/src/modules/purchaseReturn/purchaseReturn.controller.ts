@@ -17,6 +17,7 @@ export async function createPurchaseReturn(req: Request, res: Response) {
     const result = await purchaseReturnService.createPurchaseReturn(
       getBusinessId(req),
       parsedInput.data,
+      req.user?.id,
     );
     return res.status(201).json(result);
   } catch (err) {

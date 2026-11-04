@@ -244,7 +244,7 @@ export function getProductsSummary(businessId: number, locationId?: number) {
     ),
     stock_valuation AS (
       SELECT COALESCE(
-        SUM(quantity_remaining * purchase_price),
+        SUM(quantity_remaining * landed_cost_per_unit),
         0
       ) AS total_valuation
       FROM inventory_batches
@@ -624,7 +624,7 @@ export function getStaleStockSummary(
     stock_value AS (
       SELECT
         variant_id,
-        SUM(quantity_remaining * purchase_price) AS value
+        SUM(quantity_remaining * landed_cost_per_unit) AS value
       FROM inventory_batches
       WHERE business_id = ${businessId}${locFilter("inventory_batches", locationId)}
       GROUP BY variant_id

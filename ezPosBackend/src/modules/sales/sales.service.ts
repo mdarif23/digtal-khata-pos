@@ -27,6 +27,7 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { saleRefunds } from "../../db/schema/saleRefunds.js";
+import { saleItemBatchConsumptions } from "../../db/schema/saleItemBatchConsumptions.js";
 import { saleRefundItems } from "../../db/schema/saleRefundItems.js";
 import {
   type DashboardPeriod,
@@ -250,6 +251,37 @@ export async function calculateSubtotals(
   return roundMoney(subTotal);
 }
 
+export type BatchConsumption = { batchId: number; quantity: number; unitCost: number };
+
+/**
+ * Persists the per-batch detail of a sale line's FIFO consumption (Q2).
+ * The cost snapshot on sale_items stays the blended average — these rows
+ * carry WHICH batch each unit came from and its effective unit cost, so a
+ * later landed-cost adjustment can split exactly between remaining stock
+ * and already-sold units (Part F). Additive only; zero behavior change.
+ */
+export async function insertSaleItemConsumptions(
+  tx: DbTransaction,
+  businessId: number,
+  saleId: number,
+  saleItemId: number,
+  variantId: number,
+  consumed: BatchConsumption[],
+) {
+  if (consumed.length === 0) return;
+  await tx.insert(saleItemBatchConsumptions).values(
+    consumed.map((c) => ({
+      businessId,
+      saleId,
+      saleItemId,
+      batchId: c.batchId,
+      variantId,
+      quantity: c.quantity,
+      unitCostAtConsumption: c.unitCost,
+    })),
+  );
+}
+
 export async function consumeStockFifo(
   tx: DbTransaction,
   businessId: number,
@@ -260,8 +292,23 @@ export async function consumeStockFifo(
   // 1. Oldest batches first. .for("update") locks the rows, so two sales
   //    at the same moment can't take the same stock. FIFO is per-location:
   //    a sale only consumes batches stocked at its own location.
+  // Explicit columns: keeps FIFO stable regardless of new batch columns
+  // (landed cost) added to the schema.
   const batches = await tx
-    .select()
+    .select({
+      id: inventoryBatches.id,
+      businessId: inventoryBatches.businessId,
+      variantId: inventoryBatches.variantId,
+      locationId: inventoryBatches.locationId,
+      purchaseItemId: inventoryBatches.purchaseItemId,
+      batchNumber: inventoryBatches.batchNumber,
+      purchasePrice: inventoryBatches.purchasePrice,
+      landedCostPerUnit: inventoryBatches.landedCostPerUnit,
+      quantityReceived: inventoryBatches.quantityReceived,
+      quantityRemaining: inventoryBatches.quantityRemaining,
+      manufacturedDate: inventoryBatches.manufacturedDate,
+      expiryDate: inventoryBatches.expiryDate,
+    })
     .from(inventoryBatches)
     .where(
       and(
@@ -276,6 +323,7 @@ export async function consumeStockFifo(
 
   let remaining = quantity;
   let totalCost = 0;
+  const consumed: { batchId: number; quantity: number; unitCost: number }[] = [];
 
   // 2. Take from each batch until the quantity is covered
   for (const batch of batches) {
@@ -293,7 +341,11 @@ export async function consumeStockFifo(
         ),
       );
 
-    totalCost += take * batch.purchasePrice;
+    // Effective cost = original purchase + landed additions (equal to
+    // purchase_price while no landed cost has been allocated — zero-diff).
+    const unitCost = Number(batch.landedCostPerUnit ?? batch.purchasePrice);
+    totalCost += take * unitCost;
+    consumed.push({ batchId: batch.id, quantity: take, unitCost });
     remaining -= take;
   }
 
@@ -307,6 +359,7 @@ export async function consumeStockFifo(
   return {
     totalCost: roundMoney(totalCost),
     costAtSale: roundMoney(totalCost / quantity), // average cost per unit
+    consumed,
   };
 }
 export async function consumeSerials(
@@ -349,7 +402,20 @@ export async function consumeSerials(
 
   // 3. Lock those batches, reduce stock, add up the cost
   const batches = await tx
-    .select()
+    .select({
+      id: inventoryBatches.id,
+      businessId: inventoryBatches.businessId,
+      variantId: inventoryBatches.variantId,
+      locationId: inventoryBatches.locationId,
+      purchaseItemId: inventoryBatches.purchaseItemId,
+      batchNumber: inventoryBatches.batchNumber,
+      purchasePrice: inventoryBatches.purchasePrice,
+      landedCostPerUnit: inventoryBatches.landedCostPerUnit,
+      quantityReceived: inventoryBatches.quantityReceived,
+      quantityRemaining: inventoryBatches.quantityRemaining,
+      manufacturedDate: inventoryBatches.manufacturedDate,
+      expiryDate: inventoryBatches.expiryDate,
+    })
     .from(inventoryBatches)
     .where(
       and(
@@ -378,7 +444,7 @@ export async function consumeSerials(
         ),
       );
 
-    totalCost += take * batch.purchasePrice;
+    totalCost += take * Number(batch.landedCostPerUnit ?? batch.purchasePrice);
     used.push({
       batchId: batch.id,
       quantity: take,
@@ -851,7 +917,13 @@ export async function createSale(
       const line = getLinePricing(item.unitPrice, item.quantity, item.discount);
       const lineTax = lineTaxes?.[itemIndex];
 
-      let cost: { totalCost: number; costAtSale: number; serialIds?: number[] };
+      let cost: {
+        totalCost: number;
+        costAtSale: number;
+        serialIds?: number[];
+        used?: { batchId: number; quantity: number; unitCost: number }[];
+        consumed?: BatchConsumption[];
+      };
 
       if (item.trackingType === "serial") {
         // read from the DB, never from the request
@@ -862,6 +934,11 @@ export async function createSale(
           );
         }
         cost = await consumeSerials(tx, businessId, item.variantId, serials);
+        cost.consumed = (cost.used ?? []).map((u) => ({
+          batchId: u.batchId,
+          quantity: u.quantity,
+          unitCost: u.unitCost,
+        }));
       } else {
         cost = await consumeStockFifo(
           tx,
@@ -894,6 +971,17 @@ export async function createSale(
         })
         .returning({ id: saleItems.id });
       if (!saleItem) throw new Error("Failed to create sale item.");
+
+      if (cost.consumed?.length) {
+        await insertSaleItemConsumptions(
+          tx,
+          businessId,
+          saleId,
+          saleItem.id,
+          item.variantId,
+          cost.consumed,
+        );
+      }
 
       // Link the serials consumed for this line to the sale item. Refunds
       // key off serial_numbers.sale_item_id, so leaving it NULL would make
@@ -2187,6 +2275,16 @@ export async function createSaleExchange(
         })
         .returning({ id: saleItems.id });
       if (!saleItem) throw new Error("Failed to create exchange sale item.");
+      if (cost.consumed?.length) {
+        await insertSaleItemConsumptions(
+          tx,
+          businessId,
+          exchangeSale.id,
+          saleItem.id,
+          item.variantId,
+          cost.consumed,
+        );
+      }
     }
 
     // Additional payments land as normal payment rows on the replacement

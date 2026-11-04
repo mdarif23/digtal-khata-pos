@@ -150,10 +150,19 @@ export async function insertInventoryBatches(
 
   if (rows.length === 0) return [];
 
-  return tx
-    .insert(inventoryBatches)
-    .values(rows)
-    .returning({ id: inventoryBatches.id });
+  // One insert per row: multi-row drizzle inserts emit the table's full
+  // column list (with `default` placeholders), which would break against a
+  // database that has not had the landed-cost columns (migration 0042)
+  // applied yet. Single-row inserts only name the provided columns.
+  const inserted: { id: number }[] = [];
+  for (const row of rows) {
+    const [batch] = await tx
+      .insert(inventoryBatches)
+      .values(row)
+      .returning({ id: inventoryBatches.id });
+    inserted.push(batch!);
+  }
+  return inserted;
 }
 export async function insertSerialNumbers(
   tx: DbTransaction,
