@@ -26,10 +26,13 @@ import {
   closeRegisterApi,
   getCurrentSessionApi,
   getRegistersApi,
+  MOVEMENT_LABELS,
   openRegisterApi,
+  type ManualMovementType,
   type RegisterSession,
   type RegisterSummary,
 } from "../registers.api";
+import { formatCurrency } from "@/features/reports/utils/reportUtils";
 
 function extractError(error: unknown, fallback: string): string {
   if (
@@ -59,7 +62,7 @@ export function RegisterDialog() {
 
   const [registerId, setRegisterId] = useState<string>("");
   const [openingCash, setOpeningCash] = useState("0");
-  const [movementType, setMovementType] = useState<"cash_in" | "cash_out">("cash_in");
+  const [movementType, setMovementType] = useState<ManualMovementType>("cash_in");
   const [movementAmount, setMovementAmount] = useState("");
   const [movementNote, setMovementNote] = useState("");
   const [countedCash, setCountedCash] = useState("");
@@ -98,7 +101,7 @@ export function RegisterDialog() {
     try {
       const opened = await openRegisterApi(Number(registerId), amount);
       toast.add({
-        title: `Register opened with ${opened.openingCash}`,
+        title: `Register opened with ${formatCurrency(opened.openingCash)}`,
         type: "success",
       });
       setSession(opened);
@@ -126,7 +129,7 @@ export function RegisterDialog() {
         movementNote.trim() || undefined,
       );
       toast.add({
-        title: `${movementType === "cash_in" ? "Cash in" : "Cash out"} recorded — expected ${updated.expectedCash}`,
+        title: `${MOVEMENT_LABELS[movementType]} recorded — expected ${formatCurrency(updated.expectedCash)}`,
         type: "success",
       });
       setMovementAmount("");
@@ -154,7 +157,7 @@ export function RegisterDialog() {
         title:
           difference === 0
             ? "Register closed — balanced"
-            : `Register closed — ${difference > 0 ? "over" : "short"} by ${Math.abs(difference)}`,
+            : `Register closed — ${difference > 0 ? "over" : "short"} by ${formatCurrency(Math.abs(difference))}`,
         type: difference === 0 ? "success" : "error",
       });
       setSession(closed);
@@ -182,7 +185,7 @@ export function RegisterDialog() {
         Register
         {session ? (
           <Badge variant="secondary" className="ml-1">
-            {session.expectedCash}
+            {formatCurrency(session.expectedCash)}
           </Badge>
         ) : null}
       </Button>
@@ -207,11 +210,11 @@ export function RegisterDialog() {
               <div className="grid grid-cols-3 gap-2 rounded-md border p-3 text-center">
                 <div>
                   <div className="text-xs text-muted-foreground">Opening</div>
-                  <div className="font-semibold">{session.openingCash}</div>
+                  <div className="font-semibold">{formatCurrency(session.openingCash)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Expected</div>
-                  <div className="font-semibold">{session.expectedCash}</div>
+                  <div className="font-semibold">{formatCurrency(session.expectedCash)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Cashier</div>
@@ -225,15 +228,32 @@ export function RegisterDialog() {
                   <Select
                     value={movementType}
                     onValueChange={(value) =>
-                      setMovementType(value === "cash_out" ? "cash_out" : "cash_in")
+                      setMovementType(
+                        (
+                          [
+                            "cash_in",
+                            "cash_out",
+                            "safe_deposit",
+                            "safe_withdrawal",
+                            "adjustment_in",
+                            "adjustment_out",
+                          ] as ManualMovementType[]
+                        ).includes(value as ManualMovementType)
+                          ? (value as ManualMovementType)
+                          : "cash_in",
+                      )
                     }
                   >
-                    <SelectTrigger className="w-32">
+                    <SelectTrigger className="w-44">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="cash_in">Cash in</SelectItem>
                       <SelectItem value="cash_out">Cash out</SelectItem>
+                      <SelectItem value="safe_deposit">Safe deposit</SelectItem>
+                      <SelectItem value="safe_withdrawal">Safe withdrawal</SelectItem>
+                      <SelectItem value="adjustment_in">Adjustment +</SelectItem>
+                      <SelectItem value="adjustment_out">Adjustment −</SelectItem>
                     </SelectContent>
                   </Select>
                   <Input
@@ -265,7 +285,7 @@ export function RegisterDialog() {
                 <Label>Close register</Label>
                 <p className="text-xs text-muted-foreground">
                   Count the drawer and enter the amount. Expected cash:{" "}
-                  <span className="font-medium">{session.expectedCash}</span>
+                  <span className="font-medium">{formatCurrency(session.expectedCash)}</span>
                 </p>
                 <div className="flex items-center gap-2">
                   <Input

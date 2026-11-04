@@ -97,7 +97,8 @@ export function RegisterCloseReport() {
                     <th className="px-3 py-2 text-right">Non-cash</th>
                     <th className="px-3 py-2 text-right">Cash in</th>
                     <th className="px-3 py-2 text-right">Cash out</th>
-                    <th className="px-3 py-2 text-right">Refunds</th>
+                    <th className="px-3 py-2 text-right">Cash refunds</th>
+                    <th className="px-3 py-2 text-right">Refund value</th>
                     <th className="px-3 py-2 text-right">Expected</th>
                     <th className="px-3 py-2 text-right">Counted</th>
                     <th className="px-3 py-2 text-right">Over/Short</th>
@@ -115,6 +116,9 @@ export function RegisterCloseReport() {
                       <td className="px-3 py-2 text-right">{formatCurrency(session.nonCashSales)}</td>
                       <td className="px-3 py-2 text-right">{formatCurrency(session.cashIn)}</td>
                       <td className="px-3 py-2 text-right">{formatCurrency(session.cashOut)}</td>
+                      <td className="px-3 py-2 text-right text-rose-600">
+                        {formatCurrency(session.cashRefunds)}
+                      </td>
                       <td className="px-3 py-2 text-right">{formatCurrency(session.refunds)}</td>
                       <td className="px-3 py-2 text-right">
                         {session.status === "closed" ? formatCurrency(session.expectedCash) : "—"}

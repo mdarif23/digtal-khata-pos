@@ -460,6 +460,11 @@ export interface RegisterSessionZRow {
   nonCashSales: number;
   cashIn: number;
   cashOut: number;
+  cashRefunds: number;
+  safeWithdrawals: number;
+  safeDeposits: number;
+  adjustmentsIn: number;
+  adjustmentsOut: number;
   expectedCash: number;
   countedCash: number | null;
   difference: number | null;
@@ -476,6 +481,7 @@ export interface RegisterCloseData {
     countedCash: number;
     difference: number;
     cashSales: number;
+    cashRefunds: number;
   };
   cashSales: {
     cashAmount: number;

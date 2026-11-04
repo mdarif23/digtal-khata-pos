@@ -51,7 +51,7 @@ export function RegisterSessionsReport() {
         </p>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             <div className="rounded-xl border border-slate-200 p-3">
               <div className="text-xs text-slate-500">Sessions closed</div>
               <div className="text-xl font-semibold">{data.totals.sessionCount}</div>
@@ -59,6 +59,12 @@ export function RegisterSessionsReport() {
             <div className="rounded-xl border border-slate-200 p-3">
               <div className="text-xs text-slate-500">Cash sales (closed)</div>
               <div className="text-xl font-semibold">{money(data.totals.cashSales)}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <div className="text-xs text-slate-500">Cash refunds (closed)</div>
+              <div className="text-xl font-semibold text-rose-600">
+                {money(data.totals.cashRefunds)}
+              </div>
             </div>
             <div className="rounded-xl border border-slate-200 p-3">
               <div className="text-xs text-slate-500">Counted</div>
@@ -90,6 +96,7 @@ export function RegisterSessionsReport() {
                   <th className="px-4 py-2.5">Cashier</th>
                   <th className="px-4 py-2.5 text-right">Opening</th>
                   <th className="px-4 py-2.5 text-right">Cash sales</th>
+                  <th className="px-4 py-2.5 text-right">Refunds</th>
                   <th className="px-4 py-2.5 text-right">In / Out</th>
                   <th className="px-4 py-2.5 text-right">Expected</th>
                   <th className="px-4 py-2.5 text-right">Counted</th>
@@ -105,6 +112,9 @@ export function RegisterSessionsReport() {
                     <td className="px-4 py-2.5">{row.userName}</td>
                     <td className="px-4 py-2.5 text-right">{money(row.openingCash)}</td>
                     <td className="px-4 py-2.5 text-right">{money(row.cashSales)}</td>
+                    <td className="px-4 py-2.5 text-right text-rose-600">
+                      {money(row.cashRefunds)}
+                    </td>
                     <td className="px-4 py-2.5 text-right">
                       {money(row.cashIn)} / {money(row.cashOut)}
                     </td>
