@@ -13,7 +13,7 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   timeout: 45_000,
   retries: 0,
-  reporter: [["list"]],
+  reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: "http://localhost:5173",
     trace: "retain-on-failure",
