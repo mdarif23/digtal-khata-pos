@@ -89,7 +89,7 @@ export async function seedProduct(
   ctx: E2EBusiness,
   name: string,
   quantity = 10,
-): Promise<number> {
+): Promise<{ productId: number; variantId: number; sellingPrice: number }> {
   const unit = await request.post(`${BACKEND}/api/product/unit`, {
     headers: authHeaders(ctx),
     data: {
@@ -145,7 +145,248 @@ export async function seedProduct(
     throw new Error(`product create failed: ${await product.text()}`);
   }
   const body = (await product.json()) as { data: { productId: number } };
-  return body.data.productId;
+  const productId = Number(body.data.productId);
+
+  const detail = (await (
+    await request.get(`${BACKEND}/api/product/${productId}`, {
+      headers: authHeaders(ctx),
+    })
+  ).json()) as any;
+  const variant = (detail?.data ?? detail)?.variants?.[0];
+  if (!variant?.id) {
+    throw new Error(`variant missing from product detail: ${JSON.stringify(detail)}`);
+  }
+  return {
+    productId,
+    variantId: Number(variant.id),
+    sellingPrice: Number(variant.sellingPrice ?? 100),
+  };
+}
+
+export async function createCustomer(
+  request: APIRequestContext,
+  ctx: E2EBusiness,
+  name: string,
+): Promise<number> {
+  const res = await request.post(`${BACKEND}/api/customers`, {
+    headers: authHeaders(ctx),
+    data: { name, phone: `+88017${Date.now() % 100000000}`.slice(0, 14) },
+  });
+  if (res.status() !== 201) {
+    throw new Error(`customer create failed: ${await res.text()}`);
+  }
+  const body = (await res.json()) as any;
+  return Number(body?.id ?? body?.data?.id ?? body?.customer?.id);
+}
+
+/** Creates a sale through POST /api/sales — the same payload the POS sends. */
+export async function createSaleViaApi(
+  request: APIRequestContext,
+  ctx: E2EBusiness,
+  opts: {
+    variantId: number;
+    customerId: number | null;
+    payments: { method: string; amount: number }[];
+  },
+): Promise<any> {
+  const res = await request.post(`${BACKEND}/api/sales`, {
+    headers: authHeaders(ctx),
+    data: {
+      saleDate: new Date().toISOString(),
+      customerId: opts.customerId,
+      payments: opts.payments,
+      discount: null,
+      vatPercent: 0,
+      idempotencyKey: `e2e-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+      items: [
+        { variantId: opts.variantId, quantity: 1, unitPrice: 100, discount: null },
+      ],
+    },
+  });
+  if (res.status() !== 201) {
+    throw new Error(`sale create failed: ${await res.text()}`);
+  }
+  return (await res.json()) as any;
+}
+
+/** Purchase → full receive, returning ids needed for returns/verification. */
+export async function createPurchaseChain(
+  request: APIRequestContext,
+  ctx: E2EBusiness,
+  variantId: number,
+  qty = 3,
+  unitCost = 50,
+): Promise<{ purchaseId: number; poNumber: string; itemId: number }> {
+  const supplier = await request.post(`${BACKEND}/api/contacts/supplier`, {
+    headers: authHeaders(ctx),
+    data: {
+      supplierName: `E2E Supplier ${Date.now()}`,
+      phone: "+8801711000000",
+      email: `e2e-supplier-${Date.now()}@example.test`,
+      address: "E2E",
+    },
+  });
+  if (supplier.status() !== 201) {
+    throw new Error(`supplier create failed: ${await supplier.text()}`);
+  }
+  const supplierBody = (await supplier.json()) as any;
+  const supplierId = Number(
+    supplierBody?.data?.supplierId ?? supplierBody?.data?.id ?? supplierBody?.id,
+  );
+
+  const purchase = await request.post(`${BACKEND}/api/purchases`, {
+    headers: authHeaders(ctx),
+    data: {
+      items: [{ variantId, quantity: qty, purchasePrice: unitCost }],
+      supplierId,
+      purchaseDate: new Date().toISOString(),
+    },
+  });
+  if (purchase.status() !== 201) {
+    throw new Error(`purchase create failed: ${await purchase.text()}`);
+  }
+  const purchaseBody = (await purchase.json()) as any;
+  const purchaseId = Number(purchaseBody?.data?.id);
+  const poNumber = String(purchaseBody?.data?.purchaseOrderNumber ?? "");
+
+  const itemsRes = await request.get(`${BACKEND}/api/purchases/items`, {
+    headers: authHeaders(ctx),
+  });
+  const itemsBody: any = await itemsRes.json();
+  const rows: any[] = itemsBody?.data ?? itemsBody ?? [];
+  const mine = rows.find(
+    (r) => Number(r?.purchaseId ?? r?.purchase_id) === purchaseId,
+  );
+  if (!mine?.id) {
+    throw new Error(
+      `purchase item not found for purchase ${purchaseId}: ${JSON.stringify(itemsBody).slice(0, 400)}`,
+    );
+  }
+  const itemId = Number(mine.id);
+
+  const receive = await request.post(`${BACKEND}/api/purchases/receive`, {
+    headers: authHeaders(ctx),
+    data: {
+      purchaseId,
+      items: [
+        {
+          itemId,
+          trackingType: "none",
+          receiveNow: qty,
+          unitCost,
+          sellingPrice: 100,
+          batches: [],
+          serialNumbers: [],
+        },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    },
+  });
+  if (receive.status() !== 201) {
+    throw new Error(`receive failed: ${await receive.text()}`);
+  }
+  return { purchaseId, poNumber, itemId };
+}
+
+export async function createPurchaseReturn(
+  request: APIRequestContext,
+  ctx: E2EBusiness,
+  purchaseId: number,
+  itemId: number,
+  quantity: number,
+): Promise<void> {
+  const res = await request.post(`${BACKEND}/api/purchase-return`, {
+    headers: authHeaders(ctx),
+    data: {
+      orderId: purchaseId,
+      reason: "damaged in transit",
+      changedItems: [{ purchaseItemId: itemId, quantity }],
+    },
+  });
+  if (res.status() !== 201) {
+    throw new Error(`purchase return failed: ${await res.text()}`);
+  }
+}
+
+/** Refunds one sold item (restock). `saleItemId` comes from the sales list. */
+export async function refundSaleItem(
+  request: APIRequestContext,
+  ctx: E2EBusiness,
+  saleItemId: number,
+): Promise<any> {
+  const res = await request.post(
+    `${BACKEND}/api/sold_products/refund/${saleItemId}`,
+    {
+      headers: authHeaders(ctx),
+      data: { reason: "customer_request", disposition: "restock" },
+    },
+  );
+  if (res.status() !== 200 && res.status() !== 201) {
+    throw new Error(`refund failed: ${await res.text()}`);
+  }
+  return (await res.json()) as any;
+}
+
+/** First row id from the sales list — the sale-item id used for refunds. */
+export async function firstSoldItemId(
+  request: APIRequestContext,
+  ctx: E2EBusiness,
+): Promise<{ id: number; invoiceNumber: string | null }> {
+  const res = await request.get(`${BACKEND}/api/sold_products`, {
+    headers: authHeaders(ctx),
+  });
+  const body: any = await res.json();
+  const rows: any[] = body?.data ?? body ?? [];
+  const row = rows[0];
+  if (!row) {
+    throw new Error(`sales list empty: ${JSON.stringify(body).slice(0, 400)}`);
+  }
+  return {
+    // The refund endpoint wants the SALE ITEM id — exactly what the UI sends
+    // (sales.api.ts: `item.saleItemsId`).
+    id: Number(row.saleItemsId ?? row.sale_items_id ?? row.id),
+    invoiceNumber:
+      row.invoiceNumber ?? row.invoice_number ?? row.sale?.invoiceNumber ?? null,
+  };
+}
+
+/** Creates a staff user with the given role slug and returns its login. */
+export async function createStaffUser(
+  request: APIRequestContext,
+  ctx: E2EBusiness,
+  roleSlug: string,
+): Promise<{ email: string; password: string }> {
+  const rolesRes = await request.get(`${BACKEND}/api/roles`, {
+    headers: authHeaders(ctx),
+  });
+  const rolesBody: any = await rolesRes.json();
+  const roles: any[] = rolesBody?.data ?? rolesBody ?? [];
+  const role = roles.find(
+    (r) => r?.slug === roleSlug || r?.name?.toLowerCase() === roleSlug,
+  );
+  if (!role?.id) {
+    throw new Error(
+      `role "${roleSlug}" not found: ${JSON.stringify(rolesBody).slice(0, 400)}`,
+    );
+  }
+
+  const email = `staff-${Date.now()}@example.test`;
+  const password = "strong-password-123";
+  const res = await request.post(`${BACKEND}/api/users`, {
+    headers: authHeaders(ctx),
+    data: {
+      fullName: "E2E Staff",
+      email,
+      password,
+      roleIds: [Number(role.id)],
+      locationIds: ctx.locationId ? [ctx.locationId] : undefined,
+    },
+  });
+  if (res.status() !== 201) {
+    throw new Error(`staff user create failed: ${await res.text()}`);
+  }
+  return { email, password };
 }
 
 /**

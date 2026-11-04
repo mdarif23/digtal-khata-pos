@@ -10,7 +10,7 @@ test("a created product appears in the products list and on its edit page", asyn
 }) => {
   const biz = await seedBusiness(request);
   const name = `E2E Product ${Date.now()}`;
-  const productId = await seedProduct(request, biz, name);
+  const { productId } = await seedProduct(request, biz, name);
 
   await injectSession(page.context(), biz);
 
