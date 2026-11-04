@@ -41,6 +41,8 @@ import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
 import { OnlineOrderDetailsPage } from "@/features/online-orders/pages/OnlineOrderDetailsPage";
 import { LandedCostPage } from "@/features/landed-cost/pages/LandedCostPage";
+import { RegisterPage } from "@/features/cashRegisters/RegisterPage";
+import { HardwareSettingsPage } from "@/features/hardware/pages/HardwareSettingsPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -343,6 +345,28 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="taxes.view">
             <TaxRatesPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/register",
+        element: (
+          <RequirePermission permission="cash_register.view">
+            <RegisterPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/settings/hardware",
+        element: (
+          <RequirePermission
+            anyPermission={[
+              "pos_terminal.view",
+              "cash_drawer.open",
+              "cash_drawer.open_without_sale",
+            ]}
+          >
+            <HardwareSettingsPage />
           </RequirePermission>
         ),
       },

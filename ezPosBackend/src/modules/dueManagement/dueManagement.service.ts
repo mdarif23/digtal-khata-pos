@@ -15,6 +15,7 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { roundMoney } from "../../utils/roundMoney.js";
+import { recordDueCollectionInTx } from "../cashRegisters/cashRegisters.service.js";
 import {
   calculatePayments,
   calculatePaymentStatus,
@@ -476,6 +477,7 @@ export async function getSupplierDueRows(
 export async function recordCustomerPayment(
   businessId: number,
   payload: CustomerPaymentInput,
+  actorUserId: number | null = null,
 ) {
   const { saleId, amount, paymentMethod } = payload;
 
@@ -495,6 +497,7 @@ export async function recordCustomerPayment(
         finalTotal: sales.finalTotal,
         invoiceNumber: sales.invoiceNumber,
         status: sales.status,
+        locationId: sales.locationId,
       })
       .from(sales)
       .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
@@ -599,6 +602,20 @@ export async function recordCustomerPayment(
         paymentStatus: nextStatus,
       })
       .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)));
+
+    // Cash collected at the counter enters the collector's open drawer
+    // transactionally (same source record — idempotent via the movement
+    // reference unique). Non-cash methods never touch drawer cash.
+    if (paymentMethod === "cash" && inserted) {
+      await recordDueCollectionInTx(
+        tx,
+        businessId,
+        actorUserId,
+        sale.locationId,
+        roundMoney(amount),
+        inserted.id,
+      );
+    }
 
     return {
       saleId,

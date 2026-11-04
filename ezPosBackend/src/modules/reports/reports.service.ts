@@ -1473,12 +1473,21 @@ export async function getRegisterCloseReport(
       COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'sale'), 0)::numeric AS "cashSales",
       COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'cash_in'), 0)::numeric AS "cashIn",
       COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'cash_out'), 0)::numeric AS "cashOut",
+      COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'cash_refund'), 0)::numeric AS "cashRefunds",
+      COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'safe_withdrawal'), 0)::numeric AS "safeWithdrawals",
+      COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'safe_deposit'), 0)::numeric AS "safeDeposits",
+      COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'adjustment_in'), 0)::numeric AS "adjustmentsIn",
+      COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'adjustment_out'), 0)::numeric AS "adjustmentsOut",
       CASE
         WHEN rs.status = 'closed' THEN rs.expected_cash
         ELSE rs.opening_cash
-          + COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'sale'), 0)
-          + COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'cash_in'), 0)
-          - COALESCE(SUM(rt.amount) FILTER (WHERE rt.type = 'cash_out'), 0)
+          + COALESCE(SUM(
+              CASE
+                WHEN rt.type IN ('cash_out', 'cash_refund', 'safe_deposit', 'adjustment_out')
+                  THEN -rt.amount
+                ELSE rt.amount
+              END
+            ), 0)
       END::numeric AS "expectedCash",
       rs.counted_cash::numeric AS "countedCash",
       rs.difference::numeric AS "difference",
@@ -1607,6 +1616,11 @@ export async function getRegisterCloseReport(
       nonCashSales: Number(row.nonCashSales ?? 0),
       cashIn: Number(row.cashIn),
       cashOut: Number(row.cashOut),
+      cashRefunds: Number(row.cashRefunds ?? 0),
+      safeWithdrawals: Number(row.safeWithdrawals ?? 0),
+      safeDeposits: Number(row.safeDeposits ?? 0),
+      adjustmentsIn: Number(row.adjustmentsIn ?? 0),
+      adjustmentsOut: Number(row.adjustmentsOut ?? 0),
       expectedCash: Number(row.expectedCash ?? 0),
       countedCash: row.countedCash === null ? null : Number(row.countedCash),
       difference: row.difference === null ? null : Number(row.difference),
@@ -1624,8 +1638,10 @@ export async function getRegisterCloseReport(
       countedCash: acc.countedCash + (row.countedCash ?? 0),
       difference: acc.difference + (row.difference ?? 0),
       cashSales: acc.cashSales + (row.status === "closed" ? row.cashSales : 0),
+      cashRefunds:
+        acc.cashRefunds + (row.status === "closed" ? row.cashRefunds : 0),
     }),
-    { sessionCount: 0, expectedCash: 0, countedCash: 0, difference: 0, cashSales: 0 },
+    { sessionCount: 0, expectedCash: 0, countedCash: 0, difference: 0, cashSales: 0, cashRefunds: 0 },
   );
 
   return {

@@ -440,16 +440,17 @@ describe("reporting consistency integration", { skip: !runIntegration }, () => {
 
   it("register expected cash matches its transaction ledger", async () => {
     // Owner's session: opening 1000 + cash sales (500 + 180 + 100 = 780)
-    // + cash in 100 = 1880 expected. The B-location sale (300) is NOT in
-    // this drawer.
+    // + cash in 100 − cash refunds (180 + 100 = 280, both counter payouts
+    // recorded by the refund path) = 1600 expected. The B-location sale
+    // (300) is NOT in this drawer.
     const current = await api(owner, "GET", "/api/sessions/current");
     const session = payload<{ data: { id: number; expectedCash: number } }>(
       current,
     ).data;
-    assert.equal(session.expectedCash, 1880);
+    assert.equal(session.expectedCash, 1600);
 
     const closed = await api(owner, "POST", `/api/sessions/${session.id}/close`, {
-      countedCash: 1870,
+      countedCash: 1590,
     });
     assert.equal(closed.status, 200);
     assert.equal(
@@ -474,6 +475,7 @@ describe("reporting consistency integration", { skip: !runIntegration }, () => {
           countedCash: number;
           difference: number;
           nonCashSales: number;
+          cashRefunds: number;
         }[];
         totals: { difference: number };
       };
@@ -484,8 +486,9 @@ describe("reporting consistency integration", { skip: !runIntegration }, () => {
     assert.ok(zSession);
     assert.equal(zSession.cashSales, 780);
     assert.equal(zSession.openingCash, 1000);
-    assert.equal(zSession.expectedCash, 1880);
-    assert.equal(zSession.countedCash, 1870);
+    assert.equal(zSession.cashRefunds, 280);
+    assert.equal(zSession.expectedCash, 1600);
+    assert.equal(zSession.countedCash, 1590);
     assert.equal(zSession.difference, -10);
     assert.equal(zSession.nonCashSales, 0);
   });

@@ -10,17 +10,42 @@ import {
   RiUserFill,
 } from "react-icons/ri";
 import { MdPointOfSale, MdManageAccounts } from "react-icons/md";
+import { usePermissions } from "@/hooks/usePermissions";
 
 /* ------------------ MENU CONFIG ------------------ */
-const MENU_ITEMS = [
+interface MenuItem {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  path: string;
+  /** Visible only when the caller holds ANY of these permissions. */
+  anyPermission?: string[];
+}
+
+const MENU_ITEMS: MenuItem[] = [
   { label: "Dashboard", icon: RiDashboardFill, path: "/dashboard" },
   { label: "POS", icon: MdPointOfSale, path: "/" },
+  {
+    label: "Register",
+    icon: RiArchiveDrawerFill,
+    path: "/register",
+    anyPermission: ["cash_register.view"],
+  },
   { label: "Products", icon: RiProductHuntFill, path: "/product" },
   { label: "Sales", icon: RiMoneyDollarBoxFill, path: "/sales" },
   { label: "Expense", icon: RiArchiveDrawerFill, path: "/expense" },
   { label: "Customers", icon: MdManageAccounts, path: "/customer" },
   { label: "Purchases Order", icon: MdManageAccounts, path: "/purchases" },
   { label: "Purchases List", icon: MdManageAccounts, path: "/purchases-list" },
+  {
+    label: "Hardware",
+    icon: RiUserFill,
+    path: "/settings/hardware",
+    anyPermission: [
+      "pos_terminal.view",
+      "cash_drawer.open",
+      "cash_drawer.open_without_sale",
+    ],
+  },
 ];
 
 /* ------------------ SIDEBAR ------------------ */
@@ -28,6 +53,11 @@ export default function Sidebar() {
   const [active, setActive] = useState("");
   const navigate = useNavigate();
   const location = useLocation();
+  const { hasAnyPermission } = usePermissions();
+
+  const items = MENU_ITEMS.filter(
+    (item) => item.anyPermission === undefined || hasAnyPermission(item.anyPermission),
+  );
 
   useEffect(() => {
     const current = MENU_ITEMS.find((item) => item.path === location.pathname);
@@ -44,7 +74,7 @@ export default function Sidebar() {
 
       {/* ---------- MENU ---------- */}
       <nav className="flex-1 overflow-y-auto no-scrollbar py-2">
-        {MENU_ITEMS.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           const isActive = active === item.label;
 

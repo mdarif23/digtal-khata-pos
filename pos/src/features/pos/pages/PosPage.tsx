@@ -29,6 +29,7 @@ import { RegisterDialog } from "@/features/cashRegisters/components/RegisterDial
 import { SyncStatusIndicator } from "@/features/pos/components/pos/SyncStatus.js";
 import { NotificationBell } from "@/features/pos/components/pos/NotificationBell.js";
 import { useHardwareStore } from "@/hardware/deviceManager.js";
+import { requestDrawerOpen } from "@/features/hardware/drawerCommands";
 import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
 import { useRealtimeStore } from "@/features/pos/offline/realtime.js";
 import axios from "../../../api/axios.js";
@@ -161,20 +162,32 @@ function Pos() {
       form.reset();
 
       // Auto-open the drawer after cash sales (Module 9): fire-and-forget —
-      // a drawer/printer problem never touches the completed sale. The kick
-      // is audited server-side.
+      // a drawer/printer problem never touches the completed sale. The
+      // backend authors an audited command for the paired terminal; the
+      // WebUSB printer path is the fallback.
       if (
         payload.payments.some((payment) => payment.method === "cash")
       ) {
         const hardware = useHardwareStore.getState();
         if (hardware.autoDrawerKick) {
-          void hardware.kickDrawer().then((result) => {
-            if (result.ok) {
-              void axios
-                .post("/hardware/drawer-kick", { saleInvoice: response?.data?.sale?.invoiceNumber ?? null })
-                .catch(() => undefined);
-            }
-          });
+          void requestDrawerOpen({ saleId: response?.data?.sale?.id }).then(
+            (result) => {
+              if (result.via === "usb" && result.opened) {
+                void axios
+                  .post("/hardware/drawer-kick", {
+                    saleInvoice: response?.data?.sale?.invoiceNumber ?? null,
+                  })
+                  .catch(() => undefined);
+              }
+              if (!result.opened && result.error) {
+                toast.add({
+                  title: "Drawer did not open",
+                  description: result.error,
+                  type: "info",
+                });
+              }
+            },
+          );
         }
       }
 
