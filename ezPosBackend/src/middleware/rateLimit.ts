@@ -60,3 +60,36 @@ export const ipnRateLimit = rateLimit({
   legacyHeaders: false,
   message: jsonMessage("Too many requests."),
 });
+
+/**
+ * Drawer-command authoring: keyed by USER (POS terminals often share one
+ * office IP), tight enough that a compromised session cannot spam physical
+ * drawer kicks (each command expires in 15 s anyway). Cashier workflows
+ * need at most a few kicks per minute.
+ */
+export const drawerCommandRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.user?.id ?? req.ip ?? "anonymous"),
+  message: jsonMessage("Too many drawer commands — wait a moment."),
+});
+
+/**
+ * Bridge claim/ack polling: keyed by terminal id. Legit bridges poll every
+ * ~2 s (≈30 claims/min); the ceiling tolerates a few terminals behind one
+ * address without letting a runaway client hammer the database.
+ */
+export const bridgePollRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 240,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const raw = req.headers["x-terminal-id"];
+    const id = Array.isArray(raw) ? raw[0] : raw;
+    return id ? `terminal-${id}` : (req.ip ?? "anonymous");
+  },
+  message: jsonMessage("Too many bridge requests — check the bridge poll interval."),
+});

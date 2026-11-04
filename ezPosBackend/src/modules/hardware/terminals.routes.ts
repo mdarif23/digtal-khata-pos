@@ -10,6 +10,7 @@ import {
   requireAnyPermission,
   requirePermission,
 } from "../../middleware/permissions.js";
+import { drawerCommandRateLimit } from "../../middleware/rateLimit.js";
 
 const router = express.Router();
 
@@ -82,6 +83,7 @@ const commandRead = [
 ] as const;
 router.post(
   "/api/hardware/commands",
+  drawerCommandRateLimit,
   ...locationRead,
   requireFullAccess,
   terminalsController.postHardwareCommand,

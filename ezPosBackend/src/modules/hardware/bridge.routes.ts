@@ -1,7 +1,7 @@
 import express from "express";
 import * as bridgeController from "./bridge.controller.js";
 import { requireTerminalAuth } from "../../middleware/terminalAuth.js";
-import { authRateLimit } from "../../middleware/rateLimit.js";
+import { authRateLimit, bridgePollRateLimit } from "../../middleware/rateLimit.js";
 
 const router = express.Router();
 
@@ -13,8 +13,9 @@ router.post(
   bridgeController.bridgePair,
 );
 
-// Everything below requires a paired terminal's secret.
-const terminal = [requireTerminalAuth()] as const;
+// Everything below requires a paired terminal's secret. Poll endpoints get
+// a per-terminal ceiling so a runaway bridge cannot hammer the database.
+const terminal = [requireTerminalAuth(), bridgePollRateLimit] as const;
 
 router.get(
   "/api/bridge/terminal",

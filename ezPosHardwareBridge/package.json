@@ -14,6 +14,7 @@
     "pair": "tsx src/index.ts pair",
     "doctor": "tsx src/index.ts doctor",
     "test": "tsx --test \"tests/**/*.test.ts\"",
+    "e2e": "tsx scripts/e2e-check.mts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
