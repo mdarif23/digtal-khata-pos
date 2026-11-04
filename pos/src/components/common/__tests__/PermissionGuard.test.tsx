@@ -151,18 +151,15 @@ describe("PermissionGuard", () => {
     expect(screen.getByText("both-held section")).toBeInTheDocument();
   });
 
-  it("BUG PIN: anyPermission is evaluated with ALL semantics, not ANY", () => {
-    // PermissionGuard.tsx passes every prop through hasAllPermissions, so a
-    // multi-item anyPermission requires ALL of them. The cashier below holds
-    // pos.create_sale but not products.view_cost — the section stays hidden
-    // even though one permission matches. If the component is ever corrected
-    // to true ANY semantics, this test must flip with it.
+  it("allows when ANY anyPermission is held", () => {
+    // The cashier holds pos.create_sale but not products.view_cost — one
+    // match is enough for anyPermission.
     render(
       <PermissionGuard anyPermission={["products.view_cost", "pos.create_sale"]}>
         <div>either section</div>
       </PermissionGuard>,
     );
-    expect(screen.queryByText("either section")).not.toBeInTheDocument();
+    expect(screen.getByText("either section")).toBeInTheDocument();
   });
 
   it("renders when a single-item anyPermission matches", () => {

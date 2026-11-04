@@ -16,15 +16,19 @@ interface GuardProps {
 }
 
 function denies(
-  check: (required: string[]) => boolean,
+  perms: {
+    hasPermission: (permission: string) => boolean;
+    hasAnyPermission: (required: string[]) => boolean;
+    hasAllPermissions: (required: string[]) => boolean;
+  },
   props: Pick<
     GuardProps,
     "permission" | "anyPermission" | "allPermissions"
   >,
 ): boolean {
-  if (props.permission) return !check([props.permission]);
-  if (props.anyPermission) return !check(props.anyPermission);
-  if (props.allPermissions) return !check(props.allPermissions);
+  if (props.permission) return !perms.hasPermission(props.permission);
+  if (props.anyPermission) return !perms.hasAnyPermission(props.anyPermission);
+  if (props.allPermissions) return !perms.hasAllPermissions(props.allPermissions);
   return false;
 }
 
@@ -36,10 +40,9 @@ function denies(
 export function PermissionGuard(props: GuardProps) {
   const version = useSessionStore((state) => state.version);
   void version; // re-render on session refresh
-  const { hasAllPermissions } = usePermissions();
+  const perms = usePermissions();
 
-  const check = (required: string[]) => hasAllPermissions(required);
-  if (denies(check, props)) {
+  if (denies(perms, props)) {
     return <>{props.fallback ?? null}</>;
   }
   return <>{props.children}</>;
@@ -65,16 +68,9 @@ export function PermissionButton({
 }: PermissionButtonProps) {
   const version = useSessionStore((state) => state.version);
   void version;
-  const { hasAllPermissions } = usePermissions();
+  const perms = usePermissions();
 
-  const check = (required: string[]) => hasAllPermissions(required);
-  if (
-    denies(check, {
-      permission,
-      anyPermission,
-      allPermissions,
-    })
-  ) {
+  if (denies(perms, { permission, anyPermission, allPermissions })) {
     return null;
   }
   return <Button {...buttonProps}>{children}</Button>;
@@ -97,10 +93,9 @@ export function RequirePermission({
 }: RequirePermissionProps) {
   const version = useSessionStore((state) => state.version);
   void version;
-  const { hasAllPermissions } = usePermissions();
+  const perms = usePermissions();
 
-  const check = (required: string[]) => hasAllPermissions(required);
-  if (denies(check, permissionProps)) {
+  if (denies(perms, permissionProps)) {
     return <Navigate to={redirectTo} replace />;
   }
   return <>{children}</>;
