@@ -18,6 +18,7 @@ import {
   createOnlineOrder,
 } from "../modules/commerce/orders.service.js";
 import { runCommerceSweeps } from "../jobs/commerceJobs.js";
+import { createOwnerCtx } from "./helpers/fixtures.js";
 
 const runIntegration =
   process.env.INTEGRATION_TESTS === "1" && Boolean(process.env.DATABASE_URL);
@@ -56,70 +57,7 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
   });
 
   let counter = 0;
-  const uniqueEmail = () =>
-    `comm-${Date.now()}-${(counter += 1)}@example.test`;
-
-  interface Ctx {
-    token: string;
-    businessId: number;
-    userId: number;
-    email: string;
-  }
-
-  async function createOwnerCtx(
-    businessName: string,
-    options: { noLocation?: boolean } = {},
-  ): Promise<Ctx> {
-    const email = uniqueEmail();
-    const reg = await fetch(`${baseUrl}/api/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fullName: "Commerce Test",
-        email,
-        password: "strong-password-123",
-      }),
-    });
-    assert.equal(reg.status, 201);
-    const login = await fetch(`${baseUrl}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: "strong-password-123" }),
-    });
-    const loginBody = (await login.json()) as {
-      accessToken: string;
-      user: { id: number };
-    };
-    const biz = await fetch(`${baseUrl}/api/businesses`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${loginBody.accessToken}`,
-      },
-      body: JSON.stringify({ name: businessName }),
-    });
-    assert.equal(biz.status, 201);
-    const bizBody = (await biz.json()) as { business: { id: number } };
-    if (!options.noLocation) {
-      // The default location (first one) is where storefront stock lives.
-      const loc = await fetch(`${baseUrl}/api/locations`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${loginBody.accessToken}`,
-          "X-Business-Id": String(bizBody.business.id),
-        },
-        body: JSON.stringify({ name: "Main Store" }),
-      });
-      assert.equal(loc.status, 201);
-    }
-    return {
-      token: loginBody.accessToken,
-      businessId: bizBody.business.id,
-      userId: loginBody.user.id,
-      email,
-    };
-  }
+  // Owner/business fixtures come from the shared helpers (src/test/helpers).
 
   /**
    * Product with one variant + a stock row of `qty` at the business's
@@ -182,7 +120,7 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
   }
 
   it("creates a pending online order with an active reservation (idempotent)", async () => {
-    const owner = await createOwnerCtx("Commerce Order Co");
+    const owner = await createOwnerCtx(baseUrl, "Commerce Order Co");
     const variantId = await seedVariant(owner.businessId, 10);
     const dupKey = `order-${Date.now()}-a`;
 
@@ -229,7 +167,7 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
   });
 
   it("confirms an order: FIFO consumption, movement, reservation confirmed", async () => {
-    const owner = await createOwnerCtx("Commerce Confirm Co");
+    const owner = await createOwnerCtx(baseUrl, "Commerce Confirm Co");
     const variantId = await seedVariant(owner.businessId, 10, "batch");
     const order = await createOnlineOrder({
       businessId: owner.businessId,
@@ -275,7 +213,7 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
   });
 
   it("cancelling releases the reservation and restores availability", async () => {
-    const owner = await createOwnerCtx("Commerce Cancel Co");
+    const owner = await createOwnerCtx(baseUrl, "Commerce Cancel Co");
     const variantId = await seedVariant(owner.businessId, 5);
     const order = await createOnlineOrder({
       businessId: owner.businessId,
@@ -301,7 +239,7 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
   });
 
   it("concurrent online orders cannot oversell the same stock", async () => {
-    const owner = await createOwnerCtx("Commerce Race Co");
+    const owner = await createOwnerCtx(baseUrl, "Commerce Race Co");
     const variantId = await seedVariant(owner.businessId, 5);
 
     const attempt = (key: string) =>
@@ -331,7 +269,7 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
   });
 
   it("reserved channel allocation caps online availability", async () => {
-    const owner = await createOwnerCtx("Commerce Alloc Co");
+    const owner = await createOwnerCtx(baseUrl, "Commerce Alloc Co");
     const variantId = await seedVariant(owner.businessId, 10);
     const location = await pg!.query(
       "SELECT id FROM locations WHERE business_id = $1 AND is_default = true",
@@ -378,7 +316,7 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
   });
 
   it("the sweep expires stale reservations and cancels pending orders", async () => {
-    const owner = await createOwnerCtx("Commerce Expiry Co");
+    const owner = await createOwnerCtx(baseUrl, "Commerce Expiry Co");
     const variantId = await seedVariant(owner.businessId, 5);
     const order = await createOnlineOrder({
       businessId: owner.businessId,
@@ -414,8 +352,8 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
   });
 
   it("mode changes: online_only auto-creates a location; downgrade blocked with integrations", async () => {
-    const owner = await createOwnerCtx("Mode Change Co", { noLocation: true });
-    const admin = await createOwnerCtx("Mode Admin");
+    const owner = await createOwnerCtx(baseUrl, "Mode Change Co", { noLocation: true });
+    const admin = await createOwnerCtx(baseUrl, "Mode Admin");
 
     // online_only without any location → "Online Store" auto-created.
     const put = await fetch(`${baseUrl}/api/businesses/${owner.businessId}`, {
