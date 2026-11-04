@@ -14,6 +14,7 @@ import { purchaseItems } from "./purchaseItems.js";
 import { products } from "./products.js";
 import { purchases } from "./purchases.js";
 import { expenses } from "./expenses.js";
+import { expensePayments } from "./expensePayments.js";
 import { expenseCategories } from "./expenseCategories.js";
 import { productVariants } from "./productVariants.js";
 import { categories } from "./categories.js";
@@ -213,10 +214,18 @@ export const purchasesRelations = relations(purchases, ({ one, many }) => ({
   }),
 }));
 
-export const expensesRelations = relations(expenses, ({ one }) => ({
+export const expensesRelations = relations(expenses, ({ one, many }) => ({
   expenseCategory: one(expenseCategories, {
     fields: [expenses.categoryId],
     references: [expenseCategories.id],
+  }),
+  payments: many(expensePayments),
+}));
+
+export const expensePaymentsRelations = relations(expensePayments, ({ one }) => ({
+  expense: one(expenses, {
+    fields: [expensePayments.expenseId],
+    references: [expenses.id],
   }),
 }));
 
