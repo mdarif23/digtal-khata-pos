@@ -25,6 +25,19 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "pos.apply_discount", module: "pos", description: "Apply discounts to sales" },
   { key: "pos.process_return", module: "pos", description: "Process sale returns at the register" },
 
+  // Cash registers & drawer
+  { key: "cash_register.view", module: "cash_register", description: "View registers and register sessions" },
+  { key: "cash_register.open", module: "cash_register", description: "Open a register session" },
+  { key: "cash_register.close", module: "cash_register", description: "Close and reconcile a register session" },
+  { key: "cash_register.manage", module: "cash_register", description: "Create, rename and deactivate registers" },
+  { key: "cash_movement.create", module: "cash_register", description: "Record cash in/out, safe deposits/withdrawals and adjustments" },
+  { key: "cash_drawer.open", module: "cash_register", description: "Open the physical cash drawer (e.g. after a cash sale)" },
+  { key: "cash_drawer.open_without_sale", module: "cash_register", description: "Open the physical cash drawer without an associated sale" },
+
+  // POS terminals (hardware bridge)
+  { key: "pos_terminal.view", module: "pos_terminal", description: "View POS terminals and their hardware status" },
+  { key: "pos_terminal.manage", module: "pos_terminal", description: "Pair, edit and remove POS terminals" },
+
   // Sales
   { key: "sales.view", module: "sales", description: "View sales records" },
   { key: "sales.edit", module: "sales", description: "Edit sales records" },
@@ -159,6 +172,15 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "pos.create_sale",
     "pos.apply_discount",
     "pos.process_return",
+    "cash_register.view",
+    "cash_register.open",
+    "cash_register.close",
+    "cash_register.manage",
+    "cash_movement.create",
+    "cash_drawer.open",
+    "cash_drawer.open_without_sale",
+    "pos_terminal.view",
+    "pos_terminal.manage",
     "sales.view",
     "sales.edit",
     "sales.return",
@@ -219,6 +241,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
   cashier: [
     "pos.view",
     "pos.create_sale",
+    "cash_register.view",
+    "cash_register.open",
+    "cash_register.close",
+    "cash_movement.create",
+    "cash_drawer.open",
     "sales.view",
     "products.view",
     "inventory.view",
@@ -235,6 +262,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
   accountant: [
     "dashboard.view",
     "sales.view",
+    "cash_register.view",
+    "pos_terminal.view",
     "purchases.view",
     "products.view",
     "products.view_cost",

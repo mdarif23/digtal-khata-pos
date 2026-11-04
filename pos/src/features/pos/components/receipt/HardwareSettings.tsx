@@ -3,14 +3,20 @@ import { Button } from "@/components/ui/button.js";
 import { Switch } from "@/components/ui/switch.js";
 import { Badge } from "@/components/ui/badge.js";
 import { toast } from "@/components/ui/toast.js";
-import axios from "@/api/axios";
-import { useHardwareStore } from "@/hardware/deviceManager";
+import { useHardwareStore } from "@/hardware/deviceManager.js";
+import {
+  listPairedTerminals,
+  getPreferredTerminalId,
+  requestDrawerOpen,
+  setPreferredTerminalId,
+} from "@/features/hardware/drawerCommands.js";
+import { useTerminals } from "@/features/hardware/hooks/useTerminals.js";
 
 /**
  * Hardware settings (Module 9): connection mode, USB printer connection
  * status, automatic drawer kick after cash sales, and a manual kick.
- * Manual kicks are audited server-side; automatic kicks ride the already-
- * audited cash sale.
+ * Drawer opens prefer the location's paired hardware-bridge terminal
+ * (backend-relayed, audited); the WebUSB printer path is the fallback.
  */
 export function HardwareSettings() {
   const mode = useHardwareStore((s) => s.mode);
@@ -23,12 +29,17 @@ export function HardwareSettings() {
   const connect = useHardwareStore((s) => s.connect);
   const disconnect = useHardwareStore((s) => s.disconnect);
   const refresh = useHardwareStore((s) => s.refresh);
-  const kickDrawer = useHardwareStore((s) => s.kickDrawer);
   const [busy, setBusy] = useState(false);
+  const [terminalsVersion, setTerminalsVersion] = useState(0);
+  const terminals = useTerminals(true);
+  const paired = (terminals.data ?? []).filter(
+    (t) => t.paired && t.status === "active",
+  );
+  const preferredId = getPreferredTerminalId();
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
+  }, [refresh, terminalsVersion]);
 
   async function onConnect() {
     setBusy(true);
@@ -52,12 +63,17 @@ export function HardwareSettings() {
   async function onKick() {
     setBusy(true);
     try {
-      const result = await kickDrawer();
-      if (result.ok) {
-        await axios
-          .post("/hardware/drawer-kick", {})
-          .catch(() => undefined); // audit; never blocks the drawer
-        toast.add({ type: "success", description: "Drawer kicked." });
+      // Manual kick without a sale: the backend enforces
+      // cash_drawer.open_without_sale on the command path.
+      const result = await requestDrawerOpen({ reason: "manual" });
+      if (result.opened) {
+        toast.add({
+          type: "success",
+          description:
+            result.via === "terminal"
+              ? "Drawer opened via the paired terminal."
+              : "Drawer kicked.",
+        });
       } else {
         toast.add({
           type: "error",
@@ -65,6 +81,7 @@ export function HardwareSettings() {
           priority: "high",
         });
       }
+      setTerminalsVersion((version) => version + 1);
     } finally {
       setBusy(false);
     }
@@ -126,6 +143,34 @@ export function HardwareSettings() {
         >
           Kick drawer
         </Button>
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-muted-foreground">Drawer terminal</span>
+        <select
+          className="rounded-md border bg-background p-1 text-xs"
+          value={preferredId ?? ""}
+          onChange={(event) => {
+            const value = event.target.value;
+            setPreferredTerminalId(value === "" ? null : Number(value));
+            setTerminalsVersion((version) => version + 1);
+          }}
+        >
+          <option value="">
+            {paired.length === 1
+              ? `Auto — ${paired[0]!.name}`
+              : paired.length === 0
+                ? "None paired at this location"
+                : "Auto (ambiguous — pick one)"}
+          </option>
+          {paired.map((terminal) => (
+            <option key={terminal.id} value={terminal.id}>
+              {terminal.name}
+            </option>
+          ))}
+        </select>
+        {paired.length > 0 ? (
+          <Badge variant="outline">Bridge relays drawer commands</Badge>
+        ) : null}
       </div>
       <div className="text-[11px] text-muted-foreground">
         Device failures never block a sale — printing falls back to the

@@ -18,9 +18,19 @@ import { roundMoney } from "../../utils/roundMoney.js";
 type Tx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const CASH_MOVEMENT_DELTA = sql`CASE
-  WHEN ${registerTransactions.type} = 'cash_out' THEN -${registerTransactions.amount}
+  WHEN ${registerTransactions.type} IN ('cash_out', 'cash_refund', 'safe_deposit', 'adjustment_out')
+    THEN -${registerTransactions.amount}
   ELSE ${registerTransactions.amount}
 END`;
+
+/** Manual (form-driven) movement types — direction carried by the type. */
+export type ManualMovementType =
+  | "cash_in"
+  | "cash_out"
+  | "safe_deposit"
+  | "safe_withdrawal"
+  | "adjustment_in"
+  | "adjustment_out";
 
 interface SessionSummary {
   id: number;
@@ -39,7 +49,7 @@ interface SessionSummary {
   closedAt: Date | null;
 }
 
-/** Expected cash = opening + cash sales + cash in − cash out. */
+/** Expected cash = opening + sales + cash in + safe withdrawals + adjustments in − cash out − cash refunds − safe deposits − adjustments out. */
 async function computeExpectedCash(
   tx: Tx,
   sessionId: number,
@@ -404,7 +414,7 @@ export async function addCashMovement(
   callerUserId: number,
   callerIsOwner: boolean,
   sessionId: number,
-  type: "cash_in" | "cash_out",
+  type: ManualMovementType,
   amount: number,
   note?: string,
 ): Promise<SessionSummary> {
@@ -631,6 +641,103 @@ export async function recordCashSaleInTx(
   saleId: number,
 ): Promise<void> {
   if (cashAmount <= 0) return;
+  const session = await findOpenSessionForAttribution(
+    tx,
+    businessId,
+    userId,
+    locationId,
+  );
+  if (!session) return;
+  await tx.insert(registerTransactions).values({
+    businessId,
+    sessionId: session.id,
+    userId,
+    type: "sale",
+    amount: roundMoney(cashAmount),
+    referenceType: "sale",
+    referenceId: saleId,
+  });
+}
+
+/**
+ * Auto-records a counter cash refund into the refunding user's open register
+ * session (same transaction as the refund — atomic). The drawer physically
+ * pays the customer, so expected cash must decrease. No-op when the actor
+ * has no open session at the sale's location — consistent with cash-sale
+ * attribution.
+ */
+export async function recordCashRefundInTx(
+  tx: Tx,
+  businessId: number,
+  userId: number | null,
+  locationId: number | null,
+  cashAmount: number,
+  refundId: number,
+): Promise<void> {
+  if (cashAmount <= 0 || userId === null || locationId === null) return;
+  const session = await findOpenSessionForAttribution(
+    tx,
+    businessId,
+    userId,
+    locationId,
+  );
+  if (!session) return;
+  await tx.insert(registerTransactions).values({
+    businessId,
+    sessionId: session.id,
+    userId,
+    type: "cash_refund",
+    amount: roundMoney(cashAmount),
+    referenceType: "sale_refund",
+    referenceId: refundId,
+  });
+}
+
+/**
+ * Auto-records a cash due collection (customer invoice payment taken at the
+ * counter) into the collector's open register session — same transaction as
+ * the payment row. The source record is the sale_payment itself; the
+ * reference unique index makes retries idempotent.
+ */
+export async function recordDueCollectionInTx(
+  tx: Tx,
+  businessId: number,
+  userId: number | null,
+  locationId: number | null,
+  cashAmount: number,
+  paymentId: number,
+): Promise<void> {
+  if (cashAmount <= 0 || userId === null || locationId === null) return;
+  const session = await findOpenSessionForAttribution(
+    tx,
+    businessId,
+    userId,
+    locationId,
+  );
+  if (!session) return;
+  await tx.insert(registerTransactions).values({
+    businessId,
+    sessionId: session.id,
+    userId,
+    type: "cash_in",
+    amount: roundMoney(cashAmount),
+    referenceType: "sale_payment",
+    referenceId: paymentId,
+  });
+}
+
+/**
+ * The actor's open session, but only when its register sits at the given
+ * location (a session opened at another location must never absorb this
+ * business's cash). Row-locks the session so concurrent attributions
+ * serialize on the drawer.
+ */
+async function findOpenSessionForAttribution(
+  tx: Tx,
+  businessId: number,
+  userId: number,
+  locationId: number,
+): Promise<{ id: number } | null> {
   const [session] = await tx
     .select({
       id: registerSessions.id,
@@ -650,17 +757,9 @@ export async function recordCashSaleInTx(
     )
     .for("update", { of: registerSessions });
   if (!session || session.registerLocationId !== locationId) {
-    return;
+    return null;
   }
-  await tx.insert(registerTransactions).values({
-    businessId,
-    sessionId: session.id,
-    userId,
-    type: "sale",
-    amount: roundMoney(cashAmount),
-    referenceType: "sale",
-    referenceId: saleId,
-  });
+  return { id: session.id };
 }
 
 // ----------------------------------------------------
@@ -680,6 +779,11 @@ export interface RegisterSessionReportRow {
   cashSales: number;
   cashIn: number;
   cashOut: number;
+  cashRefunds: number;
+  safeWithdrawals: number;
+  safeDeposits: number;
+  adjustmentsIn: number;
+  adjustmentsOut: number;
   openedAt: Date | null;
   closedAt: Date | null;
 }
@@ -701,6 +805,7 @@ export async function getRegisterSessionReport(
     countedCash: number;
     difference: number;
     cashSales: number;
+    cashRefunds: number;
   };
 }> {
   const rows = await sessionBaseQuery()
@@ -726,13 +831,57 @@ export async function getRegisterSessionReport(
     .from(registerTransactions)
     .where(eq(registerTransactions.businessId, businessId))
     .groupBy(registerTransactions.sessionId, registerTransactions.type);
-  const movementsBySession = new Map<number, { sales: number; cashIn: number; cashOut: number }>();
+  const movementsBySession = new Map<
+    number,
+    {
+      sales: number;
+      cashIn: number;
+      cashOut: number;
+      cashRefunds: number;
+      safeWithdrawals: number;
+      safeDeposits: number;
+      adjustmentsIn: number;
+      adjustmentsOut: number;
+    }
+  >();
   for (const row of movementTotals) {
-    const entry =
-      movementsBySession.get(row.sessionId) ?? { sales: 0, cashIn: 0, cashOut: 0 };
-    if (row.type === "sale") entry.sales = Number(row.total);
-    else if (row.type === "cash_in") entry.cashIn = Number(row.total);
-    else entry.cashOut = Number(row.total);
+    const entry = movementsBySession.get(row.sessionId) ?? {
+      sales: 0,
+      cashIn: 0,
+      cashOut: 0,
+      cashRefunds: 0,
+      safeWithdrawals: 0,
+      safeDeposits: 0,
+      adjustmentsIn: 0,
+      adjustmentsOut: 0,
+    };
+    const total = Number(row.total);
+    switch (row.type) {
+      case "sale":
+        entry.sales = total;
+        break;
+      case "cash_in":
+        entry.cashIn = total;
+        break;
+      case "cash_out":
+        entry.cashOut = total;
+        break;
+      case "cash_refund":
+        entry.cashRefunds = total;
+        break;
+      case "safe_withdrawal":
+        entry.safeWithdrawals = total;
+        break;
+      case "safe_deposit":
+        entry.safeDeposits = total;
+        break;
+      case "adjustment_in":
+        entry.adjustmentsIn = total;
+        break;
+      case "adjustment_out":
+        entry.adjustmentsOut = total;
+        break;
+    }
     movementsBySession.set(row.sessionId, entry);
   }
 
@@ -741,6 +890,11 @@ export async function getRegisterSessionReport(
       sales: 0,
       cashIn: 0,
       cashOut: 0,
+      cashRefunds: 0,
+      safeWithdrawals: 0,
+      safeDeposits: 0,
+      adjustmentsIn: 0,
+      adjustmentsOut: 0,
     };
     return {
       sessionId: row.id,
@@ -755,6 +909,11 @@ export async function getRegisterSessionReport(
       cashSales: movements.sales,
       cashIn: movements.cashIn,
       cashOut: movements.cashOut,
+      cashRefunds: movements.cashRefunds,
+      safeWithdrawals: movements.safeWithdrawals,
+      safeDeposits: movements.safeDeposits,
+      adjustmentsIn: movements.adjustmentsIn,
+      adjustmentsOut: movements.adjustmentsOut,
       openedAt: row.openedAt,
       closedAt: row.closedAt,
     };
@@ -767,8 +926,9 @@ export async function getRegisterSessionReport(
       countedCash: acc.countedCash + (row.countedCash ?? 0),
       difference: acc.difference + (row.difference ?? 0),
       cashSales: acc.cashSales + (row.status === "closed" ? row.cashSales : 0),
+      cashRefunds: acc.cashRefunds + (row.status === "closed" ? row.cashRefunds : 0),
     }),
-    { sessionCount: 0, expectedCash: 0, countedCash: 0, difference: 0, cashSales: 0 },
+    { sessionCount: 0, expectedCash: 0, countedCash: 0, difference: 0, cashSales: 0, cashRefunds: 0 },
   );
 
   return { rows: reportRows, totals };

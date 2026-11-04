@@ -28,9 +28,24 @@ export const registerSessionStatusEnum = pgEnum("register_session_status", [
   "closed",
 ]);
 
+/**
+ * Drawer movement types. Direction convention — INCREASING drawer cash:
+ * sale (net cash portion), cash_in, safe_withdrawal (safe → drawer),
+ * adjustment_in. DECREASING drawer cash: cash_out, cash_refund (counter
+ * payout to the customer), safe_deposit (drawer → safe), adjustment_out.
+ */
 export const registerTransactionTypeEnum = pgEnum(
   "register_transaction_type",
-  ["sale", "cash_in", "cash_out"],
+  [
+    "sale",
+    "cash_in",
+    "cash_out",
+    "cash_refund",
+    "safe_deposit",
+    "safe_withdrawal",
+    "adjustment_in",
+    "adjustment_out",
+  ],
 );
 
 /**
@@ -135,8 +150,9 @@ export const registerSessions = pgTable(
 
 /**
  * Cash drawer movements. Cash portions of sales are recorded automatically
- * by the sale path; cash_in/cash_out are manual drawer operations.
- * amount is always positive — the type determines the direction.
+ * by the sale path; cash_refund by the refund path (counter payouts);
+ * safe/adjustment types are manual drawer operations. amount is always
+ * positive — the type determines the direction.
  */
 export const registerTransactions = pgTable(
   "register_transactions",
@@ -162,6 +178,15 @@ export const registerTransactions = pgTable(
   },
   (table) => [
     index("register_transactions_session_idx").on(table.sessionId),
+    // Idempotency: a source financial record (sale, sale_refund,
+    // sale_payment, expense_payment) can produce at most one drawer
+    // movement. Manual movements (reference_type 'manual', reference_id
+    // NULL) are exempt via the partial predicate.
+    uniqueIndex("register_transactions_reference_uq")
+      .on(table.businessId, table.referenceType, table.referenceId)
+      .where(
+        sql`${table.referenceType} IS NOT NULL AND ${table.referenceId} IS NOT NULL AND ${table.referenceType} <> 'manual'`,
+      ),
     foreignKey({
       columns: [table.sessionId, table.businessId],
       foreignColumns: [registerSessions.id, registerSessions.businessId],

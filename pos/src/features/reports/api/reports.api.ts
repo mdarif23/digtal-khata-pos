@@ -82,6 +82,11 @@ export interface RegisterSessionRow {
   cashSales: number;
   cashIn: number;
   cashOut: number;
+  cashRefunds: number;
+  safeWithdrawals: number;
+  safeDeposits: number;
+  adjustmentsIn: number;
+  adjustmentsOut: number;
   openedAt: string | null;
   closedAt: string | null;
 }
@@ -94,6 +99,7 @@ export interface RegisterSessionReportData {
     countedCash: number;
     difference: number;
     cashSales: number;
+    cashRefunds: number;
   };
 }
 

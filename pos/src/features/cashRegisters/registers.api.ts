@@ -1,5 +1,23 @@
 import api from "../../api/axios.js";
 
+/** Manual drawer movement types — direction carried by the type. */
+export type ManualMovementType =
+  | "cash_in"
+  | "cash_out"
+  | "safe_deposit"
+  | "safe_withdrawal"
+  | "adjustment_in"
+  | "adjustment_out";
+
+export const MOVEMENT_LABELS: Record<ManualMovementType, string> = {
+  cash_in: "Cash in",
+  cash_out: "Cash out",
+  safe_deposit: "Safe deposit",
+  safe_withdrawal: "Safe withdrawal",
+  adjustment_in: "Adjustment +",
+  adjustment_out: "Adjustment −",
+};
+
 export interface RegisterSummary {
   id: number;
   name: string;
@@ -31,7 +49,15 @@ export interface RegisterSession {
 
 export interface RegisterTransaction {
   id: number;
-  type: "sale" | "cash_in" | "cash_out";
+  type:
+    | "sale"
+    | "cash_in"
+    | "cash_out"
+    | "cash_refund"
+    | "safe_deposit"
+    | "safe_withdrawal"
+    | "adjustment_in"
+    | "adjustment_out";
   amount: number;
   referenceType: string | null;
   referenceId: number | null;
@@ -67,7 +93,7 @@ export async function openRegisterApi(
 
 export async function addCashMovementApi(
   sessionId: number,
-  type: "cash_in" | "cash_out",
+  type: ManualMovementType,
   amount: number,
   note?: string,
 ): Promise<RegisterSession> {
