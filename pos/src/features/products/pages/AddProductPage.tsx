@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { ArrowLeft, PackagePlus } from "lucide-react";
-import { Link, useBlocker, useNavigate, useParams } from "react-router";
+import { Link, useBlocker, useLocation, useNavigate, useParams } from "react-router";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@/components/ui/button.js";
 import {
@@ -43,6 +43,7 @@ const ProductStockForm = () => {
   const { id: productId } = useParams();
   const isEditing = productId !== undefined;
   const navigate = useNavigate();
+  const location = useLocation();
   const form = useForm<ProductTypeInput, unknown, ProductTypeOutput>({
     defaultValues,
     resolver: zodResolver(productSchema),
@@ -56,6 +57,32 @@ const ProductStockForm = () => {
   const isDirty = form.formState.isDirty;
   const isSubmitting = form.formState.isSubmitting;
   const skipNextNavigationBlock = useRef(false);
+
+  // Barcode scan-through (Products page scan → open edit): scroll to and
+  // flash the scanned variant row when navigation carried one.
+  useEffect(() => {
+    const highlightVariantId = (
+      location.state as { highlightVariantId?: number } | null
+    )?.highlightVariantId;
+    if (highlightVariantId === undefined) return;
+    window.history.replaceState({}, "");
+    const timer = window.setTimeout(() => {
+      const row = document.querySelector(
+        `[data-variant-id="${highlightVariantId}"]`,
+      );
+      if (!row) return;
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      row.classList.add("ring-2", "ring-primary", "ring-offset-2");
+      window.setTimeout(
+        () =>
+          row.classList.remove("ring-2", "ring-primary", "ring-offset-2"),
+        2500,
+      );
+    }, 400);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) => {
       if (skipNextNavigationBlock.current) {

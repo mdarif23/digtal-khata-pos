@@ -69,6 +69,7 @@ describe("barcodes integration", { skip: !runIntegration }, () => {
     method: string,
     path: string,
     body?: unknown,
+    extraHeaders?: Record<string, string>,
   ): Promise<{ status: number; body: any }> {
     const res = await fetch(`${baseUrl}${path}`, {
       method,
@@ -76,6 +77,7 @@ describe("barcodes integration", { skip: !runIntegration }, () => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${ctx.token}`,
         "X-Business-Id": String(ctx.businessId),
+        ...(extraHeaders ?? {}),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
@@ -563,5 +565,156 @@ describe("barcodes integration", { skip: !runIntegration }, () => {
     assert.equal(res.status, 401);
     const lookup = await fetch(`${baseUrl}/api/barcodes/lookup/EZ000000000001`);
     assert.equal(lookup.status, 401);
+  });
+
+  it("lookup enriches matches with status, tracking type, location stock and authorized cost", async () => {
+    const product = await createProduct(owner, `Scan Enrich ${stamp}`, [
+      { barcode: `ENRICH-${stamp}`, sku: `ENRICH-SKU-${stamp}` },
+    ]);
+    const variantId = product.variantIds[0]!;
+
+    const locs = await api(owner, "GET", "/api/locations");
+    assert.equal(locs.status, 200);
+    const locationRows = payload<{ data: { id: number; isDefault: boolean }[] }>(locs).data;
+    const defaultLocation = locationRows.find((l) => l.isDefault)!;
+    const secondLoc = await api(owner, "POST", "/api/locations", {
+      name: `Scan Branch ${stamp}`,
+    });
+    assert.equal(secondLoc.status, 201);
+    const secondLocationId = payload<{ data: { id: number } }>(secondLoc).data.id;
+
+    // Deterministic stock and batches: 30 units at the default location,
+    // 7 at the branch; batches at 40 and 70 → weighted average cost 50.
+    const { default: pg } = await import("pg");
+    const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    await client.query(
+      `INSERT INTO inventory_stock (business_id, variant_id, location_id, quantity)
+       VALUES ($1, $2, $3, 30), ($1, $2, $4, 7)
+       ON CONFLICT (business_id, variant_id, location_id)
+       DO UPDATE SET quantity = EXCLUDED.quantity`,
+      [owner.businessId, variantId, defaultLocation.id, secondLocationId],
+    );
+    // Neutralize the opening-stock batch (creation seeds one at the
+    // variant's purchase price) so the weighted average below is exact.
+    await client.query(
+      `UPDATE inventory_batches SET quantity_remaining = 0
+       WHERE business_id = $1 AND variant_id = $2`,
+      [owner.businessId, variantId],
+    );
+    await client.query(
+      `INSERT INTO inventory_batches (business_id, variant_id, location_id, batch_number, purchase_price, quantity_received, quantity_remaining)
+       VALUES ($1, $2, $3, 'SCAN-COST-A', 40, 10, 10), ($1, $2, $3, 'SCAN-COST-B', 70, 5, 5)`,
+      [owner.businessId, variantId, defaultLocation.id],
+    );
+    await client.end();
+
+    // No location header → business default location; owner is
+    // cost-authorized (wildcard permission).
+    const res = await api(owner, "GET", `/api/barcodes/lookup/ENRICH-${stamp}`);
+    assert.equal(res.status, 200);
+    const match = payload<{
+      data: {
+        matchType: string;
+        variantId: number;
+        productStatus: string | null;
+        variantStatus: string | null;
+        trackingType: string | null;
+        stockAtLocation: number;
+        purchaseCost: number | null;
+      };
+    }>(res).data;
+    assert.equal(match.matchType, "primary");
+    assert.equal(match.variantId, variantId);
+    assert.equal(match.productStatus, "active");
+    assert.equal(match.variantStatus, "active");
+    assert.equal(match.trackingType, "none");
+    assert.equal(match.stockAtLocation, 30);
+    assert.equal(match.purchaseCost, 50);
+
+    // Explicit X-Location-Id scopes the stock report to that location.
+    const scoped = await api(owner, "GET", `/api/barcodes/lookup/ENRICH-${stamp}`, undefined, {
+      "X-Location-Id": String(secondLocationId),
+    });
+    assert.equal(payload<{ data: { stockAtLocation: number } }>(scoped).data.stockAtLocation, 7);
+  });
+
+  it("never resolves deleted products; inactive ones carry their status", async () => {
+    const doomed = await createProduct(owner, `Doomed ${stamp}`, [
+      { barcode: `DOOM-${stamp}`, sku: `DOOM-SKU-${stamp}` },
+    ]);
+    const alive = await api(owner, "GET", `/api/barcodes/lookup/DOOM-${stamp}`);
+    assert.equal(payload<{ data: { matchType: string } }>(alive).data.matchType, "primary");
+
+    const { default: pg } = await import("pg");
+    const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    await client.query("UPDATE products SET status = 'deleted' WHERE id = $1", [doomed.productId]);
+    await client.end();
+
+    const dead = await api(owner, "GET", `/api/barcodes/lookup/DOOM-${stamp}`);
+    assert.equal(payload<{ data: { matchType: string } }>(dead).data.matchType, "not_found");
+    // The SKU fallback refuses deleted products too.
+    const deadSku = await api(owner, "GET", `/api/barcodes/lookup/DOOM-SKU-${stamp}`);
+    assert.equal(payload<{ data: { matchType: string } }>(deadSku).data.matchType, "not_found");
+
+    // Inactive products still resolve — the module decides what to do.
+    const sleepy = await createProduct(owner, `Sleepy ${stamp}`, [
+      { barcode: `SLEEP-${stamp}`, sku: `SLEEP-SKU-${stamp}` },
+    ]);
+    const client2 = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await client2.connect();
+    await client2.query("UPDATE products SET status = 'inactive' WHERE id = $1", [sleepy.productId]);
+    await client2.end();
+    const inactive = await api(owner, "GET", `/api/barcodes/lookup/SLEEP-${stamp}`);
+    const match = payload<{ data: { matchType: string; productStatus: string | null } }>(inactive).data;
+    assert.equal(match.matchType, "primary");
+    assert.equal(match.productStatus, "inactive");
+  });
+
+  it("hides purchaseCost from callers without purchase visibility", async () => {
+    const locs = await api(owner, "GET", "/api/locations");
+    const defaultLocation = payload<{ data: { id: number; isDefault: boolean }[] }>(locs).data.find(
+      (l) => l.isDefault,
+    )!;
+
+    // POS-browsing-only role: pos.view (lookup allowed), no purchases.*.
+    const role = await api(owner, "POST", "/api/roles", {
+      name: `Scanner ${stamp}`,
+      permissionKeys: ["pos.view"],
+    });
+    assert.equal(role.status, 201);
+    const roleId = payload<{ data: { id: number } }>(role).data.id;
+
+    const email = `barcode-scanner-${stamp}@example.test`;
+    const created = await api(owner, "POST", "/api/users", {
+      fullName: "Scanner Staff",
+      email,
+      password: "strong-password-123",
+      roleIds: [roleId],
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const userId = payload<{ data: { userId: number } }>(created).data.userId;
+    const patched = await api(owner, "PATCH", `/api/users/${userId}`, {
+      locationIds: [defaultLocation.id],
+    });
+    assert.equal(patched.status, 200);
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: "strong-password-123" }),
+    });
+    assert.equal(login.status, 200);
+    const loginBody = (await login.json()) as { accessToken: string };
+    const staff: Ctx = { token: loginBody.accessToken, businessId: owner.businessId };
+
+    const res = await api(staff, "GET", `/api/barcodes/lookup/${simpleSku}`);
+    assert.equal(res.status, 200);
+    const match = payload<{
+      data: { purchaseCost: number | null; sellingPrice: number; stockAtLocation: number };
+    }>(res).data;
+    assert.equal(match.purchaseCost, null, "POS-only roles never see purchase costs");
+    assert.equal(match.sellingPrice, 100);
+    assert.equal(typeof match.stockAtLocation, "number");
   });
 });

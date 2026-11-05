@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useWatch, type UseFormReturn } from "react-hook-form";
 import {
   Dialog,
@@ -16,7 +16,10 @@ import { useSalesStore } from "../../stores/useSalesStore.js";
 import { useProductStore } from "@/features/products/usedashboardProductStore.js";
 import type { SalesStoreType } from "../types/sales.types.js";
 import { buildVariantName } from "@/lib/variantDisplay";
-import { useEffect } from "react";
+import type { LookupMatch } from "@/features/barcodes/barcode.api.js";
+import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner.js";
+import { BarcodeScannerInput } from "@/features/barcodes/scanning/BarcodeScannerInput.js";
+import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback.js";
 
 const tk = (n: number) => `৳${n.toFixed(2)}`;
 
@@ -130,6 +133,83 @@ export function ExchangeDialog({
   const estimatedDifference =
     replacementTotal === null ? null : replacementTotal - selectedReturnValue;
 
+  /**
+   * Module scan handler — the scanner service only IDENTIFIES a barcode;
+   * the exchange rule (add the scanned variant as a replacement line, same
+   * as picking it from search) lives here. Scanning never refunds anything.
+   * Throwing surfaces the failure as an error scan.
+   */
+  const handleResolved = (match: LookupMatch) => {
+    const row = products
+      .flatMap((product) =>
+        (product.variants ?? []).map((variant) => ({ product, variant })),
+      )
+      .find(({ variant }) => variant.id === match.variantId);
+    if (!row) {
+      throw new Error(`${match.productName} is not in the loaded catalog.`);
+    }
+    if (row.product.status === "inactive") {
+      throw new Error(`${row.product.productName} is inactive.`);
+    }
+    const variantLabel = buildVariantName(
+      row.product.productName,
+      row.variant.options,
+    );
+    setReplacements((current) => {
+      const existing = current.find((r) => r.variantId === match.variantId);
+      if (existing) {
+        return current.map((r) =>
+          r.variantId === match.variantId
+            ? { ...r, quantity: r.quantity + 1 }
+            : r,
+        );
+      }
+      return [
+        ...current,
+        {
+          variantId: match.variantId,
+          name: variantLabel,
+          quantity: 1,
+          unitPrice: Number(row.variant.sellingPrice),
+        },
+      ];
+    });
+  };
+
+  // Wedge capture only while the dialog is up.
+  const { scanner, state: scanState } = useBarcodeScanner({
+    capture: "window",
+    enabled: open,
+    onResolve: handleResolved,
+  });
+
+  // Scan outcome → toast (spec §16: never silently ignore failed scans).
+  const lastHandledEventId = useRef(0);
+  useEffect(() => {
+    const event = scanState.last;
+    if (!event || event.id <= lastHandledEventId.current) return;
+    lastHandledEventId.current = event.id;
+    if (event.status === "not_found") {
+      toast.add({
+        type: "error",
+        description: "No product matches that barcode.",
+      });
+    } else if (event.status === "ambiguous") {
+      toast.add({
+        type: "error",
+        description:
+          event.detail ?? "That barcode matches more than one product.",
+        priority: "high",
+      });
+    } else if (event.status === "error") {
+      toast.add({
+        type: "error",
+        description: event.detail ?? "Scan failed.",
+        priority: "high",
+      });
+    }
+  }, [scanState.last]);
+
   async function submit() {
     if (selectedReturnIds.length === 0 || replacements.length === 0) return;
     setBusy(true);
@@ -218,10 +298,19 @@ export function ExchangeDialog({
           {/* Step 2 — replacements */}
           <div>
             <div className="mb-1 text-sm font-medium">2. Replacement items</div>
+            <div className="space-y-2">
+              <BarcodeScannerInput
+                scanner={scanner}
+                placeholder="Scan a barcode to add the replacement…"
+                aria-label="Scan barcode to add an exchange replacement"
+              />
+              <BarcodeScanFeedback state={scanState} />
+            </div>
             <Input
               placeholder="Search products to add (name, SKU, barcode)…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              className="mt-2"
             />
             {searchResults.length > 0 && (
               <div className="mt-1 max-h-32 space-y-1 overflow-y-auto rounded-md border p-2">

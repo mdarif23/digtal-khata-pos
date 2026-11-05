@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Card,
   CardContent,
@@ -12,6 +12,10 @@ import { Badge } from "@/components/ui/badge.js";
 import { Skeleton } from "@/components/ui/skeleton.js";
 import { toast } from "@/components/ui/toast.js";
 import axios from "../../../api/axios.js";
+import type { LookupMatch } from "@/features/barcodes/barcode.api.js";
+import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner.js";
+import { BarcodeScannerInput } from "@/features/barcodes/scanning/BarcodeScannerInput.js";
+import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback.js";
 
 const tkCount = (n: number) => (n > 0 ? `+${n}` : `${n}`);
 
@@ -49,7 +53,6 @@ export function StockCountPage() {
     total: number;
     status: string;
   } | null>(null);
-  const [scan, setScan] = useState("");
   const [busy, setBusy] = useState(false);
   const [counts, setCounts] = useState<Record<number, string>>({});
 
@@ -119,65 +122,91 @@ export function StockCountPage() {
     }
   }
 
-  // Scan/entry: resolve barcode | SKU | name against the session's lines;
-  // an exact miss falls back to the server barcode resolver (aliases).
-  const scanMatch = useMemo(() => {
-    const query = scan.trim().toLowerCase();
-    if (query.length < 3 || !detail) return null;
-    return (
-      detail.lines.find(
-        (l) =>
-          (l.barcode ?? "").toLowerCase() === query ||
-          (l.sku ?? "").toLowerCase() === query ||
-          l.productName.toLowerCase().includes(query),
-      ) ?? null
-    );
-  }, [scan, detail]);
-
-  const [scannedVariantId, setScannedVariantId] = useState<number | null>(null);
-  useEffect(() => {
-    if (scanMatch || scan.trim().length < 3 || !detail) {
-      setScannedVariantId(null);
-      return;
+  // Scan/entry handled by the shared scanner service (barcode | SKU |
+  // server alias resolution). Each scan counts ONE physical unit into the
+  // working count — expected stock is display-only until approval applies
+  // the corrections (counted − CURRENT stock) server-side.
+  const handleResolved = useCallback((match: LookupMatch) => {
+    const line = detail?.lines.find((l) => l.variantId === match.variantId);
+    if (!detail) {
+      throw new Error("Open a count session first.");
     }
-    let cancelled = false;
-    const query = scan.trim();
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const { lookupBarcodeApi } = await import(
-            "@/features/barcodes/barcode.api"
-          );
-          const result = await lookupBarcodeApi(query);
-          if (!cancelled && "variantId" in result) {
-            setScannedVariantId(result.variantId);
-          }
-        } catch {
-          // Alias lookup is best-effort; local matching already ran.
-        }
-      })();
-    }, 250);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [scan, scanMatch, detail]);
+    if (!line) {
+      throw new Error(
+        `${match.productName} has no line in this count session.`,
+      );
+    }
+    if (detail.status !== "open") {
+      throw new Error("This count session is closed.");
+    }
+    setCounts((c) => {
+      const current = Number.parseInt(c[line.variantId] ?? "", 10);
+      const next = (Number.isFinite(current) ? current : 0) + 1;
+      return { ...c, [line.variantId]: String(next) };
+    });
+  }, [detail]);
 
-  const scannedLine =
-    scannedVariantId !== null && detail
-      ? (detail.lines.find((l) => l.variantId === scannedVariantId) ?? null)
-      : null;
-  const effectiveScanMatch = scanMatch ?? scannedLine;
+  const { scanner, state: scanState } = useBarcodeScanner({
+    capture: "window",
+    enabled: detail?.status === "open",
+    onResolve: handleResolved,
+  });
+
+  const lastScanMatch =
+    scanState.last &&
+    (scanState.last.status === "resolved" ||
+      scanState.last.status === "duplicate")
+      ? scanState.last.match
+      : undefined;
+  const scannedLine = lastScanMatch
+    ? (detail?.lines.find((l) => l.variantId === lastScanMatch.variantId) ??
+      null)
+    : null;
+
+  const addToCount = useCallback((variantId: number) => {
+    setCounts((c) => {
+      const current = Number.parseInt(c[variantId] ?? "", 10);
+      const next = (Number.isFinite(current) ? current : 0) + 1;
+      return { ...c, [variantId]: String(next) };
+    });
+  }, []);
+
+  // Scan outcome → toast (spec §16: never silently ignore failed scans).
+  const lastHandledEventId = useRef(0);
+  useEffect(() => {
+    const event = scanState.last;
+    if (!event || event.id <= lastHandledEventId.current) return;
+    lastHandledEventId.current = event.id;
+    if (event.status === "not_found") {
+      toast.add({
+        type: "error",
+        description: "No product matches that barcode.",
+      });
+    } else if (event.status === "ambiguous") {
+      toast.add({
+        type: "error",
+        description:
+          event.detail ?? "That barcode matches more than one product.",
+        priority: "high",
+      });
+    } else if (event.status === "error") {
+      toast.add({
+        type: "error",
+        description: event.detail ?? "Scan failed.",
+        priority: "high",
+      });
+    }
+  }, [scanState.last]);
 
   async function submitCounts() {
     if (activeId === null || !detail) return;
-    const counts = Object.entries(counts)
+    const entries = Object.entries(counts)
       .map(([variantId, value]) => ({
         variantId: Number(variantId),
         countedQuantity: Number(value),
       }))
       .filter((c) => Number.isInteger(c.countedQuantity) && c.countedQuantity >= 0);
-    if (counts.length === 0) {
+    if (entries.length === 0) {
       toast.add({
         type: "error",
         description: "Enter at least one counted quantity.",
@@ -186,10 +215,9 @@ export function StockCountPage() {
     }
     setBusy(true);
     try {
-      await axios.post(`/stock-counts/${activeId}/counts`, { counts });
+      await axios.post(`/stock-counts/${activeId}/counts`, { counts: entries });
       toast.add({ type: "success", description: "Counts recorded." });
       setCounts({});
-      setScan("");
       await loadDetail(activeId);
     } catch (err) {
       toast.add({
@@ -321,32 +349,30 @@ export function StockCountPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {detail.status === "open" && (
-              <Input
-                placeholder="Scan barcode / SKU / product name…"
-                value={scan}
-                onChange={(e) => setScan(e.target.value)}
-              />
+              <div className="space-y-2">
+                <BarcodeScannerInput
+                  scanner={scanner}
+                  placeholder="Scan barcode / SKU, or type and press Enter…"
+                  aria-label="Scan a product to count it"
+                />
+                <BarcodeScanFeedback state={scanState} />
+              </div>
             )}
-            {effectiveScanMatch && detail.status === "open" && (
+            {scannedLine && detail.status === "open" && (
               <div className="rounded-md border border-primary/40 bg-primary/5 p-2 text-sm">
                 <span className="font-medium">
-                  {effectiveScanMatch.variantName || effectiveScanMatch.productName}
+                  {scannedLine.variantName || scannedLine.productName}
                 </span>{" "}
                 <span className="text-muted-foreground">
-                  expected {effectiveScanMatch.expectedQuantity}
+                  expected {scannedLine.expectedQuantity}
                 </span>
                 <Button
                   size="sm"
                   variant="outline"
                   className="ml-2"
-                  onClick={() =>
-                    setCounts((c) => ({
-                      ...c,
-                      [effectiveScanMatch.variantId]: c[effectiveScanMatch.variantId] ?? "",
-                    }))
-                  }
+                  onClick={() => addToCount(scannedLine.variantId)}
                 >
-                  Add to count
+                  Count one more
                 </Button>
               </div>
             )}

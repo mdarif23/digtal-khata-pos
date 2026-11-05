@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,10 @@ import {
   type TransferStatus,
   type VariantOption,
 } from "../stockTransfers.api";
+import type { LookupMatch } from "@/features/barcodes/barcode.api";
+import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
+import { BarcodeScannerInput } from "@/features/barcodes/scanning/BarcodeScannerInput";
+import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
 
 const STATUS_LABELS: Record<TransferStatus, string> = {
   draft: "Draft",
@@ -136,6 +140,69 @@ export function StockTransfersPage() {
     }
     return fallback;
   }
+
+  /**
+   * Module scan handler — the scanner service only IDENTIFIES a barcode;
+   * the transfer rule (fill or increment a draft row) lives here. Scanning
+   * never ships or moves stock — the draft is confirmed manually.
+   */
+  const handleResolved = (match: LookupMatch) => {
+    setItems((prev) => {
+      const existingIndex = prev.findIndex(
+        (item) => item.variantId === match.variantId,
+      );
+      if (existingIndex >= 0) {
+        return prev.map((item, i) =>
+          i === existingIndex
+            ? { ...item, quantity: String((Number(item.quantity) || 0) + 1) }
+            : item,
+        );
+      }
+      // Fill the untouched default row before appending a new one.
+      const emptyIndex = prev.findIndex((item) => item.variantId === null);
+      if (emptyIndex >= 0) {
+        return prev.map((item, i) =>
+          i === emptyIndex ? { ...item, variantId: match.variantId } : item,
+        );
+      }
+      return [...prev, { variantId: match.variantId, quantity: "1" }];
+    });
+  };
+
+  // Wedge capture only while the draft dialog is up; the scan box inside
+  // the dialog covers scans typed while an input holds focus.
+  const { scanner, state: scanState } = useBarcodeScanner({
+    capture: "window",
+    enabled: createOpen,
+    onResolve: handleResolved,
+  });
+
+  // Scan outcome → toast (spec §16: never silently ignore failed scans).
+  const lastHandledEventId = useRef(0);
+  useEffect(() => {
+    const event = scanState.last;
+    if (!event || event.id <= lastHandledEventId.current) return;
+    lastHandledEventId.current = event.id;
+    if (event.status === "not_found") {
+      toast.add({
+        type: "error",
+        description: "No product matches that barcode.",
+      });
+    } else if (event.status === "ambiguous") {
+      toast.add({
+        type: "error",
+        description:
+          event.detail ?? "That barcode matches more than one product.",
+        priority: "high",
+      });
+    } else if (event.status === "error") {
+      toast.add({
+        type: "error",
+        description: event.detail ?? "Scan failed.",
+        priority: "high",
+      });
+    }
+  }, [scanState.last]);
 
   async function handleCreate() {
     setFormError(null);
@@ -381,6 +448,14 @@ export function StockTransfersPage() {
 
             <div className="grid gap-2">
               <Label>Items</Label>
+              <div className="space-y-1 rounded-lg border bg-muted/30 p-2">
+                <BarcodeScannerInput
+                  scanner={scanner}
+                  placeholder="Scan a barcode to add it to the draft…"
+                  aria-label="Scan barcode to add a transfer item"
+                />
+                <BarcodeScanFeedback state={scanState} />
+              </div>
               {items.map((item, index) => (
                 <div key={index} className="flex items-center gap-2">
                   <Select

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,11 @@ import type { ProductType } from "../product.schema.js";
 import { calculateProductStats } from "../utils/calculateProductStats.js";
 import { getProductStockState } from "../utils/getProductStockState.js";
 import { buildVariantOptionsLabel } from "@/lib/variantDisplay";
+import { toast } from "@/components/ui/toast";
+import type { LookupMatch } from "@/features/barcodes/barcode.api";
+import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
+import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
+import { createCatalogLookup } from "@/features/barcodes/scanning/catalogLookup";
 
 type ProductStatusFilter = "all" | "active" | "draft" | "inactive";
 type StockFilter = "all" | "in-stock" | "low-stock" | "out-of-stock";
@@ -112,6 +118,73 @@ export function Products() {
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [brandFilter, setBrandFilter] = useState("all");
+  const navigate = useNavigate();
+
+  /**
+   * Module scan handler — the scanner service only IDENTIFIES a barcode;
+   * the product-management rule (open the product edit page and highlight
+   * the scanned variant) lives here. Unknown barcodes never create
+   * products. Throwing surfaces the failure as an error scan.
+   */
+  const handleResolved = useCallback(
+    async (match: LookupMatch) => {
+      const findRow = (catalog: ProductType[]) =>
+        catalog
+          .flatMap((product) =>
+            product.variants.map((variant) => ({ product, variant })),
+          )
+          .find(({ variant }) => variant.id === match.variantId);
+
+      let row = findRow(useProductStore.getState().products);
+      if (!row) {
+        await useProductStore.getState().getProducts();
+        row = findRow(useProductStore.getState().products);
+      }
+      if (!row) {
+        throw new Error(`${match.productName} is not in the loaded catalog.`);
+      }
+      navigate(`/product/${row.product.id}/edit`, {
+        state: { highlightVariantId: match.variantId },
+      });
+    },
+    [navigate],
+  );
+
+  const scanner = useBarcodeScanner({
+    capture: "window",
+    lookup: useCallback(
+      createCatalogLookup(() => useProductStore.getState().products),
+      [],
+    ),
+    onResolve: handleResolved,
+  });
+
+  // Scan outcome → toast (spec §16: never silently ignore failed scans).
+  const lastHandledEventId = useRef(0);
+  useEffect(() => {
+    const event = scanner.state.last;
+    if (!event || event.id <= lastHandledEventId.current) return;
+    lastHandledEventId.current = event.id;
+    if (event.status === "not_found") {
+      toast.add({
+        type: "error",
+        description: "No product matches that barcode.",
+      });
+    } else if (event.status === "ambiguous") {
+      toast.add({
+        type: "error",
+        description:
+          event.detail ?? "That barcode matches more than one product.",
+        priority: "high",
+      });
+    } else if (event.status === "error") {
+      toast.add({
+        type: "error",
+        description: event.detail ?? "Scan failed.",
+        priority: "high",
+      });
+    }
+  }, [scanner.state.last]);
 
   const stats = useMemo(() => calculateProductStats(products), [products]);
   const stockCounts = useMemo(
@@ -211,6 +284,28 @@ export function Products() {
                 placeholder="Search by product, SKU, or barcode"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    // Exact codes open the scanned variant; text stays a filter.
+                    const query = search.trim().toLowerCase();
+                    const isExactCode = query
+                      ? useProductStore
+                          .getState()
+                          .products.some((product) =>
+                            product.variants.some(
+                              (variant) =>
+                                variant.barcode?.trim().toLowerCase() ===
+                                  query ||
+                                variant.sku.trim().toLowerCase() === query,
+                            ),
+                          )
+                      : false;
+                    if (isExactCode) {
+                      event.preventDefault();
+                      scanner.handleScan(search.trim());
+                    }
+                  }
+                }}
                 className="h-10 pl-9 pr-10"
               />
               {search && (
@@ -226,6 +321,10 @@ export function Products() {
                 </Button>
               )}
             </div>
+            <BarcodeScanFeedback
+              state={scanner.state}
+              className="min-w-0 flex-1"
+            />
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:w-auto">
               <select
                 aria-label="Filter by product status"

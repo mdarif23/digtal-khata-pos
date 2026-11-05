@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowDown,
@@ -18,6 +18,10 @@ import { ProductVariantType } from "@/features/products/product.schema";
 import { StockAdjustmentInput } from "@/features/products/product.types";
 import useProductStore from "@/features/products/useProductStore";
 import { buildVariantOptionsLabel } from "@/lib/variantDisplay";
+import type { LookupMatch } from "@/features/barcodes/barcode.api";
+import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
+import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
+import { createCatalogLookup } from "@/features/barcodes/scanning/catalogLookup";
 
 const reasons: { value: StockAdjustmentInput["reason"]; label: string }[] = [
   { value: "count_correction", label: "Stock count correction" },
@@ -70,6 +74,7 @@ export function StockAdjustment() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const newQuantityRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (products.length === 0 && !loading && !loadError) {
@@ -202,6 +207,70 @@ export function StockAdjustment() {
     updateProductSearch("");
     searchInputRef.current?.focus();
   }
+
+  /**
+   * Module scan handler — the scanner service only IDENTIFIES a barcode;
+   * the adjustment rule (select the exact product+variant into the form)
+   * lives here. Throwing surfaces the failure as an error scan.
+   */
+  async function handleResolved(match: LookupMatch) {
+    const findRow = (catalog: ProductType[]) =>
+      catalog
+        .flatMap((product) =>
+          product.variants.map((variant) => ({ product, variant })),
+        )
+        .find(({ variant }) => variant.id === match.variantId);
+
+    let row = findRow(useProductStore.getState().products);
+    if (!row) {
+      // Scanned variant newer than the loaded catalog — refresh once.
+      await useProductStore.getState().getProducts();
+      row = findRow(useProductStore.getState().products);
+    }
+    if (!row) {
+      throw new Error(`${match.productName} is not in the loaded catalog.`);
+    }
+
+    chooseProduct(String(row.product.id));
+    setVariantId(String(row.variant.id));
+    newQuantityRef.current?.focus();
+  }
+
+  const scanner = useBarcodeScanner({
+    capture: "window",
+    lookup: useCallback(
+      createCatalogLookup(() => useProductStore.getState().products),
+      [],
+    ),
+    onResolve: handleResolved,
+  });
+
+  // Scan outcome → toast (spec §16: never silently ignore failed scans).
+  const lastHandledEventId = useRef(0);
+  useEffect(() => {
+    const event = scanner.state.last;
+    if (!event || event.id <= lastHandledEventId.current) return;
+    lastHandledEventId.current = event.id;
+    if (event.status === "not_found") {
+      toast.add({
+        type: "error",
+        description: "No product matches that barcode.",
+      });
+    } else if (event.status === "ambiguous") {
+      toast.add({
+        type: "error",
+        description:
+          event.detail ?? "That barcode matches more than one product.",
+        priority: "high",
+      });
+    } else if (event.status === "error") {
+      toast.add({
+        type: "error",
+        description: event.detail ?? "Scan failed.",
+        priority: "high",
+      });
+    }
+  }, [scanner.state.last]);
 
   async function submitAdjustment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -387,6 +456,25 @@ export function StockAdjustment() {
                   }}
                   onKeyDown={(event) => {
                     if (event.key === "Escape") setShowProductResults(false);
+                    if (event.key === "Enter") {
+                      // Exact codes scan directly; anything else keeps the
+                      // as-you-type result list.
+                      const query = search.trim().toLowerCase();
+                      const isExactCode = query
+                        ? products.some((product) =>
+                            product.variants.some(
+                              (variant) =>
+                                variant.barcode?.trim().toLowerCase() ===
+                                  query ||
+                                variant.sku.trim().toLowerCase() === query,
+                            ),
+                          )
+                        : false;
+                      if (isExactCode) {
+                        event.preventDefault();
+                        scanner.handleScan(search.trim());
+                      }
+                    }
                   }}
                   autoComplete="off"
                   aria-expanded={showProductResults}
@@ -450,6 +538,7 @@ export function StockAdjustment() {
                   </div>
                 )}
               </div>
+              <BarcodeScanFeedback state={scanner.state} className="pt-1" />
             </div>
 
             <div className="grid gap-4">
@@ -508,6 +597,7 @@ export function StockAdjustment() {
                 </label>
                 <Input
                   id="new-quantity"
+                  ref={newQuantityRef}
                   type="number"
                   min="0"
                   step="1"
