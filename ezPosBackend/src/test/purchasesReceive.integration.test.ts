@@ -12,6 +12,7 @@ import { ensureRbacSeed } from "../rbac/seed.js";
 import { connectTestDb } from "./helpers/db.js";
 import {
   createOwnerCtx,
+  getJson,
   postJson,
   type OwnerCtx,
 } from "./helpers/fixtures.js";
@@ -311,7 +312,7 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
         paymentMethod: "cash",
       },
     );
-    assert.equal(status, 404);
+    assert.equal(status, 400);
     assert.match(String(body?.message), /Payment cannot be greater/);
 
     // The exact received value is accepted.
@@ -443,5 +444,488 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
       batches.map((b) => Number(b.quantity_remaining)),
       [2, 1],
     );
+  });
+
+  it("keeps the line cost at the PO cost across sessions with different receive costs (D1)", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive D1 Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    // 10 ordered @ 100 → total 1000
+    const purchase = await createPurchase(owner, supplierId, variantId, 10, 100);
+    const rows = await purchaseItemRows(purchase.id);
+
+    // Session 1: 4 units @ 100, pay 400.
+    const first = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(rows, [
+        { receiveNow: 4, unitCost: 100, sellingPrice: 150 },
+      ]),
+      paymentAmount: 400,
+      paymentMethod: "cash",
+    });
+    assert.equal(first.status, 201, `receive 1 failed: ${JSON.stringify(first.body)}`);
+    assert.equal(Number(first.body?.data?.paidAmount), 400);
+    assert.equal(Number(first.body?.data?.receivedAmount), 400);
+
+    // Session 2, first attempt: paying 700 in-session must be rejected —
+    // the limit is min(true received value 1600, invoice total 1000) − 400.
+    const capped = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(rows, [
+        { receiveNow: 6, unitCost: 200, sellingPrice: 150 },
+      ]),
+      paymentAmount: 700,
+      paymentMethod: "cash",
+    });
+    assert.equal(capped.status, 400);
+    assert.match(String(capped.body?.message), /Payment cannot be greater/);
+
+    // Session 2, actual: 6 units @ 200, no payment.
+    const second = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(rows, [
+        { receiveNow: 6, unitCost: 200, sellingPrice: 150 },
+      ]),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(second.status, 201, `receive 2 failed: ${JSON.stringify(second.body)}`);
+    // Batch-authoritative received value: 4×100 + 6×200 = 1600.
+    assert.equal(Number(second.body?.data?.receivedAmount), 1600);
+    assert.equal(second.body?.data?.status, "received");
+    // Landed-cost feedback is always present (no document → not adjusted).
+    assert.deepEqual(second.body?.data?.landedCost, {
+      adjusted: false,
+      amount: 0,
+      documentId: null,
+    });
+
+    // The LINE cost stays the PO cost (100) — never overwritten.
+    const line = (await pg!.query(
+      "SELECT unit_cost, received_quantity FROM purchase_items WHERE id = $1",
+      [rows[0]!.id],
+    )).rows[0] as { unit_cost: string; received_quantity: string };
+    assert.equal(Number(line.unit_cost), 100);
+    assert.equal(Number(line.received_quantity), 10);
+
+    // Per-session costs live on the batches: 4 @ 100 and 6 @ 200.
+    const batches = (await pg!.query(
+      `SELECT purchase_price, quantity_received FROM inventory_batches
+       WHERE purchase_item_id = $1 AND business_id = $2 ORDER BY id`,
+      [rows[0]!.id, owner.businessId],
+    )).rows as { purchase_price: string; quantity_received: string }[];
+    assert.deepEqual(
+      batches.map((b) => Number(b.purchase_price)),
+      [100, 200],
+    );
+    assert.deepEqual(
+      batches.map((b) => Number(b.quantity_received)),
+      [4, 6],
+    );
+
+    // A fully received purchase no longer accepts receives (payments for it
+    // go through due-management, which shares the same limit math).
+    const paymentOnly = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(rows, [
+        { receiveNow: 0, unitCost: 0, sellingPrice: 0 },
+      ]),
+      paymentAmount: 600,
+      paymentMethod: "cash",
+    });
+    assert.equal(paymentOnly.status, 409);
+
+    // Same limit on the due-management supplier-payment path (shared
+    // calculatePayments): 700 over the 600 limit → 400; 600 settles it.
+    const over = await postJson(
+      baseUrl,
+      owner,
+      "/api/due-management/supplier-payment",
+      { purchaseId: purchase.id, amount: 700, method: "cash" },
+    );
+    assert.equal(over.status, 400);
+    assert.match(String(over.body?.message), /Payment cannot be greater/);
+
+    const settle = await postJson(
+      baseUrl,
+      owner,
+      "/api/due-management/supplier-payment",
+      { purchaseId: purchase.id, amount: 600, method: "cash" },
+    );
+    assert.equal(settle.status, 201, `settle failed: ${JSON.stringify(settle.body)}`);
+    assert.equal(Number(settle.body?.data?.outstandingAfter), 0);
+  });
+
+  it("rejects a receive-time cost override above the invoice total cap (D1 sanity)", async () => {
+    // Order 2 @ 50 (total 100) but receive at 80: the batch value is 160,
+    // the invoice total still caps what can be paid.
+    const owner = await createOwnerCtx(baseUrl, "Receive Override Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    const purchase = await createPurchase(owner, supplierId, variantId, 2, 50);
+    const rows = await purchaseItemRows(purchase.id);
+
+    const { status, body } = await postJson(
+      baseUrl,
+      owner,
+      "/api/purchases/receive",
+      {
+        purchaseId: purchase.id,
+        items: receivePlan(rows, [
+          { receiveNow: 2, unitCost: 80, sellingPrice: 100 },
+        ]),
+        paymentAmount: 160,
+        paymentMethod: "cash",
+      },
+    );
+    assert.equal(status, 400);
+    assert.match(String(body?.message), /Payment cannot be greater/);
+  });
+
+  it("rejects serial numbers that already exist in the business", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive SerialDup Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId, 0, "serial");
+
+    const serialItem = (row: { id: number }, serials: string[]) => ({
+      itemId: row.id,
+      trackingType: "serial",
+      receiveNow: serials.length,
+      unitCost: 50,
+      sellingPrice: 100,
+      batches: [],
+      serialNumbers: serials,
+    });
+
+    const first = await createPurchase(owner, supplierId, variantId, 1, 50);
+    const firstRows = await purchaseItemRows(first.id);
+    const ok = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: first.id,
+      items: [serialItem(firstRows[0]!, ["SN-DUP-1"])],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(ok.status, 201, `first serial receive failed: ${JSON.stringify(ok.body)}`);
+
+    const second = await createPurchase(owner, supplierId, variantId, 2, 50);
+    const secondRows = await purchaseItemRows(second.id);
+    const dup = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: second.id,
+      items: [serialItem(secondRows[0]!, ["SN-NEW-2", "SN-DUP-1"])],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(dup.status, 400);
+    assert.match(String(dup.body?.message), /already exist/);
+  });
+
+  it("rejects the same serial listed for two lines sharing one variant", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive SerialX Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId, 0, "serial");
+
+    // Two purchase lines sharing the same variant on one PO.
+    const { status: poStatus, body: poBody } = await postJson(
+      baseUrl,
+      owner,
+      "/api/purchases",
+      {
+        items: [
+          { variantId, quantity: 1, purchasePrice: 50 },
+          { variantId, quantity: 1, purchasePrice: 50 },
+        ],
+        supplierId,
+        purchaseDate: new Date().toISOString(),
+      },
+    );
+    assert.equal(poStatus, 201, `purchase create failed: ${JSON.stringify(poBody)}`);
+    const purchaseId = Number(poBody.data.id);
+    const rows = await purchaseItemRows(purchaseId);
+    assert.equal(rows.length, 2);
+
+    const { status, body } = await postJson(
+      baseUrl,
+      owner,
+      "/api/purchases/receive",
+      {
+        purchaseId,
+        items: rows.map((row) => ({
+          itemId: row.id,
+          trackingType: "serial",
+          receiveNow: 1,
+          unitCost: 50,
+          sellingPrice: 100,
+          batches: [],
+          serialNumbers: ["SN-SHARED"],
+        })),
+        paymentAmount: 0,
+        paymentMethod: "cash",
+      },
+    );
+    assert.equal(status, 400);
+    assert.match(String(body?.message), /more than one item/);
+  });
+
+  it("rejects duplicate batch numbers within a single receive", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive BatchDup Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId, 0, "batch");
+    const purchase = await createPurchase(owner, supplierId, variantId, 4, 50);
+    const rows = await purchaseItemRows(purchase.id);
+
+    const { status, body } = await postJson(
+      baseUrl,
+      owner,
+      "/api/purchases/receive",
+      {
+        purchaseId: purchase.id,
+        items: receivePlan(
+          rows,
+          [{ receiveNow: 4, unitCost: 50, sellingPrice: 100 }],
+          "batch",
+          {
+            [rows[0]!.id]: [
+              { batchNumber: "BATCH-DUP", quantity: 2 },
+              { batchNumber: "BATCH-DUP", quantity: 2 },
+            ],
+          },
+        ),
+        paymentAmount: 0,
+        paymentMethod: "cash",
+      },
+    );
+    assert.equal(status, 400);
+    assert.match(String(body?.message), /Duplicate batch numbers/);
+  });
+
+  it("rejects an expiry date before the manufacturing date", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive Expiry Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId, 0, "batch");
+    const purchase = await createPurchase(owner, supplierId, variantId, 2, 50);
+    const rows = await purchaseItemRows(purchase.id);
+
+    const { status } = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: [
+        {
+          itemId: rows[0]!.id,
+          trackingType: "batch",
+          receiveNow: 2,
+          unitCost: 50,
+          sellingPrice: 100,
+          batches: [
+            {
+              batchNumber: "BATCH-EXP",
+              quantity: 2,
+              manufacturedDate: "2026-06-01",
+              expiryDate: "2025-06-01",
+            },
+          ],
+          serialNumbers: [],
+        },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(status, 400);
+  });
+
+  it("answers 409 when receiving an already fully received purchase", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive Again Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    const purchase = await createPurchase(owner, supplierId, variantId, 2, 50);
+    const rows = await purchaseItemRows(purchase.id);
+
+    const full = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(rows, [
+        { receiveNow: 2, unitCost: 50, sellingPrice: 100 },
+      ]),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(full.status, 201);
+
+    const again = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(rows, [
+        { receiveNow: 1, unitCost: 50, sellingPrice: 100 },
+      ]),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(again.status, 409);
+    assert.match(String(again.body?.message), /already been completely received/);
+  });
+
+  it("rejects over-receiving and rolls the transaction back completely", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive Over Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    const purchase = await createPurchase(owner, supplierId, variantId, 2, 50);
+    const rows = await purchaseItemRows(purchase.id);
+
+    const { status, body } = await postJson(
+      baseUrl,
+      owner,
+      "/api/purchases/receive",
+      {
+        purchaseId: purchase.id,
+        items: receivePlan(rows, [
+          { receiveNow: 3, unitCost: 50, sellingPrice: 100 },
+        ]),
+        paymentAmount: 0,
+        paymentMethod: "cash",
+      },
+    );
+    assert.equal(status, 400);
+    assert.match(String(body?.message), /Cannot receive 3 .* Only 2 remaining/);
+
+    // Rollback proof: nothing was written.
+    const stock = await stockRow(owner.businessId, variantId);
+    assert.equal(Number(stock?.quantity ?? 0), 0);
+    const line = (await pg!.query(
+      "SELECT received_quantity FROM purchase_items WHERE id = $1",
+      [rows[0]!.id],
+    )).rows[0] as { received_quantity: string };
+    assert.equal(Number(line.received_quantity), 0);
+    const batches = await pg!.query(
+      "SELECT id FROM inventory_batches WHERE purchase_item_id = $1",
+      [rows[0]!.id],
+    );
+    assert.equal(batches.rows.length, 0);
+  });
+
+  it("rolls back the whole receive when one item of several is invalid", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive MultiRoll Co");
+    const supplierId = await createSupplier(owner);
+    // Two lines sharing one variant.
+    const variantId = await seedVariant(owner.businessId);
+    const { status: poStatus, body: poBody } = await postJson(
+      baseUrl,
+      owner,
+      "/api/purchases",
+      {
+        items: [
+          { variantId, quantity: 10, purchasePrice: 50 },
+          { variantId, quantity: 10, purchasePrice: 50 },
+        ],
+        supplierId,
+        purchaseDate: new Date().toISOString(),
+      },
+    );
+    assert.equal(poStatus, 201);
+    const purchaseId = Number(poBody.data.id);
+    const rows = await purchaseItemRows(purchaseId);
+    assert.equal(rows.length, 2);
+
+    const { status, body } = await postJson(
+      baseUrl,
+      owner,
+      "/api/purchases/receive",
+      {
+        purchaseId,
+        items: receivePlan(rows, [
+          { receiveNow: 5, unitCost: 50, sellingPrice: 100 },
+          { receiveNow: 11, unitCost: 50, sellingPrice: 100 },
+        ]),
+        paymentAmount: 0,
+        paymentMethod: "cash",
+      },
+    );
+    assert.equal(status, 400);
+    assert.match(String(body?.message), /Only 10 remaining/);
+
+    // The VALID first item must not have been written either — one tx.
+    const stock = await stockRow(owner.businessId, variantId);
+    assert.equal(Number(stock?.quantity ?? 0), 0);
+    for (const row of rows) {
+      const line = (await pg!.query(
+        "SELECT received_quantity FROM purchase_items WHERE id = $1",
+        [row.id],
+      )).rows[0] as { received_quantity: string };
+      assert.equal(Number(line.received_quantity), 0);
+      const batches = await pg!.query(
+        "SELECT id FROM inventory_batches WHERE purchase_item_id = $1",
+        [row.id],
+      );
+      assert.equal(batches.rows.length, 0);
+    }
+  });
+
+  it("rejects a serial-tracked receive whose serial count mismatches", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive SerialCount Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId, 0, "serial");
+    const purchase = await createPurchase(owner, supplierId, variantId, 2, 50);
+    const rows = await purchaseItemRows(purchase.id);
+
+    const { status, body } = await postJson(
+      baseUrl,
+      owner,
+      "/api/purchases/receive",
+      {
+        purchaseId: purchase.id,
+        items: [
+          {
+            itemId: rows[0]!.id,
+            trackingType: "serial",
+            receiveNow: 2,
+            unitCost: 50,
+            sellingPrice: 100,
+            batches: [],
+            serialNumbers: ["SN-ONLY-ONE"],
+          },
+        ],
+        paymentAmount: 0,
+        paymentMethod: "cash",
+      },
+    );
+    assert.equal(status, 400);
+    assert.equal(body?.message, "Invalid Purchase Data");
+    const errors = (body?.errors as { fieldErrors?: Record<string, string[]> })
+      ?.fieldErrors;
+    assert.match(
+      JSON.stringify(errors?.items ?? ""),
+      /you provided 1 serial numbers/,
+    );
+  });
+
+  it("serves the purchase detail endpoint (header + items + landed-cost status)", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive Detail Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    const purchase = await createPurchase(owner, supplierId, variantId, 3, 50);
+    const rows = await purchaseItemRows(purchase.id);
+
+    const detail = await getJson(baseUrl, owner, `/api/purchases/${purchase.id}`);
+    assert.equal(detail.status, 200, JSON.stringify(detail.body));
+    const body = detail.body as {
+      purchase: {
+        id: number;
+        purchaseOrderNumber: string;
+        supplierName: string | null;
+        landedCostStatus: string | null;
+      };
+      items: {
+        id: number;
+        variantId: number;
+        unitCost: string;
+        trackingType: string;
+        variantName?: string;
+      }[];
+    };
+    assert.equal(body.purchase.id, purchase.id);
+    assert.equal(body.purchase.purchaseOrderNumber, purchase.poNumber);
+    // No landed-cost document → no indicator (only applicable states show).
+    assert.equal(body.purchase.landedCostStatus, null);
+    assert.equal(body.items.length, 1);
+    assert.equal(Number(body.items[0]!.unitCost), 50);
+    assert.equal(body.items[0]!.trackingType, "none");
+
+    const missing = await getJson(baseUrl, owner, "/api/purchases/999999");
+    assert.equal(missing.status, 404);
   });
 });
