@@ -23,6 +23,7 @@ import {
   useUpdateTerminal,
 } from "../hooks/useTerminals";
 import { setPreferredTerminalId, getPreferredTerminalId } from "../drawerCommands";
+import api from "../../../api/axios.js";
 import type { TerminalSummary } from "../terminals.api";
 
 function extractError(error: unknown, fallback: string): string {
@@ -56,6 +57,8 @@ export function TerminalCard(props: { terminal: TerminalSummary }) {
   const commands = useTerminalCommands(terminal.id, historyOpen);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState(terminal.name);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [locations, setLocations] = useState<{ id: number; name: string }[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
 
@@ -145,6 +148,28 @@ export function TerminalCard(props: { terminal: TerminalSummary }) {
           }}
         >
           Rename
+        </PermissionButton>
+        <PermissionButton
+          permission="pos_terminal.manage"
+          size="sm"
+          variant="outline"
+          onClick={async () => {
+            try {
+              const res = await api.get<{
+                success: boolean;
+                data: { id: number; name: string }[];
+              }>("/locations");
+              setLocations((res.data.data ?? []).filter((l) => l.id !== terminal.locationId));
+              setMoveOpen(true);
+            } catch (error) {
+              toast.add({
+                title: extractError(error, "Unable to load locations."),
+                type: "error",
+              });
+            }
+          }}
+        >
+          Move
         </PermissionButton>
         <PermissionButton
           permission="pos_terminal.manage"
@@ -287,6 +312,49 @@ export function TerminalCard(props: { terminal: TerminalSummary }) {
               Save
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={moveOpen} onOpenChange={setMoveOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Move “{terminal.name}”</DialogTitle>
+            <DialogDescription>
+              Sales already recorded keep their original terminal attribution —
+              moving only changes where this terminal is authorized from now on.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {locations.map((location) => (
+              <Button
+                key={location.id}
+                variant="outline"
+                className="justify-start"
+                disabled={update.isPending}
+                onClick={async () => {
+                  try {
+                    await update.mutateAsync({
+                      terminalId: terminal.id,
+                      locationId: location.id,
+                    });
+                    setMoveOpen(false);
+                    toast.add({
+                      title: `Terminal moved to ${location.name}.`,
+                      type: "success",
+                    });
+                  } catch (error) {
+                    toast.add({
+                      title: extractError(error, "Unable to move the terminal."),
+                      type: "error",
+                      priority: "high",
+                    });
+                  }
+                }}
+              >
+                Move to {location.name}
+              </Button>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
 

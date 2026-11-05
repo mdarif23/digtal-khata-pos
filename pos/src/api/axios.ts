@@ -1,5 +1,10 @@
 import axios from "axios";
 import { useSessionStore, type SessionLocation } from "../auth/sessionStore";
+import {
+  bindTerminalScope,
+  currentTerminalId,
+  persistTerminalBinding,
+} from "../auth/terminalBinding";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "http://localhost:3000/api",
@@ -79,6 +84,23 @@ export function switchLocation(locationId: number): void {
 
 export function getSessionUser(): SessionUser | null {
   return sessionUser;
+}
+
+/** The terminal bound to this session, if any. */
+export function getBoundTerminalId(): number | null {
+  return currentTerminalId();
+}
+
+/**
+ * Binds ("this PC is terminal X") or clears the terminal binding and
+ * reloads: cart/outbox scopes are terminal-keyed, so a reload guarantees
+ * every store refetches against the new scope (same convention as
+ * switchLocation).
+ */
+export function bindThisTerminal(terminalId: number | null): void {
+  const user = getSessionUser()?.id ?? "?";
+  persistTerminalBinding(user, activeBusinessId ?? "?", terminalId);
+  window.location.reload();
 }
 
 export function clearSession(): void {
@@ -225,6 +247,9 @@ async function loadSession(): Promise<void> {
     "../features/pos/offline/offlineStore.js"
   );
   bindOfflineSession(getSessionUser()?.id ?? "anon", activeBusinessId);
+  // Terminal binding (multi-terminal): resolve BEFORE cart restore so the
+  // persisted cart scope matches the bound terminal.
+  bindTerminalScope(getSessionUser()?.id ?? "anon", activeBusinessId);
   useOfflineStore.getState().startWatchers();
   // Cart recovery (Module 1.5): restore a checkout interrupted by a
   // refresh/crash. After the offline scope is bound, before the first UI.
@@ -303,6 +328,13 @@ api.interceptors.request.use((config) => {
   }
   if (activeLocationId !== null) {
     config.headers["X-Location-Id"] = String(activeLocationId);
+  }
+  // Multi-terminal Phase 1: attribute POS writes to the bound terminal.
+  // The header is a claim — the backend re-validates the terminal per
+  // request and rejects revoked/foreign ones with 403 TERMINAL_REVOKED.
+  const terminalId = currentTerminalId();
+  if (terminalId !== null) {
+    config.headers["X-Terminal-Id"] = String(terminalId);
   }
   return config;
 });

@@ -168,7 +168,7 @@ export function RegisterPage() {
           <h2 className="text-lg font-semibold">Cash Register</h2>
           <p className="text-sm text-slate-500">
             {currentSession
-              ? `Open at ${currentSession.registerName} · ${currentSession.locationName}`
+              ? `Open at ${currentSession.registerName} · ${currentSession.locationName}${currentSession.terminalName ? ` · ${currentSession.terminalName}` : ""}`
               : "No open session — open a drawer to start taking cash."}
           </p>
         </div>

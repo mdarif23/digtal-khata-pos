@@ -1,4 +1,5 @@
 import { idbGet, idbPut, scopeKey, STORE_CART } from "./db.js";
+import { currentTerminalId } from "../../../auth/terminalBinding.js";
 import type { CartType } from "../../pos/types/cart.types.js";
 
 /**
@@ -11,8 +12,9 @@ import type { CartType } from "../../pos/types/cart.types.js";
  * restores after a crash mid-checkout retries with the SAME key, so the
  * backend still cannot create a duplicate sale.
  *
- * Scope: per user+business, like the catalog caches — a shared device never
- * resurrects another business's cart.
+ * Scope: per user+business+TERMINAL (multi-terminal Phase 1) — two bound
+ * terminals sharing a browser profile never clobber each other's snapshot.
+ * An unbound session uses the legacy terminal-less scope.
  */
 
 const DEBOUNCE_MS = 300;
@@ -25,12 +27,17 @@ interface PersistedCart {
   savedAt: string;
 }
 
+function cartScope(): string {
+  const terminalId = currentTerminalId();
+  return `${scopeKey("cart")}:t${terminalId ?? "none"}`;
+}
+
 export function persistCartNow(
   cart: CartType[],
   checkoutIdempotencyKey: string | null,
 ): void {
   const blob: PersistedCart = {
-    scope: scopeKey("cart"),
+    scope: cartScope(),
     cart,
     checkoutIdempotencyKey,
     savedAt: new Date().toISOString(),
@@ -54,14 +61,14 @@ export async function loadPersistedCart(): Promise<{
   cart: CartType[];
   checkoutIdempotencyKey: string | null;
 } | null> {
-  const blob = await idbGet<PersistedCart>(STORE_CART, scopeKey("cart"));
+  const blob = await idbGet<PersistedCart>(STORE_CART, cartScope());
   if (!blob || !Array.isArray(blob.cart)) return null;
   return { cart: blob.cart, checkoutIdempotencyKey: blob.checkoutIdempotencyKey };
 }
 
 export async function clearPersistedCart(): Promise<void> {
   await idbPut(STORE_CART, {
-    scope: scopeKey("cart"),
+    scope: cartScope(),
     cart: [],
     checkoutIdempotencyKey: null,
     savedAt: new Date().toISOString(),
