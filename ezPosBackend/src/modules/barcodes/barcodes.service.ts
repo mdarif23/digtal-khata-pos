@@ -52,14 +52,20 @@ export interface BarcodeVariantView {
   aliases: { id: number; barcode: string; barcodeFormat: string | null; source: string }[];
 }
 
+/**
+ * Variant display label: the option combination (Small / Medium / Big…)
+ * for EVERY variant of a variant-ed product — including the default one,
+ * which carries a real option value, not an unlabeled row. Products
+ * without variants have a single implicit variant and get no label.
+ */
 const variantLabel = sql<string | null>`CASE
-  WHEN ${productVariants.isDefault} THEN NULL
-  ELSE COALESCE((
+  WHEN ${products.hasVariants} THEN COALESCE((
     SELECT string_agg(vo.value, ' / ' ORDER BY vv.option_id)
     FROM variant_values vv
     JOIN variant_options vo ON vo.id = vv.option_id
     WHERE vv.variant_id = ${productVariants.id}
   ), ${productVariants.sku})
+  ELSE NULL
 END`;
 
 async function loadAliasesForVariants(

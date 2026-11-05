@@ -124,6 +124,12 @@ export function BarcodeGeneratorPage() {
       .filter((item): item is SelectedItem => item !== null);
   }, [rows, selectedIds]);
 
+  // Labels need a barcode to render — selected-but-unbarcoded rows are
+  // excluded from printing (generate first, then print).
+  const printableItems = selectedItems.filter(
+    (item): item is SelectedItem & { barcode: string } => item.barcode !== "",
+  );
+
   function toggle(variantId: number, checked: boolean) {
     setSelectedIds((previous) => {
       const next = new Set(previous);
@@ -137,10 +143,8 @@ export function BarcodeGeneratorPage() {
     setSelectedIds((previous) => {
       const next = new Set(previous);
       for (const row of rows) {
-        if (row.barcode !== null) {
-          if (checked) next.add(row.variantId);
-          else next.delete(row.variantId);
-        }
+        if (checked) next.add(row.variantId);
+        else next.delete(row.variantId);
       }
       return next;
     });
@@ -214,7 +218,7 @@ export function BarcodeGeneratorPage() {
     void searchQuery.refetch();
   }
 
-  const labelItems: LabelItem[] = selectedItems.map((item) => ({
+  const labelItems: LabelItem[] = printableItems.map((item) => ({
     variantId: item.variantId,
     productId: item.productId,
     productName: item.productName,
@@ -283,6 +287,13 @@ export function BarcodeGeneratorPage() {
               }}
             />
             <Select
+              items={[
+                { value: "all", label: "All categories" },
+                ...categories.map((category) => ({
+                  value: String(category.value),
+                  label: category.label,
+                })),
+              ]}
               value={categoryId ? String(categoryId) : "all"}
               onValueChange={(value) => {
                 setCategoryId(value === "all" ? undefined : Number(value));
@@ -300,6 +311,13 @@ export function BarcodeGeneratorPage() {
               </SelectContent>
             </Select>
             <Select
+              items={[
+                { value: "all", label: "All brands" },
+                ...brands.map((brand) => ({
+                  value: String(brand.value),
+                  label: brand.label,
+                })),
+              ]}
               value={brandId ? String(brandId) : "all"}
               onValueChange={(value) => {
                 setBrandId(value === "all" ? undefined : Number(value));
@@ -333,10 +351,10 @@ export function BarcodeGeneratorPage() {
                   <tr>
                     <th className="px-3 py-2">
                       <Checkbox
-                        aria-label="Select all visible items with barcodes"
+                        aria-label="Select all visible items"
                         checked={
-                          rows.filter((row) => row.barcode !== null).length > 0 &&
-                          rows.filter((row) => row.barcode !== null).every((row) => selectedIds.has(row.variantId))
+                          rows.length > 0 &&
+                          rows.every((row) => selectedIds.has(row.variantId))
                         }
                         onCheckedChange={(checked) => selectAllVisible(checked === true)}
                       />
@@ -352,7 +370,6 @@ export function BarcodeGeneratorPage() {
                       <td className="px-3 py-2">
                         <Checkbox
                           aria-label={`Select ${row.productName}`}
-                          disabled={row.barcode === null}
                           checked={selectedIds.has(row.variantId)}
                           onCheckedChange={(checked) => toggle(row.variantId, checked === true)}
                         />
@@ -436,6 +453,10 @@ export function BarcodeGeneratorPage() {
                   onChange={(event) => setManualBarcode(event.target.value)}
                 />
                 <Select
+                  items={[
+                    { value: "alias", label: "As alias" },
+                    { value: "primary", label: "As primary" },
+                  ]}
                   value={manualTarget}
                   onValueChange={(value) =>
                     setManualTarget(value === "alias" ? "alias" : "primary")
@@ -469,7 +490,14 @@ export function BarcodeGeneratorPage() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs">Label size</Label>
-                <Select value={sizeId} onValueChange={(value) => { if (value) { setSizeId(value); setConfigOverrides({}); } }}>
+                <Select
+                  items={LABEL_SIZES.map((labelSize) => ({
+                    value: labelSize.id,
+                    label: labelSize.label,
+                  }))}
+                  value={sizeId}
+                  onValueChange={(value) => { if (value) { setSizeId(value); setConfigOverrides({}); } }}
+                >
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {LABEL_SIZES.map((labelSize) => (
@@ -630,11 +658,16 @@ export function BarcodeGeneratorPage() {
           <div className="flex items-center justify-between rounded-xl border border-slate-200 p-3">
             <span className="text-sm text-slate-600">
               <strong>{selectedItems.length}</strong> selected ·{" "}
-              {selectedItems.length * copies} label(s)
+              {labelItems.length * copies} label(s)
+              {selectedItems.length > labelItems.length ? (
+                <span className="text-amber-600">
+                  {" "}· {selectedItems.length - labelItems.length} without barcode (generate first)
+                </span>
+              ) : null}
             </span>
             <PermissionButton
               permission="products.print_labels"
-              disabled={selectedItems.length === 0}
+              disabled={printableItems.length === 0}
               onClick={() => setPrintOpen(true)}
             >
               Print / PDF…

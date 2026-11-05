@@ -486,6 +486,19 @@ describe("barcodes integration", { skip: !runIntegration }, () => {
     assert.equal(payload<{ data: { matchType: string } }>(goneUpdated).data.matchType, "not_found");
   });
 
+  it("variant labels carry option values for every variant (incl. the default)", async () => {
+    const search = await api(owner, "GET", "/api/barcodes/search", undefined);
+    const rows = payload<{ data: { rows: { variantId: number; variantLabel: string | null; productName: string }[] } }>(search).data.rows;
+    const small = rows.find((r) => r.variantId === variantA);
+    const medium = rows.find((r) => r.variantId === variantB);
+    const simple = rows.find((r) => r.variantId === simpleVariant);
+    // The default variant of a variant-ed product is a REAL option value —
+    // football (Small) must not come back as an unlabeled row.
+    assert.equal(small?.variantLabel, "Small");
+    assert.equal(medium?.variantLabel, "Medium");
+    assert.equal(simple?.variantLabel, null, "products without variants have no label");
+  });
+
   it("lookups resolve primary and SKU exactly; unknown codes never guess", async () => {
     const current = await api(owner, "GET", `/api/barcodes/variant/${variantA}`);
     const primaryBarcode = payload<{ data: { barcode: string } }>(current).data.barcode;
