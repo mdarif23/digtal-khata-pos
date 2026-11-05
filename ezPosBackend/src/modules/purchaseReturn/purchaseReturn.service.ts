@@ -14,7 +14,6 @@ import {
 import { variantOptions } from "../../db/schema/variantOptions.js";
 import { variantValues } from "../../db/schema/variantValues.js";
 import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
-import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { products } from "../../db/schema/products.js";
 import { productVariants } from "../../db/schema/productVariants.js";
@@ -24,9 +23,24 @@ import { purchaseReturns } from "../../db/schema/purchaseReturns.js";
 import { purchases } from "../../db/schema/purchases.js";
 import { serialNumbers } from "../../db/schema/serialNumbers.js";
 import { supplierLedger } from "../../db/schema/supplierLedger.js";
-import { reverseForPurchaseReturnInTx } from "../landed-cost/landed-cost.lifecycle.js";
+import {
+  lockDocumentForPurchaseInTx,
+  reverseForPurchaseReturnInTx,
+} from "../landed-cost/landed-cost.lifecycle.js";
+import {
+  assertStockDecremented,
+  decrementStockGuarded,
+  markSerialsReturned,
+  recordStockMovement,
+} from "../inventory/index.js";
 import { BadRequestError, NotFoundError } from "../../utils/handleError.js";
 import type { CreatePurchaseReturnInput } from "./purchaseReturn.schema.js";
+import {
+  assertItemsBelongToPurchase,
+  assertReturnEligibility,
+  assertReturnablePurchase,
+  validateReturnRequest,
+} from "./return.validation.js";
 
 // Takes the caller's server-verified businessId (from requireBusinessContext)
 // and scopes all reads and writes to it.
@@ -39,10 +53,7 @@ export async function createPurchaseReturn(
   }: CreatePurchaseReturnInput,
   actorUserId?: number,
 ) {
-  const purchaseItemIds = changedItems.map((item) => item.purchaseItemId);
-  if (new Set(purchaseItemIds).size !== purchaseItemIds.length) {
-    throw new BadRequestError("Duplicate purchase items are not allowed.");
-  }
+  const purchaseItemIds = validateReturnRequest(changedItems);
 
   return db.transaction(async (tx) => {
     const [purchase] = await tx
@@ -62,18 +73,13 @@ export async function createPurchaseReturn(
     if (!purchase) {
       throw new NotFoundError("Purchase order not found.");
     }
-    if (purchase.supplierId === null) {
-      throw new BadRequestError(
-        "A supplier must be assigned to process a purchase return.",
-      );
-    }
-    // Returns deduct stock where the purchase was received.
-    if (purchase.locationId === null) {
-      throw new BadRequestError(
-        "This purchase has no receiving location recorded and cannot be returned.",
-      );
-    }
+    assertReturnablePurchase(purchase);
     const locationId: number = purchase.locationId;
+
+    // Lock-order anchor (see lockDocumentForPurchaseInTx): the landed-cost
+    // document row is locked before the purchase items so the reversal's
+    // allocation FKs can never cross-wait with a receive or a post.
+    await lockDocumentForPurchaseInTx(tx, businessId, orderId);
 
     const items = await tx
       .select({
@@ -102,11 +108,7 @@ export async function createPurchaseReturn(
       )
       .for("update");
 
-    if (items.length !== purchaseItemIds.length) {
-      throw new BadRequestError(
-        "One or more selected items do not belong to this purchase order.",
-      );
-    }
+    assertItemsBelongToPurchase(items, purchaseItemIds);
 
     const alreadyReturned = await tx
       .select({
@@ -152,36 +154,26 @@ export async function createPurchaseReturn(
     const stockByVariant = new Map(
       stockRows.map((row) => [row.variantId, Number(row.quantity ?? 0)]),
     );
-    const requestedByVariant = new Map<number, number>();
-
-    for (const item of items) {
-      const quantity = requestedByItem.get(item.id) ?? 0;
-      const remainingReceived =
-        Number(item.receivedQuantity) -
-        (returnedByItem.get(item.id) ?? 0);
-
-      if (quantity > remainingReceived) {
-        throw new BadRequestError(
-          `Cannot return ${quantity} of item ${item.id}; only ${Math.max(remainingReceived, 0)} received units remain eligible.`,
-        );
-      }
-
-      requestedByVariant.set(
-        item.variantId,
-        (requestedByVariant.get(item.variantId) ?? 0) + quantity,
-      );
-    }
-
-    for (const [variantId, quantity] of requestedByVariant) {
-      const available = stockByVariant.get(variantId);
-      if (available === undefined || quantity > available) {
-        throw new BadRequestError(
-          `Insufficient on-hand stock to return ${quantity} unit(s) of variant ${variantId}.`,
-        );
-      }
-    }
+    // Eligibility (received − returned per line, on-hand stock per variant)
+    // is enforced in return.validation.ts; it returns the aggregated
+    // return demand per variant used by the stock decrement below.
+    const requestedByVariant = assertReturnEligibility({
+      items,
+      requestedByItem,
+      returnedByItem,
+      stockByVariant,
+    });
 
     let totalAmount = 0;
+    // D1 (batch-authoritative credit): each returned unit is credited at the
+    // purchase_price of the batch it actually comes out of (FIFO by batch
+    // id), plus the line's discount/tax amortized over the ordered quantity
+    // — unchanged from the previous formula except that the cost basis is
+    // now the unit's real receive-time cost instead of the line's single
+    // cost column. Returning a fully received line credits exactly its net
+    // line value.
+    const lineAdjustment = (item: (typeof items)[number]) =>
+      (Number(item.tax) - Number(item.discount)) / Number(item.quantity);
     const getReturnUnitPrice = (item: (typeof items)[number]) =>
       Math.max(
         0,
@@ -197,49 +189,110 @@ export async function createPurchaseReturn(
     // Landed-cost reversal tracking (Part F): every unit taken from a batch
     // carries its per-unit landed cost out of inventory.
     const landedConsumed: { batchId: number; quantity: number }[] = [];
+    // Line credit (money) by purchase item id — the purchaseReturnItems row
+    // stores the average per-unit credit; total_amount governs the money.
+    const creditByItemId = new Map<number, number>();
+
+    // Batch pool per variant (Phase 6 fix): sales consume batches FIFO
+    // across the whole VARIANT, so a returned unit may physically sit in a
+    // sibling line's batch. The pool therefore spans this purchase's lines
+    // sharing the variant, at the receiving location — consumed FIFO by
+    // batch id across the return's lines (items processed in id order).
+    // Cross-purchase fungibility is deliberately NOT allowed: a return
+    // never credits costs from another PO's batches.
+    const requestedVariantIds = [...new Set(items.map((item) => item.variantId))];
+    const poolRows = requestedVariantIds.length
+      ? await tx
+          .select({
+            id: inventoryBatches.id,
+            variantId: inventoryBatches.variantId,
+            quantityRemaining: inventoryBatches.quantityRemaining,
+            purchasePrice: inventoryBatches.purchasePrice,
+          })
+          .from(inventoryBatches)
+          .innerJoin(
+            purchaseItems,
+            and(
+              eq(inventoryBatches.purchaseItemId, purchaseItems.id),
+              eq(inventoryBatches.businessId, purchaseItems.businessId),
+            ),
+          )
+          .where(
+            and(
+              eq(inventoryBatches.businessId, businessId),
+              eq(inventoryBatches.locationId, locationId),
+              eq(purchaseItems.purchaseId, orderId),
+              inArray(inventoryBatches.variantId, requestedVariantIds),
+            ),
+          )
+          .orderBy(inventoryBatches.id)
+          .for("update")
+      : [];
+    const batchPoolByVariant = new Map<
+      number,
+      { id: number; quantityRemaining: number; purchasePrice: number | string }[]
+    >();
+    for (const row of poolRows) {
+      if (row.variantId === null) continue;
+      const pool = batchPoolByVariant.get(row.variantId) ?? [];
+      pool.push({
+        id: row.id,
+        quantityRemaining: Number(row.quantityRemaining),
+        purchasePrice: row.purchasePrice,
+      });
+      batchPoolByVariant.set(row.variantId, pool);
+    }
 
     for (const item of items) {
       const quantity = requestedByItem.get(item.id) ?? 0;
       const trackingType = item.trackingType;
-      const batches = await tx
-        .select({
-          id: inventoryBatches.id,
-          quantityRemaining: inventoryBatches.quantityRemaining,
-        })
-        .from(inventoryBatches)
-        .where(
-          and(
-            eq(inventoryBatches.purchaseItemId, item.id),
-            eq(inventoryBatches.businessId, businessId),
-          ),
-        )
-        .orderBy(inventoryBatches.id)
-        .for("update");
+      const pool = batchPoolByVariant.get(item.variantId) ?? [];
 
-      let remainingToRemove = quantity;
-      for (const batch of batches) {
-        if (remainingToRemove <= 0) break;
-        const removed = Math.min(batch.quantityRemaining, remainingToRemove);
-        if (removed <= 0) continue;
-        await tx
-          .update(inventoryBatches)
-          .set({
-            quantityRemaining: sql`${inventoryBatches.quantityRemaining} - ${removed}`,
-          })
-          .where(
-            and(
-              eq(inventoryBatches.id, batch.id),
-              eq(inventoryBatches.businessId, businessId),
+      if (pool.length === 0) {
+        // Legacy fallback: received before batch rows were written — fall
+        // back to the line-based per-unit price (mirrors the received-value
+        // fallback in the receive flow).
+        creditByItemId.set(item.id, quantity * getReturnUnitPrice(item));
+      } else {
+        let remainingToRemove = quantity;
+        let lineCredit = 0;
+        for (const batch of pool) {
+          if (remainingToRemove <= 0) break;
+          if (batch.quantityRemaining <= 0) continue;
+          const removed = Math.min(batch.quantityRemaining, remainingToRemove);
+          await tx
+            .update(inventoryBatches)
+            .set({
+              quantityRemaining: sql`${inventoryBatches.quantityRemaining} - ${removed}`,
+            })
+            .where(
+              and(
+                eq(inventoryBatches.id, batch.id),
+                eq(inventoryBatches.businessId, businessId),
+              ),
+            );
+          batch.quantityRemaining -= removed;
+          remainingToRemove -= removed;
+          landedConsumed.push({ batchId: batch.id, quantity: removed });
+          const unitPrice = Math.max(
+            0,
+            Number(
+              (Number(batch.purchasePrice) + lineAdjustment(item)).toFixed(2),
             ),
           );
-        remainingToRemove -= removed;
-        landedConsumed.push({ batchId: batch.id, quantity: removed });
-      }
+          lineCredit += removed * unitPrice;
+        }
 
-      if (remainingToRemove > 0 && trackingType !== "none") {
-        throw new BadRequestError(
-          `Insufficient available batch quantity for purchase item ${item.id}.`,
-        );
+        // Every returned unit must trace to a batch row (its cost basis).
+        // The pool spans this purchase's batches for the variant; a
+        // shortfall means the on-hand units came from another purchase's
+        // batches (mixed sales) — refuse rather than mis-credit.
+        if (remainingToRemove > 0) {
+          throw new BadRequestError(
+            `Insufficient available batch quantity for purchase item ${item.id}.`,
+          );
+        }
+        creditByItemId.set(item.id, lineCredit);
       }
 
       if (trackingType === "serial") {
@@ -263,22 +316,17 @@ export async function createPurchaseReturn(
         }
 
         if (availableSerials.length > 0) {
-          await tx
-            .update(serialNumbers)
-            .set({ status: "returned" })
-            .where(
-              inArray(
-                serialNumbers.id,
-                availableSerials.map((serial) => serial.id),
-              ),
-            );
+          await markSerialsReturned(tx, {
+            businessId,
+            serialIds: availableSerials.map((serial) => serial.id),
+          });
         }
       }
-
-      totalAmount += quantity * getReturnUnitPrice(item);
     }
 
-    totalAmount = Number(totalAmount.toFixed(2));
+    totalAmount = Number(
+      [...creditByItemId.values()].reduce((sum, credit) => sum + credit, 0).toFixed(2),
+    );
     const [purchaseReturn] = await tx
       .insert(purchaseReturns)
       .values({
@@ -298,7 +346,10 @@ export async function createPurchaseReturn(
     await tx.insert(purchaseReturnItems).values(
       items.map((item) => {
         const quantity = requestedByItem.get(item.id) ?? 0;
-        const unitPrice = getReturnUnitPrice(item);
+        // Average per-unit credit across the batches this line's units came
+        // from (the return's total_amount is the authoritative figure).
+        const lineCredit = creditByItemId.get(item.id) ?? 0;
+        const unitPrice = quantity > 0 ? lineCredit / quantity : 0;
         return {
           businessId,
           purchaseReturnId: purchaseReturn.id,
@@ -311,28 +362,17 @@ export async function createPurchaseReturn(
     );
 
     for (const [variantId, quantity] of requestedByVariant) {
-      const [updatedStock] = await tx
-        .update(inventoryStock)
-        .set({
-          quantity: sql`${inventoryStock.quantity} - ${quantity}`,
-        })
-        .where(
-          and(
-            eq(inventoryStock.variantId, variantId),
-            eq(inventoryStock.businessId, businessId),
-            eq(inventoryStock.locationId, locationId),
-            sql`${inventoryStock.quantity} >= ${quantity}`,
-          ),
-        )
-        .returning({ variantId: inventoryStock.variantId });
+      // Conditional decrement — the last-line guard against concurrent
+      // races (the row-locked read above already checked availability).
+      const decremented = await decrementStockGuarded(tx, {
+        businessId,
+        locationId,
+        variantId,
+        quantity,
+      });
+      assertStockDecremented(decremented, variantId);
 
-      if (!updatedStock) {
-        throw new BadRequestError(
-          `Stock changed while processing the return for variant ${variantId}. Please retry.`,
-        );
-      }
-
-      await tx.insert(inventoryMovements).values({
+      await recordStockMovement(tx, {
         businessId,
         variantId,
         locationId,
@@ -353,8 +393,9 @@ export async function createPurchaseReturn(
     });
 
     // Landed-cost reversal (Part F): returned units take their allocated
-    // landed cost out of inventory — traceable, never silent.
-    await reverseForPurchaseReturnInTx(
+    // landed cost out of inventory — traceable, never silent. The reversal
+    // info rides back to the client for the adjustment notice.
+    const landedCost = await reverseForPurchaseReturnInTx(
       tx,
       businessId,
       purchase.id,
@@ -389,6 +430,8 @@ export async function createPurchaseReturn(
       data: {
         purchaseReturnId: purchaseReturn.id,
         totalAmount,
+        // Authoritative landed-cost reversal feedback for the frontend.
+        landedCost,
       },
     };
   });

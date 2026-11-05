@@ -212,6 +212,13 @@ export function calculateAllocation(options: {
 
   if (method === "manual") {
     const manual = options.manualLines ?? [];
+    // Only lines with received batches participate in manual allocation —
+    // ordered-but-unreceived lines hold their share as pending allocation.
+    const receivedItems = new Set(
+      lines
+        .filter((line) => line.batches.length > 0)
+        .map((line) => line.purchaseItemId),
+    );
     const manualIds = new Set<number>();
     for (const m of manual) {
       if (manualIds.has(m.purchaseItemId)) {
@@ -229,7 +236,7 @@ export function calculateAllocation(options: {
           field: "manualAllocations",
         });
       }
-      if (!seenItems.has(m.purchaseItemId)) {
+      if (!receivedItems.has(m.purchaseItemId)) {
         issues.push({
           code: "unknown_manual_line",
           message: `Manual allocation references purchase item ${m.purchaseItemId} which has no received batches.`,
@@ -237,7 +244,7 @@ export function calculateAllocation(options: {
         });
       }
     }
-    if (seenItems.size > 0 && manualIds.size !== seenItems.size) {
+    if (receivedItems.size > 0 && manualIds.size !== receivedItems.size) {
       issues.push({
         code: "incomplete_manual_allocation",
         message: "Every received line needs a manual allocation amount.",
@@ -278,23 +285,28 @@ export function calculateAllocation(options: {
   }[];
   if (method === "manual") {
     // Manual amounts are user-defined per line for the whole document; the
-    // received portion scales by quantity like every other method.
-    lineTargets = lines.map((line) => {
-      const totalTargetQuads = amountToMicros(
-        (options.manualLines ?? []).find(
-          (m) => m.purchaseItemId === line.purchaseItemId,
-        )!.amount,
-      ) / 100n;
+    // received portion scales by quantity like every other method. Lines
+    // without a manual entry (ordered but unreceived) hold their share as
+    // pending allocation.
+    const manualLines = options.manualLines ?? [];
+    lineTargets = lines.flatMap((line) => {
+      const manualEntry = manualLines.find(
+        (m) => m.purchaseItemId === line.purchaseItemId,
+      );
+      if (!manualEntry) return [];
+      const totalTargetQuads = amountToMicros(manualEntry.amount) / 100n;
       const orderedMillis = orderedMillisOf(line);
       const receivedMillis = receivedMillisOf(line);
-      return {
-        line,
-        totalTargetQuads,
-        receivedTargetQuads:
-          orderedMillis > 0n
-            ? (totalTargetQuads * receivedMillis) / orderedMillis
-            : totalTargetQuads,
-      };
+      return [
+        {
+          line,
+          totalTargetQuads,
+          receivedTargetQuads:
+            orderedMillis > 0n
+              ? (totalTargetQuads * receivedMillis) / orderedMillis
+              : totalTargetQuads,
+        },
+      ];
     });
   } else {
     // Basis scale is per-method (only relative size matters within one

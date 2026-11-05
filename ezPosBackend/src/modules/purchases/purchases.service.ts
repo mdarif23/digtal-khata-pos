@@ -8,6 +8,7 @@ import { variantOptions } from "../../db/schema/variantOptions.js";
 import { variantValues } from "../../db/schema/variantValues.js";
 import { purchaseItems } from "../../db/schema/purchaseItems.js";
 import { purchases } from "../../db/schema/purchases.js";
+import { landedCosts } from "../../db/schema/landedCosts.js";
 import { and, asc, eq, getTableColumns, inArray } from "drizzle-orm";
 import { products } from "../../db/schema/products.js";
 import {
@@ -20,7 +21,7 @@ import { productVariants } from "../../db/schema/productVariants.js";
 import { units } from "../../db/schema/units.js";
 import type { ReceiveItemsFormValues } from "./schemas/receiveItem.schema.js";
 import { checkPriceIncreasesInTx } from "../procurement/priceAlerts.service.js";
-import { applyReceiveDeltaInTx } from "../landed-cost/landed-cost.lifecycle.js";
+import { applyReceiveDeltaInTx, lockDocumentForPurchaseInTx } from "../landed-cost/landed-cost.lifecycle.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import {
   basicRequestValidation,
@@ -28,22 +29,28 @@ import {
   purchaseItemsValidation,
   purchaseValidation,
   receiveItemsValidation,
+  serialAvailabilityValidation,
   serialNumberValidation,
 } from "./receive/receive.validation.js";
 import {
+  calculatePurchaseStatus,
   calculatePayments,
   calculatePaymentStatus,
-  calculatePurchaseStatus,
+} from "./receive/receive.calculations.js";
+import {
   getAllPurchaseItems,
+  getPurchaseReceivedAmountInTx,
   insertInventoryBatches,
-  insertInventoryMovements,
-  insertInventoryStockOnConflictDoUpdate,
   insertPurchasePayments,
   insertSerialNumbers,
   updateProductVariants,
   updatePurchase,
   updatePurchaseItems,
 } from "./receive/receive.service.js";
+import {
+  incrementStockForReceive,
+  recordStockMovement,
+} from "../inventory/index.js";
 import {
   formatPurchaseOrderNumber,
   nextDocumentNumber,
@@ -186,6 +193,61 @@ export async function createPurchase(
     };
   });
 }
+// Landed-cost status for the purchases list indicator. Only applicable
+// states are surfaced: draft/posted docs with unallocated capitalizable
+// amount → "pending"; posted/adjusted docs fully allocated → "allocated";
+// no document or a fully reversed document → null (no indicator).
+export function deriveLandedCostStatus(row: {
+  landedCostDocStatus: string | null;
+  landedCostPending: string | number | null;
+}): "pending" | "allocated" | null {
+  if (row.landedCostDocStatus === "draft") return "pending";
+  if (
+    row.landedCostDocStatus === "posted" ||
+    row.landedCostDocStatus === "adjusted"
+  ) {
+    // 0.005 tolerance absorbs numeric(14,4) rounding residue.
+    return Number(row.landedCostPending ?? 0) > 0.005 ? "pending" : "allocated";
+  }
+  return null;
+}
+
+/**
+ * Purchase rows joined with the (single, unique-per-purchase) landed-cost
+ * document so the list can show a landed-cost allocation indicator.
+ */
+function purchasesWithLandedCostQuery() {
+  return db
+    .select({
+      ...getTableColumns(purchases),
+      supplierName: suppliers.name,
+      landedCostDocStatus: landedCosts.status,
+      landedCostPending: landedCosts.pendingAllocationAmount,
+    })
+    .from(purchases)
+    .leftJoin(suppliers, eq(purchases.supplierId, suppliers.id))
+    .leftJoin(
+      landedCosts,
+      and(
+        eq(landedCosts.purchaseId, purchases.id),
+        eq(landedCosts.businessId, purchases.businessId),
+      ),
+    );
+}
+
+function withLandedCostStatus<
+  T extends {
+    landedCostDocStatus: string | null;
+    landedCostPending: string | number | null;
+  },
+>(row: T) {
+  const { landedCostDocStatus, landedCostPending, ...rest } = row;
+  return {
+    ...rest,
+    landedCostStatus: deriveLandedCostStatus({ landedCostDocStatus, landedCostPending }),
+  };
+}
+
 export async function getPurchasesSummary(businessId: number) {
   const [
     orderedPurchase,
@@ -193,35 +255,22 @@ export async function getPurchasesSummary(businessId: number) {
     partiallyPaidPurchase,
     completedPurchase,
   ] = await Promise.all([
-    db
-      .select({ ...getTableColumns(purchases), supplierName: suppliers.name })
-      .from(purchases)
-      .leftJoin(suppliers, eq(purchases.supplierId, suppliers.id))
+    purchasesWithLandedCostQuery()
       .where(
         and(
           eq(purchases.status, "ordered"),
           eq(purchases.businessId, businessId),
         ),
       ),
-    db
-      .select({ ...getTableColumns(purchases), supplierName: suppliers.name })
-      .from(purchases)
-      .leftJoin(suppliers, eq(purchases.supplierId, suppliers.id))
-      .where(eq(purchases.businessId, businessId)),
-    db
-      .select({ ...getTableColumns(purchases), supplierName: suppliers.name })
-      .from(purchases)
-      .leftJoin(suppliers, eq(purchases.supplierId, suppliers.id))
+    purchasesWithLandedCostQuery().where(eq(purchases.businessId, businessId)),
+    purchasesWithLandedCostQuery()
       .where(
         and(
           inArray(purchases.paymentStatus, ["partial", "unpaid"]),
           eq(purchases.businessId, businessId),
         ),
       ),
-    db
-      .select({ ...getTableColumns(purchases), supplierName: suppliers.name })
-      .from(purchases)
-      .leftJoin(suppliers, eq(purchases.supplierId, suppliers.id))
+    purchasesWithLandedCostQuery()
       .where(
         and(
           inArray(purchases.paymentStatus, ["paid"]),
@@ -230,10 +279,10 @@ export async function getPurchasesSummary(businessId: number) {
       ),
   ]);
   return {
-    orderedPurchase,
-    allPurchases,
-    partiallyPaidPurchase,
-    completedPurchase,
+    orderedPurchase: orderedPurchase.map(withLandedCostStatus),
+    allPurchases: allPurchases.map(withLandedCostStatus),
+    partiallyPaidPurchase: partiallyPaidPurchase.map(withLandedCostStatus),
+    completedPurchase: completedPurchase.map(withLandedCostStatus),
   };
 }
 export async function getPurchasesItems(
@@ -298,6 +347,84 @@ export async function getPurchasesItems(
   }));
 }
 
+/**
+ * Purchase detail: header (with supplier name + landed-cost status) and the
+ * order's items with variant display. Stock is shown at the purchase's
+ * receiving location when one is recorded.
+ */
+export async function getPurchaseDetail(businessId: number, purchaseId: number) {
+  const [purchase] = await purchasesWithLandedCostQuery()
+    .where(
+      and(eq(purchases.id, purchaseId), eq(purchases.businessId, businessId)),
+    )
+    .limit(1);
+
+  if (!purchase) {
+    throw new NotFoundError("Purchase order not found.");
+  }
+
+  const itemRows = await db
+    .select({
+      ...getTableColumns(purchaseItems),
+      productName: products.name,
+      productUnit: units.name,
+      sellingPrice: productVariants.sellingPrice,
+      productId: products.id,
+      variantSku: productVariants.sku,
+      trackingType: products.trackingType,
+      availableStock: inventoryStock.quantity,
+    })
+    .from(purchaseItems)
+    .innerJoin(productVariants, eq(purchaseItems.variantId, productVariants.id))
+    .innerJoin(products, eq(productVariants.productId, products.id))
+    .leftJoin(units, eq(units.id, products.unitId))
+    .leftJoin(
+      inventoryStock,
+      and(
+        eq(inventoryStock.variantId, productVariants.id),
+        eq(inventoryStock.businessId, businessId),
+        eq(inventoryStock.locationId, purchase.locationId ?? -1),
+      ),
+    )
+    .where(
+      and(
+        eq(purchaseItems.purchaseId, purchaseId),
+        eq(purchaseItems.businessId, businessId),
+      ),
+    );
+
+  // Option labels batched per distinct variant (a join would fan out rows).
+  const variantIds = [...new Set(itemRows.map((row) => row.variantId))];
+  let optionsByVariant = new Map<number, string[]>();
+  if (variantIds.length > 0) {
+    const optRows = await db
+      .select({
+        variantId: variantValues.variantId,
+        value: variantOptions.value,
+      })
+      .from(variantValues)
+      .innerJoin(variantOptions, eq(variantValues.optionId, variantOptions.id))
+      .where(inArray(variantValues.variantId, variantIds))
+      .orderBy(asc(variantValues.optionId));
+    optionsByVariant = foldVariantOptionRows(optRows);
+  }
+
+  const items = itemRows.map((row) => ({
+    ...row,
+    variantOptions: variantOptionsFromMap(optionsByVariant, row.variantId),
+    variantName: variantNameFromMap(optionsByVariant, row.variantId, row.productName),
+  }));
+
+  const { landedCostDocStatus, landedCostPending, ...purchaseHeader } = purchase;
+  return {
+    purchase: {
+      ...purchaseHeader,
+      landedCostStatus: deriveLandedCostStatus({ landedCostDocStatus, landedCostPending }),
+    },
+    items,
+  };
+}
+
 export async function createReceivePurchase(
   businessId: number,
   locationId: number,
@@ -310,6 +437,11 @@ export async function createReceivePurchase(
   return db.transaction(async (tx) => {
     const itemIds = basicRequestValidation(items);
     const purchase = await purchaseValidation(tx, businessId, purchaseId);
+
+    // Lock-order anchor: take the (optional) landed-cost document row lock
+    // BEFORE the purchase items, so a concurrent landed-cost post holding
+    // the doc lock can never wait on this tx's item locks (deadlock).
+    await lockDocumentForPurchaseInTx(tx, businessId, purchaseId);
 
     // Stamp the receiving location on the purchase header (first receive
     // wins; later partial receives must go to the same location).
@@ -351,6 +483,10 @@ export async function createReceivePurchase(
       }
     }
 
+    // Serials are unique per business — reject duplicates before any write
+    // so the client gets a clear 400 instead of a raw constraint error.
+    await serialAvailabilityValidation(tx, businessId, items);
+
     for (const purchaseItem of existingItems) {
       const receiveItem = receiveItemMap.get(purchaseItem.id)!;
 
@@ -361,12 +497,13 @@ export async function createReceivePurchase(
       const newReceivedQuantity =
         purchaseItem.receivedQuantity + receiveItem.receiveNow;
 
+      // D1 (batch-authoritative): the line's unit_cost keeps the PO order
+      // cost; this session's cost lands on the batches created below.
       await updatePurchaseItems(
         tx,
         businessId,
         purchaseItem.id,
         newReceivedQuantity,
-        receiveItem.unitCost,
       );
       await updateProductVariants(
         tx,
@@ -375,22 +512,22 @@ export async function createReceivePurchase(
         purchaseItem.variantId,
       );
 
-      await insertInventoryStockOnConflictDoUpdate(
-        tx,
+      await incrementStockForReceive(tx, {
         businessId,
         locationId,
-        purchaseItem.variantId,
-        receiveItem.receiveNow,
-      );
+        variantId: purchaseItem.variantId,
+        quantity: receiveItem.receiveNow,
+      });
 
-      await insertInventoryMovements(
-        tx,
+      await recordStockMovement(tx, {
         businessId,
+        variantId: purchaseItem.variantId,
         locationId,
-        purchaseItem.variantId,
-        purchaseId,
-        receiveItem.receiveNow,
-      );
+        movementType: "purchase",
+        referenceType: "purchase",
+        referenceId: purchaseId,
+        quantity: receiveItem.receiveNow,
+      });
 
       const insertedBatches = await insertInventoryBatches(
         tx,
@@ -425,7 +562,13 @@ export async function createReceivePurchase(
     // Landed-cost delta (Part F): a posted landed-cost document on this
     // purchase adjusts incrementally in the SAME transaction — the new
     // batches are visible to its target recomputation. No-op otherwise.
-    await applyReceiveDeltaInTx(tx, businessId, purchaseId, actorUserId ?? 0);
+    // The delta info rides back to the client for the adjustment notice.
+    const landedCost = await applyReceiveDeltaInTx(
+      tx,
+      businessId,
+      purchaseId,
+      actorUserId ?? 0,
+    );
 
     const allPurchaseItems = await getAllPurchaseItems(
       tx,
@@ -435,22 +578,28 @@ export async function createReceivePurchase(
 
     const newStatus = calculatePurchaseStatus(allPurchaseItems);
 
+    // Payment limit is based on the value of goods ACTUALLY received
+    // (batch-authoritative, D1) capped by the invoice total.
+    const receivedAmount = await getPurchaseReceivedAmountInTx(
+      tx,
+      businessId,
+      purchaseId,
+    );
+
     const {
       updatedPaidAmount,
-      receivedAmount,
       updatedDueAmount,
       newPaymentAmount,
-    } = calculatePayments(
-      allPurchaseItems,
-      purchase.paidAmount,
+    } = calculatePayments({
+      paidAmount: purchase.paidAmount,
       paymentAmount,
-      purchase.totalAmount,
-    );
+      totalAmount: purchase.totalAmount,
+      receivedAmount,
+    });
 
     const paymentStatus = calculatePaymentStatus(
       updatedPaidAmount,
       purchase.totalAmount,
-      receivedAmount,
     );
 
     // =========================================================
@@ -511,17 +660,25 @@ export async function createReceivePurchase(
     // 15. RETURN
     // =========================================================
 
+    // Unified mutation envelope ({success, message, data}) — the same shape
+    // the purchase-return endpoint uses.
     return {
       success: true,
-      purchaseId,
-      status: newStatus,
-      receivedAmount,
-      paidAmount: updatedPaidAmount,
-      dueAmount: updatedDueAmount,
       message:
         newStatus === "received"
           ? "Purchase completely received."
           : "Purchase partially received.",
+      data: {
+        purchaseId,
+        status: newStatus,
+        receivedAmount,
+        paidAmount: updatedPaidAmount,
+        dueAmount: updatedDueAmount,
+        // Authoritative landed-cost feedback: whether a posted document
+        // adjusted, by how much, and which document. The frontend renders
+        // this as a notice — it never computes landed-cost amounts itself.
+        landedCost,
+      },
     };
   });
 }

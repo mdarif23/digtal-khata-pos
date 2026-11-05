@@ -20,6 +20,7 @@ export async function createPurchase(req: Request, res: Response) {
       result.data,
     );
     return res.status(201).json({
+      success: true,
       message: "Purchase created successfully",
       data: purchase,
     });
@@ -51,21 +52,38 @@ export async function createReceivePurchase(req: Request, res: Response) {
     const result = receiveItemsFormSchema.safeParse(req.body);
     if (!result.success) {
       return res.status(400).json({
+        success: false,
         message: "Invalid Purchase Data",
         errors: result.error.flatten(),
       });
     }
-    const receivedItems = await purchasesService.createReceivePurchase(
+    // The service returns the unified {success, message, data} envelope.
+    const received = await purchasesService.createReceivePurchase(
       getBusinessId(req),
       getLocationId(req),
       result.data,
       req.user?.id,
     );
-    res.status(201).json({
-      message: "Purchase order updated successfully",
-      data: receivedItems,
-    });
+    res.status(201).json(received);
   } catch (err) {
     return sendSafeError(res, err, "Unable to receive the purchase.");
+  }
+}
+
+export async function getPurchaseDetail(req: Request, res: Response) {
+  try {
+    const purchaseId = Number(req.params.id);
+    if (!Number.isInteger(purchaseId) || purchaseId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid purchase order id." });
+    }
+    const detail = await purchasesService.getPurchaseDetail(
+      getBusinessId(req),
+      purchaseId,
+    );
+    res.status(200).json(detail);
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to load the purchase order.");
   }
 }

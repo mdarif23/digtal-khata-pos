@@ -1,15 +1,33 @@
-import { and, eq, inArray, type ExtractTablesWithRelations } from "drizzle-orm";
+import {
+  and,
+  eq,
+  inArray,
+  type ExtractTablesWithRelations,
+} from "drizzle-orm";
 import { purchases } from "../../../db/schema/purchases.js";
-import { NotFoundError } from "../../../utils/handleError.js";
+import {
+  BadRequestError,
+  ConflictError,
+  NotFoundError,
+} from "../../../utils/handleError.js";
 import type { Items, PurchaseItem } from "./receive.types.js";
 import type { PgTransaction } from "drizzle-orm/pg-core/session";
 import type { NodePgQueryResultHKT } from "drizzle-orm/node-postgres/session";
 import { purchaseItems } from "../../../db/schema/purchaseItems.js";
+import { serialNumbers } from "../../../db/schema/serialNumbers.js";
+
+type Tx = PgTransaction<
+  NodePgQueryResultHKT,
+  Record<string, never>,
+  ExtractTablesWithRelations<Record<string, never>>
+>;
 
 // BASIC REQUEST VALIDATION
+// Business-rule violations are 400s (BadRequestError), not 404s: the request
+// reached the right resource — its content is wrong.
 export function basicRequestValidation(items: Items[]) {
   if (items.length === 0) {
-    throw new NotFoundError("At least one purchase item is required.");
+    throw new BadRequestError("At least one purchase item is required.");
   }
 
   // Prevent duplicate item IDs in the request
@@ -17,20 +35,12 @@ export function basicRequestValidation(items: Items[]) {
   const uniqueItemIds = new Set(itemIds);
 
   if (uniqueItemIds.size !== itemIds.length) {
-    throw new NotFoundError("Duplicate purchase item IDs are not allowed.");
+    throw new BadRequestError("Duplicate purchase item IDs are not allowed.");
   }
   return itemIds;
 }
 //purchase Validation
-export async function purchaseValidation(
-  tx: PgTransaction<
-    NodePgQueryResultHKT,
-    Record<string, never>,
-    ExtractTablesWithRelations<Record<string, never>>
-  >,
-  businessId: number,
-  purchaseId: number,
-) {
+export async function purchaseValidation(tx: Tx, businessId: number, purchaseId: number) {
   const [purchase] = await tx
     .select()
     .from(purchases)
@@ -47,7 +57,7 @@ export async function purchaseValidation(
   }
 
   if (purchase.status === "received") {
-    throw new NotFoundError(
+    throw new ConflictError(
       "This purchase has already been completely received.",
     );
   }
@@ -55,11 +65,7 @@ export async function purchaseValidation(
 }
 //purchase items validation
 export async function purchaseItemsValidation(
-  tx: PgTransaction<
-    NodePgQueryResultHKT,
-    Record<string, never>,
-    ExtractTablesWithRelations<Record<string, never>>
-  >,
+  tx: Tx,
   businessId: number,
   purchaseId: number,
   itemIds: number[],
@@ -81,7 +87,7 @@ export async function purchaseItemsValidation(
 
     const missingIds = itemIds.filter((id) => !foundIds.has(id));
 
-    throw new NotFoundError(
+    throw new BadRequestError(
       `These purchase items do not belong to this purchase: ${missingIds.join(
         ", ",
       )}`,
@@ -108,20 +114,17 @@ export async function receiveItemsValidation(
   // Strict receiving:
   // Do not allow receiving more than ordered.
   if (receiveItem.receiveNow > remainingQuantity) {
-    throw new NotFoundError(
+    throw new BadRequestError(
       `Cannot receive ${receiveItem.receiveNow} for item ${purchaseItem.id}. ` +
         `Only ${remainingQuantity} remaining.`,
     );
   }
 }
 //batchValidation
-export function batchValidation(
-  purchaseItem: PurchaseItem,
-  receiveItem: Items,
-) {
+export function batchValidation(purchaseItem: PurchaseItem, receiveItem: Items) {
   const batches = receiveItem.batches ?? [];
   if (batches.length === 0) {
-    throw new NotFoundError(
+    throw new BadRequestError(
       `Batch information is required for item ${purchaseItem.id}.`,
     );
   }
@@ -129,21 +132,31 @@ export function batchValidation(
   const batchQuantity = batches.reduce((sum, batch) => sum + batch.quantity, 0);
 
   if (batchQuantity !== receiveItem.receiveNow) {
-    throw new NotFoundError(
+    throw new BadRequestError(
       `Batch quantity (${batchQuantity}) must equal ` +
         `receive quantity (${receiveItem.receiveNow}) ` +
         `for item ${purchaseItem.id}.`,
     );
   }
 
+  // Duplicate batch numbers within one receive would silently create two
+  // same-named batch rows for the variant. (The same batch number arriving
+  // on a DIFFERENT purchase order remains legitimate and is allowed.)
+  const batchNumbers = batches.map((batch) => batch.batchNumber.trim());
+  if (new Set(batchNumbers).size !== batchNumbers.length) {
+    throw new BadRequestError(
+      `Duplicate batch numbers are not allowed within a single receive for item ${purchaseItem.id}.`,
+    );
+  }
+
   // Validate individual batch quantities
   for (const batch of batches) {
     if (batch.quantity <= 0) {
-      throw new NotFoundError(`Batch quantity must be greater than zero.`);
+      throw new BadRequestError(`Batch quantity must be greater than zero.`);
     }
 
     if (!batch.batchNumber.trim()) {
-      throw new NotFoundError(`Batch number is required.`);
+      throw new BadRequestError(`Batch number is required.`);
     }
   }
 }
@@ -155,7 +168,7 @@ export function serialNumberValidation(
   const serials = receiveItem.serialNumbers ?? [];
 
   if (serials.length !== receiveItem.receiveNow) {
-    throw new NotFoundError(
+    throw new BadRequestError(
       `Item ${purchaseItem.id} requires ${receiveItem.receiveNow} ` +
         `serial numbers, but ${serials.length} were provided.`,
     );
@@ -164,12 +177,59 @@ export function serialNumberValidation(
   const uniqueSerials = new Set(serials);
 
   if (uniqueSerials.size !== serials.length) {
-    throw new NotFoundError(`Duplicate serial numbers are not allowed.`);
+    throw new BadRequestError(`Duplicate serial numbers are not allowed.`);
   }
 
   for (const serial of serials) {
     if (!serial.trim()) {
-      throw new NotFoundError(`Serial number cannot be empty.`);
+      throw new BadRequestError(`Serial number cannot be empty.`);
     }
+  }
+}
+
+/**
+ * Serials are unique per business (serial_numbers_business_serial_unique).
+ * Pre-check BEFORE writing so a duplicate surfaces as a clear 400 instead of
+ * a raw constraint violation. Also catches the same serial listed for two
+ * different items in one request.
+ */
+export async function serialAvailabilityValidation(
+  tx: Tx,
+  businessId: number,
+  items: Items[],
+) {
+  const serialsByValue = new Map<string, number>();
+  for (const item of items) {
+    if (item.trackingType !== "serial" || item.receiveNow <= 0) continue;
+    for (const serial of item.serialNumbers ?? []) {
+      const normalized = serial.trim();
+      if (serialsByValue.has(normalized)) {
+        throw new BadRequestError(
+          `Serial number "${normalized}" is listed for more than one item in this receive.`,
+        );
+      }
+      serialsByValue.set(normalized, item.itemId);
+    }
+  }
+  if (serialsByValue.size === 0) return;
+
+  const existing = await tx
+    .select({ serialNumber: serialNumbers.serialNumber })
+    .from(serialNumbers)
+    .where(
+      and(
+        eq(serialNumbers.businessId, businessId),
+        inArray(serialNumbers.serialNumber, [...serialsByValue.keys()]),
+      ),
+    );
+
+  if (existing.length > 0) {
+    const offenders = [...new Set(existing.map((row) => row.serialNumber))]
+      .slice(0, 5)
+      .join(", ");
+    throw new BadRequestError(
+      `Serial number(s) already exist in this business: ${offenders}` +
+        (existing.length > 5 ? "…" : ""),
+    );
   }
 }

@@ -1,4 +1,5 @@
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db } from "../../db/schema/index.js";
 import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
 import { products } from "../../db/schema/products.js";
@@ -8,6 +9,7 @@ import { purchases } from "../../db/schema/purchases.js";
 import { landedCosts } from "../../db/schema/landedCosts.js";
 import { variantOptions } from "../../db/schema/variantOptions.js";
 import { variantValues } from "../../db/schema/variantValues.js";
+import type { DbTransaction } from "../purchases/purchase.types.js";
 import {
   buildVariantName,
   foldVariantOptionRows,
@@ -17,6 +19,16 @@ import { LandedCostValidationError } from "./landed-cost.calculator.js";
 import { capitalizableAmountMicros } from "./landed-cost.types.js";
 import { calculateAllocation, type AllocationEngineResult } from "./landed-cost.calculator.js";
 import type { LandedCostPreviewInput } from "./landed-cost.validation.js";
+
+/**
+ * Module db handle or the caller's transaction. Inside the receive
+ * transaction the tx MUST be used: a first-time-received item exists only
+ * in the transaction until commit, and the receive-delta allocation needs
+ * to see it.
+ */
+export type LandedCostConnection =
+  | NodePgDatabase<Record<string, never>>
+  | DbTransaction;
 
 // ----------------------------------------------------
 // Context loading
@@ -56,12 +68,18 @@ export interface LandedCostContext {
  * Landed-cost context for a purchase: header, received lines with their
  * batches (this purchase's receiving location) and weights. The purchase
  * must belong to the caller's business and have been received at least once.
+ *
+ * Pass the caller's transaction when invoked inside one (receive-delta
+ * path): the tx sees just-written receivedQuantity/batches that the module
+ * db handle cannot.
  */
 export async function getLandedCostContext(
   businessId: number,
   purchaseId: number,
+  conn?: LandedCostConnection,
 ): Promise<LandedCostContext> {
-  const [purchase] = await db
+  const dbConn = conn ?? db;
+  const [purchase] = await dbConn
     .select()
     .from(purchases)
     .where(and(eq(purchases.id, purchaseId), eq(purchases.businessId, businessId)))
@@ -81,7 +99,7 @@ export async function getLandedCostContext(
     ]);
   }
 
-  const itemRows = await db
+  const itemRows = await dbConn
     .select({
       purchaseItemId: purchaseItems.id,
       variantId: purchaseItems.variantId,
@@ -110,16 +128,20 @@ export async function getLandedCostContext(
         eq(products.businessId, purchaseItems.businessId),
       ),
     )
+    // Ordered-but-unreceived lines are deliberately included: the
+    // allocation engine holds their share as pending (received target = 0),
+    // so a document never reads "fully allocated" while eligible purchase
+    // quantities remain unreceived. Manual allocation only applies to
+    // lines with received batches (enforced in the calculator).
     .where(
       and(
         eq(purchaseItems.purchaseId, purchaseId),
         eq(purchaseItems.businessId, businessId),
-        gt(purchaseItems.receivedQuantity, 0),
       ),
     );
 
   const batchRows = itemRows.length
-    ? await db
+    ? await dbConn
         .select({
           batchId: inventoryBatches.id,
           purchaseItemId: inventoryBatches.purchaseItemId,
@@ -145,7 +167,7 @@ export async function getLandedCostContext(
   const variantIds = [...new Set(itemRows.map((r) => r.variantId))];
   let optionsByVariant = new Map<number, string[]>();
   if (variantIds.length > 0) {
-    const optRows = await db
+    const optRows = await dbConn
       .select({
         variantId: variantValues.variantId,
         value: variantOptions.value,
@@ -158,7 +180,7 @@ export async function getLandedCostContext(
   }
 
   // Existing document, if any (unique per purchase).
-  const [existing] = await db
+  const [existing] = await dbConn
     .select({ id: landedCosts.id, status: landedCosts.status })
     .from(landedCosts)
     .where(

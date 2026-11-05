@@ -6,7 +6,7 @@ export const receiveItemsFormSchema = z.object({
     z
       .object({
         itemId: z.number(),
-        trackingType: z.string(),
+        trackingType: z.enum(["none", "batch", "serial"]),
         receiveNow: z.number().min(0),
         unitCost: z.number().min(0),
         sellingPrice: z.number().min(0),
@@ -52,6 +52,15 @@ export const receiveItemsFormSchema = z.object({
               code: z.ZodIssueCode.custom,
               path: ["batches"],
               message: `Batch total quantity (${totalBatchQty}) must equal receive quantity (${data.receiveNow}).`,
+            });
+          }
+        }
+        for (const [index, batch] of data.batches.entries()) {
+          if (batch.expiryDate.getTime() < batch.manufacturedDate.getTime()) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["batches", index, "expiryDate"],
+              message: "Expiry date cannot be before the manufacturing date.",
             });
           }
         }
