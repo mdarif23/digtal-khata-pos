@@ -36,16 +36,18 @@ function sha256Hex(data: string): string {
 /**
  * Builds a SigV4 presigned URL for a single-object operation.
  * Only the host header is signed and the payload is unsigned (standard for
- * browser uploads).
+ * browser uploads). Defaults to the media bucket; backup packages pass the
+ * dedicated private backup bucket explicitly.
  */
 export function presignObjectUrl(
   method: "PUT" | "GET" | "HEAD" | "DELETE",
   objectKey: string,
   expiresSeconds = 600,
+  bucket: string = env.s3Bucket,
 ): string {
   const endpoint = new URL(env.s3Endpoint);
   const host = endpoint.host;
-  const canonicalUri = `/${env.s3Bucket}/${objectKey
+  const canonicalUri = `/${bucket}/${objectKey
     .split("/")
     .map(encodeURIComponent)
     .join("/")}`;

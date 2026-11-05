@@ -96,3 +96,33 @@ export const bridgePollRateLimit = rateLimit({
   },
   message: jsonMessage("Too many bridge requests — check the bridge poll interval."),
 });
+
+/**
+ * Backup mutations (create/restore/upload): keyed by USER. Heavy operations
+ * (each builds a full business package) — tight enough to stop runaway
+ * loops, loose enough for several businesses per operator.
+ */
+export const backupMutationRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    req.user?.id !== undefined
+      ? String(req.user.id)
+      : ipKeyGenerator(req.ip ?? "anonymous"),
+  message: jsonMessage("Too many backup operations — try again later."),
+});
+
+/** Download link minting / streaming: keyed by USER, hour window. */
+export const backupDownloadRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    req.user?.id !== undefined
+      ? String(req.user.id)
+      : ipKeyGenerator(req.ip ?? "anonymous"),
+  message: jsonMessage("Too many backup downloads — try again later."),
+});

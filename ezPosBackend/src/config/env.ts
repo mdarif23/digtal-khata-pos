@@ -158,4 +158,30 @@ export const env = {
     }`,
   /** Per-file upload cap in megabytes. */
   mediaMaxUploadMb: optionalInt("MEDIA_MAX_UPLOAD_MB", 10),
+  // ---------------------------------------------------------------------------
+  // Backup & Restore
+  // ---------------------------------------------------------------------------
+  /**
+   * AES-256-GCM master key that wraps per-backup data keys (envelope
+   * encryption). Required outside development; a deterministic dev fallback
+   * keeps local testing frictionless. Never shipped inside a package.
+   */
+  backupEncryptionKey:
+    process.env.BACKUP_ENCRYPTION_KEY?.trim() ||
+    (process.env.NODE_ENV === "production"
+      ? ""
+      : "ezpos-local-development-backup-encryption-key"),
+  /** Version tag recorded into every package so keys can rotate later. */
+  backupEncryptionKeyVersion: optionalInt("BACKUP_ENCRYPTION_KEY_VERSION", 1),
+  /** Upload cap for .ezbackup packages, in megabytes. */
+  backupMaxUploadMb: optionalInt("BACKUP_MAX_UPLOAD_MB", 200),
+  /** Default retention window (days) for scheduled backups. */
+  backupRetentionDays: optionalInt("BACKUP_RETENTION_DAYS", 30),
+  /** Dedicated PRIVATE bucket for backup packages (never the media bucket). */
+  s3BackupBucket: process.env.S3_BACKUP_BUCKET?.trim() || "ezpos-backups",
+  /** Lifetime of presigned download links, in seconds. */
+  backupDownloadUrlTtlSeconds: optionalInt(
+    "BACKUP_DOWNLOAD_URL_TTL_SECONDS",
+    600,
+  ),
 } as const;

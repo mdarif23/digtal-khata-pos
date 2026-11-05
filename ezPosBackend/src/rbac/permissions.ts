@@ -153,6 +153,14 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
 
   // Reports (online channel)
   { key: "reports.online_profitability.view", module: "reports", description: "View online store profitability, costs and fees" },
+
+  // Backup & Restore
+  { key: "backups.view", module: "backup", description: "View backup history, schedules and storage usage" },
+  { key: "backups.create", module: "backup", description: "Create manual backups and configure the backup schedule" },
+  { key: "backups.download", module: "backup", description: "Download backup packages via short-lived links" },
+  { key: "backups.verify", module: "backup", description: "Verify backup package integrity" },
+  { key: "backups.delete", module: "backup", description: "Delete backups subject to retention rules" },
+  { key: "backups.restore", module: "backup", description: "Restore business data from a backup package (owner-level)" },
 ];
 
 export const ALL_PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((p) => p.key);
@@ -248,6 +256,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "receipt_settings.edit",
     "receipt_settings.manage_logo",
     "receipt_settings.print_test",
+    "backups.view",
+    "backups.create",
+    "backups.download",
+    "backups.verify",
   ],
 
   cashier: [
@@ -297,6 +309,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "reports.online_profitability.view",
     "orders.view",
     "receipt_settings.view",
+    "backups.view",
   ],
 };
 
