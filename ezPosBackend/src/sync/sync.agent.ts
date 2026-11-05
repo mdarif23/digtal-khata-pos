@@ -126,6 +126,7 @@ export interface BootstrapSnapshot {
   terminal: { id: number; name: string; locationId: number };
   business: Record<string, unknown>;
   locations: Record<string, unknown>[];
+  registers?: Record<string, unknown>[];
   users: Record<string, unknown>[];
   roles: Record<string, unknown>[];
   permissions: Record<string, unknown>[];
@@ -299,9 +300,18 @@ const SERIAL_TABLES = [
 
 async function setvalAll(): Promise<void> {
   for (const table of SERIAL_TABLES) {
+    // Monotonic on purpose: never rewind a sequence below its current
+    // last_value. A naive setval(max(id)) races with UNCOMMITTED inserts in
+    // concurrent transactions — the seq moves backward, the next insert
+    // reuses an in-flight id and dies on the primary key.
     await pool.query(
-      `SELECT setval(pg_get_serial_sequence('${table}', 'id'),
-        GREATEST(COALESCE((SELECT MAX(id) FROM "${table}"), 1), 1))`,
+      `SELECT setval(
+         pg_get_serial_sequence('${table}', 'id'),
+         GREATEST(
+           COALESCE((SELECT MAX(id) FROM "${table}"), 1),
+           (SELECT last_value FROM pg_sequences WHERE schemaname='public' AND sequencename = (SELECT regexp_replace(pg_get_serial_sequence('${table}','id'), '.*\\.', '')))
+         ),
+         true)`,
     );
   }
 }
@@ -668,6 +678,9 @@ async function pullBootstrap(client: SyncCloudClient): Promise<void> {
   const { data } = await client.bootstrap();
   await upsertRows("businesses", ["id"], [data.business]);
   await upsertRows("locations", ["id"], data.locations);
+  if (data.registers) {
+    await upsertRows("registers", ["id"], data.registers);
+  }
   await upsertRows("users", ["id"], data.users);
   await upsertRows("roles", ["id"], data.roles);
   await upsertRows("permissions", ["id"], data.permissions);

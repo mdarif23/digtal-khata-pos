@@ -83,6 +83,7 @@ export async function validateStock(
   locationId: number,
   variantIds: number[],
   items: Items[],
+  opts: { allowNegative?: boolean } = {},
 ) {
   const stockRows = await tx
     .select({
@@ -104,6 +105,9 @@ export async function validateStock(
   for (const item of items) {
     const available = stockMap.get(item.variantId);
     if (available === undefined) {
+      // Offline-originated sales may reference variants never stocked at
+      // this location — the atomic upsert-decrement creates the row.
+      if (opts.allowNegative) continue;
       throw new NotFoundError(
         `No inventory record exists for variant ${item.variantId}`,
       );
@@ -111,7 +115,7 @@ export async function validateStock(
     if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
       throw new NotFoundError(`Invalid quantity for variant ${item.variantId}`);
     }
-    if (item.quantity > available) {
+    if (item.quantity > available && !opts.allowNegative) {
       throw new NotFoundError(
         `Insufficient stock for variant ${item.variantId}. Available: ${available}`,
       );

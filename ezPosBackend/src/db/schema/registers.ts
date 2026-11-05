@@ -12,6 +12,7 @@ import {
   timestamp,
   unique,
   uniqueIndex,
+  uuid,
   varchar,
 } from "drizzle-orm/pg-core";
 import { businesses } from "./businesses.js";
@@ -130,6 +131,12 @@ export const registerSessions = pgTable(
      * from an unbound PC) have none.
      */
     terminalId: integer("terminal_id"),
+    /**
+     * Offline idempotency (Phase 3): the browser-generated session UUID for
+     * a drawer opened while offline. Unique partial index (migration 0051)
+     * makes replays of a queued open a no-op.
+     */
+    clientSessionId: uuid("client_session_id"),
   },
   (table) => [
     // Candidate key for the composite FK from register_transactions.
@@ -193,6 +200,11 @@ export const registerTransactions = pgTable(
     }).notNull(),
     referenceType: varchar("reference_type", { length: 50 }),
     referenceId: integer("reference_id"),
+    /**
+     * Offline idempotency (Phase 3): the browser-generated op UUID for a
+     * drawer movement queued while offline (unique partial index).
+     */
+    clientOpId: varchar("client_op_id", { length: 120 }),
     note: text(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },

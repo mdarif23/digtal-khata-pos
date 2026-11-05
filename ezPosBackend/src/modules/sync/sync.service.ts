@@ -2,6 +2,7 @@ import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { businesses } from "../../db/schema/businesses.js";
 import { locations } from "../../db/schema/locations.js";
+import { registers } from "../../db/schema/registers.js";
 import { users } from "../../db/schema/users.js";
 import { roles } from "../../db/schema/roles.js";
 import { permissions } from "../../db/schema/permissions.js";
@@ -79,7 +80,7 @@ export async function getBootstrap(agent: SyncAgentContext) {
     .where(eq(businesses.id, businessId));
   if (!business) throw new NotFoundError("Business not found.");
 
-  const [locations_, users_, roles_, memberships, assignments, userRoles_] =
+  const [locations_, users_, roles_, memberships, assignments, userRoles_, registers_] =
     await Promise.all([
       db.select().from(locations).where(eq(locations.businessId, businessId)),
       db.select().from(users), // all users — any cashier may sign in locally
@@ -93,6 +94,7 @@ export async function getBootstrap(agent: SyncAgentContext) {
         .from(userLocationAssignments)
         .where(eq(userLocationAssignments.businessId, businessId)),
       db.select().from(userRoles).where(eq(userRoles.businessId, businessId)),
+      db.select().from(registers).where(eq(registers.businessId, businessId)),
     ]);
   const roleIds = roles_.map((r) => r.id);
   const rolePerms = roleIds.length
@@ -111,6 +113,7 @@ export async function getBootstrap(agent: SyncAgentContext) {
     terminal: { id: agent.terminalId, name: agent.name, locationId: agent.locationId },
     business,
     locations: locations_,
+    registers: registers_,
     users: users_,
     roles: roles_,
     permissions: permissionRows,

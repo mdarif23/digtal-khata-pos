@@ -1,6 +1,7 @@
 import {
   boolean,
   integer,
+  numeric,
   pgTable,
   timestamp,
 } from "drizzle-orm/pg-core";
@@ -27,6 +28,16 @@ export const posSettings = pgTable("pos_settings", {
   allowMultipleDrawerSessions: boolean("allow_multiple_drawer_sessions")
     .default(false)
     .notNull(),
+  /** Offline allowance TTL (Phase 3): allocations expire after this long. */
+  offlineAllocationTtlHours: integer("offline_allocation_ttl_hours")
+    .default(24)
+    .notNull(),
+  /** Offline cash-refund ceiling; NULL = no offline refunds allowed. */
+  offlineRefundCap: numeric("offline_refund_cap", {
+    precision: 10,
+    scale: 2,
+    mode: "number",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

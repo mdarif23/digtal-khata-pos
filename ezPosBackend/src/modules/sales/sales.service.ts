@@ -289,6 +289,7 @@ export async function consumeStockFifo(
   locationId: number,
   variantId: number,
   quantity: number,
+  opts: { allowShortfall?: boolean } = {},
 ) {
   // 1. Oldest batches first. .for("update") locks the rows, so two sales
   //    at the same moment can't take the same stock. FIFO is per-location:
@@ -353,7 +354,10 @@ export async function consumeStockFifo(
   // 3. Not enough stock: throwing rolls back the whole sale transaction.
   //    ConflictError (409), not a bare 500 — offline terminals must be able
   //    to distinguish "no stock" from "server bug" when they replay.
-  if (remaining > 0) {
+  //    Offline-originated sales are different: the sale PHYSICALLY happened,
+  //    so with allowShortfall the batches are consumed as far as possible and
+  //    the gap is returned for a sync_conflicts row (never silently lost).
+  if (remaining > 0 && !opts.allowShortfall) {
     throw new ConflictError(
       `Insufficient stock for variant ${variantId}: short by ${remaining}`,
     );
@@ -363,6 +367,7 @@ export async function consumeStockFifo(
     totalCost: roundMoney(totalCost),
     costAtSale: roundMoney(totalCost / quantity), // average cost per unit
     consumed,
+    ...(remaining > 0 ? { shortfall: remaining } : {}),
   };
 }
 export async function consumeSerials(
@@ -763,6 +768,14 @@ async function resolveTaxRulesForSale(
 export interface CreateSaleOptions {
   /** 'offline' marks a LAN-server replica applied through /api/sync/ops. */
   channel?: "pos" | "offline";
+  /**
+   * Offline-originated sales (Phase 3) may exceed stock: the sale PHYSICALLY
+   * happened, so it must never be dropped at sync time — inventory is
+   * allowed to go negative and a sync_conflicts row flags it for manager
+   * review. Oversell prevention itself happens at sale time via the
+   * allocation gates, not here.
+   */
+  allowNegativeStock?: boolean;
 }
 
 export async function createSale(
@@ -779,6 +792,7 @@ export async function createSale(
   // Binds the idempotency key to THIS payload so a replay with different
   // sale data cannot masquerade as a retry (see findSaleByIdempotencyKey).
   const payloadHash = idempotencyKey ? sha256OfJson(data) : null;
+  const batchShortfalls: { variantId: number; qty: number }[] = [];
 
   const result = await db.transaction(async (tx) => {
     // 0. Idempotent checkout: a retried submission with the same key returns
@@ -807,7 +821,9 @@ export async function createSale(
     );
 
     // 3. Lock inventory rows and validate stock.
-    await validateStock(tx, businessId, locationId, variantIds, items);
+    await validateStock(tx, businessId, locationId, variantIds, items, {
+      ...(options.allowNegativeStock ? { allowNegative: true } : {}),
+    });
 
     // 2. Trusted prices and tracking types come from the database
     const variantMap = new Map(existingVariants.map((v) => [v.id, v]));
@@ -981,7 +997,14 @@ export async function createSale(
           locationId,
           item.variantId,
           item.quantity,
+          { ...(options.allowNegativeStock ? { allowShortfall: true } : {}) },
         );
+        if ("shortfall" in cost && Number(cost.shortfall) > 0) {
+          batchShortfalls.push({
+            variantId: item.variantId,
+            qty: Number(cost.shortfall),
+          });
+        }
       }
 
       if (!Number.isFinite(cost.costAtSale) || cost.costAtSale < 0) {
@@ -1043,22 +1066,49 @@ export async function createSale(
         }
       }
 
-      const updatedRows = await tx
-        .update(inventoryStock)
-        .set({
-          quantity: sql`${inventoryStock.quantity} - ${item.quantity}`,
-        })
-        .where(
-          and(
-            eq(inventoryStock.variantId, item.variantId),
-            eq(inventoryStock.businessId, businessId),
-            eq(inventoryStock.locationId, locationId),
-          ),
-        )
-        .returning({
-          variantId: inventoryStock.variantId,
-          quantity: inventoryStock.quantity,
-        });
+      // Online sales: the row was locked+validated, so a plain decrement
+      // is safe. Offline-originated sales may reference a variant with NO
+      // stock row at this location — the atomic upsert creates it at the
+      // negative delta.
+      const updatedRows = options.allowNegativeStock
+        ? await tx
+            .insert(inventoryStock)
+            .values({
+              businessId,
+              variantId: item.variantId,
+              locationId,
+              quantity: -item.quantity,
+            })
+            .onConflictDoUpdate({
+              target: [
+                inventoryStock.businessId,
+                inventoryStock.variantId,
+                inventoryStock.locationId,
+              ],
+              set: {
+                quantity: sql`${inventoryStock.quantity} - ${item.quantity}`,
+              },
+            })
+            .returning({
+              variantId: inventoryStock.variantId,
+              quantity: inventoryStock.quantity,
+            })
+        : await tx
+            .update(inventoryStock)
+            .set({
+              quantity: sql`${inventoryStock.quantity} - ${item.quantity}`,
+            })
+            .where(
+              and(
+                eq(inventoryStock.variantId, item.variantId),
+                eq(inventoryStock.businessId, businessId),
+                eq(inventoryStock.locationId, locationId),
+              ),
+            )
+            .returning({
+              variantId: inventoryStock.variantId,
+              quantity: inventoryStock.quantity,
+            });
 
       if (updatedRows.length !== 1) {
         throw new Error(
@@ -1265,6 +1315,7 @@ export async function createSale(
       change,
       paidAmount,
       dueAmount,
+      ...(batchShortfalls.length > 0 ? { batchShortfalls } : {}),
     };
   });
 
