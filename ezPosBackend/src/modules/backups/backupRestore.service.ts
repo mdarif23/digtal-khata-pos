@@ -25,6 +25,8 @@ import {
   TABLE_COLUMNS,
   TABLE_SPECS,
   buildUpdateSet,
+  businessScopeCondition,
+  coerceRowValues,
   insertableProps,
   type BackupTableSpec,
 } from "./backupModules.js";
@@ -648,7 +650,7 @@ async function applyProfile(
   if (!profile) return;
   const patch: AnyRow = {};
   for (const [k, v] of Object.entries(profile)) {
-    if (["id", ...PROFILE_EXCLUDE].includes(k)) continue;
+    if (["id", "createdAt", "updatedAt", ...PROFILE_EXCLUDE].includes(k)) continue;
     patch[k] = v;
   }
   if (Object.keys(patch).length === 0) return;
@@ -693,7 +695,7 @@ async function upsertKeepIds(
         if (!props.has(k)) continue;
         clone[k] = k === "businessId" && bizCol ? businessId : v;
       }
-      return clone;
+      return coerceRowValues(spec, clone);
     });
     if (spec.strategy === "updateOrInsert") {
       for (const row of chunk) {
@@ -841,7 +843,7 @@ async function insertRemapped(
         }
         clone[k] = v;
       }
-      return clone;
+      return coerceRowValues(spec, clone);
     });
 
     // Polymorphic references (no FK — remapped by convention).
@@ -993,33 +995,23 @@ async function verifyRestoredData(
   for (const name of tableNames) {
     const spec = TABLE_SPECS[name];
     if (!spec) continue;
-    let actual = 0;
+    const scope = businessScopeCondition(spec, targetBusinessId);
+    if (!scope) {
+      warnings.push(`No business scope for ${name} — skipped in verification.`);
+      continue;
+    }
     try {
       const result = await db.execute(
-        sql`SELECT count(*)::int AS count FROM ${spec.table} WHERE business_id = ${targetBusinessId}`,
+        sql`SELECT count(*)::int AS count FROM ${spec.table} WHERE ${scope}`,
       );
       const rows = (result as unknown as { rows?: Array<{ count: number }> }).rows ??
         (result as unknown as Array<{ count: number }>);
-      actual = Number(rows[0]?.count ?? 0);
+      const actual = Number(rows[0]?.count ?? 0);
+      const expected = Number(manifest.recordCounts[name] ?? 0);
+      counts.push({ table: name, expected, actual, match: expected === actual });
     } catch {
-      // Composite tables without business_id: count via parents.
-      try {
-        const parent =
-          name === "product_taxes"
-            ? sql`product_id IN (SELECT id FROM products WHERE business_id = ${targetBusinessId})`
-            : sql`variant_id IN (SELECT id FROM product_variants WHERE business_id = ${targetBusinessId})`;
-        const result = await db.execute(
-          sql`SELECT count(*)::int AS count FROM ${spec.table} WHERE ${parent}`,
-        );
-        const rows = (result as unknown as { rows?: Array<{ count: number }> }).rows ??
-          (result as unknown as Array<{ count: number }>);
-        actual = Number(rows[0]?.count ?? 0);
-      } catch {
-        warnings.push(`Could not count ${name} for verification.`);
-      }
+      warnings.push(`Could not count ${name} for verification.`);
     }
-    const expected = Number(manifest.recordCounts[name] ?? 0);
-    counts.push({ table: name, expected, actual, match: expected === actual });
   }
 
   const orphans: Record<string, number> = {};

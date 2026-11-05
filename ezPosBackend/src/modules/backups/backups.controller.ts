@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { getBusinessId } from "../../middleware/business.js";
 import { sendSafeError } from "../../utils/safeError.js";
-import { ConflictError, NotFoundError } from "../../utils/handleError.js";
+import { BadRequestError, ConflictError, NotFoundError } from "../../utils/handleError.js";
 import { z } from "zod";
 import { MODULE_GROUPS } from "./backupModules.js";
 import { backupStorageEnabled } from "./backupStorage.js";
@@ -36,6 +36,20 @@ function success(res: Response, data: unknown, message?: string): void {
   res.json({ success: true, data, ...(message ? { message } : {}) });
 }
 
+/** Zod validation failures are client errors, never 500s. */
+function parseBody<T>(schema: { parse: (v: unknown) => T }, body: unknown): T {
+  try {
+    return schema.parse(body ?? {});
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      throw new BadRequestError(
+        err.issues[0]?.message ?? "Invalid request payload.",
+      );
+    }
+    throw err;
+  }
+}
+
 export function getModules(_req: Request, res: Response): void {
   success(res, {
     storageEnabled: backupStorageEnabled(),
@@ -51,7 +65,7 @@ export function getModules(_req: Request, res: Response): void {
 export async function postCreateBackup(req: Request, res: Response) {
   try {
     const businessId = getBusinessId(req);
-    const input = createBackupSchema.parse(req.body ?? {});
+    const input = parseBody(createBackupSchema, req.body);
     const row = await requestBackup({
       businessId,
       userId: req.user!.id,
@@ -161,7 +175,7 @@ export async function postUploadPresign(req: Request, res: Response) {
 export async function postUploadRegister(req: Request, res: Response) {
   try {
     const businessId = getBusinessId(req);
-    const input = registerUploadSchema.parse(req.body);
+    const input = parseBody(registerUploadSchema, req.body);
     if (!input.storageKey.startsWith(`businesses/${businessId}/uploads/`)) {
       throw new ConflictError("Upload key does not belong to this business.");
     }
@@ -182,7 +196,7 @@ export async function postUploadRegister(req: Request, res: Response) {
 export async function postRestorePreview(req: Request, res: Response) {
   try {
     const businessId = getBusinessId(req);
-    const input = restorePreviewSchema.parse(req.body ?? {});
+    const input = parseBody(restorePreviewSchema, req.body);
     const preview = await previewRestore({
       businessId,
       backupId: input.backupId,
@@ -198,7 +212,7 @@ export async function postRestorePreview(req: Request, res: Response) {
 export async function postRestore(req: Request, res: Response) {
   try {
     const businessId = getBusinessId(req);
-    const input = restoreSchema.parse(req.body ?? {});
+    const input = parseBody(restoreSchema, req.body);
     // Preview first — restore refuses to run without a ready preview this
     // session (the preview performs integrity + identity validation).
     const preview = await previewRestore({
@@ -273,7 +287,7 @@ export async function getScheduleHandler(req: Request, res: Response) {
 export async function putSchedule(req: Request, res: Response) {
   try {
     const businessId = getBusinessId(req);
-    const input = scheduleSchema.parse(req.body);
+    const input = parseBody(scheduleSchema, req.body);
     const row = await upsertSchedule(businessId, req.user!.id, {
       enabled: input.enabled,
       frequency: input.frequency,

@@ -12,6 +12,7 @@ import {
   MODULE_GROUPS,
   PROFILE_EXCLUDE,
   TABLE_SPECS,
+  businessScopeCondition,
   type BackupTableSpec,
 } from "./backupModules.js";
 import {
@@ -92,18 +93,13 @@ type BusinessRow = typeof businesses.$inferSelect;
 
 type AnyRow = Record<string, unknown>;
 
-function scopeSql(spec: BackupTableSpec, businessId: number): SQL_ | undefined {
-  const cols = getTableColumns(spec.table as never) as Record<string, never>;
-  const bizCol = cols["businessId"];
-  if (bizCol) return eq(bizCol as never, businessId) as SQL_;
-  // Join tables without business_id scope through their business parents.
-  if (spec.name === "product_taxes") {
-    return sql`product_id IN (SELECT id FROM products WHERE business_id = ${businessId})` as SQL_;
-  }
-  if (spec.name === "variant_values") {
-    return sql`variant_id IN (SELECT id FROM product_variants WHERE business_id = ${businessId})` as SQL_;
-  }
-  return undefined;
+function scopeSql(
+  spec: BackupTableSpec,
+  businessId: number,
+): ReturnType<typeof sql> | undefined {
+  // Delegates to the registry: business_id scoping, parent scoping for the
+  // join/child tables without business_id, or undefined (refuse unscoped).
+  return businessScopeCondition(spec, businessId) as ReturnType<typeof sql> | undefined;
 }
 type SQL_ = ReturnType<typeof sql>;
 

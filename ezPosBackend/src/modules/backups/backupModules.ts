@@ -94,6 +94,8 @@ import * as hooks from "../../db/schema/webhooks.js";
  *    (GENERATED ALWAYS rejects inserts).
  */
 
+type AnyRow = Record<string, unknown>;
+
 export interface BackupTableSpec {
   /** Physical table name (package file key). */
   name: string;
@@ -587,6 +589,41 @@ export const ATTACHMENT_TABLES: Record<
   },
 };
 
+/**
+ * Tables WITHOUT a business_id column, mapped to the in-registry parent
+ * whose id column scopes them. Anything business-scoped must be reachable
+ * through this map or carry business_id — otherwise the backup engine
+ * refuses to touch it (a missing scope must never degrade to "all rows").
+ */
+export const PARENT_SCOPED_TABLES: Record<string, string> = {
+  product_taxes: "products",
+  variant_values: "product_variants",
+  storefront_pages: "storefronts",
+  storefront_payment_methods: "storefronts",
+  storefront_delivery_zones: "storefronts",
+  storefront_publish_versions: "storefronts",
+  storefront_analytics_events: "storefronts",
+};
+
+/**
+ * The WHERE fragment scoping a table to one business, or undefined when the
+ * table has no safe scope (callers must skip it — never export unscoped).
+ */
+export function businessScopeCondition(
+  spec: BackupTableSpec,
+  businessId: number,
+): SQL | undefined {
+  const cols = getTableColumns(spec.table as never) as Record<string, unknown>;
+  if (cols["businessId"]) {
+    return sql`business_id = ${businessId}`;
+  }
+  const parent = PARENT_SCOPED_TABLES[spec.name];
+  if (parent) {
+    return sql`${sql.raw(spec.name === "variant_values" ? "variant_id" : spec.name === "product_taxes" ? "product_id" : "storefront_id")} IN (SELECT id FROM ${sql.raw(parent)} WHERE business_id = ${businessId})`;
+  }
+  return undefined;
+}
+
 /** Column-property → DB-name map per table (built once at import). */
 export const TABLE_COLUMNS: Record<string, Record<string, { name: string; notNull: boolean }>> = {};
 for (const [name, s] of Object.entries(TABLE_SPECS)) {
@@ -613,6 +650,24 @@ export function buildUpdateSet(
     set[prop] = sql.raw(`excluded."${col.name}"`);
   }
   return set;
+}
+
+/**
+ * JSON round-trips turn Date columns into ISO strings; drizzle's timestamp
+ * columns (mode 'date', dataType 'date') require Date objects on write.
+ * String-mode timestamp columns (dataType 'string') pass through untouched.
+ */
+export function coerceRowValues(spec: BackupTableSpec, row: AnyRow): AnyRow {
+  const cols = getTableColumns(spec.table as never) as Record<
+    string,
+    { dataType: string }
+  >;
+  for (const [k, v] of Object.entries(row)) {
+    if (typeof v === "string" && cols[k]?.dataType === "date") {
+      row[k] = new Date(v);
+    }
+  }
+  return row;
 }
 
 /** Column list used for INSERT payloads (generated columns removed). */
