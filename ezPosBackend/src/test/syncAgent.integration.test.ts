@@ -348,7 +348,10 @@ describe("LAN sync agent (Phase 2, scripted cloud)", { skip: !runIntegration, co
     });
     cloudCalls.length = 0;
 
-    const cloudUserId = 990000 + (Date.now() % 10000);
+    const { rows: uidRows } = await dbClient.query(
+      `SELECT COALESCE(MAX(id),0)+100 AS base FROM users`,
+    );
+    const cloudUserId = Number(uidRows[0].base);
     bootstrapPayload = {
       terminal: { id: 1, name: "LAN Server", locationId: mainLocationId },
       business: { id: businessId, name: "Agent Biz (cloud-updated)", slug: `agent-biz-${Date.now()}`, createdByUserId: ownerUserId },
@@ -367,9 +370,15 @@ describe("LAN sync agent (Phase 2, scripted cloud)", { skip: !runIntegration, co
       subscription: null,
       posSettings: null,
     };
-    // Run-unique cloud ids: a fixed id would collide with rows a previous
-    // test run inserted under a DIFFERENT business (composite-FK upsert).
-    const cloudProductId = 880000 + (Date.now() % 10000);
+    // Collision-proof cloud ids: derive from the DB's current max so two
+    // runs (or parallel suites sharing ezpos_test) never reuse ids under a
+    // different business (composite-FK upserts).
+    const { rows: idRows } = await dbClient.query(
+      `SELECT GREATEST((SELECT COALESCE(MAX(id),0)+100 FROM products),
+                       (SELECT COALESCE(MAX(id),0)+100 FROM product_variants),
+                       (SELECT COALESCE(MAX(id),0)+100 FROM inventory_batches)) AS base`,
+    );
+    const cloudProductId = Number(idRows[0].base);
     const cloudVariantId = cloudProductId + 1;
     const cloudBatchId = cloudProductId + 2;
     catalogPayload = {

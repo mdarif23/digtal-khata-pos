@@ -169,6 +169,11 @@ export interface PushOpResult {
 
 export function cloudClientFromEnv(): SyncCloudClient | null {
   if (!env.syncEnabled || !env.syncCloudUrl || !env.syncTerminalId || !env.syncTerminalSecret) {
+    if (env.syncEnabled) {
+      console.error(
+        "[sync] agent enabled but misconfigured — cloudUrl/terminalId/secret missing",
+      );
+    }
     return null;
   }
   return new SyncCloudClient(
@@ -239,6 +244,9 @@ async function upsertRows(
   if (keys.length === 0) return 0;
 
   const colSql = keys.map((c) => `"${c}"`).join(", ");
+  // Tables whose ONLY columns are the conflict key (role_permissions) have
+  // nothing to update — ON CONFLICT DO UPDATE SET <empty> is a syntax
+  // error, so those become DO NOTHING.
   const updateSql = keys
     .filter((c) => !conflictColumns.includes(c))
     .map((c) => `"${c}" = EXCLUDED."${c}"`)
@@ -259,9 +267,13 @@ async function upsertRows(
       });
       return `(${placeholders.join(", ")})`;
     });
+    const conflictTarget = conflictColumns.map((c) => `"${c}"`).join(", ");
+    const conflictAction = updateSql
+      ? `DO UPDATE SET ${updateSql}`
+      : "DO NOTHING";
     const query =
       `INSERT INTO "${table}" (${colSql}) VALUES ${tuples.join(", ")} ` +
-      `ON CONFLICT (${conflictColumns.map((c) => `"${c}"`).join(", ")}) DO UPDATE SET ${updateSql}`;
+      `ON CONFLICT (${conflictTarget}) ${conflictAction}`;
     const result = await pool.query(query, values);
     applied += result.rowCount ?? 0;
   }
@@ -341,7 +353,11 @@ export async function pushOnce(
       and(
         eq(sales.businessId, agent.businessId),
         isNull(sales.syncedAt),
-        eq(sales.channel, "pos"),
+        // 'pos' = normal LAN sales; 'offline' = sales the LAN's own browser
+        // terminals recorded via /api/offline/sync — both are LOCAL sales
+        // that must reach the cloud. (On the cloud itself the agent never
+        // runs, so replicas are never re-pushed.)
+        inArray(sales.channel, ["pos", "offline"]),
         eq(sales.status, "completed"),
         sql`${sales.syncAttempts} < ${env.syncMaxAttempts}`,
       ),
@@ -436,6 +452,7 @@ export async function pushOnce(
     for (const result of data.results) {
       if (result.status === "failed") {
         failed += 1;
+        console.error(`[sync] op ${result.opId} failed: ${result.error ?? "unknown"}`);
         await pool.query(
           `UPDATE sales SET sync_attempts = sync_attempts + 1 WHERE id = $1`,
           [saleIdByOpId(saleOpBySaleId, ops, result.opId)],
@@ -628,8 +645,10 @@ async function buildSaleOpPayload(
     (payment) => ({
       method: payment.method,
       amount: roundMoney(Number(payment.amount)),
-      reference: payment.reference,
-      tendered: payment.tendered === null ? null : Number(payment.tendered),
+      // reference/tendered are OPTIONAL (string/number) — explicit nulls
+      // are rejected by the payload schema.
+      ...(payment.reference !== null ? { reference: payment.reference } : {}),
+      ...(payment.tendered !== null ? { tendered: Number(payment.tendered) } : {}),
     }),
   );
   if (Number(sale.dueAmount ?? 0) > 0.009) {
@@ -676,15 +695,18 @@ async function buildSaleOpPayload(
 
 async function pullBootstrap(client: SyncCloudClient): Promise<void> {
   const { data } = await client.bootstrap();
+  // FK-ordered: users first (businesses.created_by_user_id references
+  // them), then roles/permissions, then the business, its locations and
+  // registers, and finally the membership/plan graphs.
+  await upsertRows("users", ["id"], data.users);
+  await upsertRows("permissions", ["id"], data.permissions);
   await upsertRows("businesses", ["id"], [data.business]);
+  await upsertRows("roles", ["id"], data.roles);
+  await upsertRows("role_permissions", ["role_id", "permission_id"], data.rolePermissions);
   await upsertRows("locations", ["id"], data.locations);
   if (data.registers) {
     await upsertRows("registers", ["id"], data.registers);
   }
-  await upsertRows("users", ["id"], data.users);
-  await upsertRows("roles", ["id"], data.roles);
-  await upsertRows("permissions", ["id"], data.permissions);
-  await upsertRows("role_permissions", ["role_id", "permission_id"], data.rolePermissions);
   await upsertRows("user_roles", ["id"], data.userRoles);
   await upsertRows("business_memberships", ["id"], data.memberships);
   await upsertRows("user_location_assignments", ["id"], data.locationAssignments);
@@ -795,10 +817,17 @@ export function startSyncAgent(): void {
   const client = cloudClientFromEnv();
   if (!client) return;
   if (sweepTimer) return;
+  console.log(
+    `[sync] agent started — cloud=${env.syncCloudUrl} terminal=${env.syncTerminalId} secretLen=${env.syncTerminalSecret.length}`,
+  );
   const intervalMs = Math.max(15, env.syncIntervalSeconds) * 1000;
-  void runSweep(client).catch(() => undefined);
+  void runSweep(client).catch((err) => {
+    console.error("[sync] sweep failed:", err);
+  });
   sweepTimer = setInterval(() => {
-    void runSweep(client).catch(() => undefined);
+    void runSweep(client).catch((err) => {
+      console.error("[sync] sweep failed:", err);
+    });
   }, intervalMs);
 }
 

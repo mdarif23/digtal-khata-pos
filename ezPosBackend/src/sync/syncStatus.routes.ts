@@ -1,6 +1,6 @@
 import express from "express";
 import type { Request, Response } from "express";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth.js";
 import { requireBusinessContext, getBusinessId } from "../middleware/business.js";
 import { sendSafeError } from "../utils/safeError.js";
@@ -34,7 +34,12 @@ router.get(
           and(
             eq(sales.businessId, businessId),
             isNull(sales.syncedAt),
-            eq(sales.channel, "pos"),
+            // LAN (sync enabled): offline-channel sales are locally recorded
+            // work that must still be pushed. Cloud: only POS sales are
+            // "pending" — offline rows there are already-synced replicas.
+            env.syncEnabled
+              ? inArray(sales.channel, ["pos", "offline"])
+              : eq(sales.channel, "pos"),
             eq(sales.status, "completed"),
           ),
         );
