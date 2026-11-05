@@ -2,6 +2,7 @@ import express from "express";
 import * as barcodesController from "./barcodes.controller.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { requireBusinessContext, requireFullAccess } from "../../middleware/business.js";
+import { requireLocationAccess } from "../../middleware/location.js";
 import { requirePermission, requireAnyPermission } from "../../middleware/permissions.js";
 
 const router = express.Router();
@@ -38,7 +39,14 @@ router.delete("/api/barcodes/alias/:aliasId", ...write, barcodesController.delet
 // Live validation (format, check digit, in-business conflicts).
 router.post("/api/barcodes/validate", ...read, barcodesController.postValidate);
 // Exact scanner resolution: primary → alias → SKU; never ambiguous picks.
-router.get("/api/barcodes/lookup/:code", ...read, barcodesController.getLookup);
+// Location access runs only here — stockAtLocation is scoped to the
+// caller's active location (falls back to the business default).
+router.get(
+  "/api/barcodes/lookup/:code",
+  ...read,
+  requireLocationAccess(),
+  barcodesController.getLookup,
+);
 // Print history (audit-backed) + job logging.
 router.get("/api/barcodes/print-history", ...read, barcodesController.getPrintHistoryHandler);
 router.post("/api/barcodes/print-history", ...print, barcodesController.postPrintLog);

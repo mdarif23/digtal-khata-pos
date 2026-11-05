@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import {
   ArrowLeft,
@@ -11,11 +11,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SummaryCard } from "@/features/purchases/components/purchasesReceiveItems/SummaryCard";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
+import { toast } from "@/components/ui/toast";
 import type {
   PaymentsInfoCard,
   PurchasesItems,
 } from "@/features/purchases/purchase.types";
 import { usePurchasesStore } from "@/features/purchases/usePurchaseStore";
+import type { LookupMatch } from "@/features/barcodes/barcode.api";
+import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
+import { BarcodeScannerInput } from "@/features/barcodes/scanning/BarcodeScannerInput";
+import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-BD", {
@@ -210,6 +215,80 @@ export const PurchaseViewItems = () => {
     }
   };
 
+  /**
+   * Module scan handler — the scanner service only IDENTIFIES a barcode;
+   * return eligibility (received − returned, capped by in-stock units)
+   * lives here. Scanning never submits a return. Throwing surfaces the
+   * failure as an error scan.
+   */
+  const returnQuantitiesRef = useRef(returnQuantities);
+  returnQuantitiesRef.current = returnQuantities;
+
+  const handleResolved = (match: LookupMatch) => {
+    const item = orderItems.find((entry) => entry.variantId === match.variantId);
+    if (!item) {
+      throw new Error("This item is not on this purchase order.");
+    }
+    const itemName = item.variantName ?? item.variantSku ?? "This item";
+    const current = returnQuantitiesRef.current;
+    const alreadyReturned = returnedByItem.get(item.id) ?? 0;
+    const remainingReceived = Math.max(
+      0,
+      Number(item.receivedQuantity) - alreadyReturned,
+    );
+    const alreadySelectedForVariant = orderItems.reduce(
+      (sum, otherItem) =>
+        otherItem.variantId === item.variantId && otherItem.id !== item.id
+          ? sum + (current[otherItem.id] ?? 0)
+          : sum,
+      0,
+    );
+    const availableStock = Math.max(
+      0,
+      Number(item.availableStock ?? 0) - alreadySelectedForVariant,
+    );
+    const maxReturn = Math.floor(Math.min(remainingReceived, availableStock));
+    if (maxReturn <= (current[item.id] ?? 0)) {
+      throw new Error(`${itemName} has no returnable quantity left.`);
+    }
+    setReturnQuantities((existing) => ({
+      ...existing,
+      [item.id]: Math.min(maxReturn, (existing[item.id] ?? 0) + 1),
+    }));
+  };
+
+  const { scanner, state: scanState } = useBarcodeScanner({
+    capture: "window",
+    onResolve: handleResolved,
+  });
+
+  // Scan outcome → toast (spec §16: never silently ignore failed scans).
+  const lastHandledEventId = useRef(0);
+  useEffect(() => {
+    const event = scanState.last;
+    if (!event || event.id <= lastHandledEventId.current) return;
+    lastHandledEventId.current = event.id;
+    if (event.status === "not_found") {
+      toast.add({
+        type: "error",
+        description: "No product matches that barcode.",
+      });
+    } else if (event.status === "ambiguous") {
+      toast.add({
+        type: "error",
+        description:
+          event.detail ?? "That barcode matches more than one product.",
+        priority: "high",
+      });
+    } else if (event.status === "error") {
+      toast.add({
+        type: "error",
+        description: event.detail ?? "Scan failed.",
+        priority: "high",
+      });
+    }
+  }, [scanState.last]);
+
   if (!Number.isInteger(purchaseId) || purchaseId <= 0) {
     return (
       <ReturnState
@@ -305,6 +384,16 @@ export const PurchaseViewItems = () => {
                 </p>
               </div>
             </div>
+            {orderItems.length ? (
+              <div className="mt-3 space-y-2 rounded-lg border bg-muted/30 p-2">
+                <BarcodeScannerInput
+                  scanner={scanner}
+                  placeholder="Scan a barcode to add it to the return…"
+                  aria-label="Scan barcode to add a purchase return item"
+                />
+                <BarcodeScanFeedback state={scanState} />
+              </div>
+            ) : null}
           </div>
           {orderItems.length ? (
             <div className="overflow-x-auto">

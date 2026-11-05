@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, PackageCheck, ReceiptText, Wallet } from "lucide-react";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -16,6 +16,10 @@ import {
   type ReceiveItemsFormValues,
 } from "../schemas/receiveItem.schema";
 import { usePurchasesStore } from "../usePurchaseStore";
+import type { LookupMatch } from "@/features/barcodes/barcode.api";
+import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
+import { BarcodeScannerInput } from "@/features/barcodes/scanning/BarcodeScannerInput";
+import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-BD", {
@@ -178,50 +182,94 @@ export const ReceiveItems = () => {
     },
   ];
 
-  const [scanValue, setScanValue] = useState("");
-  const [scanBusy, setScanBusy] = useState(false);
+  /**
+   * Module scan handler — the scanner service only IDENTIFIES a barcode;
+   * receiving rules (on-this-PO check, remaining cap, batch/serial routing)
+   * live here. Throwing surfaces the failure as an error scan.
+   *
+   * Each scan counts one physical unit: from the untouched "receive the
+   * full remainder" prefill, the first scan resumes at previously received
+   * + 1 (Ordered 20 · received 5 · scan ×3 → receiving 8). Manual edits
+   * increment as typed.
+   */
+  const handleResolved = (match: LookupMatch) => {
+    const lineIndex = receiveItems.findIndex(
+      (item) => item.variantId === match.variantId,
+    );
+    const line = lineIndex >= 0 ? receiveItems[lineIndex] : undefined;
+    if (!line) {
+      throw new Error("This item is not on this purchase order.");
+    }
+    const lineName =
+      line.variantName ?? line.variantSku ?? `line ${lineIndex + 1}`;
+    const remaining = Math.max(
+      0,
+      Number(line.quantity) - Number(line.receivedQuantity),
+    );
+    if (remaining <= 0) {
+      throw new Error(`${lineName} is already fully received.`);
+    }
 
-  /** Scan-to-line: resolve a barcode to the matching PO line and focus its
-   * quantity field. Server lookup covers alias barcodes. */
-  const handleReceiveScan = async () => {
-    const code = scanValue.trim();
-    if (!code || scanBusy) return;
-    setScanBusy(true);
-    try {
-      const { lookupBarcodeApi } = await import(
-        "@/features/barcodes/barcode.api"
-      );
-      const result = await lookupBarcodeApi(code);
-      if (!("variantId" in result)) {
-        toast.add({
-          type: "error",
-          description: "No product matches that barcode.",
-        });
-        return;
-      }
-      const lineIndex = receiveItems.findIndex(
-        (item) => item.variantId === result.variantId,
-      );
-      const line = lineIndex >= 0 ? receiveItems[lineIndex] : undefined;
-      if (!line) {
-        toast.add({
-          type: "error",
-          description: "This item is not on this purchase order.",
-        });
-        return;
-      }
+    if (line.trackingType === "batch" || line.trackingType === "serial") {
+      // Quantities for tracked lines are assigned in their dialogs —
+      // scanning just jumps to the line.
       form.setFocus(`items.${lineIndex}.receiveNow`);
       toast.add({
         type: "success",
-        description: `Found: ${line.variantName ?? line.variantSku ?? `line ${lineIndex + 1}`}`,
+        description: `Found: ${lineName} — assign its ${
+          line.trackingType === "batch" ? "batches" : "serials"
+        } on the line.`,
       });
-      setScanValue("");
-    } catch {
-      toast.add({ type: "error", description: "Lookup failed — try again." });
-    } finally {
-      setScanBusy(false);
+      return;
     }
+
+    const current = Number(form.getValues(`items.${lineIndex}.receiveNow`)) || 0;
+    const next =
+      current === remaining
+        ? Math.min(remaining, Number(line.receivedQuantity || 0) + 1)
+        : Math.min(remaining, current + 1);
+    form.setValue(`items.${lineIndex}.receiveNow`, next, {
+      shouldValidate: true,
+      shouldDirty: true,
+    });
+    form.setFocus(`items.${lineIndex}.receiveNow`);
+    toast.add({
+      type: "success",
+      description: `${lineName} — receiving ${next} of ${line.quantity}`,
+    });
   };
+
+  const { scanner, state: scanState } = useBarcodeScanner({
+    capture: "window",
+    onResolve: handleResolved,
+  });
+
+  // Scan outcome → toast (spec §16: never silently ignore failed scans).
+  const lastHandledEventId = useRef(0);
+  useEffect(() => {
+    const event = scanState.last;
+    if (!event || event.id <= lastHandledEventId.current) return;
+    lastHandledEventId.current = event.id;
+    if (event.status === "not_found") {
+      toast.add({
+        type: "error",
+        description: "No product matches that barcode.",
+      });
+    } else if (event.status === "ambiguous") {
+      toast.add({
+        type: "error",
+        description:
+          event.detail ?? "That barcode matches more than one product.",
+        priority: "high",
+      });
+    } else if (event.status === "error") {
+      toast.add({
+        type: "error",
+        description: event.detail ?? "Scan failed.",
+        priority: "high",
+      });
+    }
+  }, [scanState.last]);
 
   const onSubmit = async (data: ReceiveItemsFormValues) => {
     try {
@@ -346,24 +394,13 @@ export const ReceiveItems = () => {
             </div>
             {receiveItems.length ? (
               <>
-              <div className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
-                <Barcode className="size-4 text-muted-foreground" />
-                <Input
-                  value={scanValue}
-                  onChange={(event) => setScanValue(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void handleReceiveScan();
-                    }
-                  }}
-                  placeholder="Scan a barcode to jump to its line…"
-                  aria-label="Scan barcode to find a purchase line"
-                  className="h-9 border-0 shadow-none focus-visible:ring-0"
+              <div className="space-y-2 rounded-lg border bg-background px-3 py-2">
+                <BarcodeScannerInput
+                  scanner={scanner}
+                  placeholder="Scan a barcode to count it in…"
+                  aria-label="Scan barcode to receive a purchase line"
                 />
-                {scanBusy ? (
-                  <span className="text-xs text-muted-foreground">Looking up…</span>
-                ) : null}
+                <BarcodeScanFeedback state={scanState} />
               </div>
               <ItemsReceiveTable
                 receivePurchasesItems={receiveItems}

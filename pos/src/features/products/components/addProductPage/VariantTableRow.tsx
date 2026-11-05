@@ -36,7 +36,7 @@ export function VariantTableRow({
 
   return (
     <Fragment>
-      <TableRow>
+      <TableRow data-variant-id={added ? variants[variantIndex]?.id : undefined}>
         <TableCell>
           <div className="flex items-center gap-3">
             {added && (

@@ -225,7 +225,11 @@ function Pos() {
           </div>
         </div>
         <section className="flex h-[60dvh] min-h-[420px] shrink-0 flex-col overflow-hidden rounded-xl border bg-background shadow-sm lg:h-full lg:min-h-0 lg:shrink">
-          <ProductList />
+          {/* Page-scoped wedge capture pauses while checkout/receipt dialogs
+              are up — scans must never edit the cart mid-payment. */}
+          <ProductList
+            scannerEnabled={!isPaymentDialogOpen && !isSuccessDialogOpen}
+          />
         </section>
 
         <form

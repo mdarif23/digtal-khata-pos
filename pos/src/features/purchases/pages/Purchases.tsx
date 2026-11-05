@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   ArrowRight,
@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { ProductCard } from "@/components/common/ProductCard";
 import { ShowVariants } from "@/components/common/ShowVariants";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
+import { toast } from "@/components/ui/toast";
 import {
   ProductType,
   ProductVariantType,
@@ -24,6 +25,12 @@ import { getVariantPurchaseCost } from "@/features/products/utils/getVariantPurc
 import type { PurchaseCart } from "../purchase.types";
 import { PurchaseTable } from "../components/purchases/PurchaseTable";
 import { usePurchasesStore } from "../usePurchaseStore";
+import {
+  type LookupMatch,
+} from "@/features/barcodes/barcode.api";
+import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
+import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
+import { createCatalogLookup } from "@/features/barcodes/scanning/catalogLookup";
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-BD", {
@@ -34,6 +41,19 @@ const roundCurrency = (value: number | null | undefined) => {
   const amount = Number(value);
   return Number.isFinite(amount) ? Number(amount.toFixed(2)) : 0;
 };
+
+/** Only active products with active variants are purchasable. */
+function toActiveProducts(catalog: ProductType[]) {
+  return catalog
+    .filter((product) => product.status === "active")
+    .map((product) => ({
+      ...product,
+      variants: product.variants.filter(
+        (variant) => variant.status === "active",
+      ),
+    }))
+    .filter((product) => product.variants.length > 0);
+}
 
 export function PurchasesOrder() {
   const navigate = useNavigate();
@@ -178,8 +198,90 @@ export function PurchasesOrder() {
     );
   };
 
-  const handleBarcodeSearch = async () => {
-    const query = searchProducts.trim().toLowerCase();
+  /**
+   * Module scan handler — the scanner service only IDENTIFIES a barcode;
+   * the purchase rules (active status, catalog row, cost default, add or
+   * increment) live here. Throwing surfaces the failure as an error scan.
+   */
+  const handleResolved = useCallback(
+    async (match: LookupMatch) => {
+      if (
+        (match.productStatus && match.productStatus !== "active") ||
+        (match.variantStatus && match.variantStatus !== "active")
+      ) {
+        throw new Error(`${match.productName} is not available for purchase.`);
+      }
+
+      const findRow = (catalog: ProductType[]) =>
+        catalog
+          .flatMap((product) =>
+            product.variants.map((variant) => ({ product, variant })),
+          )
+          .find(({ variant }) => variant.id === match.variantId);
+
+      let row = findRow(toActiveProducts(useProductStore.getState().products));
+      if (!row) {
+        // Scanned variant newer than the loaded catalog — refresh once.
+        await useProductStore.getState().getProducts();
+        row = findRow(toActiveProducts(useProductStore.getState().products));
+      }
+      if (!row) {
+        throw new Error(`${match.productName} is not in the loaded catalog.`);
+      }
+
+      handleAddPurchase({ ...row.product, variants: [row.variant] });
+      setSearchProducts("");
+    },
+    // handleAddPurchase only touches setPurchasesCart and cost helpers.
+    [],
+  );
+
+  // Local-first identification over the purchasable catalog; everything
+  // else resolves against the server (alias barcodes, newer codes).
+  const lookup = useCallback(
+    createCatalogLookup(
+      () => toActiveProducts(useProductStore.getState().products),
+    ),
+    [],
+  );
+
+  const scanner = useBarcodeScanner({
+    capture: "window",
+    lookup,
+    onResolve: handleResolved,
+  });
+
+  // Scan outcome → toast (spec §16: never silently ignore failed scans).
+  const lastHandledEventId = useRef(0);
+  useEffect(() => {
+    const event = scanner.state.last;
+    if (!event || event.id <= lastHandledEventId.current) return;
+    lastHandledEventId.current = event.id;
+    if (event.status === "not_found") {
+      toast.add({
+        type: "error",
+        description: "No product matches that barcode.",
+      });
+    } else if (event.status === "ambiguous") {
+      toast.add({
+        type: "error",
+        description:
+          event.detail ?? "That barcode matches more than one product.",
+        priority: "high",
+      });
+    } else if (event.status === "error") {
+      toast.add({
+        type: "error",
+        description: event.detail ?? "Scan failed.",
+        priority: "high",
+      });
+    }
+  }, [scanner.state.last]);
+
+  // Search-box Enter: exact product names keep the add-default-variant
+  // behavior; everything else goes through the scanner.
+  const handleSearchEnter = (text: string) => {
+    const query = text.trim().toLowerCase();
     if (!query) return;
     const product = activeProducts.find(
       (item) => item.name.trim().toLowerCase() === query,
@@ -193,49 +295,7 @@ export function PurchasesOrder() {
       }
       return;
     }
-
-    const matchingVariant = activeProducts
-      .flatMap((item) =>
-        item.variants.map((variant) => ({ product: item, variant })),
-      )
-      .find(
-        ({ variant }) =>
-          variant.sku.trim().toLowerCase() === query ||
-          variant.barcode?.trim().toLowerCase() === query,
-      );
-    if (matchingVariant) {
-      handleAddPurchase({
-        ...matchingVariant.product,
-        variants: [matchingVariant.variant],
-      });
-      setSearchProducts("");
-      return;
-    }
-
-    // Scan miss → resolve aliases / newer codes against the server, then
-    // match again over the (refreshed) local catalog.
-    try {
-      const { lookupBarcodeApi } = await import(
-        "@/features/barcodes/barcode.api"
-      );
-      const result = await lookupBarcodeApi(query);
-      if ("variantId" in result) {
-        const refreshed = activeProducts
-          .flatMap((item) =>
-            item.variants.map((variant) => ({ product: item, variant })),
-          )
-          .find(({ variant }) => variant.id === result.variantId);
-        if (refreshed) {
-          handleAddPurchase({
-            ...refreshed.product,
-            variants: [refreshed.variant],
-          });
-          setSearchProducts("");
-        }
-      }
-    } catch {
-      // Lookup is best-effort — a failed resolve just leaves the cart alone.
-    }
+    scanner.handleScan(text);
   };
 
   const handleCreatePurchaseOrder = async () => {
@@ -318,7 +378,7 @@ export function PurchasesOrder() {
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
-                      handleBarcodeSearch();
+                      handleSearchEnter(searchProducts);
                     }
                   }}
                   className="h-11 pl-9 pr-10"
@@ -327,6 +387,7 @@ export function PurchasesOrder() {
                 />
                 <Barcode className="absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               </div>
+              <BarcodeScanFeedback state={scanner.state} className="mt-2" />
             </div>
             <div className="max-h-[calc(100vh-18rem)] min-h-72 overflow-y-auto p-4 md:p-5">
               {productError && (

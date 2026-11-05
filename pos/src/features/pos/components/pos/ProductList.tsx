@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PackageSearch } from "lucide-react";
 import { buildVariantName } from "@/lib/variantDisplay";
 import { ProductHeader } from "./ProductHeader";
@@ -19,6 +19,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { LookupMatch } from "@/features/barcodes/barcode.api";
+import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
+import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
+import { createCatalogLookup } from "@/features/barcodes/scanning/catalogLookup";
 
 type ActiveSerialProduct = {
   product: ProductType;
@@ -27,7 +31,11 @@ type ActiveSerialProduct = {
 
 const EMPTY_SERIALS: string[] = [];
 
-export function ProductList() {
+export function ProductList({
+  scannerEnabled = true,
+}: {
+  scannerEnabled?: boolean;
+}) {
   const { addToCart } = useCartStore();
   const { products, productSelectOptions } = useProductStore();
   const [searchProducts, setSearchProducts] = useState("");
@@ -61,72 +69,113 @@ export function ProductList() {
     (category) => category.status === "active",
   );
 
-  const handleScan = async (code: string) => {
-    const normalizedCode = code.trim().toLowerCase();
-    const findMatch = (catalog: ProductType[]) =>
-      catalog
-        .flatMap((product) =>
-          product.variants.map((variant) => ({ product, variant })),
-        )
-        .find(
-          ({ variant }) =>
-            variant.barcode?.trim().toLowerCase() === normalizedCode ||
-            variant.sku.trim().toLowerCase() === normalizedCode,
-        );
+  /**
+   * Module scan handler — the scanner service only IDENTIFIES a barcode;
+   * every sales business rule (catalog row, stock gate, serial tracking)
+   * lives here. Throwing surfaces the failure as an error scan.
+   */
+  const handleResolved = useCallback(
+    async (match: LookupMatch) => {
+      const findRow = (catalog: ProductType[]) =>
+        catalog
+          .flatMap((product) =>
+            product.variants.map((variant) => ({ product, variant })),
+          )
+          .find(({ variant }) => variant.id === match.variantId);
 
-    let match = findMatch(products);
-
-    // Scan miss → resolve against the server (alias barcodes, codes newer
-    // than the loaded catalog). The lookup returns only the variant id;
-    // the cart entry is still built from the full local catalog row.
-    if (!match) {
-      try {
-        const { lookupBarcodeApi } = await import(
-          "@/features/barcodes/barcode.api"
-        );
-        const result = await lookupBarcodeApi(code.trim());
-        if ("variantId" in result) {
-          let refreshed = findMatch(products);
-          if (!refreshed) {
-            await useProductStore.getState().getProducts();
-            refreshed = findMatch(useProductStore.getState().products);
-          }
-          match = refreshed;
-        }
-      } catch {
-        // Lookup is best-effort — fall through to the not-found toast.
+      // The cart entry is built from the full local catalog row; refresh
+      // it when the scanned variant is newer than the loaded catalog.
+      let row = findRow(useProductStore.getState().products);
+      if (!row) {
+        await useProductStore.getState().getProducts();
+        row = findRow(useProductStore.getState().products);
       }
-    }
-
-    if (!match) {
-      if (filteredProducts.length === 0) {
-        toast.add({
-          type: "error",
-          description: "No product matches that name, SKU, or barcode.",
-        });
+      if (!row) {
+        throw new Error(`${match.productName} is not in the loaded catalog.`);
       }
-      return;
-    }
 
-    const { product, variant } = match;
-    if (variant.quantity <= 0) {
+      const { product, variant } = row;
+      if (variant.quantity <= 0) {
+        throw new Error(`${product.name} is out of stock.`);
+      }
+
+      if (product.trackingType === "serial") {
+        setSearchProducts("");
+        setActiveSerialProduct({ product, variantId: variant.id });
+        return;
+      }
+
+      const variantName = buildVariantName(product.name, variant.options);
+      addToCart({ ...product, name: variantName, variants: [variant] });
+      setSearchProducts("");
+      toast.add({ description: `${variantName} added to cart.` });
+    },
+    [addToCart],
+  );
+
+  // Local-first identification: loaded catalog matches never hit the
+  // network; everything else resolves against the server (alias barcodes,
+  // codes newer than the catalog).
+  const lookup = useCallback(
+    createCatalogLookup(() => useProductStore.getState().products),
+    [],
+  );
+
+  const scanner = useBarcodeScanner({
+    capture: "window",
+    enabled: scannerEnabled,
+    lookup,
+    onResolve: handleResolved,
+  });
+
+  // Scan outcome → toast (spec §16: never silently ignore failed scans).
+  const lastHandledEventId = useRef(0);
+  useEffect(() => {
+    const event = scanner.state.last;
+    if (!event || event.id <= lastHandledEventId.current) return;
+    lastHandledEventId.current = event.id;
+    if (event.status === "not_found") {
       toast.add({
         type: "error",
-        description: `${product.name} is out of stock.`,
+        description: "No product matches that name, SKU, or barcode.",
       });
+    } else if (event.status === "ambiguous") {
+      toast.add({
+        type: "error",
+        description: event.detail ?? "That barcode matches more than one product.",
+        priority: "high",
+      });
+    } else if (event.status === "error") {
+      toast.add({
+        type: "error",
+        description: event.detail ?? "Scan failed.",
+        priority: "high",
+      });
+    }
+  }, [scanner.state.last]);
+
+  // Search-box Enter: exact codes go straight to the scanner; product-name
+  // searches stay a filter (typing search + Enter must not error-toast when
+  // the as-you-type list already shows results).
+  const handleSearchEnter = (text: string) => {
+    const query = text.trim().toLowerCase();
+    if (!query) return;
+    const isExactCode = products.some((product) =>
+      product.variants.some(
+        (variant) =>
+          variant.barcode?.trim().toLowerCase() === query ||
+          variant.sku.trim().toLowerCase() === query,
+      ),
+    );
+    if (isExactCode) {
+      scanner.handleScan(text);
       return;
     }
-
-    if (product.trackingType === "serial") {
-      setSearchProducts("");
-      setActiveSerialProduct({ product, variantId: variant.id });
-      return;
-    }
-
-    const variantName = buildVariantName(product.name, variant.options);
-    addToCart({ ...product, name: variantName, variants: [variant] });
-    setSearchProducts("");
-    toast.add({ description: `${variantName} added to cart.` });
+    const nameHits = products.some((product) =>
+      product.name.toLowerCase().includes(query),
+    );
+    if (nameHits && filteredProducts.length > 0) return;
+    scanner.handleScan(text);
   };
 
   const openSerialPicker = (
@@ -150,7 +199,11 @@ export function ProductList() {
       <ProductHeader
         searchProducts={searchProducts}
         setSearchProducts={setSearchProducts}
-        onScan={handleScan}
+        onScan={handleSearchEnter}
+      />
+      <BarcodeScanFeedback
+        state={scanner.state}
+        className="shrink-0 px-4 pt-2 sm:px-5"
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
         <div className="mb-3 flex items-center justify-between gap-3">

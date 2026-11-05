@@ -5,6 +5,8 @@ import {
 } from "../../db/schema/productVariants.js";
 import { variantBarcodeAliases } from "../../db/schema/variantBarcodeAliases.js";
 import { products } from "../../db/schema/products.js";
+import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
+import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { auditLog } from "../../db/schema/auditLog.js";
 import { recordAudit, recordAuditInTx } from "../../services/audit.js";
 import { nextDocumentNumber } from "../../utils/documentSequence.js";
@@ -617,22 +619,111 @@ export type LookupResult =
       barcodeFormat: string | null;
       sellingPrice: number;
       hasVariants: boolean;
+      /** products.status — modules decide what an inactive product means. */
+      productStatus: string | null;
+      variantStatus: string | null;
+      /** products.tracking_type: none | batch | serial. */
+      trackingType: string | null;
+      /** On-hand quantity at the caller's active location (0 when unknown). */
+      stockAtLocation: number;
+      /** Weighted-average landed cost — null unless the caller is
+       *  purchase-cost authorized (purchases.view / purchases.create). */
+      purchaseCost: number | null;
     }
   | { matchType: "not_found" }
   | { matchType: "ambiguous"; detail: string };
 
+/** Optional switches for lookupBarcode (global barcode scanning). */
+export interface LookupOptions {
+  /** Caller's verified active location; stockAtLocation is scoped to it. */
+  locationId?: number | undefined;
+  /** Expose purchaseCost (cost-authorized callers only). */
+  includeCost?: boolean | undefined;
+}
+
+/** Weighted-average landed cost of on-hand batches — the same definition
+ *  the products API exposes as variant purchaseCost. */
+async function loadVariantPurchaseCost(
+  businessId: number,
+  variantId: number,
+): Promise<number | null> {
+  const [row] = await db
+    .select({
+      avgCost: sql<string | null>`
+        SUM(${inventoryBatches.landedCostPerUnit} * ${inventoryBatches.quantityRemaining})
+        / NULLIF(SUM(${inventoryBatches.quantityRemaining}), 0)`,
+    })
+    .from(inventoryBatches)
+    .where(
+      and(
+        eq(inventoryBatches.businessId, businessId),
+        eq(inventoryBatches.variantId, variantId),
+        sql`${inventoryBatches.quantityRemaining} > 0`,
+      ),
+    );
+  return row?.avgCost != null ? Number(row.avgCost) : null;
+}
+
+async function loadStockAtLocation(
+  businessId: number,
+  variantId: number,
+  locationId: number | undefined,
+): Promise<number> {
+  if (locationId === undefined) return 0;
+  const [row] = await db
+    .select({ quantity: inventoryStock.quantity })
+    .from(inventoryStock)
+    .where(
+      and(
+        eq(inventoryStock.businessId, businessId),
+        eq(inventoryStock.variantId, variantId),
+        eq(inventoryStock.locationId, locationId),
+      ),
+    )
+    .limit(1);
+  return row?.quantity ?? 0;
+}
+
+/** Attaches the module-support payload (status/tracking/stock/cost) to a
+ *  resolved match. Stock and cost are follow-up queries on the single
+ *  resolved variant — never the whole catalog. */
+async function finishLookupMatch(
+  match: Omit<
+    Extract<LookupResult, { matchType: "primary" | "alias" }>,
+    "stockAtLocation" | "purchaseCost"
+  >,
+  businessId: number,
+  options: LookupOptions,
+): Promise<LookupResult> {
+  const [stockAtLocation, purchaseCost] = await Promise.all([
+    loadStockAtLocation(businessId, match.variantId, options.locationId),
+    options.includeCost === true
+      ? loadVariantPurchaseCost(businessId, match.variantId)
+      : Promise.resolve(null),
+  ]);
+  return { ...match, stockAtLocation, purchaseCost };
+}
+
 /**
  * Exact scanner resolution: primary barcode → alias → SKU. Every path is
  * an exact match scoped to the business; ambiguous never picks one.
+ * Deleted products never resolve; inactive ones resolve with their status
+ * so the calling module decides what to do with them.
  */
 export async function lookupBarcode(
   businessId: number,
   code: string,
+  options: LookupOptions = {},
 ): Promise<LookupResult> {
   const trimmed = code.trim();
   if (trimmed === "") {
     return { matchType: "not_found" };
   }
+
+  const resolvable = and(
+    eq(productVariants.businessId, businessId),
+    sql`(${products.status} <> 'deleted' OR ${products.status} IS NULL)`,
+  );
 
   const [primary] = await db
     .select({
@@ -645,29 +736,34 @@ export async function lookupBarcode(
       barcodeFormat: productVariants.barcodeFormat,
       sellingPrice: productVariants.sellingPrice,
       hasVariants: products.hasVariants,
+      productStatus: products.status,
+      variantStatus: productVariants.status,
+      trackingType: products.trackingType,
     })
     .from(productVariants)
     .innerJoin(products, and(eq(products.id, productVariants.productId), eq(products.businessId, productVariants.businessId)))
-    .where(
-      and(
-        eq(productVariants.businessId, businessId),
-        eq(productVariants.barcode, trimmed),
-      ),
-    )
+    .where(and(resolvable, eq(productVariants.barcode, trimmed)))
     .limit(2);
   if (primary) {
-    return {
-      matchType: "primary",
-      variantId: primary.variantId,
-      productId: primary.productId,
-      productName: primary.productName,
-      variantLabel: primary.variantLabel,
-      sku: primary.sku,
-      barcode: primary.barcode!,
-      barcodeFormat: primary.barcodeFormat,
-      sellingPrice: Number(primary.sellingPrice),
-      hasVariants: primary.hasVariants === true,
-    };
+    return finishLookupMatch(
+      {
+        matchType: "primary",
+        variantId: primary.variantId,
+        productId: primary.productId,
+        productName: primary.productName,
+        variantLabel: primary.variantLabel,
+        sku: primary.sku,
+        barcode: primary.barcode!,
+        barcodeFormat: primary.barcodeFormat,
+        sellingPrice: Number(primary.sellingPrice),
+        hasVariants: primary.hasVariants === true,
+        productStatus: primary.productStatus,
+        variantStatus: primary.variantStatus,
+        trackingType: primary.trackingType,
+      },
+      businessId,
+      options,
+    );
   }
 
   const aliasRows = await db
@@ -682,6 +778,9 @@ export async function lookupBarcode(
       barcodeFormat: variantBarcodeAliases.barcodeFormat,
       sellingPrice: productVariants.sellingPrice,
       hasVariants: products.hasVariants,
+      productStatus: products.status,
+      variantStatus: productVariants.status,
+      trackingType: products.trackingType,
     })
     .from(variantBarcodeAliases)
     .innerJoin(
@@ -694,6 +793,7 @@ export async function lookupBarcode(
     .innerJoin(products, and(eq(products.id, productVariants.productId), eq(products.businessId, productVariants.businessId)))
     .where(
       and(
+        resolvable,
         eq(variantBarcodeAliases.businessId, businessId),
         eq(variantBarcodeAliases.barcode, trimmed),
       ),
@@ -701,18 +801,25 @@ export async function lookupBarcode(
     .limit(2);
   if (aliasRows.length === 1) {
     const alias = aliasRows[0]!;
-    return {
-      matchType: "alias",
-      variantId: alias.variantId,
-      productId: alias.productId,
-      productName: alias.productName,
-      variantLabel: alias.variantLabel,
-      sku: alias.sku,
-      barcode: alias.barcode,
-      barcodeFormat: alias.barcodeFormat,
-      sellingPrice: Number(alias.sellingPrice),
-      hasVariants: alias.hasVariants === true,
-    };
+    return finishLookupMatch(
+      {
+        matchType: "alias",
+        variantId: alias.variantId,
+        productId: alias.productId,
+        productName: alias.productName,
+        variantLabel: alias.variantLabel,
+        sku: alias.sku,
+        barcode: alias.barcode,
+        barcodeFormat: alias.barcodeFormat,
+        sellingPrice: Number(alias.sellingPrice),
+        hasVariants: alias.hasVariants === true,
+        productStatus: alias.productStatus,
+        variantStatus: alias.variantStatus,
+        trackingType: alias.trackingType,
+      },
+      businessId,
+      options,
+    );
   }
   if (aliasRows.length > 1) {
     return {
@@ -734,29 +841,34 @@ export async function lookupBarcode(
       barcodeFormat: productVariants.barcodeFormat,
       sellingPrice: productVariants.sellingPrice,
       hasVariants: products.hasVariants,
+      productStatus: products.status,
+      variantStatus: productVariants.status,
+      trackingType: products.trackingType,
     })
     .from(productVariants)
     .innerJoin(products, and(eq(products.id, productVariants.productId), eq(products.businessId, productVariants.businessId)))
-    .where(
-      and(
-        eq(productVariants.businessId, businessId),
-        eq(productVariants.sku, trimmed),
-      ),
-    )
+    .where(and(resolvable, eq(productVariants.sku, trimmed)))
     .limit(2);
   if (skuMatch) {
-    return {
-      matchType: "primary",
-      variantId: skuMatch.variantId,
-      productId: skuMatch.productId,
-      productName: skuMatch.productName,
-      variantLabel: skuMatch.variantLabel,
-      sku: skuMatch.sku,
-      barcode: skuMatch.barcode ?? skuMatch.sku,
-      barcodeFormat: skuMatch.barcodeFormat,
-      sellingPrice: Number(skuMatch.sellingPrice),
-      hasVariants: skuMatch.hasVariants === true,
-    };
+    return finishLookupMatch(
+      {
+        matchType: "primary",
+        variantId: skuMatch.variantId,
+        productId: skuMatch.productId,
+        productName: skuMatch.productName,
+        variantLabel: skuMatch.variantLabel,
+        sku: skuMatch.sku,
+        barcode: skuMatch.barcode ?? skuMatch.sku,
+        barcodeFormat: skuMatch.barcodeFormat,
+        sellingPrice: Number(skuMatch.sellingPrice),
+        hasVariants: skuMatch.hasVariants === true,
+        productStatus: skuMatch.productStatus,
+        variantStatus: skuMatch.variantStatus,
+        trackingType: skuMatch.trackingType,
+      },
+      businessId,
+      options,
+    );
   }
 
   return { matchType: "not_found" };

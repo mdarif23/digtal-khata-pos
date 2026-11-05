@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { getBusinessId } from "../../middleware/business.js";
+import { getLocationId } from "../../middleware/location.js";
+import { callerHasPermission } from "../../middleware/permissions.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { BadRequestError } from "../../utils/handleError.js";
 import { isBarcodeFormat } from "./barcodes.validation.js";
@@ -207,7 +209,14 @@ export async function getLookup(req: Request, res: Response) {
     if (code.trim() === "" || code.length > 100) {
       throw new BadRequestError("A barcode of at most 100 characters is required.");
     }
-    const data = await lookupBarcode(getBusinessId(req), code);
+    const data = await lookupBarcode(getBusinessId(req), code, {
+      // Stock is reported for the caller's verified active location.
+      locationId: getLocationId(req),
+      // Purchase costs stay hidden from POS-only roles (spec §17).
+      includeCost:
+        callerHasPermission(req, "purchases.view") ||
+        callerHasPermission(req, "purchases.create"),
+    });
     return res.status(200).json({ success: true, data });
   } catch (err: unknown) {
     return sendSafeError(res, err, "Unable to resolve the barcode.");

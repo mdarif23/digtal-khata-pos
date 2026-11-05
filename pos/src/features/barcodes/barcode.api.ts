@@ -43,6 +43,15 @@ export interface LookupMatch {
   barcodeFormat: string | null;
   sellingPrice: number;
   hasVariants: boolean;
+  /** products.status — modules decide what an inactive product means. */
+  productStatus: string | null;
+  variantStatus: string | null;
+  /** products.tracking_type: none | batch | serial. */
+  trackingType: string | null;
+  /** On-hand quantity at the active location (0 when unknown). */
+  stockAtLocation: number;
+  /** Only present for purchase-cost authorized roles; null otherwise. */
+  purchaseCost: number | null;
 }
 
 export type LookupResponse =
