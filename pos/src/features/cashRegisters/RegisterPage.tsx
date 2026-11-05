@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { PermissionButton } from "@/components/common/PermissionGuard";
 import { formatCurrency, formatDateTime } from "@/features/reports/utils/reportUtils";
+import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
 import {
   addCashMovementApi,
   closeRegisterApi,
@@ -85,10 +86,48 @@ export function RegisterPage() {
     void qc.invalidateQueries({ queryKey: ["register"] });
   };
 
+  // Offline drawer (Phase 3): when the device is offline the open/movement/
+  // close actions queue as replay-safe ops (client-generated ids) and sync
+  // through /api/offline/sync when the connection returns.
+  const [offlineSessionId, setOfflineSessionId] = useState<string | null>(null);
+  const queueOfflineOp = async (
+    kind: "drawer.open" | "drawer.movement" | "drawer.close",
+    payload: Record<string, unknown>,
+    detail: string,
+  ) => {
+    const sessionId =
+      kind === "drawer.open"
+        ? crypto.randomUUID()
+        : (offlineSessionId ?? crypto.randomUUID());
+    if (kind === "drawer.open") setOfflineSessionId(sessionId);
+    await useOfflineStore.getState().recordOfflineOp({
+      kind,
+      payload: { ...payload, clientSessionId: sessionId },
+      summary: { total: 0, itemCount: 0, customerName: null },
+    });
+    toast.add({
+      title: `Offline — ${detail} queued and will sync automatically.`,
+      type: "info",
+      priority: "high",
+    });
+  };
+
   const openMutation = useMutation({
-    mutationFn: (input: { registerId: number; openingCash: number }) =>
-      openRegisterApi(input.registerId, input.openingCash),
-    onSuccess: () => invalidate(),
+    mutationFn: async (input: { registerId: number; openingCash: number }) => {
+      if (!navigator.onLine) {
+        await queueOfflineOp(
+          "drawer.open",
+          { registerId: input.registerId, openingCash: input.openingCash },
+          "drawer open",
+        );
+        return null;
+      }
+      return openRegisterApi(input.registerId, input.openingCash);
+    },
+    onSuccess: (data) => {
+      if (data === null) return; // queued offline
+      invalidate();
+    },
     onError: (error) =>
       toast.add({
         title: extractError(error, "Unable to open the register."),
@@ -98,19 +137,29 @@ export function RegisterPage() {
   });
 
   const movementMutation = useMutation({
-    mutationFn: (input: {
+    mutationFn: async (input: {
       sessionId: number;
       type: ManualMovementType;
       amount: number;
       note?: string;
-    }) =>
-      addCashMovementApi(
-        input.sessionId,
-        input.type,
-        input.amount,
-        input.note,
-      ),
-    onSuccess: () => {
+    }) => {
+      if (!navigator.onLine) {
+        await queueOfflineOp(
+          "drawer.movement",
+          {
+            clientOpId: crypto.randomUUID(),
+            type: input.type,
+            amount: input.amount,
+            note: input.note ?? null,
+          },
+          "cash movement",
+        );
+        return null;
+      }
+      return addCashMovementApi(input.sessionId, input.type, input.amount, input.note);
+    },
+    onSuccess: (data) => {
+      if (data === null) return; // queued offline
       setMovementAmount("");
       setMovementNote("");
       invalidate();
@@ -124,9 +173,19 @@ export function RegisterPage() {
   });
 
   const closeMutation = useMutation({
-    mutationFn: (input: { sessionId: number; countedCash: number }) =>
-      closeRegisterApi(input.sessionId, input.countedCash),
+    mutationFn: async (input: { sessionId: number; countedCash: number }) => {
+      if (!navigator.onLine) {
+        await queueOfflineOp(
+          "drawer.close",
+          { countedCash: input.countedCash },
+          "drawer close",
+        );
+        return null;
+      }
+      return closeRegisterApi(input.sessionId, input.countedCash);
+    },
     onSuccess: (closed) => {
+      if (closed === null) return; // queued offline
       const difference = closed.difference ?? 0;
       toast.add({
         title:

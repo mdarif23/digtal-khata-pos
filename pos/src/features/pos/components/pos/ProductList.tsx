@@ -12,6 +12,7 @@ import {
   ProductVariantType,
 } from "@/features/products/product.schema";
 import { toast } from "@/components/ui/toast";
+import { checkAllowance } from "@/features/pos/offline/allocations.js";
 import {
   Select,
   SelectContent,
@@ -106,6 +107,16 @@ export function ProductList({
       }
 
       const variantName = buildVariantName(product.name, variant.options);
+      // Offline allowance gate (Phase 3): allocated products can only take
+      // what THIS terminal was granted; blocked products never sell offline.
+      // The server re-checks and flags overages at sync time regardless.
+      if (!navigator.onLine) {
+        const check = await checkAllowance(variant.id, 1);
+        if (!check.allowed) {
+          toast.add({ type: "error", description: check.reason, priority: "high" });
+          return;
+        }
+      }
       addToCart({ ...product, name: variantName, variants: [variant] });
       setSearchProducts("");
       toast.add({ description: `${variantName} added to cart.` });

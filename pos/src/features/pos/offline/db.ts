@@ -16,13 +16,14 @@
  */
 
 const DB_NAME = "ezpos-offline";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export const STORE_PRODUCTS = "catalog_products";
 export const STORE_CUSTOMERS = "catalog_customers";
 export const STORE_OUTBOX = "outbox";
 export const STORE_CART = "active_cart";
 export const STORE_SYNC_LOG = "sync_log";
+export const STORE_GRANTS = "offline_grants";
 
 export type ScopeKey = string;
 
@@ -68,6 +69,9 @@ function openDb(): Promise<IDBDatabase> {
         });
         outbox.createIndex("status", "status");
         outbox.createIndex("recordedAt", "recordedAt");
+      }
+      if (!db.objectStoreNames.contains(STORE_GRANTS)) {
+        db.createObjectStore(STORE_GRANTS, { keyPath: "scope" });
       }
       if (!db.objectStoreNames.contains(STORE_SYNC_LOG)) {
         const log = db.createObjectStore(STORE_SYNC_LOG, {
@@ -139,11 +143,18 @@ export async function readCatalog<T>(
 
 export type OutboxStatus = "pending" | "synced" | "failed";
 
+export type OutboxKind =
+  | "sale"
+  | "customer"
+  | "drawer.open"
+  | "drawer.movement"
+  | "drawer.close";
+
 export interface OutboxEntry {
-  /** Client-generated transaction id — sent as the sale idempotency key. */
+  /** Client-generated transaction id — the sale idempotency key / op id. */
   clientSaleId: string;
   status: OutboxStatus;
-  payload: unknown; // CreateSalePayload
+  payload: unknown; // CreateSalePayload or an offline op payload
   invoiceNumber: string | null;
   recordedAt: string;
   syncedAt: string | null;
@@ -151,6 +162,12 @@ export interface OutboxEntry {
   lastError: string | null;
   /** Cashier-facing summary for the sync history dialog. */
   summary: { total: number; itemCount: number; customerName: string | null };
+  /** Phase 3: op kind (default 'sale'). */
+  kind?: OutboxKind;
+  /** True when the op was CREATED offline → replay via /api/offline/sync. */
+  offlineOrigin?: boolean;
+  /** Set when the backend applied the op but flagged a conflict. */
+  conflictId?: number;
 }
 
 export async function putOutboxEntry(entry: OutboxEntry): Promise<void> {

@@ -41,6 +41,87 @@ let sessionUser: SessionUser | null = null;
 let bootstrapPromise: Promise<void> | null = null;
 
 const ACTIVE_LOCATION_KEY = "ezpos-active-location";
+const OFFLINE_SESSION_KEY = "ezpos-offline-session";
+const OFFLINE_SESSION_TTL_MS = 7 * 24 * 3600_000; // refresh-token TTL parity
+
+/**
+ * Offline session fallback (Phase 3): when the refresh cookie cannot be
+ * restored because the DEVICE is offline, a previously cached session
+ * snapshot (saved at every successful bootstrap, expired with the refresh
+ * TTL) lets the POS mount in offline mode. Authorization is still
+ * backend-enforced — offline work happens in the local engine and is
+ * re-validated at sync time. A revoked user/terminal takes effect at the
+ * first contact, or when the snapshot expires.
+ */
+let offlineFallbackActive = false;
+
+export function isOfflineFallbackActive(): boolean {
+  return offlineFallbackActive;
+}
+
+function saveOfflineSessionSnapshot(): void {
+  try {
+    const store = useSessionStore.getState();
+    localStorage.setItem(
+      OFFLINE_SESSION_KEY,
+      JSON.stringify({
+        savedAt: new Date().toISOString(),
+        user: store.user,
+        businessId: store.businessId,
+        locations: store.locations,
+        activeLocationId: store.activeLocationId,
+        permissions: store.permissions,
+        roleSlug: store.roleSlug,
+        roleName: store.roleName,
+      }),
+    );
+  } catch {
+    // localStorage unavailable — no offline fallback for this device.
+  }
+}
+
+function tryRestoreOfflineSession(): boolean {
+  if (navigator.onLine) return false;
+  try {
+    const raw = localStorage.getItem(OFFLINE_SESSION_KEY);
+    if (!raw) return false;
+    const snapshot = JSON.parse(raw) as {
+      savedAt: string;
+      user: SessionUser & { id?: number };
+      businessId: number | null;
+      locations: SessionLocation[];
+      activeLocationId: number | null;
+      permissions: string[];
+      roleSlug: string | null;
+      roleName: string | null;
+    };
+    if (
+      Date.now() - new Date(snapshot.savedAt).getTime() >
+      OFFLINE_SESSION_TTL_MS
+    ) {
+      return false;
+    }
+    accessToken = null;
+    activeBusinessId = snapshot.businessId;
+    activeLocationId = snapshot.activeLocationId;
+    sessionUser = snapshot.user;
+    offlineFallbackActive = true;
+    useSessionStore.getState().setSession({
+      user: snapshot.user,
+      businessId: snapshot.businessId,
+      roleSlug: snapshot.roleSlug,
+      roleName: snapshot.roleName,
+      roles: [],
+      permissions: snapshot.permissions ?? [],
+    });
+    useSessionStore
+      .getState()
+      .setLocationContext(snapshot.locations ?? [], snapshot.activeLocationId);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export interface SessionUser {
   id?: number | undefined;
@@ -144,6 +225,11 @@ export async function logout(): Promise<void> {
 }
 
 function redirectToSignIn(reason?: string): never {
+  // Offline fallback: the device cannot reach the network — mount with the
+  // cached session instead of bouncing to the website sign-in.
+  if (offlineFallbackActive || (!navigator.onLine && tryRestoreOfflineSession())) {
+    throw new Error("offline_fallback_active");
+  }
   const query = reason ? `?pos_error=${encodeURIComponent(reason)}` : "";
   window.location.href = `${WEBSITE_URL}/sign-in${query}`;
   // Reject instead of resolving: the app must not mount without a session
@@ -233,8 +319,16 @@ async function loadSession(): Promise<void> {
       .setLocationContext(locations, activeLocationId);
   } catch (err) {
     const status = axios.isAxiosError(err) ? err.response?.status : "network";
+    if (offlineFallbackActive || (!navigator.onLine && tryRestoreOfflineSession())) {
+      // Offline bootstrap: skip the rest (which needs the network) — the
+      // offline engine works entirely from the local caches.
+      return;
+    }
     redirectToSignIn(`me_failed_${status}`);
   }
+
+  // Snapshot for the offline fallback (Phase 3) — after everything resolved.
+  saveOfflineSessionSnapshot();
 
   // 4. Signed in but no business yet — the website dashboard is where
   //    businesses are created.
@@ -314,6 +408,7 @@ export async function refreshLocationContext(): Promise<void> {
  * a completed bootstrap short-circuits.
  */
 export function bootstrapSession(): Promise<void> {
+  if (offlineFallbackActive) return Promise.resolve();
   if (accessToken && activeBusinessId) return Promise.resolve();
   if (!bootstrapPromise) {
     bootstrapPromise = loadSession().catch((err) => {
