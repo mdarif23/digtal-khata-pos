@@ -69,6 +69,10 @@ import {
   landedCostPostings,
 } from "./landedCosts.js";
 import { saleItemBatchConsumptions } from "./saleItemBatchConsumptions.js";
+import {
+  productImportSessions,
+  productImportRows,
+} from "./productImport.js";
 import { businessInvitations } from "./businessInvitations.js";
 import { documentSequences } from "./documentSequences.js";
 
@@ -890,6 +894,31 @@ export const saleItemBatchConsumptionsRelations = relations(
     variant: one(productVariants, {
       fields: [saleItemBatchConsumptions.variantId],
       references: [productVariants.id],
+    }),
+  }),
+);
+
+export const productImportSessionsRelations = relations(
+  productImportSessions,
+  ({ one, many }) => ({
+    business: one(businesses, {
+      fields: [productImportSessions.businessId],
+      references: [businesses.id],
+    }),
+    createdByUser: one(users, {
+      fields: [productImportSessions.createdBy],
+      references: [users.id],
+    }),
+    rows: many(productImportRows),
+  }),
+);
+
+export const productImportRowsRelations = relations(
+  productImportRows,
+  ({ one }) => ({
+    session: one(productImportSessions, {
+      fields: [productImportRows.sessionId],
+      references: [productImportSessions.id],
     }),
   }),
 );

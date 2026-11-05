@@ -7,6 +7,7 @@ import {
   Package,
   Plus,
   TrendingUp,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -73,6 +74,23 @@ export default function ProductOverview({
             <Download aria-hidden="true" />
             Export CSV
           </Button>
+          <Button
+            variant="outline"
+            nativeButton={false}
+            render={
+              <a href="/product/import" />
+            }
+          >
+            <Upload aria-hidden="true" />
+            Import
+          </Button>
+          <a
+            className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-input bg-background px-4 py-2 text-sm font-medium shadow-sm hover:bg-accent"
+            href="/api/products/export?format=xlsx"
+          >
+            <Download aria-hidden="true" />
+            Export XLSX
+          </a>
           <Button
             nativeButton={false}
             variant="outline"
