@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Percent,
   ReceiptText,
+  DatabaseBackup,
 } from "lucide-react";
 import { GiExpense } from "react-icons/gi";
 import { MdOutlinePointOfSale } from "react-icons/md";
@@ -188,6 +189,12 @@ export const navigation = [
     url: "/tax-rates",
     icon: Percent,
     permission: "taxes.view",
+  },
+  {
+    title: "Backup & Restore",
+    url: "/settings/backup",
+    icon: DatabaseBackup,
+    permission: "backups.view",
   },
   {
     title: "Receipt & Invoice",

@@ -28,6 +28,7 @@ import { RolesPage } from "@/features/roles/pages/RolesPage";
 import { PaymentIntentReturn } from "@/features/pos/pages/PaymentIntentReturn";
 import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
 import ReceiptSettingsPage from "@/features/receipt-settings/pages/ReceiptSettingsPage";
+import BackupSettingsPage from "../features/backups/pages/BackupSettingsPage";
 import { StockCountPage } from "@/features/products/pages/StockCountPage";
 import { ReorderPage } from "@/features/purchases/pages/ReorderPage";
 import { PriceMonitoringPage } from "@/features/procurement/pages/PriceMonitoringPage";
@@ -376,6 +377,14 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="products.view">
             <BarcodeGeneratorPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/settings/backup",
+        element: (
+          <RequirePermission permission="backups.view">
+            <BackupSettingsPage />
           </RequirePermission>
         ),
       },
