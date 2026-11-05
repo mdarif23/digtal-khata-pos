@@ -759,12 +759,19 @@ async function resolveTaxRulesForSale(
   return map;
 }
 
+/** CreateSaleOptions: extra context for non-POS invocations of the engine. */
+export interface CreateSaleOptions {
+  /** 'offline' marks a LAN-server replica applied through /api/sync/ops. */
+  channel?: "pos" | "offline";
+}
+
 export async function createSale(
   businessId: number,
   locationId: number,
-  cashierUserId: number,
+  cashierUserId: number | null,
   data: CreateSalePayload,
   terminalId: number | null = null,
+  options: CreateSaleOptions = {},
 ) {
   const { customerId, items, discount, vatPercent, payments, saleDate } = data;
   const couponCode = data.couponCode?.trim() || null;
@@ -900,6 +907,7 @@ export async function createSale(
         dueAmount,
         paymentStatus,
         status: "completed",
+        channel: options.channel ?? undefined,
         idempotencyKey,
         idempotencyPayloadHash: payloadHash,
         terminalId,
@@ -1180,15 +1188,19 @@ export async function createSale(
         const cashAmount = receivedPayments
           .filter((payment) => payment.method === "cash")
           .reduce((sum, payment) => sum + (payment.amount ?? 0), 0);
-        await recordCashSaleInTx(
-          tx,
-          businessId,
-          cashierUserId,
-          locationId,
-          cashAmount,
-          saleId,
-          terminalId,
-        );
+        // A sale without a cashier (LAN replicas of legacy rows) records no
+        // drawer movement — register_transactions.userId is NOT NULL.
+        if (cashierUserId !== null) {
+          await recordCashSaleInTx(
+            tx,
+            businessId,
+            cashierUserId,
+            locationId,
+            cashAmount,
+            saleId,
+            terminalId,
+          );
+        }
       } catch (error: unknown) {
         if (isDuplicatePaymentReferenceError(error)) {
           throw new ConflictError(

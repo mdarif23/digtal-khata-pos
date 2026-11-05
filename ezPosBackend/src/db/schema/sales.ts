@@ -82,6 +82,14 @@ export const sales = pgTable(
      */
     terminalId: integer("terminal_id"),
     /**
+     * LAN sync bookkeeping (Phase 2, inert on the cloud): the LOCAL server
+     * marks a sale synced_at once its op was applied upstream; sync_attempts
+     * dead-letters poison ops. NULL synced_at on the cloud always — replicas
+     * arrive through /api/sync/ops, not the outbox scan.
+     */
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+    syncAttempts: integer("sync_attempts").default(0).notNull(),
+    /**
      * Exchange transactions (Module 5): the replacement sale references the
      * original. Composite FK keeps the tenant guarantee; NULL for normal
      * sales. The original's refund rows + this sale's items tell the whole

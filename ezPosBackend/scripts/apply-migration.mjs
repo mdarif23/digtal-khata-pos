@@ -43,15 +43,23 @@ if (!entry) {
 const WHEN = String(entry.when);
 const expectedCount = entry.idx + 1; // bookkeeping rows that must exist BEFORE applying
 
-// Strip -- comment lines first (comments may contain ';'), then split.
-const codeOnly = raw
-  .split(/\r?\n/)
-  .filter((l) => !l.trim().startsWith("--"))
-  .join("\n");
-const statements = codeOnly
-  .split(";")
-  .map((s) => s.trim())
-  .filter(Boolean);
+// Split preferring drizzle's `--> statement-breakpoint` markers when the
+// file uses them — semicolon-splitting shreds plpgsql bodies ($$ blocks
+// contain semicolons; hit on 0050). Legacy fallback: strip -- comment lines
+// first (comments may contain ';'), then split on ';'.
+const hasMarkers = raw.includes("--> statement-breakpoint");
+const statements = hasMarkers
+  ? raw
+      .split("--> statement-breakpoint")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  : raw
+      .split(/\r?\n/)
+      .filter((l) => !l.trim().startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
 const TOLERATED = new Set(["42P07", "42710", "42701", "42723", "23505", "42P16"]);
 

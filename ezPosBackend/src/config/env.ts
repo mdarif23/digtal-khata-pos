@@ -92,6 +92,18 @@ export const env = {
   jobsEnabled: process.env.JOBS_ENABLED?.trim() !== "false",
   jobsIntervalMinutes: optionalInt("JOBS_INTERVAL_MINUTES", 60),
   /**
+   * LAN sync agent (Phase 2) — disabled on the cloud by default. When
+   * EZPOS_SYNC_ENABLED=true the process ALSO runs the sync agent, pulling
+   * identity/catalog/stock from the cloud and pushing local sales up. The
+   * credential is the shop's sync-agent terminal (ezpos_tb_ secret).
+   */
+  syncEnabled: process.env.EZPOS_SYNC_ENABLED?.trim() === "true",
+  syncCloudUrl: process.env.EZPOS_SYNC_CLOUD_URL?.trim() || "",
+  syncTerminalId: optionalInt("EZPOS_SYNC_TERMINAL_ID", 0),
+  syncTerminalSecret: process.env.EZPOS_SYNC_TERMINAL_SECRET?.trim() || "",
+  syncIntervalSeconds: optionalInt("EZPOS_SYNC_INTERVAL_SECONDS", 60),
+  syncMaxAttempts: optionalInt("EZPOS_SYNC_MAX_ATTEMPTS", 20),
+  /**
    * AES-256-GCM master key for integration credentials. Required outside
    * development; a deterministic dev fallback keeps local testing frictionless.
    */

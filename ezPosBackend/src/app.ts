@@ -41,6 +41,8 @@ import locationsRouter from "./modules/locations/locations.routes.js";
 import stockTransfersRouter from "./modules/stockTransfers/stockTransfers.routes.js";
 import cashRegistersRouter from "./modules/cashRegisters/cashRegisters.routes.js";
 import posSettingsRouter from "./modules/posSettings/posSettings.routes.js";
+import syncRouter from "./modules/sync/sync.routes.js";
+import syncStatusRouter from "./sync/syncStatus.routes.js";
 import barcodesRouter from "./modules/barcodes/barcodes.routes.js";
 import backupsRouter from "./modules/backups/backups.routes.js";
 import supportRouter from "./modules/support/support.routes.js";
@@ -157,6 +159,8 @@ export function buildApp() {
   app.use("/", stockTransfersRouter);
   app.use("/", cashRegistersRouter);
   app.use("/", posSettingsRouter);
+  app.use("/", syncRouter);
+  app.use("/", syncStatusRouter);
   app.use("/", barcodesRouter);
   app.use("/", backupsRouter);
   app.use("/", supportRouter);

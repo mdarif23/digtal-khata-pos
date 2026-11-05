@@ -41,6 +41,10 @@ export const variantBarcodeAliases = pgTable(
       onDelete: "set null",
     }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    /** Sync watermark (Phase 2): maintained by trigger. */
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [
     unique("variant_barcode_aliases_business_barcode_uq").on(
