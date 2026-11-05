@@ -117,7 +117,16 @@ export type RealtimeEvent =
   | { kind: "register.changed"; locationId: number }
   /** Online order activity (module two) — business-wide so every portal
    * screen can refresh its order lists. */
-  | { kind: "order.updated"; saleId: number };
+  | { kind: "order.updated"; saleId: number }
+  /** Backup & restore job progress (advisory; state polls the API). */
+  | { kind: "backup.progress"; backupId: number; status: string; stage?: string }
+  | {
+      kind: "restore.progress";
+      restoreId: number;
+      status: string;
+      stage?: string;
+      percent?: number;
+    };
 
 /**
  * Publishes an event to every stream of the same business. locationId-scoped

@@ -25,7 +25,9 @@ export type NotificationKind =
   | "register_discrepancy"
   | "integration_failure"
   | "price_increase"
-  | "system";
+  | "system"
+  | "backup"
+  | "restore";
 
 export interface NotifyInput {
   businessId: number;

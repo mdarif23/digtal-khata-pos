@@ -26,6 +26,7 @@
     "express-rate-limit": "^8.7.2",
     "jose": "^6.2.14",
     "pg": "^8.22.0",
+    "tar-stream": "^3.2.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {

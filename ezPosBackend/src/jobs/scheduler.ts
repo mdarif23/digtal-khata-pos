@@ -4,6 +4,7 @@ import { runCommerceSweeps } from "./commerceJobs.js";
 import { runIntegrationSweeps } from "./integrationJobs.js";
 import { processWebhookDeliveries } from "../modules/webhooks/webhookDelivery.service.js";
 import { generateDueExpensesForAllBusinesses } from "../modules/expenses/expenses.templates.service.js";
+import { runBackupSweeps } from "../modules/backups/backups.service.js";
 
 /**
  * In-process scheduler: sweeps subscription lifecycle jobs on a fixed
@@ -29,8 +30,9 @@ export function startScheduler(): void {
       runIntegrationSweeps(),
       processWebhookDeliveries(),
       generateDueExpensesForAllBusinesses(),
+      runBackupSweeps(),
     ])
-      .then(([sub, commerce, integrations, deliveries, expenses]) => {
+      .then(([sub, commerce, integrations, deliveries, expenses, backups]) => {
         const total =
           sub.expiredTrials +
           sub.trialReminders +
@@ -44,9 +46,11 @@ export function startScheduler(): void {
           integrations.customerPushes +
           deliveries.delivered +
           deliveries.failed +
-          expenses.expensesGenerated;
+          expenses.expensesGenerated +
+          backups.backupsStarted +
+          backups.expiredDeleted;
         if (total > 0) {
-          console.info("Scheduled sweeps:", { ...sub, ...commerce, expenses });
+          console.info("Scheduled sweeps:", { ...sub, ...commerce, expenses, backups });
         }
       })
       .catch((err) => console.error("Scheduled sweeps failed:", err))
