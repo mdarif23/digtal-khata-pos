@@ -28,6 +28,10 @@ import {
   insertSaleItemConsumptions,
 } from "../sales/sales.service.js";
 import { emitWebhookEventInTx } from "../webhooks/webhookDelivery.service.js";
+import {
+  formatSaleInvoiceNumber,
+  nextDocumentNumber,
+} from "../../utils/documentSequence.js";
 import { salePayments } from "../../db/schema/salePayments.js";
 import { saleRefunds } from "../../db/schema/saleRefunds.js";
 import {
@@ -345,12 +349,24 @@ export async function createOnlineOrder(
     const customerId = await resolveCustomerId(tx, input.businessId, input.customer);
     const deliveryFee = roundMoney(input.deliveryFee ?? 0);
 
+    // One invoice-numbering regime for every channel: online orders used
+    // to draw from the legacy GLOBAL sale_invoice_number_seq column default,
+    // which counts from 1 independently of the per-business
+    // document_sequences counter the POS path uses — the two regimes could
+    // hand the same business the same INV-YYYY-NNNNNN and the unique
+    // constraint then 500'd one side. Allocate from document_sequences like
+    // createSale does (migration 0049 repaired the counters first).
+    const invoiceNumber = formatSaleInvoiceNumber(
+      new Date().getFullYear(),
+      await nextDocumentNumber(tx, input.businessId, "sale_invoice"),
+    );
     const [sale] = await tx
       .insert(sales)
       .values({
         businessId: input.businessId,
         status: "pending",
         channel: input.channel,
+        invoiceNumber,
         integrationId: input.integrationId,
         externalOrderId: input.externalOrderId ?? null,
         externalOrderNumber: input.externalOrderNumber ?? null,

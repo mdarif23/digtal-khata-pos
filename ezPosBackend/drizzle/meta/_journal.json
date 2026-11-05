@@ -342,6 +342,13 @@
       "when": 1794200000000,
       "tag": "0048_backup_restore",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794300000000,
+      "tag": "0049_multi_terminal_attribution",
+      "breakpoints": true
     }
   ]
 }

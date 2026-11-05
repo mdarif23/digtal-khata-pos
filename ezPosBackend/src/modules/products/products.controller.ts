@@ -3,6 +3,7 @@ import * as productsService from "./products.service.js";
 import { getBusinessId } from "../../middleware/business.js";
 import { getLocationId } from "../../middleware/location.js";
 import { sendSafeError } from "../../utils/safeError.js";
+import { publishRealtime } from "../realtime/realtime.service.js";
 import { z } from "zod";
 import { callerHasPermission } from "../../middleware/permissions.js";
 import { stripCostData } from "../../rbac/sanitize.js";
@@ -136,6 +137,10 @@ export async function adjustVariantStock(req: Request, res: Response) {
       variantId,
       parsed.data,
     );
+    publishRealtime(getBusinessId(req), getLocationId(req), {
+      kind: "product.changed",
+      locationId: getLocationId(req),
+    });
     res.status(200).json({
       message: "Stock adjusted",
       data: result,

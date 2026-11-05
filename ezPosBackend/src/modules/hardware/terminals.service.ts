@@ -7,6 +7,10 @@ import {
   terminalPairingCodes,
 } from "../../db/schema/posTerminals.js";
 import { recordAudit } from "../../services/audit.js";
+import { publishRealtime } from "../realtime/realtime.service.js";
+import { locations } from "../../db/schema/locations.js";
+import { sales } from "../../db/schema/sales.js";
+import { registerSessions } from "../../db/schema/registers.js";
 import {
   BadRequestError,
   ConflictError,
@@ -36,6 +40,7 @@ export interface TerminalView {
   id: number;
   name: string;
   status: string;
+  locationId: number;
   paired: boolean;
   deviceInfo: unknown;
   lastSeenAt: Date | null;
@@ -48,6 +53,7 @@ function toView(row: typeof posTerminals.$inferSelect): TerminalView {
     id: row.id,
     name: row.name,
     status: row.status,
+    locationId: row.locationId,
     paired: row.secretHash !== null,
     deviceInfo: row.deviceInfo,
     lastSeenAt: row.lastSeenAt,
@@ -97,7 +103,11 @@ export async function getTerminal(
 export async function updateTerminal(
   businessId: number,
   terminalId: number,
-  input: { name?: string; status?: "active" | "inactive" },
+  input: {
+    name?: string;
+    status?: "active" | "inactive";
+    locationId?: number;
+  },
   actorUserId: number | null,
 ): Promise<TerminalView> {
   const [existing] = await db
@@ -112,11 +122,47 @@ export async function updateTerminal(
   if (!existing) {
     throw new NotFoundError("Terminal not found.");
   }
+  let targetLocationId = existing.locationId;
+  if (input.locationId !== undefined && input.locationId !== existing.locationId) {
+    // The terminal moves to another counter of the same business. Sales and
+    // sessions already written keep their original attribution — history
+    // records where things happened, not where the PC is now.
+    const [location] = await db
+      .select({ id: locations.id })
+      .from(locations)
+      .where(
+        and(eq(locations.id, input.locationId), eq(locations.businessId, businessId)),
+      )
+      .limit(1);
+    if (!location) {
+      throw new NotFoundError("Location not found.");
+    }
+    targetLocationId = input.locationId;
+  }
+  const targetName = input.name ?? existing.name;
+  // (location_id, name) is unique among terminals — keep the friendly 409
+  // the DB constraint would otherwise turn into a 500.
+  const [clash] = await db
+    .select({ id: posTerminals.id })
+    .from(posTerminals)
+    .where(
+      and(
+        eq(posTerminals.locationId, targetLocationId),
+        eq(posTerminals.name, targetName),
+      ),
+    )
+    .limit(1);
+  if (clash && clash.id !== terminalId) {
+    throw new ConflictError(
+      "Another terminal at that location already uses this name.",
+    );
+  }
   const [updated] = await db
     .update(posTerminals)
     .set({
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.locationId !== undefined ? { locationId: input.locationId } : {}),
       updatedAt: new Date(),
     })
     .where(eq(posTerminals.id, terminalId))
@@ -130,7 +176,15 @@ export async function updateTerminal(
     action: "pos_terminal.updated",
     entityType: "pos_terminal",
     entityId: terminalId,
-    metadata: { name: input.name, status: input.status },
+    metadata: {
+      name: input.name,
+      status: input.status,
+      locationId: input.locationId,
+    },
+  });
+  publishRealtime(businessId, updated.locationId, {
+    kind: "terminal.changed",
+    locationId: updated.locationId,
   });
   return toView(updated);
 }
@@ -146,7 +200,11 @@ export async function deleteTerminal(
   actorUserId: number | null,
 ): Promise<{ id: number }> {
   const [existing] = await db
-    .select({ id: posTerminals.id, secretHash: posTerminals.secretHash })
+    .select({
+      id: posTerminals.id,
+      secretHash: posTerminals.secretHash,
+      locationId: posTerminals.locationId,
+    })
     .from(posTerminals)
     .where(
       and(
@@ -167,6 +225,28 @@ export async function deleteTerminal(
       "This terminal has command history. Deactivate it instead of deleting.",
     );
   }
+  // Transaction history is audit evidence too: a terminal that rang sales
+  // or held a drawer session cannot be deleted — deactivate it instead.
+  const [attribution] = await db
+    .select({ id: sales.id })
+    .from(sales)
+    .where(eq(sales.terminalId, terminalId))
+    .limit(1);
+  if (attribution) {
+    throw new ConflictError(
+      "This terminal has recorded sales. Deactivate it instead of deleting.",
+    );
+  }
+  const [sessionRef] = await db
+    .select({ id: registerSessions.id })
+    .from(registerSessions)
+    .where(eq(registerSessions.terminalId, terminalId))
+    .limit(1);
+  if (sessionRef) {
+    throw new ConflictError(
+      "This terminal has register session history. Deactivate it instead of deleting.",
+    );
+  }
   const [deleted] = await db
     .delete(posTerminals)
     .where(eq(posTerminals.id, terminalId))
@@ -181,6 +261,10 @@ export async function deleteTerminal(
     entityType: "pos_terminal",
     entityId: terminalId,
     metadata: { wasPaired: existing.secretHash !== null },
+  });
+  publishRealtime(businessId, existing.locationId, {
+    kind: "terminal.changed",
+    locationId: existing.locationId,
   });
   return deleted;
 }
@@ -318,6 +402,10 @@ export async function pairTerminal(
     entityType: "pos_terminal",
     entityId: result.terminal.id,
     metadata: { name: result.terminal.name, via: "pairing_code" },
+  });
+  publishRealtime(result.businessId, result.locationId, {
+    kind: "terminal.changed",
+    locationId: result.locationId,
   });
   return {
     terminalId: result.terminal.id,

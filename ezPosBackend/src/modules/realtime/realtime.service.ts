@@ -115,6 +115,14 @@ export type RealtimeEvent =
   | { kind: "notification.created" }
   | { kind: "held_sales.changed"; locationId: number }
   | { kind: "register.changed"; locationId: number }
+  /** Catalog edits (create/update/stock adjustment) — business-wide so
+   * every terminal can refresh its product cache. */
+  | { kind: "product.changed"; locationId: number | null }
+  /** Customer create — business-wide signal for open checkout screens. */
+  | { kind: "customer.changed"; locationId: number | null }
+  /** Terminal registry changes (pair/update/delete/reassign) — scoped to
+   * the terminal's location. */
+  | { kind: "terminal.changed"; locationId: number }
   /** Online order activity (module two) — business-wide so every portal
    * screen can refresh its order lists. */
   | { kind: "order.updated"; saleId: number }

@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import * as salesService from "./sales.service.js";
 import { getBusinessId } from "../../middleware/business.js";
+import { getTerminalId } from "../../middleware/terminalContext.js";
 import { getLocationId } from "../../middleware/location.js";
 import { sendSafeError } from "../../utils/safeError.js";
 
@@ -69,6 +70,7 @@ export async function createExchange(req: Request, res: Response) {
       saleId,
       req.user?.id ?? null,
       parsed.data,
+      getTerminalId(req),
     );
     return res
       .status(result.replayed ? 200 : 201)

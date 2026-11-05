@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { businessMemberships } from "../../db/schema/businessMemberships.js";
 import { roles } from "../../db/schema/roles.js";
@@ -6,6 +6,7 @@ import { userRoles } from "../../db/schema/userRoles.js";
 import { userLocationAssignments } from "../../db/schema/userLocationAssignments.js";
 import { locations } from "../../db/schema/locations.js";
 import { users } from "../../db/schema/users.js";
+import { refreshTokens } from "../../db/schema/refreshTokens.js";
 import {
   BadRequestError,
   ConflictError,
@@ -394,4 +395,13 @@ export async function resetMemberPassword(
     .update(users)
     .set({ passwordHash, updatedAt: new Date() })
     .where(eq(users.id, targetUserId));
+  // Killing every live session is the point of an admin reset — otherwise
+  // the old password keeps working until each access token expires. The
+  // self-service change/reset flows already did this; parity here.
+  await db
+    .update(refreshTokens)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(eq(refreshTokens.userId, targetUserId), isNull(refreshTokens.revokedAt)),
+    );
 }

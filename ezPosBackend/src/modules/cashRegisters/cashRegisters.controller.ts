@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import { getBusinessId } from "../../middleware/business.js";
 import { getLocationId } from "../../middleware/location.js";
+import { getTerminalId } from "../../middleware/terminalContext.js";
+import { getAllowMultipleDrawerSessions } from "../posSettings/posSettings.service.js";
 import { callerHasPermission } from "../../middleware/permissions.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { WILDCARD_PERMISSION } from "../../rbac/permissions.js";
@@ -117,12 +119,16 @@ export async function postRegisterOpen(req: Request, res: Response) {
       });
     }
     const { userId } = actor(req);
+    const businessId = getBusinessId(req);
+    const allowMultiple = await getAllowMultipleDrawerSessions(businessId);
     const data = await openSession(
-      getBusinessId(req),
+      businessId,
       userId,
       getLocationId(req),
       registerId,
       parsed.data.openingCash,
+      getTerminalId(req),
+      allowMultiple,
     );
     return res.status(201).json({ success: true, data });
   } catch (err: unknown) {

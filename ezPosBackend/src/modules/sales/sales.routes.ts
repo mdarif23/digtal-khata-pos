@@ -7,6 +7,7 @@ import {
   requireFullAccess,
 } from "../../middleware/business.js";
 import { requireLocationAccess } from "../../middleware/location.js";
+import { requireTerminalContext } from "../../middleware/terminalContext.js";
 import { requirePermission } from "../../middleware/permissions.js";
 
 const router = express.Router();
@@ -17,7 +18,9 @@ const read = [
   requireBusinessContext(),
   requireLocationAccess(),
 ] as const;
-const write = [...read, requireFullAccess] as const;
+// Writes additionally resolve the optional X-Terminal-Id header (terminal
+// attribution + revocation enforcement; strict mode via pos_settings).
+const write = [...read, requireTerminalContext(), requireFullAccess] as const;
 
 router.get(
   "/api/sold_products",

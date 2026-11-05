@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import * as salesService from "./sales.service.js";
 import { getBusinessId } from "../../middleware/business.js";
 import { getLocationId } from "../../middleware/location.js";
+import { getTerminalId } from "../../middleware/terminalContext.js";
 import { callerHasPermission } from "../../middleware/permissions.js";
 import { resolveOptionalLocationParam } from "../../middleware/location.js";
 import { sendSafeError } from "../../utils/safeError.js";
@@ -67,6 +68,7 @@ export async function createSale(req: Request, res: Response) {
       getLocationId(req),
       req.user!.id,
       payload,
+      getTerminalId(req),
     );
     return res
       .status(201)
