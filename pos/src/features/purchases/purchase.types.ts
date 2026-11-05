@@ -19,6 +19,8 @@ export interface PurchaseStoreType {
   status: "ordered" | "received" | "partially_received";
   paymentStatus: "paid" | "unpaid" | "partial";
   notes: string | null;
+  /** Landed-cost allocation indicator (Phase 4) — null = no document / reversed. */
+  landedCostStatus?: "pending" | "allocated" | null;
   createdAt: Date;
   updatedAt: Date;
   supplierName: string | null;
@@ -78,35 +80,33 @@ export interface PurchaseReturnResponse {
   data: {
     purchaseReturnId: number;
     totalAmount: number;
+    landedCost: LandedCostFeedback;
   };
 }
-export interface UpdateStockChangedItems {
-  id: number;
-  productId: number;
-  receiveQuantity: number;
-  purchasePrice: number;
-  sellingPrice: number;
-  changedFields: boolean;
-}
-interface UpdateStockResponse {
-  message: string;
-}
+/** Landed-cost feedback returned by the receive backend (authoritative). */
+export type LandedCostFeedback = {
+  adjusted: boolean;
+  amount: number;
+  documentId: number | null;
+};
+
 export type ReceivePurchaseResponse = {
   success: boolean;
   message: string;
   data: {
-    success: boolean;
     purchaseId: number;
     status: "received" | "partially_received";
     receivedAmount: number;
     paidAmount: number;
     dueAmount: number;
-    message: string;
+    landedCost: LandedCostFeedback;
   };
 };
 export type CreatePurchaseResponse = {
+  success: boolean;
   message: string;
   data: {
+    id: number;
     purchaseOrderNumber: string;
   };
 };
@@ -124,10 +124,6 @@ export interface PurchasesStore {
   getPurchaseItems: () => Promise<void>;
   getPurchases: () => Promise<void>;
   getPurchasesReturnItems: () => Promise<void>;
-  updateStock: (
-    paymentDetails: PaymentDetails,
-    changedItems: UpdateStockChangedItems[],
-  ) => Promise<UpdateStockResponse>;
   purchaseReturn: (
     data: PurchaseReturnInput,
   ) => Promise<PurchaseReturnResponse>;
@@ -164,18 +160,6 @@ export interface SummaryCardProps {
   card: PaymentsInfoCard;
   formatCurrency: (value: number) => string;
 }
-export interface PaymentDetails {
-  orderId: number;
-  paymentAmount: number;
-  paymentMethod: string;
-  paymentNotes: string;
-}
-export interface ProductCardProps {
-  product: ProductType;
-  handleAddPurchase: (product: ProductType) => void;
-  defaultVariant: ProductVariantType;
-}
-export interface ShowVariantsProps extends ProductCardProps {}
 export interface GroupedVariantOption {
   typeName: string;
   optionsName: string[];

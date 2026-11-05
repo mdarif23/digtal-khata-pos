@@ -54,6 +54,15 @@ export const receiveItemsFormSchema = z.object({
             });
           }
         }
+        for (const [index, batch] of data.batches.entries()) {
+          if (batch.expiryDate.getTime() < batch.manufacturedDate.getTime()) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["batches", index, "expiryDate"],
+              message: "Expiry date cannot be before the manufacturing date.",
+            });
+          }
+        }
       }),
   ).min(1, "At least one purchase item is required"),
   paymentAmount: z.number().finite().min(0),

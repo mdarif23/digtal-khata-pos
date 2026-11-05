@@ -1,39 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft, PackageCheck, ReceiptText, Wallet } from "lucide-react";
+import { ArrowLeft, PackageCheck, ReceiptText } from "lucide-react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
 import { toast } from "@/components/ui/toast";
-import { Barcode } from "lucide-react";
-import { SummaryCard } from "../components/purchasesReceiveItems/SummaryCard";
 import { ItemsReceiveTable } from "../components/purchasesReceiveItems/ItemsReceiveTable";
+import { ReceivingSummary } from "../components/receiving/ReceivingSummary";
+import { ReceivingPaymentSection } from "../components/receiving/ReceivingPaymentSection";
 import type { PaymentsInfoCard } from "../purchase.types";
 import {
   receiveItemsFormSchema,
   type ReceiveItemsFormValues,
 } from "../schemas/receiveItem.schema";
 import { usePurchasesStore } from "../usePurchaseStore";
+import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
+import { useReceivePurchase } from "../hooks/useReceivePurchase";
+import { useScanFailureToast } from "@/features/barcodes/scanning/useScanFailureToast";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
 import { BarcodeScannerInput } from "@/features/barcodes/scanning/BarcodeScannerInput";
 import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-BD", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(value) ? value : 0);
-
-const paymentMethods = [
-  { label: "Cash", value: "cash" },
-  { label: "Bank transfer", value: "bank_transfer" },
-  { label: "Cheque", value: "cheque" },
-  { label: "Card", value: "card" },
-  { label: "Other", value: "other" },
-] as const;
 
 export const ReceiveItems = () => {
   const { id } = useParams();
@@ -46,9 +35,7 @@ export const ReceiveItems = () => {
   const error = usePurchasesStore((state) => state.error);
   const getPurchases = usePurchasesStore((state) => state.getPurchases);
   const getPurchaseItems = usePurchasesStore((state) => state.getPurchaseItems);
-  const createReceivePurchase = usePurchasesStore(
-    (state) => state.createReceivePurchase,
-  );
+  const receiveMutation = useReceivePurchase();
 
   useEffect(() => {
     if (!Number.isInteger(purchaseId) || purchaseId <= 0) return;
@@ -114,6 +101,9 @@ export const ReceiveItems = () => {
   const hasItemsToReceive = watchedItems.some(
     (item) => Number(item.receiveNow) > 0,
   );
+  // Client-side estimate of the payable limit (order cost × received units).
+  // The backend recomputes this from the actual batch costs and is
+  // authoritative — a rejected amount surfaces as a 400 toast.
   const previouslyReceivedValue = receiveItems.reduce(
     (sum, item) =>
       sum + Number(item.receivedQuantity || 0) * Number(item.unitCost || 0),
@@ -123,7 +113,6 @@ export const ReceiveItems = () => {
     0,
     Math.min(dueAmount, previouslyReceivedValue + receivingTotal - paidAmount),
   );
-  const newBalance = Math.max(0, dueAmount - Number(paymentAmount || 0));
 
   useEffect(() => {
     if (Number(paymentAmount) > paymentLimit) {
@@ -158,27 +147,6 @@ export const ReceiveItems = () => {
       circleBg: "bg-rose-500",
       title: "Balance due",
       total: dueAmount,
-    },
-  ];
-
-  const paymentSummary: PaymentsInfoCard[] = [
-    {
-      bg: "bg-amber-50",
-      circleBg: "bg-amber-500",
-      title: "Receiving now",
-      total: receivingTotal,
-    },
-    {
-      bg: "bg-emerald-50",
-      circleBg: "bg-emerald-500",
-      title: "Previously paid",
-      total: paidAmount,
-    },
-    {
-      bg: "bg-blue-50",
-      circleBg: "bg-blue-500",
-      title: "Maximum payable now",
-      total: paymentLimit,
     },
   ];
 
@@ -244,43 +212,27 @@ export const ReceiveItems = () => {
     onResolve: handleResolved,
   });
 
-  // Scan outcome → toast (spec §16: never silently ignore failed scans).
-  const lastHandledEventId = useRef(0);
-  useEffect(() => {
-    const event = scanState.last;
-    if (!event || event.id <= lastHandledEventId.current) return;
-    lastHandledEventId.current = event.id;
-    if (event.status === "not_found") {
-      toast.add({
-        type: "error",
-        description: "No product matches that barcode.",
-      });
-    } else if (event.status === "ambiguous") {
-      toast.add({
-        type: "error",
-        description:
-          event.detail ?? "That barcode matches more than one product.",
-        priority: "high",
-      });
-    } else if (event.status === "error") {
-      toast.add({
-        type: "error",
-        description: event.detail ?? "Scan failed.",
-        priority: "high",
-      });
-    }
-  }, [scanState.last]);
+  useScanFailureToast(scanState);
 
   const onSubmit = async (data: ReceiveItemsFormValues) => {
     try {
-      await createEntityPromiseToast({
+      const result = await createEntityPromiseToast({
         data,
-        apiCall: createReceivePurchase,
+        apiCall: (values) => receiveMutation.mutateAsync(values),
         entityName: "Receive purchase",
-        getSuccessMessage: (response) => response.data.message,
+        getSuccessMessage: (response) => response.message,
       });
-      await Promise.all([getPurchases(), getPurchaseItems()]);
-      navigate("/purchases-list");
+      // Store/query refreshes happen in useReceivePurchase's onSuccess
+      // (purchases, products, landed-cost, due-management). The landed-cost
+      // adjustment notice is rendered by the list page from router state.
+      navigate("/purchases-list", {
+        state: {
+          receiveNotice: {
+            purchaseId,
+            landedCost: result.data.landedCost,
+          },
+        },
+      });
     } catch {
       // The toast reports the API error; keep the form open so it can be corrected.
     }
@@ -355,15 +307,10 @@ export const ReceiveItems = () => {
           </div>
         </header>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {receiveSummary.map((card) => (
-            <SummaryCard
-              key={card.title}
-              card={card}
-              formatCurrency={formatCurrency}
-            />
-          ))}
-        </section>
+        <ReceivingSummary
+          cards={receiveSummary}
+          formatCurrency={formatCurrency}
+        />
 
         {error && (
           <p
@@ -414,145 +361,41 @@ export const ReceiveItems = () => {
             )}
           </section>
 
-          <section className="space-y-4 rounded-xl border bg-background p-4 shadow-sm md:p-5">
-            <div className="flex items-center gap-3">
-              <Wallet className="size-5 text-primary" />
-              <div>
-                <h2 className="font-semibold">Payment for this receipt</h2>
-                <p className="text-sm text-muted-foreground">
-                  Payment is optional. The amount is limited to the received
-                  value and outstanding balance.
-                </p>
-              </div>
-            </div>
+          <ReceivingPaymentSection
+            form={form}
+            paymentLimit={paymentLimit}
+            receivingTotal={receivingTotal}
+            paidAmount={paidAmount}
+            dueAmount={dueAmount}
+            formatCurrency={formatCurrency}
+          />
 
-            <div className="grid gap-4 md:grid-cols-3">
-              {paymentSummary.map((card) => (
-                <SummaryCard
-                  key={card.title}
-                  card={card}
-                  formatCurrency={formatCurrency}
-                />
-              ))}
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-1.5 text-sm font-medium">
-                Payment amount
-                <Controller
-                  control={form.control}
-                  name="paymentAmount"
-                  render={({ field, fieldState }) => (
-                    <>
-                      <Input
-                        {...field}
-                        value={field.value ?? 0}
-                        type="number"
-                        min={0}
-                        max={paymentLimit}
-                        step="0.01"
-                        onChange={(event) => {
-                          const amount = Number(event.target.value);
-                          field.onChange(
-                            Number.isFinite(amount)
-                              ? Math.min(Math.max(0, amount), paymentLimit)
-                              : 0,
-                          );
-                        }}
-                        aria-invalid={fieldState.invalid}
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        Maximum payable: ৳ {formatCurrency(paymentLimit)}
-                      </span>
-                      {fieldState.error && (
-                        <span className="block text-xs text-destructive">
-                          {fieldState.error.message}
-                        </span>
-                      )}
-                    </>
-                  )}
-                />
-              </label>
-
-              <label className="space-y-1.5 text-sm font-medium">
-                Payment method
-                <select
-                  {...form.register("paymentMethod")}
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  {paymentMethods.map((method) => (
-                    <option key={method.value} value={method.value}>
-                      {method.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <label className="block space-y-1.5 text-sm font-medium">
-              Payment notes{" "}
-              <span className="font-normal text-muted-foreground">
-                (optional)
-              </span>
-              <textarea
-                {...form.register("paymentNotes")}
-                rows={2}
-                maxLength={300}
-                placeholder="Reference number or payment note"
-                className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm font-normal"
-              />
-            </label>
-
-            <div className="flex flex-wrap justify-between gap-3 rounded-lg bg-muted/50 p-4 text-sm">
-              <div>
-                <p className="text-muted-foreground">
-                  Outstanding before payment
-                </p>
-                <p className="mt-1 font-medium">
-                  ৳ {formatCurrency(dueAmount)}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Paying now</p>
-                <p className="mt-1 font-medium">
-                  ৳ {formatCurrency(Number(paymentAmount) || 0)}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Balance after payment</p>
-                <p className="mt-1 text-lg font-semibold">
-                  ৳ {formatCurrency(newBalance)}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button
-                nativeButton={false}
-                type="button"
-                variant="outline"
-                render={<Link to="/purchases-list" />}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  form.formState.isSubmitting ||
-                  receiveItems.length === 0 ||
-                  (watchedItems.every((item) => Number(item.receiveNow) <= 0) &&
-                    Number(paymentAmount) <= 0)
-                }
-              >
-                <ReceiptText />
-                {form.formState.isSubmitting
-                  ? "Saving receipt..."
-                  : hasItemsToReceive
-                    ? "Receive items and update stock"
-                    : "Record payment"}
-              </Button>
-            </div>
-          </section>
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button
+              nativeButton={false}
+              type="button"
+              variant="outline"
+              render={<Link to="/purchases-list" />}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                form.formState.isSubmitting ||
+                receiveItems.length === 0 ||
+                (watchedItems.every((item) => Number(item.receiveNow) <= 0) &&
+                  Number(paymentAmount) <= 0)
+              }
+            >
+              <ReceiptText />
+              {form.formState.isSubmitting
+                ? "Saving receipt..."
+                : hasItemsToReceive
+                  ? "Receive items and update stock"
+                  : "Record payment"}
+            </Button>
+          </div>
         </form>
       </div>
     </div>

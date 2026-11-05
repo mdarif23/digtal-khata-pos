@@ -1,49 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import {
-  ArrowLeft,
-  ClipboardList,
-  PackageMinus,
-  RotateCcw,
-  Wallet,
-} from "lucide-react";
+import { ArrowLeft, PackageMinus, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { SummaryCard } from "@/features/purchases/components/purchasesReceiveItems/SummaryCard";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
 import { toast } from "@/components/ui/toast";
+import { PurchaseReturnSummary } from "@/features/purchases/components/return/PurchaseReturnSummary";
+import { ReturnItemsTable } from "@/features/purchases/components/return/ReturnItemsTable";
+import { SupplierCreditSummary } from "@/features/purchases/components/return/SupplierCreditSummary";
+import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
+import {
+  estimateReturnUnitPrice,
+  maxReturnableForItem,
+} from "@/features/purchases/utils/returnCalculations";
 import type {
   PaymentsInfoCard,
   PurchasesItems,
 } from "@/features/purchases/purchase.types";
 import { usePurchasesStore } from "@/features/purchases/usePurchaseStore";
+import { usePurchaseReturn } from "@/features/purchases/hooks/usePurchaseReturn";
+import { useScanFailureToast } from "@/features/barcodes/scanning/useScanFailureToast";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
 import { BarcodeScannerInput } from "@/features/barcodes/scanning/BarcodeScannerInput";
 import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
-
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-BD", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(value) ? value : 0);
-
-const getReturnUnitPrice = (item: PurchasesItems) => {
-  const quantity = Number(item.quantity);
-  if (quantity <= 0) return 0;
-  const lineTotal =
-    quantity * Number(item.unitCost) -
-    Number(item.discount || 0) +
-    Number(item.tax || 0);
-  return Math.max(0, Number((lineTotal / quantity).toFixed(2)));
-};
 
 export const PurchaseViewItems = () => {
   const { id } = useParams();
   const purchaseId = Number(id);
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [reason, setReason] = useState("");
   const [returnQuantities, setReturnQuantities] = useState<
     Record<number, number>
@@ -60,7 +45,7 @@ export const PurchaseViewItems = () => {
   const getPurchasesReturnItems = usePurchasesStore(
     (state) => state.getPurchasesReturnItems,
   );
-  const purchaseReturn = usePurchasesStore((state) => state.purchaseReturn);
+  const returnMutation = usePurchaseReturn();
 
   useEffect(() => {
     if (!Number.isInteger(purchaseId) || purchaseId <= 0) {
@@ -102,14 +87,16 @@ export const PurchaseViewItems = () => {
         .filter((item) => item.quantity > 0),
     [orderItems, returnQuantities],
   );
+  // Client-side ESTIMATE — the server credits per-unit batch costs (FIFO)
+  // and its authoritative total is shown in the success toast.
   const totalRefund = orderItems.reduce(
     (sum, item) =>
-      sum + (returnQuantities[item.id] ?? 0) * getReturnUnitPrice(item),
+      sum + (returnQuantities[item.id] ?? 0) * estimateReturnUnitPrice(item),
     0,
   );
   const receivedValue = orderItems.reduce(
     (sum, item) =>
-      sum + Number(item.receivedQuantity || 0) * getReturnUnitPrice(item),
+      sum + Number(item.receivedQuantity || 0) * estimateReturnUnitPrice(item),
     0,
   );
   const balanceAfterReturn = Math.max(
@@ -165,53 +152,53 @@ export const PurchaseViewItems = () => {
     },
   ];
 
-  const updateQuantity = (item: PurchasesItems, value: number) => {
-    const alreadyReturned = returnedByItem.get(item.id) ?? 0;
-    const remainingReceived = Math.max(
-      0,
-      Number(item.receivedQuantity) - alreadyReturned,
-    );
-    const alreadySelectedForVariant = orderItems.reduce(
+  // Units already typed for sibling lines sharing this variant.
+  const selectedForVariant = (item: PurchasesItems) =>
+    orderItems.reduce(
       (sum, otherItem) =>
         otherItem.variantId === item.variantId && otherItem.id !== item.id
           ? sum + (returnQuantities[otherItem.id] ?? 0)
           : sum,
       0,
     );
-    const availableStock = Math.max(
-      0,
-      Number(item.availableStock ?? 0) - alreadySelectedForVariant,
+
+  const updateQuantity = (item: PurchasesItems, value: number) => {
+    const maxReturn = maxReturnableForItem(
+      item,
+      returnedByItem.get(item.id) ?? 0,
+      selectedForVariant(item),
     );
-    const maxReturn = Math.floor(Math.min(remainingReceived, availableStock));
     const quantity = Math.min(Math.max(0, Math.floor(value)), maxReturn);
     setReturnQuantities((current) => ({ ...current, [item.id]: quantity }));
   };
 
   const handleSubmit = async () => {
-    if (!purchaseOrder || requestedItems.length === 0 || isSubmitting) return;
-    setIsSubmitting(true);
+    if (!purchaseOrder || requestedItems.length === 0) return;
     try {
-      await createEntityPromiseToast({
+      const result = await createEntityPromiseToast({
         data: {
           orderId: purchaseId,
-          reason: reason.trim() || undefined,
+          ...(reason.trim() ? { reason: reason.trim() } : {}),
           changedItems: requestedItems,
         },
-        apiCall: purchaseReturn,
+        apiCall: (values) => returnMutation.mutateAsync(values),
         entityName: "Purchase return",
         getSuccessMessage: (response) =>
           `${response.message} Total: ৳ ${formatCurrency(response.data.totalAmount)}`,
       });
-      await Promise.all([
-        getPurchases(),
-        getPurchaseItems(),
-        getPurchasesReturnItems(),
-      ]);
-      navigate("/purchases-list");
+      // Store/query refreshes happen in usePurchaseReturn's onSuccess
+      // (purchases, products, landed-cost, due-management). The landed-cost
+      // reversal notice is rendered by the list page from router state.
+      navigate("/purchases-list", {
+        state: {
+          returnNotice: {
+            purchaseId,
+            landedCost: result.data.landedCost,
+          },
+        },
+      });
     } catch {
       // The toast reports the API error; keep the return form open for correction.
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -231,23 +218,18 @@ export const PurchaseViewItems = () => {
     }
     const itemName = item.variantName ?? item.variantSku ?? "This item";
     const current = returnQuantitiesRef.current;
-    const alreadyReturned = returnedByItem.get(item.id) ?? 0;
-    const remainingReceived = Math.max(
-      0,
-      Number(item.receivedQuantity) - alreadyReturned,
-    );
-    const alreadySelectedForVariant = orderItems.reduce(
+    const selectedForVariant = orderItems.reduce(
       (sum, otherItem) =>
         otherItem.variantId === item.variantId && otherItem.id !== item.id
           ? sum + (current[otherItem.id] ?? 0)
           : sum,
       0,
     );
-    const availableStock = Math.max(
-      0,
-      Number(item.availableStock ?? 0) - alreadySelectedForVariant,
+    const maxReturn = maxReturnableForItem(
+      item,
+      returnedByItem.get(item.id) ?? 0,
+      selectedForVariant,
     );
-    const maxReturn = Math.floor(Math.min(remainingReceived, availableStock));
     if (maxReturn <= (current[item.id] ?? 0)) {
       throw new Error(`${itemName} has no returnable quantity left.`);
     }
@@ -262,32 +244,7 @@ export const PurchaseViewItems = () => {
     onResolve: handleResolved,
   });
 
-  // Scan outcome → toast (spec §16: never silently ignore failed scans).
-  const lastHandledEventId = useRef(0);
-  useEffect(() => {
-    const event = scanState.last;
-    if (!event || event.id <= lastHandledEventId.current) return;
-    lastHandledEventId.current = event.id;
-    if (event.status === "not_found") {
-      toast.add({
-        type: "error",
-        description: "No product matches that barcode.",
-      });
-    } else if (event.status === "ambiguous") {
-      toast.add({
-        type: "error",
-        description:
-          event.detail ?? "That barcode matches more than one product.",
-        priority: "high",
-      });
-    } else if (event.status === "error") {
-      toast.add({
-        type: "error",
-        description: event.detail ?? "Scan failed.",
-        priority: "high",
-      });
-    }
-  }, [scanState.last]);
+  useScanFailureToast(scanState);
 
   if (!Number.isInteger(purchaseId) || purchaseId <= 0) {
     return (
@@ -354,15 +311,10 @@ export const PurchaseViewItems = () => {
           </div>
         </header>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {orderSummary.map((card) => (
-            <SummaryCard
-              key={card.title}
-              card={card}
-              formatCurrency={formatCurrency}
-            />
-          ))}
-        </section>
+        <PurchaseReturnSummary
+          cards={orderSummary}
+          formatCurrency={formatCurrency}
+        />
 
         {error && (
           <p
@@ -395,148 +347,18 @@ export const PurchaseViewItems = () => {
               </div>
             ) : null}
           </div>
-          {orderItems.length ? (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px] text-left text-sm">
-                <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Product</th>
-                    <th className="px-3 py-3 font-medium">Unit</th>
-                    <th className="px-3 py-3 text-right font-medium">
-                      Ordered
-                    </th>
-                    <th className="px-3 py-3 text-right font-medium">
-                      Received
-                    </th>
-                    <th className="px-3 py-3 text-right font-medium">
-                      Returned
-                    </th>
-                    <th className="px-3 py-3 text-right font-medium">
-                      Available stock
-                    </th>
-                    <th className="w-32 px-3 py-3 font-medium">Return qty</th>
-                    <th className="px-4 py-3 text-right font-medium">
-                      Unit cost
-                    </th>
-                    <th className="px-4 py-3 text-right font-medium">
-                      Return total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {orderItems.map((item) => {
-                    const returned = returnedByItem.get(item.id) ?? 0;
-                    const remainingReceived = Math.max(
-                      0,
-                      Number(item.receivedQuantity) - returned,
-                    );
-                    const selectedForVariant = orderItems.reduce(
-                      (sum, otherItem) =>
-                        otherItem.variantId === item.variantId &&
-                        otherItem.id !== item.id
-                          ? sum + (returnQuantities[otherItem.id] ?? 0)
-                          : sum,
-                      0,
-                    );
-                    const availableStock = Math.max(
-                      0,
-                      Number(item.availableStock ?? 0) - selectedForVariant,
-                    );
-                    const maxReturn = Math.floor(
-                      Math.min(remainingReceived, availableStock),
-                    );
-                    const quantity = returnQuantities[item.id] ?? 0;
-                    return (
-                      <tr key={item.id}>
-                        <td className="px-4 py-3">
-                          <p className="font-medium">
-                            {item.variantName || item.productName}
-                          </p>
-                          {item.variantOptions && item.variantName ? (
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              {item.productName} · {item.variantOptions}
-                            </p>
-                          ) : null}
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {item.trackingType} tracking
-                          </p>
-                        </td>
-                        <td className="px-3 py-3 text-muted-foreground">
-                          {item.productUnit || "—"}
-                        </td>
-                        <td className="px-3 py-3 text-right">
-                          {item.quantity}
-                        </td>
-                        <td className="px-3 py-3 text-right">
-                          {item.receivedQuantity}
-                        </td>
-                        <td className="px-3 py-3 text-right">{returned}</td>
-                        <td className="px-3 py-3 text-right">
-                          {availableStock}
-                        </td>
-                        <td className="px-3 py-2">
-                          <Input
-                            aria-label={`Return quantity for ${item.variantName || item.productName}`}
-                            type="number"
-                            min={0}
-                            max={maxReturn}
-                            step={1}
-                            value={quantity}
-                            disabled={maxReturn <= 0}
-                            onChange={(event) =>
-                              updateQuantity(
-                                item,
-                                Number(event.target.value) || 0,
-                              )
-                            }
-                            className="h-9"
-                          />
-                          <span className="mt-1 block text-xs text-muted-foreground">
-                            Max {maxReturn}
-                          </span>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right">
-                          ৳ {formatCurrency(getReturnUnitPrice(item))}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right font-medium">
-                          ৳{" "}
-                          {formatCurrency(quantity * getReturnUnitPrice(item))}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="p-8 text-center">
-              <ClipboardList className="mx-auto size-9 text-muted-foreground/50" />
-              <p className="mt-3 font-medium">No items on this order</p>
-            </div>
-          )}
+          <ReturnItemsTable
+            orderItems={orderItems}
+            returnedByItem={returnedByItem}
+            returnQuantities={returnQuantities}
+            onQuantityChange={updateQuantity}
+          />
         </section>
 
-        <section className="space-y-4 rounded-xl border bg-background p-4 shadow-sm md:p-5">
-          <div className="flex items-center gap-3">
-            <Wallet className="size-5 text-primary" />
-            <div>
-              <h2 className="font-semibold">Return summary</h2>
-              <p className="text-sm text-muted-foreground">
-                Processing updates inventory and records a supplier credit.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            {returnSummary.map((card) => (
-              <SummaryCard
-                key={card.title}
-                card={card}
-                formatCurrency={formatCurrency}
-              />
-            ))}
-          </div>
-
+        <SupplierCreditSummary
+          cards={returnSummary}
+          formatCurrency={formatCurrency}
+        >
           <label className="block space-y-1.5 text-sm font-medium">
             Return reason{" "}
             <span className="font-normal text-muted-foreground">
@@ -564,15 +386,17 @@ export const PurchaseViewItems = () => {
             <Button
               type="button"
               onClick={handleSubmit}
-              disabled={isSubmitting || requestedItems.length === 0}
+              disabled={
+                returnMutation.isPending || requestedItems.length === 0
+              }
             >
               <RotateCcw />
-              {isSubmitting
+              {returnMutation.isPending
                 ? "Processing return..."
                 : "Process purchase return"}
             </Button>
           </div>
-        </section>
+        </SupplierCreditSummary>
       </div>
     </div>
   );

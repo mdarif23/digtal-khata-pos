@@ -25,18 +25,15 @@ import { getVariantPurchaseCost } from "@/features/products/utils/getVariantPurc
 import type { PurchaseCart } from "../purchase.types";
 import { PurchaseTable } from "../components/purchases/PurchaseTable";
 import { usePurchasesStore } from "../usePurchaseStore";
+import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
 import {
   type LookupMatch,
 } from "@/features/barcodes/barcode.api";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
+import { useScanFailureToast } from "@/features/barcodes/scanning/useScanFailureToast";
 import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
 import { createCatalogLookup } from "@/features/barcodes/scanning/catalogLookup";
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-BD", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
 const roundCurrency = (value: number | null | undefined) => {
   const amount = Number(value);
   return Number.isFinite(amount) ? Number(amount.toFixed(2)) : 0;
@@ -81,19 +78,7 @@ export function PurchasesOrder() {
   const createPurchase = usePurchasesStore((state) => state.createPurchase);
   const getPurchases = usePurchasesStore((state) => state.getPurchases);
 
-  const activeProducts = useMemo(
-    () =>
-      products
-        .filter((product) => product.status === "active")
-        .map((product) => ({
-          ...product,
-          variants: product.variants.filter(
-            (variant) => variant.status === "active",
-          ),
-        }))
-        .filter((product) => product.variants.length > 0),
-    [products],
-  );
+  const activeProducts = useMemo(() => toActiveProducts(products), [products]);
   const filteredProducts = useMemo(() => {
     const query = searchProducts.trim().toLowerCase();
     if (!query) return activeProducts;
@@ -251,32 +236,7 @@ export function PurchasesOrder() {
     onResolve: handleResolved,
   });
 
-  // Scan outcome → toast (spec §16: never silently ignore failed scans).
-  const lastHandledEventId = useRef(0);
-  useEffect(() => {
-    const event = scanner.state.last;
-    if (!event || event.id <= lastHandledEventId.current) return;
-    lastHandledEventId.current = event.id;
-    if (event.status === "not_found") {
-      toast.add({
-        type: "error",
-        description: "No product matches that barcode.",
-      });
-    } else if (event.status === "ambiguous") {
-      toast.add({
-        type: "error",
-        description:
-          event.detail ?? "That barcode matches more than one product.",
-        priority: "high",
-      });
-    } else if (event.status === "error") {
-      toast.add({
-        type: "error",
-        description: event.detail ?? "Scan failed.",
-        priority: "high",
-      });
-    }
-  }, [scanner.state.last]);
+  useScanFailureToast(scanner.state);
 
   // Search-box Enter: exact product names keep the add-default-variant
   // behavior; everything else goes through the scanner.

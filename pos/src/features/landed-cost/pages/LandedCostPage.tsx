@@ -178,10 +178,15 @@ function LandedCostEditor({ purchaseId }: { purchaseId: number }) {
     if (parsedExpenses.length === 0) return null;
     const manualAllocations =
       method === "manual"
-        ? context.lines.map((line) => ({
-            purchaseItemId: line.purchaseItemId,
-            amount: Number(manualLines[line.purchaseItemId] ?? 0),
-          }))
+        ? context.lines
+            // Only received lines take manual amounts — ordered-but-
+            // unreceived lines hold their share as pending allocation
+            // (backend-enforced).
+            .filter((line) => line.batches.length > 0)
+            .map((line) => ({
+              purchaseItemId: line.purchaseItemId,
+              amount: Number(manualLines[line.purchaseItemId] ?? 0),
+            }))
         : undefined;
     return {
       method,
