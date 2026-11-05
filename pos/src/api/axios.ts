@@ -6,8 +6,13 @@ import {
   persistTerminalBinding,
 } from "../auth/terminalBinding";
 
+// Runtime override first (LAN deployments edit public/config.js — no
+// rebuild), then the build-time env, then the dev default.
+const runtimeApiUrl =
+  typeof window !== "undefined" &&
+  (window as { ezposConfig?: { apiUrl?: string } }).ezposConfig?.apiUrl;
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:3000/api",
+  baseURL: runtimeApiUrl || import.meta.env.VITE_API_URL || "http://localhost:3000/api",
 });
 
 /**

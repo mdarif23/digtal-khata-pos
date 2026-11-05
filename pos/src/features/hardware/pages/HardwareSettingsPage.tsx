@@ -6,6 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { HardwareSettings } from "@/features/pos/components/receipt/HardwareSettings";
 import { TerminalCard } from "../components/TerminalCard";
 import { TerminalPairDialog } from "../components/TerminalPairDialog";
+import { LocalSyncStatus } from "../components/LocalSyncStatus";
 import { useTerminals } from "../hooks/useTerminals";
 import api from "../../../api/axios.js";
 
@@ -76,6 +77,8 @@ export function HardwareSettingsPage() {
           onCheckedChange={(checked) => void onToggleRequireTerminal(checked)}
         />
       </div>
+
+      <LocalSyncStatus />
 
       <HardwareSettings />
 

@@ -109,6 +109,36 @@ Master prompt §6.9: two+ PCs same business ✅ (already true); simultaneous cas
   - LAN inventory consistency: same server, same transactions — Phase 1's concurrency guarantees apply verbatim (master prompt §7.7).
 - Migration 0050+; endpoints under `/api/sync/*` gated by the sync-agent credential.
 
+### 4.1 Phase 2 as implemented (2026-11-06)
+
+Refinements locked in during implementation (all covered by integration tests):
+
+- **The sales table IS the durable outbox.** `sales.synced_at IS NULL` +
+  attempt counter + partial index — no separate queue table; a committed
+  sale can never be lost, and retries are idempotent via the existing
+  business-scoped idempotency key (plus `lan-<saleId>` fallback for legacy
+  keyless rows).
+- **Identity = full snapshot every sweep** (business, locations, users
+  *with password hashes* so cashiers can log in offline, roles,
+  memberships, plans + subscription, POS settings). Catalog/customers =
+  microsecond-precision watermark deltas (`updated_at` now trigger-maintained
+  on products, variants, aliases, customers); **stock = full per-location
+  snapshot**, applied only after a successful push (push-before-pull gate).
+- **Customer id mapping**: locally-created customers upload first with a
+  `client_uuid`; the cloud adopts them and the agent rewrites dependent
+  sale payloads to the cloud id on the next sweep (one-sweep latency).
+- **Two-server prevention is DB-enforced**: partial unique index — one
+  `is_sync_agent` terminal per business+location; ops from non-agents are
+  403. Replicated sales carry `channel='offline'` and never appear in the
+  online-orders portal.
+- **Tenancy inside the agent**: every push query is explicitly
+  business-scoped (the pushOnce business filter was added after a test
+  run proved cross-business leakage on a shared test DB).
+- Windows packaging: `ezPosLocalServer/setup.mjs` + `pair.mjs` +
+  README/DEPLOYMENT (UNVERIFIED on real hardware, flagged); SPA gains a
+  runtime `public/config.js` API-URL override (no rebuild per shop) and a
+  Local server sync card at Settings → Hardware.
+
 ## 5. Phase 3 — Full offline per-terminal (outline; separate approval required — includes the inventory-allocation design the user flagged as the hard problem)
 
 Extend the **existing** browser engine (`pos/src/features/pos/offline/`) rather than adding a framework: IndexedDB stays, add Dexie only if raw-IDB maintenance cost proves it (audit: deliberately dependency-free today).
