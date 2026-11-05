@@ -42,6 +42,8 @@ import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
 import { OnlineOrderDetailsPage } from "@/features/online-orders/pages/OnlineOrderDetailsPage";
 import { LandedCostPage } from "@/features/landed-cost/pages/LandedCostPage";
+import { ImportWizardPage } from "@/features/products/import/ImportWizardPage";
+import { ImportHistoryPage } from "@/features/products/import/ImportHistoryPage";
 import { RegisterPage } from "@/features/cashRegisters/RegisterPage";
 import { HardwareSettingsPage } from "@/features/hardware/pages/HardwareSettingsPage";
 import { BarcodeGeneratorPage } from "@/features/barcodes/pages/BarcodeGeneratorPage";
@@ -217,6 +219,22 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="purchases.receive">
             <ReceiveItems />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/product/import",
+        element: (
+          <RequirePermission permission="products.create">
+            <ImportWizardPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/product/import-history",
+        element: (
+          <RequirePermission permission="products.view">
+            <ImportHistoryPage />
           </RequirePermission>
         ),
       },

@@ -1,5 +1,4 @@
 {
-  "version": "7",
   "entries": [
     {
       "idx": 0,
@@ -333,8 +332,15 @@
     {
       "idx": 47,
       "version": "7",
-      "when": 1794100000000,
-      "tag": "0047_backup_restore",
+      "when": 1794050000000,
+      "tag": "0047_product_import_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794200000000,
+      "tag": "0048_backup_restore",
       "breakpoints": true
     }
   ]
