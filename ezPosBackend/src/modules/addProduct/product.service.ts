@@ -463,7 +463,7 @@ async function insertInventoryStock(
     quantity,
   });
 }
-async function generateSku(tx: Tx, businessId: number) {
+export async function generateSku(tx: Tx, businessId: number) {
   // Per-business SKU counter (document_sequences) replaces the global
   // product_sku_seq sequence. Rollback-safe: shares the caller's transaction.
   const number = await nextDocumentNumber(tx, businessId, "product_sku");
