@@ -1,4 +1,5 @@
 import {
+  boolean,
   foreignKey,
   index,
   integer,
@@ -58,6 +59,14 @@ export const posTerminals = pgTable(
     locationId: integer("location_id").notNull(),
     name: varchar("name", { length: 100 }).notNull(),
     status: terminalStatusEnum("status").default("active").notNull(),
+    /**
+     * The designated LAN sync agent (Phase 2): the one local server allowed
+     * to pull catalog/identity and push this shop's transactions to the
+     * cloud. A partial unique index (business_id, location_id) WHERE true
+     * enforces at most one agent per shop location — two accidentally
+     * started servers can never both become inventory authorities.
+     */
+    isSyncAgent: boolean("is_sync_agent").default(false).notNull(),
     secretHash: varchar("secret_hash", { length: 64 }),
     pairedAt: timestamp("paired_at", { withTimezone: true }),
     createdBy: integer("created_by")

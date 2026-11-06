@@ -43,21 +43,39 @@ if (!entry) {
 const WHEN = String(entry.when);
 const expectedCount = entry.idx + 1; // bookkeeping rows that must exist BEFORE applying
 
-// Strip -- comment lines first (comments may contain ';'), then split.
-const codeOnly = raw
-  .split(/\r?\n/)
-  .filter((l) => !l.trim().startsWith("--"))
-  .join("\n");
-const statements = codeOnly
-  .split(";")
-  .map((s) => s.trim())
-  .filter(Boolean);
+// Split preferring drizzle's `--> statement-breakpoint` markers when the
+// file uses them — semicolon-splitting shreds plpgsql bodies ($$ blocks
+// contain semicolons; hit on 0050). Legacy fallback: strip -- comment lines
+// first (comments may contain ';'), then split on ';'.
+const hasMarkers = raw.includes("--> statement-breakpoint");
+const statements = hasMarkers
+  ? raw
+      .split("--> statement-breakpoint")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  : raw
+      .split(/\r?\n/)
+      .filter((l) => !l.trim().startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
 const TOLERATED = new Set(["42P07", "42710", "42701", "42723", "23505", "42P16"]);
 
 async function apply(url, label) {
   const client = new pg.Client({ connectionString: url });
   await client.connect();
+  // Fresh-database bootstrap (drizzle-kit normally creates this; we must not
+  // depend on it): the schema + bookkeeping table, idempotently.
+  await client.query(
+    `CREATE SCHEMA IF NOT EXISTS drizzle;
+     CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (
+       id serial PRIMARY KEY,
+       hash text NOT NULL,
+       created_at bigint NOT NULL
+     )`,
+  );
   const db = (await client.query("SELECT current_database() AS d")).rows[0].d;
   const applied = (
     await client.query("SELECT COUNT(*)::int AS n FROM drizzle.__drizzle_migrations")
@@ -111,10 +129,15 @@ async function apply(url, label) {
   await client.end();
 }
 
-const envFile = readFileSync(new URL("../.env", import.meta.url), "utf8");
-const line = envFile.split(/\r?\n/).find((l) => l.startsWith("DATABASE_URL="));
-if (!line) throw new Error("DATABASE_URL not found in .env");
-const devUrl = line.slice("DATABASE_URL=".length).trim().replace(/^['"]|['"]$/g, "");
+// An explicit DATABASE_URL env wins (cross-mode/CI runs target other
+// databases); otherwise fall back to the repo's .env (dev default).
+let devUrl = process.env.DATABASE_URL?.trim() || "";
+if (!devUrl) {
+  const envFile = readFileSync(new URL("../.env", import.meta.url), "utf8");
+  const line = envFile.split(/\r?\n/).find((l) => l.startsWith("DATABASE_URL="));
+  if (!line) throw new Error("DATABASE_URL not found in .env or environment");
+  devUrl = line.slice("DATABASE_URL=".length).trim().replace(/^['"]|['"]$/g, "");
+}
 
 await apply(devUrl, "DEV");
 if (flag === "--both") {

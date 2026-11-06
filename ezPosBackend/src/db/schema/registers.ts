@@ -12,11 +12,13 @@ import {
   timestamp,
   unique,
   uniqueIndex,
+  uuid,
   varchar,
 } from "drizzle-orm/pg-core";
 import { businesses } from "./businesses.js";
 import { locations } from "./locations.js";
 import { users } from "./users.js";
+import { posTerminals } from "./posTerminals.js";
 
 export const registerStatusEnum = pgEnum("register_status", [
   "active",
@@ -123,6 +125,18 @@ export const registerSessions = pgTable(
     notes: text(),
     openedAt: timestamp("opened_at", { withTimezone: true }).defaultNow(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
+    /**
+     * Terminal attribution (multi-terminal Phase 1): the PC whose drawer is
+     * being counted. Nullable — sessions opened before terminal binding (or
+     * from an unbound PC) have none.
+     */
+    terminalId: integer("terminal_id"),
+    /**
+     * Offline idempotency (Phase 3): the browser-generated session UUID for
+     * a drawer opened while offline. Unique partial index (migration 0051)
+     * makes replays of a queued open a no-op.
+     */
+    clientSessionId: uuid("client_session_id"),
   },
   (table) => [
     // Candidate key for the composite FK from register_transactions.
@@ -134,16 +148,29 @@ export const registerSessions = pgTable(
     uniqueIndex("register_sessions_one_open_per_register")
       .on(table.registerId)
       .where(sql`${table.status} = 'open'`),
-    // At most one OPEN session per user — keeps cash attribution
-    // unambiguous when sales are auto-recorded to the cashier's drawer.
-    uniqueIndex("register_sessions_one_open_per_user")
-      .on(table.userId, table.businessId)
+    // At most one OPEN session per user+terminal. Declared in migration
+    // 0049 as NULLS NOT DISTINCT — this drizzle version's index builder
+    // cannot express that, so it is intentionally NOT declared here (a
+    // drizzle-kit generate would not see it; this repo hand-writes SQL).
+    // Semantics: NULLS NOT DISTINCT preserves one-open-session-per-user for
+    // terminal-less sessions; two open sessions on DIFFERENT terminals may
+    // coexist only when the business enables allow_multiple_drawer_sessions
+    // (the service gates it), and one terminal can never hold two.
+    // Terminal-scoped session lookup for cash attribution (multi-terminal).
+    index("register_sessions_open_terminal_idx")
+      .on(table.terminalId)
       .where(sql`${table.status} = 'open'`),
     index("register_sessions_register_idx").on(table.registerId),
     foreignKey({
       columns: [table.registerId, table.businessId],
       foreignColumns: [registers.id, registers.businessId],
       name: "register_sessions_register_business_fkey",
+    }),
+    // The session's terminal must belong to the same business.
+    foreignKey({
+      columns: [table.terminalId, table.businessId],
+      foreignColumns: [posTerminals.id, posTerminals.businessId],
+      name: "register_sessions_terminal_business_fkey",
     }),
   ],
 );
@@ -173,6 +200,11 @@ export const registerTransactions = pgTable(
     }).notNull(),
     referenceType: varchar("reference_type", { length: 50 }),
     referenceId: integer("reference_id"),
+    /**
+     * Offline idempotency (Phase 3): the browser-generated op UUID for a
+     * drawer movement queued while offline (unique partial index).
+     */
+    clientOpId: varchar("client_op_id", { length: 120 }),
     note: text(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },

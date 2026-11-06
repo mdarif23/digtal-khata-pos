@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { HardwareSettings } from "@/features/pos/components/receipt/HardwareSettings";
 import { TerminalCard } from "../components/TerminalCard";
 import { TerminalPairDialog } from "../components/TerminalPairDialog";
+import { LocalSyncStatus } from "../components/LocalSyncStatus";
 import { useTerminals } from "../hooks/useTerminals";
+import api from "../../../api/axios.js";
 
 /**
  * Hardware settings (Phase 3): the local receipt-printer controls (USB /
@@ -17,6 +21,34 @@ import { useTerminals } from "../hooks/useTerminals";
 export function HardwareSettingsPage() {
   const terminals = useTerminals();
   const [pairOpen, setPairOpen] = useState(false);
+  const [requireTerminal, setRequireTerminal] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await api.get<{ data: { requireTerminal: boolean } }>(
+          "/pos-settings",
+        );
+        if (!cancelled) setRequireTerminal(res.data.data.requireTerminal);
+      } catch {
+        if (!cancelled) setRequireTerminal(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onToggleRequireTerminal(next: boolean) {
+    const previous = requireTerminal;
+    setRequireTerminal(next);
+    try {
+      await api.patch("/pos-settings", { requireTerminal: next });
+    } catch {
+      setRequireTerminal(previous);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -29,6 +61,24 @@ export function HardwareSettingsPage() {
         </div>
         <Button onClick={() => setPairOpen(true)}>Pair a terminal</Button>
       </div>
+
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 p-4">
+        <div className="space-y-1">
+          <Label htmlFor="require-terminal">Require a registered terminal for checkout</Label>
+          <p className="text-sm text-slate-500">
+            When on, sales are only accepted from PCs bound to an active
+            terminal of this location. Unbound PCs can browse but not sell.
+          </p>
+        </div>
+        <Switch
+          id="require-terminal"
+          checked={requireTerminal === true}
+          disabled={requireTerminal === null}
+          onCheckedChange={(checked) => void onToggleRequireTerminal(checked)}
+        />
+      </div>
+
+      <LocalSyncStatus />
 
       <HardwareSettings />
 

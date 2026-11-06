@@ -7,6 +7,7 @@ import { registerTransactions } from "../../db/schema/registers.js";
 import { registers } from "../../db/schema/registers.js";
 import { locations } from "../../db/schema/locations.js";
 import { users } from "../../db/schema/users.js";
+import { posTerminals } from "../../db/schema/posTerminals.js";
 import {
   BadRequestError,
   ConflictError,
@@ -39,6 +40,8 @@ interface SessionSummary {
   locationId: number;
   locationName: string;
   userName: string;
+  terminalId: number | null;
+  terminalName: string | null;
   status: string;
   openingCash: number;
   expectedCash: number;
@@ -72,6 +75,8 @@ function toSummary(
     locationId: number;
     locationName: string;
     userName: string;
+    terminalId: number | null;
+    terminalName: string | null;
     status: string;
     openingCash: number;
     expectedCash: number | null;
@@ -90,6 +95,8 @@ function toSummary(
     locationId: row.locationId,
     locationName: row.locationName,
     userName: row.userName,
+    terminalId: row.terminalId,
+    terminalName: row.terminalName,
     status: row.status,
     openingCash: Number(row.openingCash),
     expectedCash: expectedOverride ?? Number(row.expectedCash ?? 0),
@@ -108,6 +115,8 @@ const sessionSelect = {
   locationId: locations.id,
   locationName: locations.name,
   userName: users.fullName,
+  terminalId: registerSessions.terminalId,
+  terminalName: posTerminals.name,
   status: registerSessions.status,
   openingCash: registerSessions.openingCash,
   expectedCash: registerSessions.expectedCash,
@@ -126,7 +135,8 @@ function sessionBaseQuery() {
     .from(registerSessions)
     .innerJoin(registers, eq(registers.id, registerSessions.registerId))
     .innerJoin(locations, eq(locations.id, registers.locationId))
-    .innerJoin(users, eq(users.id, registerSessions.userId));
+    .innerJoin(users, eq(users.id, registerSessions.userId))
+    .leftJoin(posTerminals, eq(posTerminals.id, registerSessions.terminalId));
 }
 
 /** Registers at the caller's (server-verified) location, with open sessions. */
@@ -273,6 +283,8 @@ export async function openSession(
   locationId: number,
   registerId: number,
   openingCash: number,
+  terminalId: number | null = null,
+  allowMultipleSessions = false,
 ): Promise<SessionSummary> {
   if (openingCash < 0) {
     throw new BadRequestError("Opening cash cannot be negative.");
@@ -315,7 +327,7 @@ export async function openSession(
       );
     }
     const [userOpen] = await tx
-      .select({ id: registerSessions.id })
+      .select({ id: registerSessions.id, terminalId: registerSessions.terminalId })
       .from(registerSessions)
       .where(
         and(
@@ -326,9 +338,19 @@ export async function openSession(
       )
       .for("update", { of: registerSessions });
     if (userOpen) {
-      throw new ConflictError(
-        "You already have an open register session. Close it first.",
-      );
+      // The business policy (pos_settings.allow_multiple_drawer_sessions)
+      // may let one cashier run two counters — but only on DIFFERENT
+      // terminals; a second terminal-less session stays blocked for
+      // everyone (NULLS NOT DISTINCT enforces the same rule at the DB).
+      if (
+        !allowMultipleSessions ||
+        userOpen.terminalId === null ||
+        userOpen.terminalId === terminalId
+      ) {
+        throw new ConflictError(
+          "You already have an open register session. Close it first.",
+        );
+      }
     }
 
     const [session] = await tx
@@ -338,6 +360,7 @@ export async function openSession(
         registerId,
         userId,
         openingCash: roundMoney(openingCash),
+        terminalId,
       })
       .returning();
     if (!session) {
@@ -362,6 +385,7 @@ export async function openSession(
         ),
       )
       .innerJoin(users, eq(users.id, registerSessions.userId))
+      .leftJoin(posTerminals, eq(posTerminals.id, registerSessions.terminalId))
       .where(eq(registerSessions.id, session.id));
     if (!row) {
       throw new Error("Session lookup failed.");
@@ -455,6 +479,8 @@ export async function addCashMovement(
       locationId: 0,
       locationName: "",
       userName: "",
+      terminalId: session.terminalId,
+      terminalName: null,
       status: session.status,
       openingCash: Number(session.openingCash),
       expectedCash: expected,
@@ -602,6 +628,7 @@ export async function closeSession(
         ),
       )
       .innerJoin(users, eq(users.id, registerSessions.userId))
+      .leftJoin(posTerminals, eq(posTerminals.id, registerSessions.terminalId))
       .where(eq(registerSessions.id, sessionId));
     if (!row) {
       throw new Error("Session lookup failed after close.");
@@ -628,9 +655,11 @@ export async function closeSession(
 }
 
 /**
- * Auto-records the cash portion of a sale into the seller's open register
- * session (same transaction as the sale — atomic). No-op when the seller
- * has no open session at this location or the cash amount is zero.
+ * Auto-records the cash portion of a sale into an open register session
+ * (same transaction as the sale — atomic). Attribution preference: the
+ * session bound to the sale's TERMINAL (the drawer the money physically
+ * landed in, even when another cashier opened it), then the seller's own
+ * open session at this location. No-op when neither exists or cash is zero.
  */
 export async function recordCashSaleInTx(
   tx: Tx,
@@ -639,6 +668,7 @@ export async function recordCashSaleInTx(
   locationId: number,
   cashAmount: number,
   saleId: number,
+  terminalId: number | null = null,
 ): Promise<void> {
   if (cashAmount <= 0) return;
   const session = await findOpenSessionForAttribution(
@@ -646,6 +676,7 @@ export async function recordCashSaleInTx(
     businessId,
     userId,
     locationId,
+    terminalId,
   );
   if (!session) return;
   await tx.insert(registerTransactions).values({
@@ -673,6 +704,7 @@ export async function recordCashRefundInTx(
   locationId: number | null,
   cashAmount: number,
   refundId: number,
+  terminalId: number | null = null,
 ): Promise<void> {
   if (cashAmount <= 0 || userId === null || locationId === null) return;
   const session = await findOpenSessionForAttribution(
@@ -680,6 +712,7 @@ export async function recordCashRefundInTx(
     businessId,
     userId,
     locationId,
+    terminalId,
   );
   if (!session) return;
   await tx.insert(registerTransactions).values({
@@ -727,17 +760,43 @@ export async function recordDueCollectionInTx(
 }
 
 /**
- * The actor's open session, but only when its register sits at the given
- * location (a session opened at another location must never absorb this
- * business's cash). Row-locks the session so concurrent attributions
- * serialize on the drawer.
+ * The actor's open session — or, when the request came from a bound
+ * terminal, that terminal's open session (the drawer the cash physically
+ * reached, regardless of which cashier opened it). Only sessions whose
+ * register sits at the given location qualify (a session opened at another
+ * location must never absorb this business's cash). Row-locks the session
+ * so concurrent attributions serialize on the drawer.
  */
 async function findOpenSessionForAttribution(
   tx: Tx,
   businessId: number,
   userId: number,
   locationId: number,
+  terminalId: number | null = null,
 ): Promise<{ id: number } | null> {
+  if (terminalId !== null) {
+    const [terminalSession] = await tx
+      .select({
+        id: registerSessions.id,
+        registerLocationId: registers.locationId,
+      })
+      .from(registerSessions)
+      .innerJoin(
+        registers,
+        eq(registers.id, registerSessions.registerId),
+      )
+      .where(
+        and(
+          eq(registerSessions.businessId, businessId),
+          eq(registerSessions.terminalId, terminalId),
+          eq(registerSessions.status, "open"),
+        ),
+      )
+      .for("update", { of: registerSessions });
+    if (terminalSession && terminalSession.registerLocationId === locationId) {
+      return { id: terminalSession.id };
+    }
+  }
   const [session] = await tx
     .select({
       id: registerSessions.id,

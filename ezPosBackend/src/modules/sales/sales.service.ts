@@ -77,6 +77,7 @@ import {
 } from "../../services/coupons.js";
 import { notifyStockLevel } from "../../services/notifications.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
+import { sha256OfJson } from "../../utils/canonicalJson.js";
 import {
   customerValidation,
   validatePayments,
@@ -288,6 +289,7 @@ export async function consumeStockFifo(
   locationId: number,
   variantId: number,
   quantity: number,
+  opts: { allowShortfall?: boolean } = {},
 ) {
   // 1. Oldest batches first. .for("update") locks the rows, so two sales
   //    at the same moment can't take the same stock. FIFO is per-location:
@@ -349,9 +351,14 @@ export async function consumeStockFifo(
     remaining -= take;
   }
 
-  // 3. Not enough stock: throwing rolls back the whole sale transaction
-  if (remaining > 0) {
-    throw new Error(
+  // 3. Not enough stock: throwing rolls back the whole sale transaction.
+  //    ConflictError (409), not a bare 500 — offline terminals must be able
+  //    to distinguish "no stock" from "server bug" when they replay.
+  //    Offline-originated sales are different: the sale PHYSICALLY happened,
+  //    so with allowShortfall the batches are consumed as far as possible and
+  //    the gap is returned for a sync_conflicts row (never silently lost).
+  if (remaining > 0 && !opts.allowShortfall) {
+    throw new ConflictError(
       `Insufficient stock for variant ${variantId}: short by ${remaining}`,
     );
   }
@@ -360,6 +367,7 @@ export async function consumeStockFifo(
     totalCost: roundMoney(totalCost),
     costAtSale: roundMoney(totalCost / quantity), // average cost per unit
     consumed,
+    ...(remaining > 0 ? { shortfall: remaining } : {}),
   };
 }
 export async function consumeSerials(
@@ -369,9 +377,9 @@ export async function consumeSerials(
   serials: string[],
 ) {
   if (serials.length === 0)
-    throw new Error("Select at least one serial number");
+    throw new BadRequestError("Select at least one serial number");
   if (new Set(serials).size !== serials.length)
-    throw new Error("Duplicate serial number");
+    throw new BadRequestError("Duplicate serial number");
 
   // 1. Find and lock the serials (must be in stock, for this variant and business)
   const rows = await tx
@@ -388,7 +396,9 @@ export async function consumeSerials(
     .for("update");
 
   if (rows.length !== serials.length) {
-    throw new Error("One or more serial numbers are not available");
+    // 409, not 500: an already-sold/unknown serial is a client-facing
+    // conflict (offline replay safety — see consumeStockFifo above).
+    throw new ConflictError("One or more serial numbers are not available");
   }
   if (rows.some((r) => r.batchId == null)) {
     throw new Error("A serial number has no batch. Backfill it first.");
@@ -645,6 +655,7 @@ async function findSaleByIdempotencyKey(
   tx: DbTransaction,
   businessId: number,
   idempotencyKey: string,
+  expectedPayloadHash?: string | null,
 ) {
   const [sale] = await tx
     .select({
@@ -656,6 +667,7 @@ async function findSaleByIdempotencyKey(
       finalTotal: sales.finalTotal,
       dueAmount: sales.dueAmount,
       paymentStatus: sales.paymentStatus,
+      idempotencyPayloadHash: sales.idempotencyPayloadHash,
     })
     .from(sales)
     .where(
@@ -666,6 +678,18 @@ async function findSaleByIdempotencyKey(
     )
     .limit(1);
   if (!sale) return null;
+  // Payload binding: a key reused with DIFFERENT sale data is a client bug
+  // (or tampering) — never silently hand back the first sale. Legacy rows
+  // (hash NULL) keep the old replay behavior.
+  if (
+    expectedPayloadHash &&
+    sale.idempotencyPayloadHash &&
+    sale.idempotencyPayloadHash !== expectedPayloadHash
+  ) {
+    throw new ConflictError(
+      "This idempotency key was already used with different sale data. Refusing to replay it.",
+    );
+  }
   const payments = await tx
     .select({ amount: salePayments.amount })
     .from(salePayments)
@@ -740,15 +764,35 @@ async function resolveTaxRulesForSale(
   return map;
 }
 
+/** CreateSaleOptions: extra context for non-POS invocations of the engine. */
+export interface CreateSaleOptions {
+  /** 'offline' marks a LAN-server replica applied through /api/sync/ops. */
+  channel?: "pos" | "offline";
+  /**
+   * Offline-originated sales (Phase 3) may exceed stock: the sale PHYSICALLY
+   * happened, so it must never be dropped at sync time — inventory is
+   * allowed to go negative and a sync_conflicts row flags it for manager
+   * review. Oversell prevention itself happens at sale time via the
+   * allocation gates, not here.
+   */
+  allowNegativeStock?: boolean;
+}
+
 export async function createSale(
   businessId: number,
   locationId: number,
-  cashierUserId: number,
+  cashierUserId: number | null,
   data: CreateSalePayload,
+  terminalId: number | null = null,
+  options: CreateSaleOptions = {},
 ) {
   const { customerId, items, discount, vatPercent, payments, saleDate } = data;
   const couponCode = data.couponCode?.trim() || null;
   const idempotencyKey = data.idempotencyKey?.trim() || null;
+  // Binds the idempotency key to THIS payload so a replay with different
+  // sale data cannot masquerade as a retry (see findSaleByIdempotencyKey).
+  const payloadHash = idempotencyKey ? sha256OfJson(data) : null;
+  const batchShortfalls: { variantId: number; qty: number }[] = [];
 
   const result = await db.transaction(async (tx) => {
     // 0. Idempotent checkout: a retried submission with the same key returns
@@ -761,6 +805,7 @@ export async function createSale(
         tx,
         businessId,
         idempotencyKey,
+        payloadHash,
       );
       if (replay) return replay;
     }
@@ -776,7 +821,9 @@ export async function createSale(
     );
 
     // 3. Lock inventory rows and validate stock.
-    await validateStock(tx, businessId, locationId, variantIds, items);
+    await validateStock(tx, businessId, locationId, variantIds, items, {
+      ...(options.allowNegativeStock ? { allowNegative: true } : {}),
+    });
 
     // 2. Trusted prices and tracking types come from the database
     const variantMap = new Map(existingVariants.map((v) => [v.id, v]));
@@ -876,7 +923,10 @@ export async function createSale(
         dueAmount,
         paymentStatus,
         status: "completed",
+        channel: options.channel ?? undefined,
         idempotencyKey,
+        idempotencyPayloadHash: payloadHash,
+        terminalId,
         cashierUserId,
       })
       .onConflictDoNothing({
@@ -901,6 +951,7 @@ export async function createSale(
         tx,
         businessId,
         idempotencyKey,
+        payloadHash,
       );
       if (!replay) {
         throw new ConflictError("Sale insert returned no row.");
@@ -929,7 +980,7 @@ export async function createSale(
         // read from the DB, never from the request
         const serials = item.serialNumbers ?? [];
         if (serials.length !== item.quantity) {
-          throw new Error(
+          throw new BadRequestError(
             `Select exactly ${item.quantity} serial number(s) for variant ${item.variantId}.`,
           );
         }
@@ -946,7 +997,14 @@ export async function createSale(
           locationId,
           item.variantId,
           item.quantity,
+          { ...(options.allowNegativeStock ? { allowShortfall: true } : {}) },
         );
+        if ("shortfall" in cost && Number(cost.shortfall) > 0) {
+          batchShortfalls.push({
+            variantId: item.variantId,
+            qty: Number(cost.shortfall),
+          });
+        }
       }
 
       if (!Number.isFinite(cost.costAtSale) || cost.costAtSale < 0) {
@@ -1008,22 +1066,49 @@ export async function createSale(
         }
       }
 
-      const updatedRows = await tx
-        .update(inventoryStock)
-        .set({
-          quantity: sql`${inventoryStock.quantity} - ${item.quantity}`,
-        })
-        .where(
-          and(
-            eq(inventoryStock.variantId, item.variantId),
-            eq(inventoryStock.businessId, businessId),
-            eq(inventoryStock.locationId, locationId),
-          ),
-        )
-        .returning({
-          variantId: inventoryStock.variantId,
-          quantity: inventoryStock.quantity,
-        });
+      // Online sales: the row was locked+validated, so a plain decrement
+      // is safe. Offline-originated sales may reference a variant with NO
+      // stock row at this location — the atomic upsert creates it at the
+      // negative delta.
+      const updatedRows = options.allowNegativeStock
+        ? await tx
+            .insert(inventoryStock)
+            .values({
+              businessId,
+              variantId: item.variantId,
+              locationId,
+              quantity: -item.quantity,
+            })
+            .onConflictDoUpdate({
+              target: [
+                inventoryStock.businessId,
+                inventoryStock.variantId,
+                inventoryStock.locationId,
+              ],
+              set: {
+                quantity: sql`${inventoryStock.quantity} - ${item.quantity}`,
+              },
+            })
+            .returning({
+              variantId: inventoryStock.variantId,
+              quantity: inventoryStock.quantity,
+            })
+        : await tx
+            .update(inventoryStock)
+            .set({
+              quantity: sql`${inventoryStock.quantity} - ${item.quantity}`,
+            })
+            .where(
+              and(
+                eq(inventoryStock.variantId, item.variantId),
+                eq(inventoryStock.businessId, businessId),
+                eq(inventoryStock.locationId, locationId),
+              ),
+            )
+            .returning({
+              variantId: inventoryStock.variantId,
+              quantity: inventoryStock.quantity,
+            });
 
       if (updatedRows.length !== 1) {
         throw new Error(
@@ -1153,14 +1238,19 @@ export async function createSale(
         const cashAmount = receivedPayments
           .filter((payment) => payment.method === "cash")
           .reduce((sum, payment) => sum + (payment.amount ?? 0), 0);
-        await recordCashSaleInTx(
-          tx,
-          businessId,
-          cashierUserId,
-          locationId,
-          cashAmount,
-          saleId,
-        );
+        // A sale without a cashier (LAN replicas of legacy rows) records no
+        // drawer movement — register_transactions.userId is NOT NULL.
+        if (cashierUserId !== null) {
+          await recordCashSaleInTx(
+            tx,
+            businessId,
+            cashierUserId,
+            locationId,
+            cashAmount,
+            saleId,
+            terminalId,
+          );
+        }
       } catch (error: unknown) {
         if (isDuplicatePaymentReferenceError(error)) {
           throw new ConflictError(
@@ -1225,6 +1315,7 @@ export async function createSale(
       change,
       paidAmount,
       dueAmount,
+      ...(batchShortfalls.length > 0 ? { batchShortfalls } : {}),
     };
   });
 
@@ -2028,8 +2119,10 @@ export async function createSaleExchange(
   saleId: number,
   actorUserId: number | null,
   payload: ExchangePayload,
+  terminalId: number | null = null,
 ) {
   const idempotencyKey = payload.idempotencyKey?.trim() || null;
+  const payloadHash = idempotencyKey ? sha256OfJson(payload) : null;
   if (payload.returns.length === 0) {
     throw new BadRequestError("An exchange requires at least one returned item.");
   }
@@ -2040,7 +2133,7 @@ export async function createSaleExchange(
   const result = await db.transaction(async (tx) => {
     // 0. Idempotent replay: the replacement sale carries the key.
     if (idempotencyKey) {
-      const replay = await findSaleByIdempotencyKey(tx, businessId, idempotencyKey);
+      const replay = await findSaleByIdempotencyKey(tx, businessId, idempotencyKey, payloadHash);
       if (replay) return { replayed: true as const, ...replay };
     }
 
@@ -2220,6 +2313,8 @@ export async function createSaleExchange(
         status: "completed",
         exchangeOfSaleId: saleId,
         idempotencyKey,
+        idempotencyPayloadHash: payloadHash,
+        terminalId,
         cashierUserId: actorUserId,
         note: payload.notes ?? null,
       })
@@ -2240,12 +2335,15 @@ export async function createSaleExchange(
       if (!idempotencyKey) {
         throw new ConflictError("Exchange sale insert returned no row.");
       }
-      const replay = await findSaleByIdempotencyKey(tx, businessId, idempotencyKey);
+      const replay = await findSaleByIdempotencyKey(tx, businessId, idempotencyKey, payloadHash);
       if (!replay) throw new ConflictError("Exchange sale insert returned no row.");
       return { replayed: true as const, ...replay };
     }
 
     // Items: stock consumption + tax snapshots (same machinery as createSale).
+    // The replacement is a real sale: batches AND the per-location stock row
+    // must both move, plus the sale movement row — omitting the stock
+    // decrement desynchronized batches from inventory_stock (audit R1).
     for (const [itemIndex, item] of trustedReplacements.entries()) {
       const line = getLinePricing(item.unitPrice, item.quantity, item.discount);
       const cost = await consumeStockFifo(
@@ -2285,6 +2383,37 @@ export async function createSaleExchange(
           cost.consumed,
         );
       }
+      // validateStock already locked this row and verified availability —
+      // the decrement itself is unconditional, exactly like createSale.
+      const updatedRows = await tx
+        .update(inventoryStock)
+        .set({
+          quantity: sql`${inventoryStock.quantity} - ${item.quantity}`,
+        })
+        .where(
+          and(
+            eq(inventoryStock.variantId, item.variantId),
+            eq(inventoryStock.businessId, businessId),
+            eq(inventoryStock.locationId, exchangeLocationId),
+          ),
+        )
+        .returning({
+          variantId: inventoryStock.variantId,
+        });
+      if (updatedRows.length !== 1) {
+        throw new Error(
+          `Failed to update stock for variant ${item.variantId}.`,
+        );
+      }
+      await tx.insert(inventoryMovements).values({
+        businessId,
+        variantId: item.variantId,
+        locationId: exchangeLocationId,
+        movementType: "sale",
+        quantity: item.quantity,
+        referenceType: "sale",
+        referenceId: exchangeSale.id,
+      });
     }
 
     // Additional payments land as normal payment rows on the replacement
@@ -2322,6 +2451,7 @@ export async function createSaleExchange(
           exchangeLocationId,
           cashAmount,
           exchangeSale.id,
+          terminalId,
         );
       }
     }
@@ -2344,6 +2474,7 @@ export async function createSaleExchange(
         exchangeLocationId,
         cashSurplusPayout,
         refundId,
+        terminalId,
       );
     }
 

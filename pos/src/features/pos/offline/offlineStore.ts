@@ -32,6 +32,15 @@ export interface OfflineSaleInput {
   summary: OutboxEntry["summary"];
 }
 
+export type OfflineOpKind = Exclude<import("./db.js").OutboxEntry["kind"], undefined>;
+
+export interface OfflineOpInput {
+  kind: OfflineOpKind;
+  opId?: string;
+  payload: unknown;
+  summary?: Partial<OutboxEntry["summary"]>;
+}
+
 interface OfflineState {
   online: boolean;
   /** True while the device has never reached the backend (catalog fallback active). */
@@ -44,6 +53,7 @@ interface OfflineState {
   log: SyncLogEntry[];
   refresh: () => Promise<void>;
   recordOfflineSale: (input: OfflineSaleInput) => Promise<string>;
+  recordOfflineOp: (input: OfflineOpInput) => Promise<string>;
   syncNow: () => Promise<{ synced: number; failed: number }>;
   retryFailed: () => Promise<void>;
   startWatchers: () => void;
@@ -89,25 +99,44 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
   },
 
   recordOfflineSale: async (input) => {
+    // Sales recorded offline replay through the OFFLINE op surface (Phase 3):
+    // allocation-aware, conflict-recorded — never dropped for oversell.
+    return get().recordOfflineOp({
+      kind: "sale",
+      payload: input.payload,
+      summary: input.summary,
+    });
+  },
+
+  recordOfflineOp: async (input) => {
     await requestPersistentStorage();
-    const clientSaleId = crypto.randomUUID();
+    const clientSaleId = input.opId ?? crypto.randomUUID();
     const entry: OutboxEntry = {
       clientSaleId,
       status: "pending",
+      kind: input.kind,
+      offlineOrigin: true,
       payload: input.payload,
       invoiceNumber: null,
       recordedAt: new Date().toISOString(),
       syncedAt: null,
       attempts: 0,
       lastError: null,
-      summary: input.summary,
+      summary: {
+        total: input.summary?.total ?? 0,
+        itemCount: input.summary?.itemCount ?? 0,
+        customerName: input.summary?.customerName ?? null,
+      },
     };
     await putOutboxEntry(entry);
     await appendSyncLog({
       at: new Date().toISOString(),
       kind: "recorded_offline",
       clientSaleId,
-      detail: `Offline sale recorded — ৳${input.summary.total.toFixed(2)}, ${input.summary.itemCount} item(s)`,
+      detail:
+        input.kind === "sale"
+          ? `Offline sale recorded — ৳${entry.summary.total.toFixed(2)}, ${entry.summary.itemCount} item(s)`
+          : `Offline ${input.kind} recorded`,
     });
     await get().refresh();
     return clientSaleId;
@@ -124,12 +153,45 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
       // stock consumption on the server must match the register's history.
       for (const entry of entries) {
         try {
-          const res = await axios.post<{
-            data: { sale: { invoiceNumber: string } };
-          }>("/sales", entry.payload as never);
+          let invoiceNumber: string | null = null;
+          let conflictId: number | undefined;
+          if (entry.offlineOrigin) {
+            // Offline-originated op (Phase 3): allocation-aware application,
+            // per-op results, conflicts recorded server-side for review.
+            const opType =
+              entry.kind === "sale" ? "sale.create" : (entry.kind as string);
+            const res = await axios.post<{
+              data: {
+                results: {
+                  opId: string;
+                  status: string;
+                  saleId?: number;
+                  conflictId?: number;
+                  error?: string;
+                }[];
+              };
+            }>("/offline/sync", {
+              ops: [{ opId: entry.clientSaleId, type: opType, payload: entry.payload }],
+            });
+            const result = res.data?.data?.results?.[0];
+            if (!result) throw new Error("The sync endpoint returned no result.");
+            if (result.status === "failed") {
+              const error = new Error(result.error ?? "The op was rejected.");
+              (error as { response?: unknown }).response = { data: { message: result.error } };
+              throw error;
+            }
+            conflictId = result.conflictId;
+            void invoiceNumber;
+          } else {
+            const res = await axios.post<{
+              data: { sale: { invoiceNumber: string } };
+            }>("/sales", entry.payload as never);
+            invoiceNumber = res.data?.data?.sale?.invoiceNumber ?? null;
+          }
           entry.status = "synced";
           entry.syncedAt = new Date().toISOString();
-          entry.invoiceNumber = res.data?.data?.sale?.invoiceNumber ?? null;
+          entry.invoiceNumber = invoiceNumber;
+          if (conflictId !== undefined) entry.conflictId = conflictId;
           entry.attempts += 1;
           entry.lastError = null;
           await putOutboxEntry(entry);
@@ -141,6 +203,14 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
           });
           synced += 1;
           backoffMs = 5_000; // success resets the backoff
+          if (conflictId !== undefined) {
+            await appendSyncLog({
+              at: new Date().toISOString(),
+              kind: "conflict",
+              clientSaleId: entry.clientSaleId,
+              detail: "Applied, but flagged for manager review (stock/conflict).",
+            });
+          }
         } catch (err) {
           entry.attempts += 1;
           if (isNetworkError(err)) {
@@ -193,12 +263,40 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
 
   startWatchers: () => {
     // Reconnect + periodic retry with backoff. The engine never overlaps.
+    const refreshGrants = async () => {
+      // Phase 3: keep this terminal's offline allowances fresh WHILE online
+      // so they are in place the moment the connection drops.
+      try {
+        const { prepareOffline } = await import("./allocations.js");
+        const { useProductStore } = await import(
+          "@/features/products/usedashboardProductStore.js"
+        );
+        const products = useProductStore.getState().products ?? [];
+        const variantIds = products
+          .flatMap((p: { variants?: { id: number }[] }) => (p.variants ?? []).map((v) => v.id))
+          .filter(Boolean);
+        if (variantIds.length === 0) return;
+        await prepareOffline(variantIds);
+        await appendSyncLog({
+          at: new Date().toISOString(),
+          kind: "recorded_offline",
+          clientSaleId: "allocations",
+          detail: `Offline allowances refreshed (${variantIds.length} variants).`,
+        });
+        await get().refresh();
+      } catch {
+        // Best effort — stale grants only ever UNDER-sell (the server
+        // re-checks and flags overages at sync time).
+      }
+    };
     window.addEventListener("online", () => {
       set({ online: true });
       backoffTimer !== null && clearTimeout(backoffTimer);
       void get().syncNow();
+      void refreshGrants();
     });
     window.addEventListener("offline", () => set({ online: false, offlineMode: true }));
+    if (get().online) void refreshGrants();
     const tick = () => {
       if (get().online && get().pendingCount > 0 && !get().syncing) {
         void get().syncNow();

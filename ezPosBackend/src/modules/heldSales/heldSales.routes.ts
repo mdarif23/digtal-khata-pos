@@ -6,6 +6,7 @@ import {
   requireFullAccess,
 } from "../../middleware/business.js";
 import { requireLocationAccess } from "../../middleware/location.js";
+import { requireTerminalContext } from "../../middleware/terminalContext.js";
 import { requirePermission } from "../../middleware/permissions.js";
 
 /**
@@ -21,7 +22,9 @@ const read = [
   requireBusinessContext(),
   requireLocationAccess(),
 ] as const;
-const write = [...read, requireFullAccess] as const;
+// Writes resolve the optional X-Terminal-Id header (revoked terminals must
+// not be able to park carts either).
+const write = [...read, requireTerminalContext(), requireFullAccess] as const;
 
 router.get(
   "/api/held-sales",

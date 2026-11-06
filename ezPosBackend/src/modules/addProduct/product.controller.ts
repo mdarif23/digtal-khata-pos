@@ -3,6 +3,7 @@ import * as productService from "./product.service.js";
 import { getBusinessId } from "../../middleware/business.js";
 import { getLocationId } from "../../middleware/location.js";
 import { sendSafeError } from "../../utils/safeError.js";
+import { publishRealtime } from "../realtime/realtime.service.js";
 import { callerHasPermission } from "../../middleware/permissions.js";
 import { stripCostData } from "../../rbac/sanitize.js";
 import { productSchema } from "./schemas/product.schema.js";
@@ -52,6 +53,10 @@ export async function createProduct(req: Request, res: Response) {
       getLocationId(req),
       result.data,
     );
+    publishRealtime(getBusinessId(req), null, {
+      kind: "product.changed",
+      locationId: null,
+    });
     return res.status(201).json({
       message: "Product created successfully",
       data: product,
@@ -97,6 +102,12 @@ export async function updateProduct(req: Request, res: Response) {
       id,
       result.data,
     );
+    // Catalog edits matter to every terminal's product cache — signal
+    // business-wide (after the write committed).
+    publishRealtime(getBusinessId(req), null, {
+      kind: "product.changed",
+      locationId: null,
+    });
     return res.json({
       message: "Product updated successfully",
       data: product,

@@ -51,12 +51,23 @@ export async function getTerminalDetail(req: Request, res: Response) {
 
 export async function patchTerminal(req: Request, res: Response) {
   try {
-    const input: { name?: string; status?: "active" | "inactive" } = {};
+    const input: {
+      name?: string;
+      status?: "active" | "inactive";
+      locationId?: number;
+    } = {};
     if (typeof req.body?.name === "string" && req.body.name.trim() !== "") {
       input.name = req.body.name.trim().slice(0, 100);
     }
     if (req.body?.status === "active" || req.body?.status === "inactive") {
       input.status = req.body.status;
+    }
+    if (req.body?.locationId !== undefined) {
+      const locationId = Number(req.body.locationId);
+      if (!Number.isInteger(locationId) || locationId <= 0) {
+        throw new BadRequestError("Invalid location ID.");
+      }
+      input.locationId = locationId;
     }
     if (Object.keys(input).length === 0) {
       throw new BadRequestError("Nothing to update.");

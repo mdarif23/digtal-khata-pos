@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import * as customersService from "./customers.service.js";
 import { getBusinessId } from "../../middleware/business.js";
 import { sendSafeError } from "../../utils/safeError.js";
+import { publishRealtime } from "../realtime/realtime.service.js";
 
 export async function getCustomers(req: Request, res: Response) {
   try {
@@ -27,6 +28,10 @@ export async function createCustomer(req: Request, res: Response) {
         ? email.trim().toLowerCase()
         : null,
     );
+    publishRealtime(getBusinessId(req), null, {
+      kind: "customer.changed",
+      locationId: null,
+    });
     res.status(201).json(customer);
   } catch (err) {
     sendSafeError(res, err, "Unable to create the customer.");

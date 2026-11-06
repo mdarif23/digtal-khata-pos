@@ -5,6 +5,11 @@ import { buildApp } from "./app.js";
 import { pool } from "./config/db.js";
 import { ensureRbacSeed } from "./rbac/seed.js";
 import { startScheduler, stopScheduler } from "./jobs/scheduler.js";
+import {
+  isSyncEnabled,
+  startSyncAgent,
+  stopSyncAgent,
+} from "./sync/sync.agent.js";
 
 const app = buildApp();
 
@@ -17,6 +22,13 @@ ensureRbacSeed().catch((err) => {
 // Subscription lifecycle sweeps (trial expiry, reminders, grace suspension)
 // on a fixed interval — disabled with JOBS_ENABLED=false.
 startScheduler();
+
+// LAN sync agent (Phase 2): only runs when EZPOS_SYNC_ENABLED=true with a
+// cloud URL + sync-agent terminal credential configured (never on cloud).
+if (isSyncEnabled()) {
+  console.log("LAN sync agent enabled — syncing with the cloud backend.");
+  startSyncAgent();
+}
 
 // Configurable for local development so the website (3001), POS frontend,
 // and a second backend instance can run alongside the default port.
@@ -40,6 +52,7 @@ const server = app.listen(PORT, () =>
 async function shutdown(signal: string) {
   console.log(`${signal} received — shutting down gracefully.`);
   stopScheduler();
+  stopSyncAgent();
   server.close(async () => {
     try {
       await pool.end();

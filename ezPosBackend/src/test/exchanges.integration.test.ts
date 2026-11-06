@@ -249,7 +249,9 @@ describe("exchanges and refund methods integration", { skip: !runIntegration }, 
     assert.equal(replacement.status, "completed");
     assert.equal(Number(replacement.final_total), 100);
 
-    // Stock: net zero (one restocked, one consumed).
+    // Stock: one restocked, one consumed by the replacement — the
+    // replacement IS a real sale and must decrement inventory_stock
+    // (multi-terminal Phase 1 fixed the old batches-only drift).
     const { default: pg } = await import("pg");
     const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
@@ -262,7 +264,8 @@ describe("exchanges and refund methods integration", { skip: !runIntegration }, 
       [body.data.refundId],
     );
     await client.end();
-    assert.equal(Number(stock.rows[0].quantity), 20); // started at 20
+    // 20 opening − 1 sold − 1 replacement + 1 restock = 19.
+    assert.equal(Number(stock.rows[0].quantity), 19);
     // An even exchange settles against itself — no payout direction, so the
     // refund row is informational (refund_method NULL).
     assert.equal(refundMethod.rows[0].refund_method, null);

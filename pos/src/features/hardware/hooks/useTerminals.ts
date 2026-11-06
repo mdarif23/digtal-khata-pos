@@ -46,10 +46,12 @@ export function useUpdateTerminal() {
       terminalId: number;
       name?: string;
       status?: "active" | "inactive";
+      locationId?: number;
     }) =>
       patchTerminalApi(input.terminalId, {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.locationId !== undefined ? { locationId: input.locationId } : {}),
       }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: terminalKeys.all }),
   });

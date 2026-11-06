@@ -18,7 +18,13 @@ export type RealtimeEvent =
   | { kind: "sale.created"; locationId: number; saleId: number }
   | { kind: "held_sales.changed"; locationId: number }
   | { kind: "register.changed"; locationId: number }
-  | { kind: "notification.created" };
+  | { kind: "notification.created" }
+  /** Catalog edits (multi-terminal): business-wide product cache refresh. */
+  | { kind: "product.changed"; locationId: number | null }
+  /** Customer create (multi-terminal): refresh open customer pickers. */
+  | { kind: "customer.changed"; locationId: number | null }
+  /** Terminal registry changes (multi-terminal): refresh binding UIs. */
+  | { kind: "terminal.changed"; locationId: number };
 
 interface RealtimeState {
   connected: boolean;
@@ -27,6 +33,9 @@ interface RealtimeState {
   holdsRevision: number;
   registerRevision: number;
   notificationRevision: number;
+  productRevision: number;
+  customerRevision: number;
+  terminalRevision: number;
   start: () => void;
   stop: () => void;
 }
@@ -41,6 +50,9 @@ export const useRealtimeStore = create<RealtimeState>()((set, get) => ({
   holdsRevision: 0,
   registerRevision: 0,
   notificationRevision: 0,
+  productRevision: 0,
+  customerRevision: 0,
+  terminalRevision: 0,
 
   start: () => {
     if (source) return;
@@ -88,6 +100,15 @@ async function connect(
             set((state) => ({
               notificationRevision: state.notificationRevision + 1,
             }));
+            break;
+          case "product.changed":
+            set((state) => ({ productRevision: state.productRevision + 1 }));
+            break;
+          case "customer.changed":
+            set((state) => ({ customerRevision: state.customerRevision + 1 }));
+            break;
+          case "terminal.changed":
+            set((state) => ({ terminalRevision: state.terminalRevision + 1 }));
             break;
         }
       } catch {

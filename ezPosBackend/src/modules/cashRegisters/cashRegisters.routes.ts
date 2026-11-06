@@ -6,6 +6,7 @@ import {
   requireFullAccess,
 } from "../../middleware/business.js";
 import { requireLocationAccess } from "../../middleware/location.js";
+import { requireTerminalContext } from "../../middleware/terminalContext.js";
 import { requirePermission } from "../../middleware/permissions.js";
 
 const router = express.Router();
@@ -16,7 +17,14 @@ const locationRead = [
   requireBusinessContext(),
   requireLocationAccess(),
 ] as const;
-const locationWrite = [...locationRead, requireFullAccess] as const;
+// Writes resolve the optional X-Terminal-Id header — opening a session from
+// a bound terminal records that terminal on the drawer session (and a
+// revoked terminal cannot open one at all).
+const locationWrite = [
+  ...locationRead,
+  requireTerminalContext(),
+  requireFullAccess,
+] as const;
 const manage = [
   ...locationWrite,
   requirePermission("settings.edit"),

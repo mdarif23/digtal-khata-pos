@@ -1,8 +1,18 @@
 import axios from "axios";
 import { useSessionStore, type SessionLocation } from "../auth/sessionStore";
+import {
+  bindTerminalScope,
+  currentTerminalId,
+  persistTerminalBinding,
+} from "../auth/terminalBinding";
 
+// Runtime override first (LAN deployments edit public/config.js — no
+// rebuild), then the build-time env, then the dev default.
+const runtimeApiUrl =
+  typeof window !== "undefined" &&
+  (window as { ezposConfig?: { apiUrl?: string } }).ezposConfig?.apiUrl;
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:3000/api",
+  baseURL: runtimeApiUrl || import.meta.env.VITE_API_URL || "http://localhost:3000/api",
 });
 
 /**
@@ -31,6 +41,87 @@ let sessionUser: SessionUser | null = null;
 let bootstrapPromise: Promise<void> | null = null;
 
 const ACTIVE_LOCATION_KEY = "ezpos-active-location";
+const OFFLINE_SESSION_KEY = "ezpos-offline-session";
+const OFFLINE_SESSION_TTL_MS = 7 * 24 * 3600_000; // refresh-token TTL parity
+
+/**
+ * Offline session fallback (Phase 3): when the refresh cookie cannot be
+ * restored because the DEVICE is offline, a previously cached session
+ * snapshot (saved at every successful bootstrap, expired with the refresh
+ * TTL) lets the POS mount in offline mode. Authorization is still
+ * backend-enforced — offline work happens in the local engine and is
+ * re-validated at sync time. A revoked user/terminal takes effect at the
+ * first contact, or when the snapshot expires.
+ */
+let offlineFallbackActive = false;
+
+export function isOfflineFallbackActive(): boolean {
+  return offlineFallbackActive;
+}
+
+function saveOfflineSessionSnapshot(): void {
+  try {
+    const store = useSessionStore.getState();
+    localStorage.setItem(
+      OFFLINE_SESSION_KEY,
+      JSON.stringify({
+        savedAt: new Date().toISOString(),
+        user: store.user,
+        businessId: store.businessId,
+        locations: store.locations,
+        activeLocationId: store.activeLocationId,
+        permissions: store.permissions,
+        roleSlug: store.roleSlug,
+        roleName: store.roleName,
+      }),
+    );
+  } catch {
+    // localStorage unavailable — no offline fallback for this device.
+  }
+}
+
+function tryRestoreOfflineSession(): boolean {
+  if (navigator.onLine) return false;
+  try {
+    const raw = localStorage.getItem(OFFLINE_SESSION_KEY);
+    if (!raw) return false;
+    const snapshot = JSON.parse(raw) as {
+      savedAt: string;
+      user: SessionUser & { id?: number };
+      businessId: number | null;
+      locations: SessionLocation[];
+      activeLocationId: number | null;
+      permissions: string[];
+      roleSlug: string | null;
+      roleName: string | null;
+    };
+    if (
+      Date.now() - new Date(snapshot.savedAt).getTime() >
+      OFFLINE_SESSION_TTL_MS
+    ) {
+      return false;
+    }
+    accessToken = null;
+    activeBusinessId = snapshot.businessId;
+    activeLocationId = snapshot.activeLocationId;
+    sessionUser = snapshot.user;
+    offlineFallbackActive = true;
+    useSessionStore.getState().setSession({
+      user: snapshot.user,
+      businessId: snapshot.businessId,
+      roleSlug: snapshot.roleSlug,
+      roleName: snapshot.roleName,
+      roles: [],
+      permissions: snapshot.permissions ?? [],
+    });
+    useSessionStore
+      .getState()
+      .setLocationContext(snapshot.locations ?? [], snapshot.activeLocationId);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export interface SessionUser {
   id?: number | undefined;
@@ -81,6 +172,23 @@ export function getSessionUser(): SessionUser | null {
   return sessionUser;
 }
 
+/** The terminal bound to this session, if any. */
+export function getBoundTerminalId(): number | null {
+  return currentTerminalId();
+}
+
+/**
+ * Binds ("this PC is terminal X") or clears the terminal binding and
+ * reloads: cart/outbox scopes are terminal-keyed, so a reload guarantees
+ * every store refetches against the new scope (same convention as
+ * switchLocation).
+ */
+export function bindThisTerminal(terminalId: number | null): void {
+  const user = getSessionUser()?.id ?? "?";
+  persistTerminalBinding(user, activeBusinessId ?? "?", terminalId);
+  window.location.reload();
+}
+
 export function clearSession(): void {
   accessToken = null;
   activeBusinessId = null;
@@ -117,6 +225,11 @@ export async function logout(): Promise<void> {
 }
 
 function redirectToSignIn(reason?: string): never {
+  // Offline fallback: the device cannot reach the network — mount with the
+  // cached session instead of bouncing to the website sign-in.
+  if (offlineFallbackActive || (!navigator.onLine && tryRestoreOfflineSession())) {
+    throw new Error("offline_fallback_active");
+  }
   const query = reason ? `?pos_error=${encodeURIComponent(reason)}` : "";
   window.location.href = `${WEBSITE_URL}/sign-in${query}`;
   // Reject instead of resolving: the app must not mount without a session
@@ -206,8 +319,16 @@ async function loadSession(): Promise<void> {
       .setLocationContext(locations, activeLocationId);
   } catch (err) {
     const status = axios.isAxiosError(err) ? err.response?.status : "network";
+    if (offlineFallbackActive || (!navigator.onLine && tryRestoreOfflineSession())) {
+      // Offline bootstrap: skip the rest (which needs the network) — the
+      // offline engine works entirely from the local caches.
+      return;
+    }
     redirectToSignIn(`me_failed_${status}`);
   }
+
+  // Snapshot for the offline fallback (Phase 3) — after everything resolved.
+  saveOfflineSessionSnapshot();
 
   // 4. Signed in but no business yet — the website dashboard is where
   //    businesses are created.
@@ -225,6 +346,9 @@ async function loadSession(): Promise<void> {
     "../features/pos/offline/offlineStore.js"
   );
   bindOfflineSession(getSessionUser()?.id ?? "anon", activeBusinessId);
+  // Terminal binding (multi-terminal): resolve BEFORE cart restore so the
+  // persisted cart scope matches the bound terminal.
+  bindTerminalScope(getSessionUser()?.id ?? "anon", activeBusinessId);
   useOfflineStore.getState().startWatchers();
   // Cart recovery (Module 1.5): restore a checkout interrupted by a
   // refresh/crash. After the offline scope is bound, before the first UI.
@@ -284,6 +408,7 @@ export async function refreshLocationContext(): Promise<void> {
  * a completed bootstrap short-circuits.
  */
 export function bootstrapSession(): Promise<void> {
+  if (offlineFallbackActive) return Promise.resolve();
   if (accessToken && activeBusinessId) return Promise.resolve();
   if (!bootstrapPromise) {
     bootstrapPromise = loadSession().catch((err) => {
@@ -303,6 +428,13 @@ api.interceptors.request.use((config) => {
   }
   if (activeLocationId !== null) {
     config.headers["X-Location-Id"] = String(activeLocationId);
+  }
+  // Multi-terminal Phase 1: attribute POS writes to the bound terminal.
+  // The header is a claim — the backend re-validates the terminal per
+  // request and rejects revoked/foreign ones with 403 TERMINAL_REVOKED.
+  const terminalId = currentTerminalId();
+  if (terminalId !== null) {
+    config.headers["X-Terminal-Id"] = String(terminalId);
   }
   return config;
 });

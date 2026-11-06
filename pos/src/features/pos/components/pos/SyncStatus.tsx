@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog.js";
 import { useOfflineStore } from "../../offline/offlineStore.js";
+import api from "../../../../api/axios.js";
 
 /**
  * Register-side offline status (Module 10): an offline pill when the
@@ -80,6 +81,7 @@ function SyncHistoryDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <ConflictSection />
         <DialogHeader>
           <DialogTitle>Offline sales & synchronization</DialogTitle>
           <DialogDescription>
@@ -168,5 +170,73 @@ function SyncHistoryDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface ConflictRow {
+  id: number;
+  opType: string;
+  reason: string;
+  message: string;
+  status: string;
+  createdAt: string;
+}
+
+/** Phase 3: server-flagged sync conflicts (allocation overages, negative
+ * stock, batch gaps, capped refunds) with manager acknowledgment. */
+function ConflictSection() {
+  const [conflicts, setConflicts] = useState<ConflictRow[] | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .get<{ data: ConflictRow[] }>("/offline/conflicts")
+      .then((res) => {
+        if (!cancelled) setConflicts(res.data.data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setConflicts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tick]);
+
+  const openConflicts = (conflicts ?? []).filter((c) => c.status === "open");
+  if (conflicts === null || openConflicts.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
+      <div className="text-sm font-semibold text-amber-900">
+        Conflicts needing review ({openConflicts.length})
+      </div>
+      <div className="mt-2 space-y-2">
+        {openConflicts.map((conflict) => (
+          <div
+            key={conflict.id}
+            className="rounded-md border border-amber-200 bg-white p-2 text-sm"
+          >
+            <div className="font-medium">{conflict.reason}</div>
+            <div className="text-slate-600">{conflict.message}</div>
+            <div className="mt-1 flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void api
+                    .post(`/offline/conflicts/${conflict.id}/resolve`, {
+                      action: "discard",
+                    })
+                    .then(() => setTick((t) => t + 1));
+                }}
+              >
+                Acknowledge
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -13,6 +13,8 @@ export const saleChannelEnum = pgEnum("sale_channel", [
   "pos",
   "woocommerce",
   "custom_storefront",
+  /** Replica of a sale created on the shop's LAN server (Phase 2). */
+  "offline",
 ]);
 
 /**

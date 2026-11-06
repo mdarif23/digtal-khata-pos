@@ -66,6 +66,16 @@ export const products = pgTable(
     handlingInstructions: text("handling_instructions"),
     isFragile: boolean("is_fragile").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    /**
+     * Offline selling policy (Phase 3). 'allocated' (default): the terminal
+     * may sell up to its server-granted allowance. 'blocked': never sell
+     * offline (serial-tracked products are always blocked in code — the
+     * same serial must never sell twice). 'open': sell freely offline;
+     * overages auto-apply and land in sync_conflicts for manager review.
+     */
+    offlinePolicy: varchar("offline_policy", { length: 20 })
+      .default("allocated")
+      .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [

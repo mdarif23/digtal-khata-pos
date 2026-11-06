@@ -28,6 +28,10 @@ import {
   insertSaleItemConsumptions,
 } from "../sales/sales.service.js";
 import { emitWebhookEventInTx } from "../webhooks/webhookDelivery.service.js";
+import {
+  formatSaleInvoiceNumber,
+  nextDocumentNumber,
+} from "../../utils/documentSequence.js";
 import { salePayments } from "../../db/schema/salePayments.js";
 import { saleRefunds } from "../../db/schema/saleRefunds.js";
 import {
@@ -345,12 +349,24 @@ export async function createOnlineOrder(
     const customerId = await resolveCustomerId(tx, input.businessId, input.customer);
     const deliveryFee = roundMoney(input.deliveryFee ?? 0);
 
+    // One invoice-numbering regime for every channel: online orders used
+    // to draw from the legacy GLOBAL sale_invoice_number_seq column default,
+    // which counts from 1 independently of the per-business
+    // document_sequences counter the POS path uses — the two regimes could
+    // hand the same business the same INV-YYYY-NNNNNN and the unique
+    // constraint then 500'd one side. Allocate from document_sequences like
+    // createSale does (migration 0049 repaired the counters first).
+    const invoiceNumber = formatSaleInvoiceNumber(
+      new Date().getFullYear(),
+      await nextDocumentNumber(tx, input.businessId, "sale_invoice"),
+    );
     const [sale] = await tx
       .insert(sales)
       .values({
         businessId: input.businessId,
         status: "pending",
         channel: input.channel,
+        invoiceNumber,
         integrationId: input.integrationId,
         externalOrderId: input.externalOrderId ?? null,
         externalOrderNumber: input.externalOrderNumber ?? null,
@@ -698,7 +714,7 @@ export async function cancelOnlineOrder(
 export interface UnifiedOrderRow {
   id: number;
   invoiceNumber: string;
-  channel: "pos" | "woocommerce" | "custom_storefront";
+  channel: "pos" | "woocommerce" | "custom_storefront" | "offline";
   status: "pending" | "completed" | "held" | "cancelled" | "refunded";
   paymentStatus: "paid" | "unpaid" | "partial";
   fulfillmentStatus: FulfillmentState;
@@ -735,7 +751,7 @@ export async function listUnifiedOrders(
   // the fulfillment endpoints enforce the same boundary.
   const conditions = [
     eq(sales.businessId, businessId),
-    sql`${sales.channel} <> 'pos'`,
+    sql`${sales.channel} NOT IN ('pos', 'offline')`,
   ];
   if (filters.channel) {
     conditions.push(eq(sales.channel, filters.channel));
@@ -1203,7 +1219,7 @@ export async function getOrdersSummary(
 ): Promise<OrdersSummary> {
   const conditions = [
     eq(sales.businessId, businessId),
-    sql`${sales.channel} <> 'pos'`,
+    sql`${sales.channel} NOT IN ('pos', 'offline')`,
   ];
   if (filters.channel) conditions.push(eq(sales.channel, filters.channel));
   if (filters.locationId) conditions.push(eq(sales.locationId, filters.locationId));
@@ -1238,7 +1254,7 @@ export async function getOrdersSummary(
     .where(
       and(
         eq(sales.businessId, businessId),
-        sql`${sales.channel} <> 'pos'`,
+        sql`${sales.channel} NOT IN ('pos', 'offline')`,
         gte(saleRefunds.createdAt, filters.from ? new Date(`${filters.from}T00:00:00`) : new Date(0)),
         lte(saleRefunds.createdAt, filters.to ? new Date(`${filters.to}T23:59:59.999`) : new Date()),
       ),

@@ -37,6 +37,9 @@ export interface RegisterSession {
   locationId: number;
   locationName: string;
   userName: string;
+  /** Terminal attribution (multi-terminal Phase 1). */
+  terminalId: number | null;
+  terminalName: string | null;
   status: string;
   openingCash: number;
   expectedCash: number;

@@ -9,6 +9,7 @@ import {
   unique,
   varchar,
   boolean,
+  timestamp,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { products } from "./products.js";
@@ -57,6 +58,8 @@ export const productVariants = pgTable(
     // No default on purpose (drizzle INSERTs defaulted columns; see
     // inventory_batches.additional_cost_per_unit). Services default to kg.
     weightUnit: varchar("weight_unit", { length: 5 }),
+    /** Sync watermark (Phase 2): maintained by trigger, read by the LAN catalog delta. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("product_variants_business_id_idx").on(table.businessId),

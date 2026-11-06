@@ -21,3 +21,14 @@ createRoot(document.getElementById("root")!).render(
       </QueryClientProvider>
   </StrictMode>
 );
+
+// PWA app-shell (Phase 3): a tiny hand-rolled service worker keeps the SPA
+// loadable after a refresh while the device is offline (transactions
+// themselves live in IndexedDB, not the SW cache).
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      // SW is an enhancement — registration failure never blocks the POS.
+    });
+  });
+}

@@ -34,6 +34,7 @@ import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
 import { useRealtimeStore } from "@/features/pos/offline/realtime.js";
 import axios from "../../../api/axios.js";
 import { useProductStore } from "@/features/products/usedashboardProductStore.js";
+import { TerminalBindingDialog } from "@/features/pos/components/pos/TerminalBindingDialog.js";
 
 function Pos() {
   const { cart, resetCart } = useCartStore();
@@ -49,15 +50,24 @@ function Pos() {
   const stockRevision = useRealtimeStore((s) => s.stockRevision);
   const holdsRevision = useRealtimeStore((s) => s.holdsRevision);
   const notificationRevision = useRealtimeStore((s) => s.notificationRevision);
+  // Multi-terminal: catalog edits and customer creates from OTHER terminals
+  // refresh this register's caches within seconds.
+  const productRevision = useRealtimeStore((s) => s.productRevision);
+  const customerRevision = useRealtimeStore((s) => s.customerRevision);
   useEffect(() => {
     useRealtimeStore.getState().start();
     return () => useRealtimeStore.getState().stop();
   }, []);
   useEffect(() => {
-    if (stockRevision > 0) {
+    if (stockRevision > 0 || productRevision > 0) {
       void useProductStore.getState().getProducts();
     }
-  }, [stockRevision]);
+  }, [stockRevision, productRevision]);
+  useEffect(() => {
+    if (customerRevision > 0) {
+      void useCustomerStore.getState().getCustomers();
+    }
+  }, [customerRevision]);
   useEffect(() => {
     if (holdsRevision > 0) {
       void import("../stores/useCartStore.js").then((m) =>
@@ -256,6 +266,9 @@ function Pos() {
           </Card>
         </form>
       </div>
+
+      {/* Multi-terminal: ask once whether this PC is a registered terminal. */}
+      <TerminalBindingDialog />
 
       {/* Post-sale confirmation and receipt printing */}
       <SaleSuccessDialog

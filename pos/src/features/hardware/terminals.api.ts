@@ -10,6 +10,8 @@ export interface TerminalSummary {
   id: number;
   name: string;
   status: "active" | "inactive";
+  /** The location (counter) this terminal is registered at. */
+  locationId: number;
   paired: boolean;
   deviceInfo: Record<string, unknown> | null;
   lastSeenAt: string | null;
@@ -55,7 +57,11 @@ export async function getTerminalsApi(): Promise<TerminalSummary[]> {
 
 export async function patchTerminalApi(
   terminalId: number,
-  input: { name?: string; status?: "active" | "inactive" },
+  input: {
+    name?: string;
+    status?: "active" | "inactive";
+    locationId?: number;
+  },
 ): Promise<TerminalSummary> {
   const res = await api.patch<{ success: boolean; data: TerminalSummary }>(
     `/terminals/${terminalId}`,
