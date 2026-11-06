@@ -1,31 +1,33 @@
 import { purchaseItems } from "../../../db/schema/purchaseItems.js";
 import { and, eq, sql } from "drizzle-orm";
 import type { DbTransaction } from "../purchase.types.js";
-import { inventoryStock } from "../../../db/schema/inventoryStock.js";
-import { inventoryMovements } from "../../../db/schema/inventoryMovements.js";
 import { inventoryBatches } from "../../../db/schema/inventoryBatches.js";
 import type { Items } from "./receive.types.js";
 import { serialNumbers } from "../../../db/schema/serialNumbers.js";
-import { NotFoundError } from "../../../utils/handleError.js";
 import { purchases } from "../../../db/schema/purchases.js";
 import { purchasePayments } from "../../../db/schema/purchasePayments.js";
 import { productVariants } from "../../../db/schema/productVariants.js";
+import { receivedAmountFromBatches } from "./receive.calculations.js";
 
 // Every function takes the caller's server-verified businessId (from
 // requireBusinessContext) and scopes all reads and writes to it.
+// Pure calculations live in receive.calculations.ts; inventory writes
+// (stock/movements) live in modules/inventory — this file keeps the
+// receive-specific writers (batches, serials) and purchase persistence.
 
 export async function updatePurchaseItems(
   tx: DbTransaction,
   businessId: number,
   purchaseItemId: number,
   newReceivedQuantity: number,
-  unitCost: number,
 ) {
+  // D1 (batch-authoritative): the line's unit_cost stays the PO order cost.
+  // The cost entered at each receive session is persisted on that session's
+  // inventory_batches rows (purchase_price), never overwritten here.
   await tx
     .update(purchaseItems)
     .set({
       receivedQuantity: newReceivedQuantity,
-      unitCost,
     })
     .where(
       and(
@@ -51,55 +53,6 @@ export async function updateProductVariants(
         eq(productVariants.businessId, businessId),
       ),
     );
-}
-export async function insertInventoryStockOnConflictDoUpdate(
-  tx: DbTransaction,
-  businessId: number,
-  locationId: number,
-  variantId: number,
-  receiveNow: number,
-) {
-  // One stock row per (business, variant, location): receiving into one
-  // store never touches another store's stock.
-  await tx
-    .insert(inventoryStock)
-    .values({
-      businessId,
-      locationId,
-      variantId,
-      quantity: receiveNow,
-    })
-    .onConflictDoUpdate({
-      target: [
-        inventoryStock.businessId,
-        inventoryStock.variantId,
-        inventoryStock.locationId,
-      ],
-      set: {
-        quantity: sql`
-              ${inventoryStock.quantity}
-              + ${receiveNow}
-            `,
-      },
-    });
-}
-export async function insertInventoryMovements(
-  tx: DbTransaction,
-  businessId: number,
-  locationId: number,
-  variantId: number,
-  purchaseId: number,
-  receiveNow: number,
-) {
-  await tx.insert(inventoryMovements).values({
-    businessId,
-    variantId,
-    locationId,
-    movementType: "purchase",
-    referenceType: "purchase",
-    referenceId: purchaseId,
-    quantity: receiveNow,
-  });
 }
 export async function insertInventoryBatches(
   tx: DbTransaction,
@@ -205,79 +158,40 @@ export async function getAllPurchaseItems(
       ),
     );
 }
-type AllPurchaseItems = {
-  quantity: number;
-  receivedQuantity: number;
-  unitCost: number;
-};
-export function calculatePurchaseStatus(allPurchaseItems: AllPurchaseItems[]) {
-  const allItemsFullyReceived =
-    allPurchaseItems.length > 0 &&
-    allPurchaseItems.every((item) => item.receivedQuantity >= item.quantity);
 
-  return allItemsFullyReceived ? "received" : "partially_received";
-}
-
-export function calculatePayments(
-  allPurchaseItems: AllPurchaseItems[],
-  paidAmount: number,
-  paymentAmount: number,
-  totalAmount: number,
-) {
-  const receivedAmount = allPurchaseItems.reduce(
-    (sum, item) => sum + Number(item.receivedQuantity) * Number(item.unitCost),
-    0,
-  );
-
-  const currentPaidAmount = Number(paidAmount ?? 0);
-
-  const newPaymentAmount = Number(paymentAmount ?? 0);
-  const paymentLimit = Math.max(
-    0,
-    Math.min(
-      receivedAmount - currentPaidAmount,
-      Number(totalAmount ?? receivedAmount) - currentPaidAmount,
-    ),
-  );
-
-  if (newPaymentAmount < 0) {
-    throw new NotFoundError("Payment amount cannot be negative.");
-  }
-
-  if (newPaymentAmount > paymentLimit) {
-    throw new NotFoundError(
-      `Payment cannot be greater than the available received balance (${paymentLimit.toFixed(2)}).`,
+/**
+ * Value of goods received, batch-authoritative (D1): Σ quantity_received ×
+ * purchase_price over this purchase's batches. Legacy fallback (received
+ * units with no batch rows at all) uses the line costs — see
+ * receivedAmountFromBatches in receive.calculations.ts.
+ */
+export async function getPurchaseReceivedAmountInTx(
+  tx: DbTransaction,
+  businessId: number,
+  purchaseId: number,
+): Promise<number> {
+  const [batchTotal] = await tx
+    .select({
+      total: sql<string>`COALESCE(SUM(${inventoryBatches.quantityReceived} * ${inventoryBatches.purchasePrice}), 0)`,
+    })
+    .from(inventoryBatches)
+    .innerJoin(
+      purchaseItems,
+      and(
+        eq(inventoryBatches.purchaseItemId, purchaseItems.id),
+        eq(inventoryBatches.businessId, purchaseItems.businessId),
+      ),
+    )
+    .where(
+      and(
+        eq(purchaseItems.purchaseId, purchaseId),
+        eq(purchaseItems.businessId, businessId),
+      ),
     );
-  }
 
-  const updatedPaidAmount = currentPaidAmount + newPaymentAmount;
+  const lineItems = await getAllPurchaseItems(tx, businessId, purchaseId);
 
-  const updatedDueAmount = Math.max(
-    0,
-    Number(totalAmount ?? receivedAmount) - updatedPaidAmount,
-  );
-  return {
-    updatedPaidAmount,
-    receivedAmount,
-    updatedDueAmount,
-    newPaymentAmount,
-  };
-}
-export function calculatePaymentStatus(
-  updatedPaidAmount: number,
-  totalAmount: number,
-  receivedAmount: number,
-) {
-  let paymentStatus: "unpaid" | "partial" | "paid";
-
-  if (updatedPaidAmount <= 0) {
-    paymentStatus = "unpaid";
-  } else if (updatedPaidAmount < Number(totalAmount ?? receivedAmount)) {
-    paymentStatus = "partial";
-  } else {
-    paymentStatus = "paid";
-  }
-  return paymentStatus;
+  return receivedAmountFromBatches(Number(batchTotal?.total ?? 0), lineItems);
 }
 export async function updatePurchase(
   tx: DbTransaction,

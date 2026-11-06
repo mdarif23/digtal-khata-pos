@@ -1,14 +1,14 @@
 import { create } from "zustand";
 import { PurchasesStore } from "./purchase.types.js";
 import {
+  createPurchaseApi,
+  createReceivePurchaseApi,
   getPurchasesApi,
   getPurchasesItemsApi,
   getPurchasesReturnItemsApi,
   purchaseReturnApi,
-  updateStockApi,
-} from "@/api/purchases.api.js";
+} from "./purchase.api.js";
 import { getErrorMessage } from "@/utils/getErrorMessage.js";
-import { createPurchaseApi, createReceivePurchaseApi } from "./purchase.api.js";
 export const usePurchasesStore = create<PurchasesStore>((set) => ({
   purchases: {
     orderedPurchase: [],
@@ -45,14 +45,6 @@ export const usePurchasesStore = create<PurchasesStore>((set) => ({
       set({ purchasesReturnItems: data, loading: false });
     } catch (err: unknown) {
       set({ error: getErrorMessage(err), loading: false });
-    }
-  },
-  updateStock: async (paymentDetails, changedItems) => {
-    try {
-      const { data } = await updateStockApi(paymentDetails, changedItems);
-      return data;
-    } catch (err) {
-      throw err;
     }
   },
   purchaseReturn: async (data) => {

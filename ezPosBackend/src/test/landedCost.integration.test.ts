@@ -893,6 +893,12 @@ describe("landed cost integration", { skip: !runIntegration }, () => {
       changedItems: [{ purchaseItemId: itemId, quantity: 5 }],
     });
     assert.equal(ret.status, 201, JSON.stringify(ret.body));
+    // The return response carries the authoritative reversal feedback.
+    assert.deepEqual((ret.body as { data: { landedCost: unknown } }).data.landedCost, {
+      adjusted: true,
+      amount: 50,
+      documentId: docId,
+    });
 
     const detail = await api(owner, "GET", `/api/landed-costs/${docId}`);
     const docData = (detail.body as { data: any }).data;
@@ -908,5 +914,69 @@ describe("landed cost integration", { skip: !runIntegration }, () => {
       [itemId],
     );
     assert.equal(Number(batchRow[0].additional_cost_per_unit), 10);
+  });
+
+  /**
+   * F2 regression: an item whose FIRST-EVER receive happens after the
+   * landed-cost document was posted must still be allocated — the
+   * receive-delta runs inside the receive transaction, and the context
+   * must read through that same transaction to see the just-received line.
+   */
+  it("allocates to an item first received after posting (tx-scoped context)", async () => {
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId: smallVariantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+        { variantId: mediumVariantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201, JSON.stringify(purchase.body));
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const mine = (items.body as any[]).filter((i) => i.purchaseId === pid);
+    const smallItem = mine.find((i) => i.variantId === smallVariantId);
+    const mediumItem = mine.find((i) => i.variantId === mediumVariantId);
+    assert.ok(smallItem && mediumItem);
+
+    // Receive ONLY the small line, then create + post the doc.
+    await receivePurchase(pid, smallItem.id, 10);
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [{ expenseType: "shipping", amount: 200, isCapitalizable: true }],
+    });
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    const docId = doc.body.data.id as number;
+    assert.equal((await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status, 200);
+
+    // Small line allocated (10/unit), medium still unreceived → pending.
+    const docAfterPost = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(docAfterPost.data.document.pendingAllocationAmount), 100);
+    const listAfterPost = (await api(owner, "GET", "/api/purchases")).body as any;
+    const poAfterPost = listAfterPost.allPurchases.find((p: any) => p.id === pid);
+    assert.equal(poAfterPost.landedCostStatus, "pending");
+
+    // First-ever receive of the medium line — inside THIS receive
+    // transaction the delta must see the new line and allocate to it.
+    await receivePurchase(pid, mediumItem.id, 10);
+
+    const docAfterDelta = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(docAfterDelta.data.document.pendingAllocationAmount), 0);
+    assert.equal(docAfterDelta.data.document.status, "adjusted");
+    const mediumBatch = await dbRows(
+      `SELECT additional_cost_per_unit, quantity_received
+       FROM inventory_batches WHERE purchase_item_id = $1`,
+      [mediumItem.id],
+    );
+    assert.ok(mediumBatch.length > 0, "medium batch missing");
+    assert.equal(Number(mediumBatch[0].additional_cost_per_unit), 10);
+
+    // Fully allocated → list indicator flips.
+    const listAfterDelta = (await api(owner, "GET", "/api/purchases")).body as any;
+    const poAfterDelta = listAfterDelta.allPurchases.find((p: any) => p.id === pid);
+    assert.equal(poAfterDelta.landedCostStatus, "allocated");
   });
 });

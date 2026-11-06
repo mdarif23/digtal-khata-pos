@@ -36,6 +36,20 @@ router.get(
   requirePermission("purchases.view"),
   purchasesController.getPurchasesItems,
 );
+// NOTE: the numeric guard falls through with next("route") so literal
+// sibling segments mounted by other routers (/api/purchases/return-items)
+// still match — Express 5 path-to-regexp does not support `:id(\\d+)`.
+router.get(
+  "/api/purchases/:id",
+  ...read,
+  requirePermission("purchases.view"),
+  (req, res, next) => {
+    if (!/^\d+$/.test(String(req.params.id))) {
+      return next("route");
+    }
+    return purchasesController.getPurchaseDetail(req, res);
+  },
+);
 router.post(
   "/api/purchases/receive",
   ...write,

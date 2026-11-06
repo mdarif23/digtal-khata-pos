@@ -17,10 +17,10 @@ import {
 import { roundMoney } from "../../utils/roundMoney.js";
 import { recordDueCollectionInTx } from "../cashRegisters/cashRegisters.service.js";
 import {
-  calculatePayments,
   calculatePaymentStatus,
-  getAllPurchaseItems,
-} from "../purchases/receive/receive.service.js";
+  calculatePayments,
+} from "../purchases/receive/receive.calculations.js";
+import { getPurchaseReceivedAmountInTx } from "../purchases/receive/receive.service.js";
 import type {
   CustomerPaymentInput,
   DueRowQuery,
@@ -659,28 +659,20 @@ export async function recordSupplierPayment(
       throw new NotFoundError("Purchase not found.");
     }
 
-    const allPurchaseItems = await getAllPurchaseItems(
+    // Reuse the receive-flow rules: you can only pay for goods that have
+    // actually been received (batch-authoritative, D1), never beyond the
+    // invoice total. calculatePayments throws BadRequestError directly.
+    const receivedAmount = await getPurchaseReceivedAmountInTx(
       tx,
       businessId,
       purchaseId,
     );
-
-    // Reuse the receive-flow rules: you can only pay for goods that have
-    // actually been received, never beyond the invoice total.
-    let paymentMath: ReturnType<typeof calculatePayments>;
-    try {
-      paymentMath = calculatePayments(
-        allPurchaseItems,
-        purchase.paidAmount,
-        roundMoney(amount),
-        purchase.totalAmount,
-      );
-    } catch (err) {
-      if (err instanceof NotFoundError) {
-        throw new BadRequestError(err.message);
-      }
-      throw err;
-    }
+    const paymentMath = calculatePayments({
+      paidAmount: purchase.paidAmount,
+      paymentAmount: roundMoney(amount),
+      totalAmount: purchase.totalAmount,
+      receivedAmount,
+    });
 
     let inserted: { id: number } | undefined;
     try {
@@ -706,11 +698,9 @@ export async function recordSupplierPayment(
       throw err;
     }
 
-    const receivedAmount = roundMoney(toNumber(paymentMath.receivedAmount));
     const nextStatus = calculatePaymentStatus(
       paymentMath.updatedPaidAmount,
       purchase.totalAmount,
-      receivedAmount,
     );
 
     await tx

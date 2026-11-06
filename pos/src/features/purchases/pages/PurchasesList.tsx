@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import {
   ArrowUpRight,
   ClipboardList,
@@ -12,9 +12,29 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { usePurchasesStore } from "../usePurchaseStore";
-import type { PurchaseNewProps, PurchaseStoreType } from "../purchase.types";
+import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
+import {
+  LandedCostAdjustmentNotice,
+  LandedCostReversalNotice,
+} from "../components/receiving/LandedCostAdjustmentNotice";
+import type {
+  LandedCostFeedback,
+  PurchaseNewProps,
+  PurchaseStoreType,
+} from "../purchase.types";
 
 type PurchaseFilter = "all" | "ordered" | "partially_received" | "received";
+
+type PurchaseNoticeState = {
+  receiveNotice?: {
+    purchaseId: number;
+    landedCost: LandedCostFeedback;
+  };
+  returnNotice?: {
+    purchaseId: number;
+    landedCost: LandedCostFeedback;
+  };
+} | null;
 
 const filters: { value: PurchaseFilter; label: string }[] = [
   { value: "all", label: "All orders" },
@@ -23,11 +43,6 @@ const filters: { value: PurchaseFilter; label: string }[] = [
   { value: "received", label: "Received" },
 ];
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-BD", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
 
 function formatDate(value: Date | string) {
   const date = new Date(value);
@@ -43,6 +58,12 @@ function formatDate(value: Date | string) {
 export const PurchasesList = () => {
   const [filter, setFilter] = useState<PurchaseFilter>("all");
   const [search, setSearch] = useState("");
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Landed-cost feedback handed over from a just-completed receive/return.
+  const noticeState = (location.state as PurchaseNoticeState) ?? null;
+  const receiveNotice = noticeState?.receiveNotice ?? null;
+  const returnNotice = noticeState?.returnNotice ?? null;
   const purchases = usePurchasesStore((state) => state.purchases);
   const purchaseItems = usePurchasesStore((state) => state.purchasesItems);
   const returnedItems = usePurchasesStore(
@@ -148,6 +169,29 @@ export const PurchasesList = () => {
             <Plus /> New purchase
           </Button>
         </header>
+
+        {(receiveNotice || returnNotice) && (
+          <div className="space-y-3">
+            {receiveNotice && (
+              <LandedCostAdjustmentNotice
+                purchaseId={receiveNotice.purchaseId}
+                landedCost={receiveNotice.landedCost}
+                onDismiss={() =>
+                  navigate(location.pathname, { replace: true, state: null })
+                }
+              />
+            )}
+            {returnNotice && (
+              <LandedCostReversalNotice
+                purchaseId={returnNotice.purchaseId}
+                landedCost={returnNotice.landedCost}
+                onDismiss={() =>
+                  navigate(location.pathname, { replace: true, state: null })
+                }
+              />
+            )}
+          </div>
+        )}
 
         <section className="grid gap-4 sm:grid-cols-3">
           <SummaryCard
@@ -341,7 +385,7 @@ function PurchaseOrderRow({
 }: {
   purchase: PurchaseStoreType;
   lineCount: number;
-  returnStatus?: string;
+  returnStatus?: string | undefined;
 }) {
   const statusStyles: Record<PurchaseStoreType["status"], string> = {
     ordered: "bg-sky-100 text-sky-800",
@@ -388,6 +432,15 @@ function PurchaseOrderRow({
           label={purchase.status.replace("_", " ")}
           className={statusStyles[purchase.status]}
         />
+        {/* Landed-cost indicator — only shown when a document exists and
+            hasn't been fully reversed (backend sends null otherwise). */}
+        {purchase.landedCostStatus && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {purchase.landedCostStatus === "pending"
+              ? "Landed cost pending"
+              : "Landed cost allocated"}
+          </p>
+        )}
       </td>
       <td className="px-4 py-4">
         {returnStatus ? (

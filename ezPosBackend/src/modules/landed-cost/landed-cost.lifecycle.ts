@@ -58,6 +58,33 @@ async function lockDocument(
 }
 
 /**
+ * Global lock-order anchor (Phase 6, concurrency fix): every transaction
+ * that touches BOTH a landed-cost document and purchase items/batches must
+ * take the document row lock FIRST — before the purchase items — so the
+ * FK key-share that allocation inserts take on locked purchase-item rows
+ * can never wait behind a transaction that is itself waiting for the
+ * document lock. (The receive-vs-post deadlock this prevents is exercised
+ * by purchaseLifecycle.integration.test.ts.)
+ */
+export async function lockDocumentForPurchaseInTx(
+  tx: DbTransaction,
+  businessId: number,
+  purchaseId: number,
+): Promise<void> {
+  await tx
+    .select({ id: landedCosts.id })
+    .from(landedCosts)
+    .where(
+      and(
+        eq(landedCosts.purchaseId, purchaseId),
+        eq(landedCosts.businessId, businessId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+}
+
+/**
  * Server-verified settlement references (Part G): an expense settled from a
  * recorded expense payment must point at a real, same-business expense row;
  * a supplier-payable settlement needs the vendor for the payable reference.
@@ -318,38 +345,7 @@ async function computeDocumentTargets(
       ),
     );
 
-  const context = await getLandedCostContext(businessId, doc.purchaseId);
-  // getLandedCostContext uses the module db handle — inside a transaction we
-  // must re-read batches from the tx to see just-created rows. The context's
-  // line structure is identical; patch the batch quantities from the tx.
-  const txBatches = await tx
-    .select({
-      purchaseItemId: inventoryBatches.purchaseItemId,
-      batchId: inventoryBatches.id,
-      batchNumber: inventoryBatches.batchNumber,
-      quantityReceived: inventoryBatches.quantityReceived,
-      quantityRemaining: inventoryBatches.quantityRemaining,
-    })
-    .from(inventoryBatches)
-    .where(
-      and(
-        eq(inventoryBatches.businessId, businessId),
-        inArray(
-          inventoryBatches.purchaseItemId,
-          context.lines.map((l) => l.purchaseItemId),
-        ),
-      ),
-    );
-  for (const line of context.lines) {
-    line.batches = txBatches
-      .filter((b) => b.purchaseItemId === line.purchaseItemId)
-      .map((b) => ({
-        batchId: b.batchId,
-        batchNumber: b.batchNumber,
-        quantityReceived: b.quantityReceived,
-        quantityRemaining: b.quantityRemaining,
-      }));
-  }
+  const context = await getLandedCostContext(businessId, doc.purchaseId, tx);
 
   const preview = computeLandedCostPreview(context.lines, {
     method: doc.allocationMethod,
@@ -671,13 +667,22 @@ export async function postLandedCostDocument(
  * Receive-flow delta (Part F): recompute cumulative targets now that more
  * batches exist, post only the difference. No-op when there is no posted
  * document. MUST run inside the receive transaction.
+ *
+ * Returns authoritative adjustment feedback for the receive response so the
+ * frontend can render an adjustment notice without computing amounts itself.
  */
+export interface ReceiveLandedCostDelta {
+  adjusted: boolean;
+  amount: number;
+  documentId: number | null;
+}
+
 export async function applyReceiveDeltaInTx(
   tx: DbTransaction,
   businessId: number,
   purchaseId: number,
   actorUserId: number,
-): Promise<void> {
+): Promise<ReceiveLandedCostDelta> {
   const [doc] = await tx
     .select()
     .from(landedCosts)
@@ -686,7 +691,9 @@ export async function applyReceiveDeltaInTx(
     )
     .for("update")
     .limit(1);
-  if (!doc || (doc.status !== "posted" && doc.status !== "adjusted")) return;
+  if (!doc || (doc.status !== "posted" && doc.status !== "adjusted")) {
+    return { adjusted: false, amount: 0, documentId: doc?.id ?? null };
+  }
 
   const { context, preview, expenseRows } = await computeDocumentTargets(
     tx,
@@ -761,7 +768,9 @@ export async function applyReceiveDeltaInTx(
     }
   }
 
-  if (allocationRows.length === 0) return;
+  if (allocationRows.length === 0) {
+    return { adjusted: false, amount: 0, documentId: doc.id };
+  }
   await tx.insert(landedCostAllocations).values(allocationRows);
   await recomputeBatchCosts(
     tx,
@@ -844,13 +853,28 @@ export async function applyReceiveDeltaInTx(
       cogsAmount: round2q(cogsQuads),
     },
   });
+
+  return {
+    adjusted: true,
+    amount: roundMoney(newAllocated - round2q(previousAllocated)),
+    documentId: doc.id,
+  };
 }
 
 /**
  * Purchase-return reversal: returned units carry their landed cost out of
  * inventory. Reverses perUnitLanded × returnedQty per consumed batch inside
  * the return's transaction and records a traceable reversal adjustment.
+ *
+ * Returns authoritative reversal feedback for the return response so the
+ * frontend can render a reversal notice without computing amounts itself.
  */
+export interface ReturnLandedCostReversal {
+  adjusted: boolean;
+  amount: number;
+  documentId: number | null;
+}
+
 export async function reverseForPurchaseReturnInTx(
   tx: DbTransaction,
   businessId: number,
@@ -858,8 +882,10 @@ export async function reverseForPurchaseReturnInTx(
   purchaseReturnId: number,
   consumed: { batchId: number; quantity: number }[],
   actorUserId: number,
-): Promise<void> {
-  if (consumed.length === 0) return;
+): Promise<ReturnLandedCostReversal> {
+  if (consumed.length === 0) {
+    return { adjusted: false, amount: 0, documentId: null };
+  }
   const [doc] = await tx
     .select()
     .from(landedCosts)
@@ -868,7 +894,9 @@ export async function reverseForPurchaseReturnInTx(
     )
     .for("update")
     .limit(1);
-  if (!doc || doc.status === "draft" || doc.status === "reversed") return;
+  if (!doc || doc.status === "draft" || doc.status === "reversed") {
+    return { adjusted: false, amount: 0, documentId: doc?.id ?? null };
+  }
 
   const batchIds = consumed.map((c) => c.batchId);
   const batchRows = await tx
@@ -891,7 +919,9 @@ export async function reverseForPurchaseReturnInTx(
     if (perUnit === 0) continue;
     reversalQuads += BigInt(Math.round(perUnit * c.quantity * 10_000));
   }
-  if (reversalQuads === 0n) return;
+  if (reversalQuads === 0n) {
+    return { adjusted: false, amount: 0, documentId: doc.id };
+  }
   const reversalAmount = roundMoney(Number(reversalQuads) / 10_000);
 
   // Returns do NOT change a batch's per-unit additional cost — the
@@ -943,4 +973,6 @@ export async function reverseForPurchaseReturnInTx(
     actorUserId,
     details: { purchaseReturnId, reversalAmount, batches: consumed.length },
   });
+
+  return { adjusted: true, amount: reversalAmount, documentId: doc.id };
 }
