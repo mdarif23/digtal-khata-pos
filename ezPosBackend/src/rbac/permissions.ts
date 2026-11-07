@@ -57,6 +57,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "purchases.create", module: "purchases", description: "Create purchase orders" },
   { key: "purchases.edit", module: "purchases", description: "Edit purchase orders" },
   { key: "purchases.receive", module: "purchases", description: "Receive purchased items into inventory" },
+  { key: "purchases.over_receive", module: "purchases", description: "Accept delivered quantities above the ordered amount beyond the receiving tolerance" },
   { key: "purchases.return", module: "purchases", description: "Create and manage purchase returns" },
   { key: "purchases.price_check", module: "purchases", description: "Record, edit and delete market price check observations" },
   { key: "purchases.manage_price_alerts", module: "purchases", description: "Configure price increase alert thresholds" },
