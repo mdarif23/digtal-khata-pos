@@ -112,7 +112,7 @@ export function ProductList({
       // The server re-checks and flags overages at sync time regardless.
       if (!navigator.onLine) {
         const check = await checkAllowance(variant.id, 1);
-        if (!check.allowed) {
+        if (!check?.allowed) {
           toast.add({ type: "error", description: check.reason, priority: "high" });
           return;
         }

@@ -2,6 +2,32 @@ import { z } from "zod";
 const serialNumberSchema = z.object({
   serial: z.string().min(1, { message: "Serial number is required" }),
 });
+/**
+ * GS1 check-digit validation (P5) — ported 1:1 from
+ * ezPosBackend/src/modules/barcodes/barcodes.validation.ts so the frontend
+ * rejects an invalid EAN-8/UPC-A/EAN-13 before submission.
+ */
+export function gtinCheckDigitIsValid(fullCode: string): boolean {
+  if (!/^\d+$/.test(fullCode) || fullCode.length < 2) return false;
+  const payload = fullCode.slice(0, -1);
+  const supplied = Number(fullCode[fullCode.length - 1]);
+  const expected = gtinCheckDigit(payload);
+  return expected !== null && expected === supplied;
+}
+
+function gtinCheckDigit(payload: string): number | null {
+  // GS1: weights 3,1,3,1… from the RIGHT of the payload.
+  if (!/^\d+$/.test(payload)) return null;
+  let sum = 0;
+  let weight = 3;
+  for (let i = payload.length - 1; i >= 0; i -= 1) {
+    sum += Number(payload[i]) * weight;
+    weight = weight === 3 ? 1 : 3;
+  }
+  const remainder = sum % 10;
+  return remainder === 0 ? 0 : 10 - remainder;
+}
+
 const variantSchema = z.object({
   id: z.number().int().optional(),
   options: z
@@ -19,7 +45,24 @@ const variantSchema = z.object({
     .string()
     .max(100)
     .nullable()
-    .transform((val) => (val?.trim() === "" ? null : val)),
+    .transform((val) => (val?.trim() === "" ? null : val))
+    // P5: ported 1:1 from the backend (addProduct product.schema + barcodes
+    // validation) so a bad GS1 check digit fails in the form instead of at
+    // submit time. GTIN-shaped codes only (8/12/13 digits); free-form
+    // internal codes (CODE128/CODE39) pass untouched. Backend stays
+    // authoritative.
+    .refine(
+      (val) =>
+        val === null ||
+        !/^\d{8}$|^\d{12}$|^\d{13}$/.test(val) ||
+        gtinCheckDigitIsValid(val),
+      {
+        message:
+          "Invalid check digit — this looks like an EAN-8/UPC-A/EAN-13 code but fails GS1 validation. Verify the number or use it as a CODE128/CODE39 code instead.",
+      },
+    ),
+  weight: z.coerce.number().min(0).nullable().optional(),
+  weightUnit: z.enum(["kg", "g", "lb", "oz"]).nullish(),
   sellingPrice: z.coerce.number().min(0),
   alertQuantity: z.coerce.number().min(0),
   isDefault: z.boolean(),

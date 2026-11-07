@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CartStore, CartType } from "../types/cart.types.js";
 import { HoldCartItems } from "@/features/pos/types/cart.types.js";
-import { useProductStore } from "@/features/products/usedashboardProductStore.js";
+import useProductStore from "@/features/products/useProductStore.js";
 
 // export const useCartStore = create(
 //   persist(

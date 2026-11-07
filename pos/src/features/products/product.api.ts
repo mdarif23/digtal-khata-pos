@@ -39,6 +39,48 @@ export async function updateProductApi(id: number, data: ProductTypeOutput) {
   }>(`/product/${id}`, data);
   return response.data;
 }
+export interface ProductImageRow {
+  id: number;
+  productId: number | null;
+  imageUrl: string;
+  is_primary: boolean;
+  sortOrder: number;
+}
+
+async function uploadProductImageFile(productId: number, file: File) {
+  // 1. presign  2. browser PUT  3. register (expense-attachment flow)
+  const presign = await axios.post<{ success: boolean; data: { objectKey: string; uploadUrl: string } }>(
+    `/products/${productId}/images/presign`,
+    { contentType: file.type, sizeBytes: file.size },
+  );
+  const { objectKey, uploadUrl } = presign.data.data;
+  await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  const registered = await axios.post<{ success: boolean; data: ProductImageRow }>(
+    `/products/${productId}/images`,
+    { objectKey, contentType: file.type },
+  );
+  return registered.data.data;
+}
+
+export async function attachProductImageIfAny(
+  productId: number,
+  file: File | null | undefined,
+): Promise<ProductImageRow | null> {
+  if (!file) return null;
+  return uploadProductImageFile(productId, file);
+}
+
+export async function listProductImagesApi(productId: number) {
+  const { data } = await axios.get<{ success: boolean; data: ProductImageRow[] }>(
+    `/products/${productId}/images`,
+  );
+  return data.data;
+}
+
 export async function adjustVariantStockApi(
   variantId: number,
   data: StockAdjustmentInput,

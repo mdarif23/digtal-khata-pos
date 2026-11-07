@@ -8,6 +8,7 @@ import { products as productsTable } from "../../db/schema/products.js";
 import { serialNumbers } from "../../db/schema/serialNumbers.js";
 import { units as unitsTable } from "../../db/schema/units.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../utils/handleError.js";
+import { gtinCheckDigitIsValid } from "../barcodes/barcodes.validation.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 import { assertWithinProductLimit } from "../../services/entitlements.js";
 import { generateSku } from "../addProduct/product.service.js";
@@ -48,6 +49,8 @@ export const CANONICAL_FIELDS = [
   "batch_number",
   "expiry_date",
   "serial_numbers",
+  "weight",
+  "weight_unit",
   "image_url",
   "status",
 ] as const;
@@ -79,6 +82,8 @@ const FIELD_ALIASES: Record<string, CanonicalField> = Object.fromEntries(
     ["expiry date", "expiry_date"], ["expire date", "expiry_date"], ["expires", "expiry_date"],
     ["serial numbers", "serial_numbers"], ["serials", "serial_numbers"], ["serial number", "serial_numbers"],
     ["image url", "image_url"], ["image", "image_url"], ["photo", "image_url"], ["image link", "image_url"],
+    ["weight", "weight"], ["variant weight", "weight"], ["unit weight", "weight"],
+    ["weight unit", "weight_unit"], ["uom weight", "weight_unit"],
     ["status", "status"], ["product status", "status"],
   ].map(([alias, field]) => [alias, field as CanonicalField]),
 );
@@ -105,6 +110,8 @@ export interface NormalizedRow {
   batchNumber: string | null;
   expiryDate: string | null;
   serialNumbers: string[];
+  weight: number | null;
+  weightUnit: "kg" | "g" | "lb" | "oz" | null;
   imageUrl: string | null;
   status: "draft" | "active" | "inactive";
   groupKey: string;
@@ -316,12 +323,24 @@ export function normalizeRow(
   const sku = normalizeText(get("sku"));
 
   const barcode = normalizeText(get("barcode"));
-  if (barcode && !/^[0-9A-Za-z-]{4,20}$/.test(barcode)) {
-    issues.push({
-      code: "invalid_barcode",
-      message: `Barcode "${barcode}" must be 4-20 letters/digits.`,
-      field: "barcode",
-    });
+  if (barcode) {
+    if (barcode.length > 100 || /[ -]/.test(barcode)) {
+      issues.push({
+        code: "invalid_barcode",
+        message: `Barcode "${barcode}" is not a valid barcode value.`,
+        field: "barcode",
+      });
+    } else if (
+      /^\d{8}$|^\d{12}$|^\d{13}$/.test(barcode) &&
+      !gtinCheckDigitIsValid(barcode)
+    ) {
+      // P7: same GTIN check-digit rule manual creation enforces.
+      issues.push({
+        code: "invalid_barcode",
+        message: `Barcode "${barcode}" looks like an EAN-8/UPC-A/EAN-13 code but fails GS1 validation.`,
+        field: "barcode",
+      });
+    }
   }
 
   const serialText = normalizeText(get("serial_numbers"));
@@ -374,6 +393,21 @@ export function normalizeRow(
     ? (statusText as "draft" | "active" | "inactive")
     : "active";
 
+  const weight = normalizeNumber(get("weight"), "weight", issues, rowNumber);
+  if (weight !== null && weight < 0) {
+    issues.push({
+      code: "invalid_weight",
+      message: "Weight cannot be negative.",
+      field: "weight",
+    });
+  }
+  const weightUnitText = (normalizeText(get("weight_unit")) ?? "kg").toLowerCase();
+  const weightUnit = (["kg", "g", "lb", "oz"] as const).includes(
+    weightUnitText as never,
+  )
+    ? (weightUnitText as "kg" | "g" | "lb" | "oz")
+    : null;
+
   const imageUrl = normalizeText(get("image_url"));
   if (imageUrl && !/^https:\/\/.+/i.test(imageUrl)) {
     issues.push({
@@ -422,6 +456,8 @@ export function normalizeRow(
       batchNumber: normalizeText(get("batch_number")),
       expiryDate,
       serialNumbers,
+      weight: weight === null ? null : weight,
+      weightUnit,
       imageUrl: imageUrl && /^https:\/\//i.test(imageUrl) ? imageUrl : null,
       status,
       groupKey,
@@ -735,7 +771,10 @@ export function validateGroups(
         issues?: RowIssue[];
         match?: { variantId: number; productId: number };
       };
-      payload.issues = issues;
+      // MERGE with normalizeRow issues (invalid numbers, GTIN check digits,
+      // serial mismatches...) — the old code overwrote them, silently
+      // hiding real row errors.
+      payload.issues = [...(payload.issues ?? []), ...issues];
     }
   }
 }

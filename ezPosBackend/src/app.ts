@@ -24,6 +24,7 @@ import customersRouter from "./modules/customers/customers.routes.js";
 import expenseRouter from "./modules/expenses/expenses.routes.js";
 import landedCostRouter from "./modules/landed-cost/landed-cost.routes.js";
 import productImportRouter from "./modules/productImport/productImport.routes.js";
+import productImagesRouter from "./modules/productImages/productImages.routes.js";
 import purchasesRouter from "./modules/purchases/purchases.routes.js";
 import purchasesReturnRouter from "./modules/purchaseReturn/purchaseReturn.routes.js";
 import procurementRouter from "./modules/procurement/procurement.routes.js";
@@ -143,6 +144,7 @@ export function buildApp() {
   app.use("/", expenseRouter);
   app.use("/", landedCostRouter);
   app.use("/", productImportRouter);
+  app.use("/", productImagesRouter);
   app.use("/", purchasesRouter);
   app.use("/", purchasesReturnRouter);
   app.use("/", procurementRouter);

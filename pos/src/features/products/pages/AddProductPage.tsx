@@ -36,7 +36,9 @@ import {
   createProductPromiseToast,
   updateProductPromiseToast,
 } from "../utils/productPromiseToast.js";
-import { getProductForEditApi } from "../product.api.js";
+import { getProductForEditApi,
+  attachProductImageIfAny,
+} from "../product.api.js";
 import { getErrorMessage } from "@/utils/getErrorMessage.js";
 
 const ProductStockForm = () => {
@@ -52,6 +54,7 @@ const ProductStockForm = () => {
   const createProduct = useProductStore((state) => state.createProduct);
   const updateProduct = useProductStore((state) => state.updateProduct);
   const [isLoadingProduct, setIsLoadingProduct] = useState(isEditing);
+  const [editInventory, setEditInventory] = useState<Record<number, { totalStock: number; batches: { batchNumber: string; expiryDate: string | null; quantityRemaining: number }[]; serialCount: number }>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const isDirty = form.formState.isDirty;
@@ -116,6 +119,24 @@ const ProductStockForm = () => {
       const product = await getProductForEditApi(id);
       if (isCancelled()) return;
       form.reset(product);
+      // Phase 7: read-only inventory summary for the edit view (batches,
+      // expiry, serial counts — never editable from the form).
+      const inventory = Object.fromEntries(
+        product.variants.map((variant) => [
+          variant.id,
+          (variant as { inventory?: unknown }).inventory ?? {
+            totalStock: 0,
+            batches: [],
+            serialCount: 0,
+          },
+        ]),
+      );
+      setEditInventory(
+        inventory as Record<
+          number,
+          { totalStock: number; batches: { batchNumber: string; expiryDate: string | null; quantityRemaining: number }[]; serialCount: number }
+        >,
+      );
     } catch (error: unknown) {
       if (!isCancelled()) setLoadError(getErrorMessage(error));
     } finally {
@@ -150,13 +171,25 @@ const ProductStockForm = () => {
       if (productId) {
         const id = Number(productId);
         await updateProductPromiseToast(data, () => updateProduct(id, data));
+        // Phase 5: complete the previously dead image flow — a picked File
+        // goes through the presign upload now that the product id exists.
+        if (data.imageFile) {
+          await attachProductImageIfAny(id, data.imageFile);
+        }
         form.reset(data);
         skipNextNavigationBlock.current = true;
         navigate("/product");
         return;
       }
 
-      await createProductPromiseToast(data, createProduct);
+      const created = await createProductPromiseToast(data, createProduct);
+      // POST /api/product body shape: { data: { productId } }
+      const newProductId =
+        (created as { data?: { productId?: number } } | undefined)?.data
+          ?.productId ?? null;
+      if (newProductId !== null && data.imageFile) {
+        await attachProductImageIfAny(newProductId, data.imageFile);
+      }
       form.reset(defaultValues);
     } catch (error: unknown) {
       setSubmitError(getErrorMessage(error));
@@ -280,6 +313,11 @@ const ProductStockForm = () => {
                 replace={replace}
                 remove={remove}
                 isEditing={isEditing}
+                inventorySummary={
+                  isEditing && productId !== undefined
+                    ? editInventory[Number(productId)]
+                    : undefined
+                }
               />
             </div>
             <aside className="space-y-6 lg:sticky lg:top-6">

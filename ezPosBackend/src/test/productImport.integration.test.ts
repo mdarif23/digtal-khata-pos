@@ -290,4 +290,41 @@ describe("product import/export integration", { skip: !runIntegration }, () => {
     assert.equal(executed.body.data.created, 0, JSON.stringify(executed.body));
     assert.ok((executed.body.data.updated as number) >= 2);
   });
+
+  it("imports variant weight and enforces GTIN check digits (P7)", async () => {
+    // Bad GS1 check digit -> validation error.
+    const bytes = csvFor([
+      ["GTIN Bad", "physical", "", "", "Piece", "", "GTIN-BAD", "false", "", "8801230000019", "100", "", "none", "", "", "", "", "", "", "active"],
+    ]);
+    const up = await upload(owner, "gtin-bad.csv", bytes);
+    const badSession = up.body.data.sessionId as number;
+    const badValidated = await api(owner, "POST", `/api/products/import/${badSession}/validate`);
+    assert.equal(badValidated.body.data.totals.errorRows, 1);
+
+    // Weighted row imports with weight preserved (extended template).
+    const extendedHeader =
+      "product_name,product_type,category,brand,unit,description,sku,has_variants,variant_options,barcode,selling_price,purchase_price,alert_quantity,tracking_type,opening_stock,location,batch_number,expiry_date,serial_numbers,image_url,status,weight,weight_unit";
+    const weightedBytes = Buffer.from(
+      "﻿" +
+        [
+          extendedHeader,
+          `"Weighted Item ${stamp}","physical","","","Piece","","WT-${stamp}","false","","","100","","5","none","","","","","","","active","0.45","kg"`,
+        ].join("\r\n"),
+      "utf8",
+    );
+    const up2 = await upload(owner, "weighted.csv", weightedBytes);
+    assert.equal(up2.status, 201, JSON.stringify(up2.body));
+    const sessionId = up2.body.data.sessionId as number;
+    await api(owner, "POST", `/api/products/import/${sessionId}/validate`);
+    const executed = await api(owner, "POST", `/api/products/import/${sessionId}/execute`);
+    assert.equal(executed.status, 200, JSON.stringify(executed.body));
+
+    const products = await api(owner, "GET", "/api/products");
+    const created = (products.body as any[]).find(
+      (p) => p.name === `Weighted Item ${stamp}`,
+    );
+    assert.ok(created);
+    const variant = created.variants.find((v: any) => v.sku === `WT-${stamp}`);
+    assert.equal(Number(variant.weight), 0.45);
+  });
 });
