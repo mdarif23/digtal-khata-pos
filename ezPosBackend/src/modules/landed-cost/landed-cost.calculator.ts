@@ -142,25 +142,10 @@ export function calculateAllocation(options: {
       message: "No received purchase lines to allocate against.",
     });
   }
-  for (const line of lines) {
-    const ordered = Number(
-      line.quantityOrdered ?? line.batches.reduce(
-        (sum, b) => sum + Number(b.quantityReceived),
-        0,
-      ),
-    );
-    const received = line.batches.reduce(
-      (sum, b) => sum + Number(b.quantityReceived),
-      0,
-    );
-    if (ordered > 0 && received > ordered + 1e-9) {
-      issues.push({
-        code: "invalid_quantities",
-        message: `Received quantity exceeds the ordered quantity for purchase item ${line.purchaseItemId}.`,
-        field: "lines",
-      });
-    }
-  }
+  // NOTE: received > ordered is legitimate since approved over-receiving
+  // (migration 0052) — the received target is clamped at the line's total
+  // target below, so over-received lines simply allocate everything with
+  // nothing left pending.
   const seenItems = new Set<number>();
   for (const line of lines) {
     if (seenItems.has(line.purchaseItemId)) {
@@ -267,6 +252,11 @@ export function calculateAllocation(options: {
   if (issues.length > 0) throw new LandedCostValidationError(issues);
 
   // ---- line-level targets (Part F: complete-order target, received share) ----
+  // Over-received lines (accepted > ordered, migration 0052) can produce a
+  // received share above the line's total target — clamp so they simply
+  // allocate the full target with nothing left pending.
+  const clampReceivedTarget = (received: bigint, total: bigint): bigint =>
+    received > total ? total : received;
   const orderedMillisOf = (line: AllocationLineInput) =>
     quantityToMillis(
       line.quantityOrdered ??
@@ -301,10 +291,12 @@ export function calculateAllocation(options: {
         {
           line,
           totalTargetQuads,
-          receivedTargetQuads:
+          receivedTargetQuads: clampReceivedTarget(
             orderedMillis > 0n
               ? (totalTargetQuads * receivedMillis) / orderedMillis
               : totalTargetQuads,
+            totalTargetQuads,
+          ),
         },
       ];
     });
@@ -355,10 +347,12 @@ export function calculateAllocation(options: {
       return {
         line,
         totalTargetQuads,
-        receivedTargetQuads:
+        receivedTargetQuads: clampReceivedTarget(
           orderedBasis > 0n
             ? (totalTargetQuads * receivedBasisOf(line)) / orderedBasis
             : totalTargetQuads,
+          totalTargetQuads,
+        ),
       };
     });
   }

@@ -107,6 +107,7 @@ export async function getLandedCostContext(
       discount: purchaseItems.discount,
       receivedQuantity: purchaseItems.receivedQuantity,
       orderedQuantity: purchaseItems.quantity,
+      cancelledQuantity: purchaseItems.cancelledQuantity,
       productName: products.name,
       sku: productVariants.sku,
       variantWeight: productVariants.weight,
@@ -204,7 +205,12 @@ export async function getLandedCostContext(
     unitCost: Number(row.unitCost),
     discount: Number(row.discount),
     receivedQuantity: Number(row.receivedQuantity),
-    orderedQuantity: Number(row.orderedQuantity),
+    // Effective ordered basis excludes cancelled quantities so a resolved
+    // shortage never leaves a landed-cost share pending indefinitely.
+    orderedQuantity: Math.max(
+      0,
+      Number(row.orderedQuantity) - Number(row.cancelledQuantity ?? 0),
+    ),
     variantWeight:
       row.variantWeight === null ? null : Number(row.variantWeight),
     variantWeightUnit: row.variantWeightUnit,

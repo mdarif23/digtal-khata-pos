@@ -133,7 +133,7 @@ function reorderBaseCte(businessId: number, locationId: number): SQL {
         AND st.business_id = ${businessId} AND st.location_id = ${locationId}
       LEFT JOIN (
         SELECT pi.variant_id,
-               SUM(pi.quantity - pi.received_quantity - pi."cancelled_quantity   ") AS qty
+               SUM(pi.quantity - pi.received_quantity - pi."cancelled_quantity") AS qty
         FROM purchase_items pi
         JOIN purchases p ON p.id = pi.purchase_id
         WHERE pi.business_id = ${businessId}

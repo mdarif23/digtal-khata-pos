@@ -1,5 +1,13 @@
 import { z } from "zod";
 import { purchasePayments } from "../../../db/schema/purchasePayments.js";
+
+export const REJECTION_CATEGORIES = [
+  "damaged",
+  "incorrect",
+  "expired",
+  "other",
+] as const;
+
 export const receiveItemsFormSchema = z.object({
   purchaseId: z.number(),
   items: z.array(
@@ -7,7 +15,17 @@ export const receiveItemsFormSchema = z.object({
       .object({
         itemId: z.number(),
         trackingType: z.enum(["none", "batch", "serial"]),
+        // ACCEPTED quantity — the only quantity that enters inventory.
         receiveNow: z.number().min(0),
+        // Delivered but refused — recorded, never stocked or valued.
+        rejectedQuantity: z.number().min(0).default(0),
+        rejectionCategory: z
+          .enum(REJECTION_CATEGORIES)
+          .optional(),
+        rejectionReason: z.string().max(300).optional(),
+        // Required whenever this line accepts more than the outstanding
+        // quantity (over-receiving — within tolerance or approved).
+        overReceiveReason: z.string().max(300).optional(),
         unitCost: z.number().min(0),
         sellingPrice: z.number().min(0),
         batches: z.array(
@@ -52,6 +70,22 @@ export const receiveItemsFormSchema = z.object({
               code: z.ZodIssueCode.custom,
               path: ["batches"],
               message: `Batch total quantity (${totalBatchQty}) must equal receive quantity (${data.receiveNow}).`,
+            });
+          }
+        }
+        if (data.rejectedQuantity > 0) {
+          if (!data.rejectionCategory) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["rejectionCategory"],
+              message: "A rejection category is required for rejected goods.",
+            });
+          }
+          if (!data.rejectionReason?.trim()) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["rejectionReason"],
+              message: "A rejection reason is required for rejected goods.",
             });
           }
         }

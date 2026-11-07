@@ -9,14 +9,26 @@ import { roundMoney } from "../../../utils/roundMoney.js";
 export type PurchaseStatus = "received" | "partially_received";
 export type PaymentStatus = "paid" | "unpaid" | "partial";
 
-type StatusItems = { quantity: number; receivedQuantity: number };
+type StatusItems = {
+  quantity: number;
+  receivedQuantity: number;
+  cancelledQuantity?: number;
+};
 
 export function calculatePurchaseStatus(
   allPurchaseItems: StatusItems[],
 ): PurchaseStatus {
+  // Outstanding = ordered − received − cancelled. A line is complete when
+  // nothing is outstanding: received units plus short-receiving
+  // cancellations cover the order. Cancelled units never mark a purchase
+  // complete prematurely — they ARE the resolution.
   const allItemsFullyReceived =
     allPurchaseItems.length > 0 &&
-    allPurchaseItems.every((item) => item.receivedQuantity >= item.quantity);
+    allPurchaseItems.every(
+      (item) =>
+        item.receivedQuantity + Number(item.cancelledQuantity ?? 0) >=
+        item.quantity,
+    );
 
   return allItemsFullyReceived ? "received" : "partially_received";
 }
@@ -26,11 +38,14 @@ export function calculatePayments({
   paymentAmount,
   totalAmount,
   receivedAmount,
+  cancelledAmount = 0,
 }: {
   paidAmount: number;
   paymentAmount: number;
   totalAmount: number;
   receivedAmount: number;
+  /** Invoice value written off by short-receiving cancellations (Phase 3). */
+  cancelledAmount?: number;
 }): {
   updatedPaidAmount: number;
   receivedAmount: number;
@@ -40,12 +55,18 @@ export function calculatePayments({
 } {
   const currentPaidAmount = Number(paidAmount ?? 0);
   const newPaymentAmount = Number(paymentAmount ?? 0);
+  // The effective invoice total nets out cancelled quantities — a payable
+  // reduction must survive subsequent payments.
+  const effectiveTotal = Math.max(0, totalAmount - Math.max(0, cancelledAmount));
 
   // You can only pay for goods that have actually been received, and never
-  // beyond the invoice total.
+  // beyond the (cancellation-adjusted) invoice total.
   const paymentLimit = Math.max(
     0,
-    Math.min(receivedAmount - currentPaidAmount, totalAmount - currentPaidAmount),
+    Math.min(
+      receivedAmount - currentPaidAmount,
+      effectiveTotal - currentPaidAmount,
+    ),
   );
 
   if (newPaymentAmount < 0) {
@@ -60,7 +81,7 @@ export function calculatePayments({
 
   const updatedPaidAmount = currentPaidAmount + newPaymentAmount;
 
-  const updatedDueAmount = Math.max(0, totalAmount - updatedPaidAmount);
+  const updatedDueAmount = Math.max(0, effectiveTotal - updatedPaidAmount);
 
   return {
     updatedPaidAmount,

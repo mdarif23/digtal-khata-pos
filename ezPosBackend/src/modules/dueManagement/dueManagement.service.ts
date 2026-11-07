@@ -3,6 +3,7 @@ import { db } from "../../db/schema/index.js";
 import { customers } from "../../db/schema/customers.js";
 import { purchaseItems } from "../../db/schema/purchaseItems.js";
 import { purchasePayments } from "../../db/schema/purchasePayments.js";
+import { purchaseDiscrepancies } from "../../db/schema/purchaseDiscrepancies.js";
 import { purchaseReturns } from "../../db/schema/purchaseReturns.js";
 import { purchases } from "../../db/schema/purchases.js";
 import { salePayments } from "../../db/schema/salePayments.js";
@@ -21,6 +22,9 @@ import {
   calculatePayments,
 } from "../purchases/receive/receive.calculations.js";
 import { getPurchaseReceivedAmountInTx } from "../purchases/receive/receive.service.js";
+import {
+  getPurchaseCancelledValueInTx,
+} from "../purchases/outstandingResolution.service.js";
 import type {
   CustomerPaymentInput,
   DueRowQuery,
@@ -121,7 +125,10 @@ export async function getDueManagementSummary(
             ROUND(
               COALESCE(p.total_amount, 0)
               - COALESCE((SELECT SUM(pp.amount) FROM purchase_payments pp WHERE pp.purchase_id = p.id), 0)
-              - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr WHERE pr.purchase_id = p.id), 0),
+              - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr WHERE pr.purchase_id = p.id), 0)
+              - COALESCE((SELECT SUM(
+                  (pi.quantity * pi.unit_cost - pi.discount + pi.tax) * pi.cancelled_quantity / NULLIF(pi.quantity, 0)
+                ) FROM purchase_items pi WHERE pi.purchase_id = p.id), 0),
               2
             )::float8 AS outstanding
           FROM purchases p
@@ -373,7 +380,12 @@ export async function getSupplierDueRows(
   // Operands must stay numeric: ROUND(x, 2) does not exist for float8.
   const paidAmountSql = sql<number>`COALESCE((SELECT SUM(${purchasePayments.amount}) FROM ${purchasePayments} WHERE ${purchasePayments.purchaseId} = ${purchases.id}), 0)::numeric`;
   const returnAmountSql = sql<number>`COALESCE((SELECT SUM(${purchaseReturns.totalAmount}) FROM ${purchaseReturns} WHERE ${purchaseReturns.purchaseId} = ${purchases.id}), 0)::numeric`;
-  const outstandingSql = sql<number>`ROUND(COALESCE(${purchases.totalAmount}, 0) - ${paidAmountSql} - ${returnAmountSql}, 2)::float8`;
+  // Cancelled (written-off) outstanding quantity reduces the invoice value
+  // by the line's per-unit order price (Phase 3).
+  const cancelledAmountSql = sql<number>`COALESCE((SELECT SUM(
+      (pi.quantity * pi.unit_cost - pi.discount + pi.tax) * pi.cancelled_quantity / NULLIF(pi.quantity, 0)
+    ) FROM purchase_items pi WHERE pi.purchase_id = ${purchases.id}), 0)::numeric`;
+  const outstandingSql = sql<number>`ROUND(COALESCE(${purchases.totalAmount}, 0) - ${paidAmountSql} - ${returnAmountSql} - ${cancelledAmountSql}, 2)::float8`;
 
   const conditions = [
     eq(purchases.businessId, businessId),
@@ -414,6 +426,7 @@ export async function getSupplierDueRows(
       totalAmount: purchases.totalAmount,
       paidAmount: paidAmountSql,
       returnAmount: returnAmountSql,
+      cancelledAmount: cancelledAmountSql,
       outstandingAmount: outstandingSql,
     })
     .from(purchases)
@@ -661,8 +674,14 @@ export async function recordSupplierPayment(
 
     // Reuse the receive-flow rules: you can only pay for goods that have
     // actually been received (batch-authoritative, D1), never beyond the
-    // invoice total. calculatePayments throws BadRequestError directly.
+    // invoice total net of cancelled quantities (Phase 3).
+    // calculatePayments throws BadRequestError directly.
     const receivedAmount = await getPurchaseReceivedAmountInTx(
+      tx,
+      businessId,
+      purchaseId,
+    );
+    const cancelledAmount = await getPurchaseCancelledValueInTx(
       tx,
       businessId,
       purchaseId,
@@ -672,6 +691,7 @@ export async function recordSupplierPayment(
       paymentAmount: roundMoney(amount),
       totalAmount: purchase.totalAmount,
       receivedAmount,
+      cancelledAmount,
     });
 
     let inserted: { id: number } | undefined;
@@ -871,7 +891,7 @@ export async function getPurchasePayments(
 /* ------------------------------------------------------------------ */
 
 type LedgerTransactionRow = {
-  type: "invoice" | "payment" | "refund" | "purchase" | "return";
+  type: "invoice" | "payment" | "refund" | "purchase" | "return" | "cancellation";
   transactionDate: Date | string | null;
   reference: string;
   description: string | null;
@@ -1130,10 +1150,41 @@ export async function getSupplierLedger(
       ),
     );
 
+  // Cancelled outstanding quantities (Phase 3) reduce what is owed —
+  // shown as credits so the ledger's running balance matches the derived
+  // outstanding.
+  const cancellationRows = await db
+    .select({
+      type: sql<"cancellation">`'cancellation'`,
+      transactionDate: purchaseDiscrepancies.resolvedAt,
+      reference: sql<string>`'CAN-' || ${purchaseDiscrepancies.id}`,
+      description: sql<string>`'Cancelled outstanding quantity'`,
+      debit: sql<number>`0`,
+      credit: sql<number>`ROUND(
+        (${purchaseItems.quantity} * ${purchaseItems.unitCost} - ${purchaseItems.discount} + ${purchaseItems.tax}) / NULLIF(${purchaseItems.quantity}, 0)
+        * ${purchaseDiscrepancies.quantity}, 2)::float8`,
+      relatedId: purchaseDiscrepancies.id,
+    })
+    .from(purchaseDiscrepancies)
+    .innerJoin(
+      purchaseItems,
+      eq(purchaseDiscrepancies.purchaseItemId, purchaseItems.id),
+    )
+    .innerJoin(purchases, eq(purchaseDiscrepancies.purchaseId, purchases.id))
+    .where(
+      and(
+        eq(purchaseDiscrepancies.type, "shortage"),
+        eq(purchaseDiscrepancies.resolution, "cancel"),
+        eq(purchases.supplierId, supplierId),
+        eq(purchases.businessId, businessId),
+      ),
+    );
+
   const allRows: LedgerTransactionRow[] = [
     ...purchaseRows,
     ...paymentRows,
     ...returnRows,
+    ...cancellationRows,
   ];
 
   const hasFrom = query.from !== undefined;
