@@ -6,6 +6,9 @@ import type { PurchasesItems } from "../../purchase.types";
 import type { ReceiveItemsFormValues } from "../../schemas/receiveItem.schema";
 import { SerialsDialog } from "./SerialsDialog";
 import { BatchesDialog } from "./BatchesDialog";
+import { ReceivingDiscrepancyDialog } from "../receiving/ReceivingDiscrepancyDialog";
+import { ResolveOutstandingDialog } from "../receiving/ResolveOutstandingDialog";
+import { outstandingOf, overReceiveOf } from "../../utils/receiveQuantities";
 
 export function ItemsReceiveTable({
   receivePurchasesItems,
@@ -23,12 +26,13 @@ export function ItemsReceiveTable({
             <th className="px-3 py-3 font-medium">Unit</th>
             <th className="px-3 py-3 text-right font-medium">Ordered</th>
             <th className="px-3 py-3 text-right font-medium">Received</th>
-            <th className="px-3 py-3 text-right font-medium">Remaining</th>
+            <th className="px-3 py-3 text-right font-medium">Outstanding</th>
             <th className="w-28 px-3 py-3 font-medium">Receive now</th>
             <th className="w-28 px-3 py-3 font-medium">Unit cost</th>
             <th className="w-28 px-3 py-3 font-medium">Selling price</th>
             <th className="px-3 py-3 text-right font-medium">Total</th>
             <th className="px-4 py-3 font-medium">Tracking</th>
+            <th className="px-4 py-3 font-medium">Discrepancy</th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -65,12 +69,11 @@ function ReceiveItemRow({
       control: form.control,
       name: `items.${index}.unitCost`,
     }) ?? 0;
-  const remaining = Math.max(
-    0,
-    Number(item.quantity) - Number(item.receivedQuantity),
-  );
+  // Outstanding excludes cancelled quantities (short-receiving write-offs).
+  const outstanding = outstandingOf(item);
+  const over = overReceiveOf(item, Number(receiveNow) || 0);
   const rowTotal = (Number(receiveNow) || 0) * (Number(unitCost) || 0);
-  const disabled = remaining === 0;
+  const disabled = outstanding === 0;
   const serialError =
     form.formState.errors.items?.[index]?.serialNumbers?.message;
   const batchError =
@@ -96,7 +99,7 @@ function ReceiveItemRow({
       </td>
       <td className="px-3 py-3 text-right">{item.quantity}</td>
       <td className="px-3 py-3 text-right">{item.receivedQuantity}</td>
-      <td className="px-3 py-3 text-right font-medium">{remaining}</td>
+      <td className="px-3 py-3 text-right font-medium">{outstanding}</td>
       <td className="px-3 py-2">
         <NumberField
           form={form}
@@ -104,9 +107,15 @@ function ReceiveItemRow({
           label={`${item.variantName || item.productName} receive quantity`}
           disabled={disabled}
           min={0}
-          max={remaining}
+          max={outstanding + (over?.overQuantity ?? 0)}
           step={item.trackingType === "serial" ? "1" : "0.001"}
         />
+        {over && (
+          <span className="mt-1 block text-xs text-amber-700">
+            Over-receiving {over.overQuantity} — reason required in
+            Discrepancy…
+          </span>
+        )}
         {serialError && item.trackingType === "serial" && (
           <p className="mt-1 text-xs text-destructive">{serialError}</p>
         )}
@@ -138,6 +147,9 @@ function ReceiveItemRow({
         {rowTotal.toFixed(2)}
       </td>
       <td className="px-4 py-2">
+        <div className="mb-1">
+          <ResolveOutstandingDialog item={item} />
+        </div>
         {disabled ? (
           <span className="text-xs text-muted-foreground">Complete</span>
         ) : item.trackingType === "batch" ? (
@@ -157,6 +169,9 @@ function ReceiveItemRow({
         ) : (
           <Minus className="size-4 text-muted-foreground" />
         )}
+      </td>
+      <td className="px-4 py-2">
+        <ReceivingDiscrepancyDialog item={item} form={form} index={index} />
       </td>
     </tr>
   );

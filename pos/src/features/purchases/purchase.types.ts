@@ -45,6 +45,10 @@ export interface PurchasesItems {
   variantId: number;
   quantity: number;
   receivedQuantity: number;
+  /** Quantity-discrepancy split (migration 0052). */
+  deliveredQuantity: number;
+  rejectedQuantity: number;
+  cancelledQuantity: number;
   unitCost: number;
   discount: number;
   tax: number;
@@ -53,6 +57,84 @@ export interface PurchasesItems {
   receiveNow: number;
   trackingType: string;
   availableStock: number | null;
+}
+
+export type RejectionCategory = "damaged" | "incorrect" | "expired" | "other";
+export type OutstandingResolution = "receive_later" | "cancel" | "backordered";
+export type DiscrepancyResolution = "supplier_credit" | "replacement";
+
+export interface ResolveOutstandingInput {
+  items: {
+    purchaseItemId: number;
+    quantity: number;
+    resolution: OutstandingResolution;
+    reason?: string;
+  }[];
+}
+
+export interface ResolveOutstandingResponse {
+  success: boolean;
+  message: string;
+  data: {
+    purchaseId: number;
+    status: string;
+    resolved: {
+      purchaseItemId: number;
+      quantity: number;
+      resolution: string;
+      outstandingAfter: number;
+    }[];
+    cancelledValue: number;
+    dueAmount: number;
+    paymentStatus: string | null;
+    landedCost: LandedCostFeedback;
+  };
+}
+
+export interface ResolveDiscrepancyInput {
+  resolution: DiscrepancyResolution;
+  reason?: string;
+}
+
+export interface PurchaseReceivingRecord {
+  id: number;
+  purchaseItemId: number;
+  variantId: number;
+  locationId: number;
+  deliveredQuantity: number;
+  acceptedQuantity: number;
+  rejectedQuantity: number;
+  unitCost: number;
+  rejectionCategory: string | null;
+  rejectionReason: string | null;
+  overReceived: boolean;
+  approvalReason: string | null;
+  receivedByUserId: number;
+  approvedByUserId: number | null;
+  createdAt: string;
+}
+
+export interface PurchaseDiscrepancy {
+  id: number;
+  purchaseItemId: number;
+  type: "over_receival" | "shortage" | "rejection" | "cancellation";
+  quantity: number;
+  reason: string | null;
+  category: string | null;
+  status: "open" | "resolved" | "cancelled";
+  resolution: string | null;
+  resolvedByUserId: number | null;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+export interface PurchaseDiscrepancyResponse {
+  success: boolean;
+  data: {
+    purchaseId: number;
+    receivingRecords: PurchaseReceivingRecord[];
+    discrepancies: PurchaseDiscrepancy[];
+  };
 }
 export interface PurchasesReturnItems {
   purchaseItemId: number;
