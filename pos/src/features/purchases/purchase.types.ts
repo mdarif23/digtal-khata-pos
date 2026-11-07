@@ -24,6 +24,9 @@ export interface PurchaseStoreType {
   createdAt: Date;
   updatedAt: Date;
   supplierName: string | null;
+  supplierPhone?: string | null;
+  /** Derived (Phase 3): workflow-complete with ZERO accepted goods — never present as received. */
+  fullyCancelled?: boolean;
 }
 export interface PurchaseCart extends Omit<ProductType, "variants"> {
   variants: [(ProductVariantType & { id: number })];
@@ -126,6 +129,79 @@ export interface PurchaseDiscrepancy {
   resolvedByUserId: number | null;
   resolvedAt: string | null;
   createdAt: string;
+}
+
+export interface PurchaseListItem {
+  id: number;
+  purchaseOrderNumber: string;
+  purchaseDate: string;
+  supplierId: number | null;
+  supplierName: string | null;
+  supplierPhone: string | null;
+  receivingStatus: "ordered" | "partially_received" | "received";
+  returnStatus: "Returned" | "Partially returned" | null;
+  fullyCancelled: boolean;
+
+  totalItems: number;
+  orderedQuantity: number;
+  acceptedReceivedQuantity: number;
+  rejectedQuantity: number;
+  cancelledQuantity: number;
+  returnedQuantity: number;
+  outstandingQuantity: number;
+
+  subtotal: number;
+  discount: number;
+  tax: number;
+  shippingCost: number;
+  landedCostStatus: "pending" | "allocated" | null;
+
+  totalAmount: number;
+  paidAmount: number;
+  dueAmount: number;
+  paymentStatus: "paid" | "unpaid" | "partial";
+
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PurchaseListParams {
+  page: number;
+  pageSize: number;
+  search?: string;
+  receivingStatus?: "ordered" | "partially_received" | "received";
+  returnStatus?: "Returned" | "Partially returned";
+  fullyCancelled?: "true" | "false";
+  supplierId?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  sortBy?: "purchaseDate" | "totalAmount" | "dueAmount" | "purchaseOrderNumber";
+  sortOrder?: "asc" | "desc";
+}
+
+export interface PurchaseListPage {
+  data: PurchaseListItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+  counts: {
+    all: number;
+    ordered: number;
+    partially_received: number;
+    received: number;
+    partially_returned: number;
+    returned: number;
+    cancelled: number;
+  };
+  summary: {
+    totalPurchases: number;
+    awaitingReceipt: number;
+    outstandingBalance: number;
+  };
 }
 
 export interface PurchaseDiscrepancyResponse {

@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProductCard } from "@/components/common/ProductCard";
 import { ShowVariants } from "@/components/common/ShowVariants";
+import { useQueryClient } from "@tanstack/react-query";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
 import { toast } from "@/components/ui/toast";
 import {
@@ -54,6 +55,7 @@ function toActiveProducts(catalog: ProductType[]) {
 
 export function PurchasesOrder() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchProducts, setSearchProducts] = useState("");
   const [purchaseDate, setPurchaseDate] = useState(
     new Date().toISOString().slice(0, 10),
@@ -284,6 +286,9 @@ export function PurchasesOrder() {
           `Purchase order ${response.data.purchaseOrderNumber} created`,
       });
       await getPurchases();
+      // The list is TanStack-cached (Phase 6) — refresh it so the new
+      // order is there when the user lands back on it.
+      await queryClient.invalidateQueries({ queryKey: ["purchases", "list"] });
       navigate("/purchases-list");
     } finally {
       setIsSubmitting(false);
