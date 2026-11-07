@@ -50,6 +50,43 @@ router.get(
     return purchasesController.getPurchaseDetail(req, res);
   },
 );
+// Receiving configuration (over-receiving tolerance). Reads use the
+// receive-level gate; updates are owner/edit-level financial config.
+router.get(
+  "/api/purchases/receiving-settings",
+  ...read,
+  requirePermission("purchases.receive"),
+  purchasesController.getReceivingSettingsHandler,
+);
+router.put(
+  "/api/purchases/receiving-settings",
+  ...write,
+  requirePermission("purchases.edit"),
+  purchasesController.updateReceivingSettingsHandler,
+);
+// Short-receiving resolution (Phase 3): cancel / receive-later /
+// backordered decisions on a purchase's outstanding quantities. Financial
+// (cancellation reduces the payable) — purchases.edit gate.
+router.post(
+  "/api/purchases/:id/outstanding-resolution",
+  ...write,
+  requirePermission("purchases.edit"),
+  purchasesController.resolveOutstanding,
+);
+// Rejection resolution + discrepancy audit trail (Phase 4). Resolving is
+// a recorded decision only — credits/payments are never auto-created.
+router.get(
+  "/api/purchases/:id/discrepancies",
+  ...read,
+  requirePermission("purchases.view"),
+  purchasesController.getDiscrepancies,
+);
+router.post(
+  "/api/purchases/:id/discrepancies/:discrepancyId/resolve",
+  ...write,
+  requirePermission("purchases.edit"),
+  purchasesController.resolveDiscrepancy,
+);
 router.post(
   "/api/purchases/receive",
   ...write,

@@ -1,4 +1,12 @@
 import { z } from "zod";
+
+export const REJECTION_CATEGORIES = [
+  "damaged",
+  "incorrect",
+  "expired",
+  "other",
+] as const;
+
 export const receiveItemsFormSchema = z.object({
   purchaseId: z.number().int().positive(),
   items: z.array(
@@ -6,7 +14,16 @@ export const receiveItemsFormSchema = z.object({
       .object({
         itemId: z.number().int().positive(),
         trackingType: z.enum(["none", "batch", "serial"]),
+        // ACCEPTED quantity — the only quantity that enters inventory.
         receiveNow: z.number().finite().min(0),
+        // Delivered but refused — recorded, never stocked or valued.
+        // (Required: the page's form defaults always provide 0.)
+        rejectedQuantity: z.number().finite().min(0),
+        rejectionCategory: z.enum(REJECTION_CATEGORIES).optional(),
+        rejectionReason: z.string().max(300).optional(),
+        // Required whenever this line accepts more than the outstanding
+        // quantity (over-receiving — within tolerance or approved).
+        overReceiveReason: z.string().max(300).optional(),
         unitCost: z.number().finite().min(0),
         sellingPrice: z.number().finite().min(0),
         batches: z.array(
@@ -51,6 +68,22 @@ export const receiveItemsFormSchema = z.object({
               code: z.ZodIssueCode.custom,
               path: ["batches"],
               message: `Batch total quantity (${totalBatchQty}) must equal receive quantity (${data.receiveNow}).`,
+            });
+          }
+        }
+        if (data.rejectedQuantity > 0) {
+          if (!data.rejectionCategory) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["rejectionCategory"],
+              message: "A rejection category is required for rejected goods.",
+            });
+          }
+          if (!data.rejectionReason?.trim()) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["rejectionReason"],
+              message: "A rejection reason is required for rejected goods.",
             });
           }
         }

@@ -979,4 +979,237 @@ describe("landed cost integration", { skip: !runIntegration }, () => {
     const poAfterDelta = listAfterDelta.allPurchases.find((p: any) => p.id === pid);
     assert.equal(poAfterDelta.landedCostStatus, "allocated");
   });
+
+  /* ------------------------------------------------------------------
+   * Phase 6 (discrepancy feature): landed-cost × quantity discrepancies.
+   * Self-contained assertions (per purchase/doc) — no shared-variant
+   * baselines, so placement at the end is deliberate.
+   * ------------------------------------------------------------------ */
+
+  it("holds rejected quantities as pending until replaced (they are delivered, not accepted)", async () => {
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId: mediumVariantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201);
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find(
+      (i) => i.purchaseId === pid,
+    ).id;
+
+    // Deliver 10: accept 8, reject 2 (damaged).
+    const received = await api(owner, "POST", "/api/purchases/receive", {
+      purchaseId: pid,
+      items: [
+        {
+          itemId,
+          trackingType: "none",
+          receiveNow: 8,
+          rejectedQuantity: 2,
+          rejectionCategory: "damaged",
+          rejectionReason: "crushed cartons",
+          unitCost: 100,
+          sellingPrice: 150,
+          batches: [],
+          serialNumbers: [],
+        },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(received.status, 201, JSON.stringify(received.body));
+
+    // 200 capitalizable over an ordered basis of 10 → received share 160,
+    // the rejected 2 units hold 40 pending until replaced.
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [{ expenseType: "shipping", amount: 200, isCapitalizable: true }],
+    });
+    assert.equal(doc.status, 201);
+    const docId = doc.body.data.id as number;
+    assert.equal((await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status, 200);
+
+    const detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 160);
+    assert.equal(Number(detail.data.document.pendingAllocationAmount), 40);
+    const batch = (await dbRows(
+      "SELECT additional_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1",
+      [itemId],
+    ))[0] as Record<string, string>;
+    assert.equal(Number(batch.additional_cost_per_unit), 20); // 160 / 8
+
+    // Replacement arrives → delta allocates the pending 40 to the new batch.
+    await api(owner, "POST", "/api/purchases/receive", {
+      purchaseId: pid,
+      items: [
+        { itemId, trackingType: "none", receiveNow: 2, unitCost: 100, sellingPrice: 150, batches: [], serialNumbers: [] },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    const detail2 = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(detail2.data.document.totalAllocatedAmount), 200);
+    assert.equal(Number(detail2.data.document.pendingAllocationAmount), 0);
+    const batches = await dbRows(
+      "SELECT quantity_received, additional_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1 ORDER BY id",
+      [itemId],
+    );
+    assert.equal(Number(batches[1].additional_cost_per_unit), 20);
+  });
+
+  it("clamps over-received allocation: full capitalizable amount, nothing pending", async () => {
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId: mediumVariantId, quantity: 4, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201);
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find(
+      (i) => i.purchaseId === pid,
+    ).id;
+
+    // Ordered 4, accepted 6 (over-receive 2, owner has the permission).
+    const received = await api(owner, "POST", "/api/purchases/receive", {
+      purchaseId: pid,
+      items: [
+        {
+          itemId,
+          trackingType: "none",
+          receiveNow: 6,
+          unitCost: 100,
+          sellingPrice: 150,
+          batches: [],
+          serialNumbers: [],
+          overReceiveReason: "full case shipped",
+        },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(received.status, 201, JSON.stringify(received.body));
+
+    // 200 over an ordered basis of 4 → unclamped received share 300 →
+    // clamped at the line's total target 200 across 6 accepted units.
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [{ expenseType: "shipping", amount: 200, isCapitalizable: true }],
+    });
+    assert.equal(doc.status, 201);
+    const docId = doc.body.data.id as number;
+    assert.equal((await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status, 200);
+
+    const detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 200);
+    assert.equal(Number(detail.data.document.pendingAllocationAmount), 0);
+    const batch = (await dbRows(
+      "SELECT additional_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1",
+      [itemId],
+    ))[0] as Record<string, string>;
+    assert.ok(
+      Math.abs(Number(batch.additional_cost_per_unit) - 200 / 6) < 0.0001,
+      `unexpected additional cost ${batch.additional_cost_per_unit}`,
+    );
+  });
+
+  it("resolves pending allocation when outstanding is cancelled after posting", async () => {
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId: mediumVariantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201);
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find(
+      (i) => i.purchaseId === pid,
+    ).id;
+
+    await api(owner, "POST", "/api/purchases/receive", {
+      purchaseId: pid,
+      items: [
+        { itemId, trackingType: "none", receiveNow: 4, unitCost: 100, sellingPrice: 150, batches: [], serialNumbers: [] },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+
+    // Post with 6 units still outstanding → 80 allocated, 120 pending.
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [{ expenseType: "shipping", amount: 200, isCapitalizable: true }],
+    });
+    assert.equal(doc.status, 201);
+    const docId = doc.body.data.id as number;
+    assert.equal((await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status, 200);
+    let detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 80);
+    assert.equal(Number(detail.data.document.pendingAllocationAmount), 120);
+
+    // Cancel the outstanding 6 → the effective ordered basis drops to 4,
+    // and the resolution triggers the allocation delta IN THE SAME
+    // transaction: the pending 120 lands on the existing batch.
+    const resolved = await api(
+      owner,
+      "POST",
+      `/api/purchases/${pid}/outstanding-resolution`,
+      {
+        items: [
+          {
+            purchaseItemId: itemId,
+            quantity: 6,
+            resolution: "cancel",
+            reason: "supplier discontinued the item",
+          },
+        ],
+      },
+    );
+    assert.equal(resolved.status, 200, JSON.stringify(resolved.body));
+    assert.equal(resolved.body.data.landedCost.adjusted, true);
+    assert.equal(Number(resolved.body.data.landedCost.amount), 120);
+    assert.equal(Number(resolved.body.data.landedCost.documentId), docId);
+
+    detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(detail.data.document.status, "adjusted");
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 200);
+    assert.equal(Number(detail.data.document.pendingAllocationAmount), 0);
+    const batch = (await dbRows(
+      "SELECT additional_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1",
+      [itemId],
+    ))[0] as Record<string, string>;
+    assert.equal(Number(batch.additional_cost_per_unit), 50); // 200 / 4
+
+    // No duplicate adjustments: a no-op receive (all zero) adds nothing.
+    const adjustmentsBefore = (detail.data.adjustments as any[]).length;
+    await api(owner, "POST", "/api/purchases/receive", {
+      purchaseId: pid,
+      items: [
+        { itemId, trackingType: "none", receiveNow: 0, unitCost: 0, sellingPrice: 0, batches: [], serialNumbers: [] },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    const detail3 = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal((detail3.data.adjustments as any[]).length, adjustmentsBefore);
+    assert.equal(Number(detail3.data.document.totalAllocatedAmount), 200);
+  });
 });
+

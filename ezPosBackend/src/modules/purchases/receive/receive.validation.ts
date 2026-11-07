@@ -8,6 +8,7 @@ import { purchases } from "../../../db/schema/purchases.js";
 import {
   BadRequestError,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
 } from "../../../utils/handleError.js";
 import type { Items, PurchaseItem } from "./receive.types.js";
@@ -96,29 +97,62 @@ export async function purchaseItemsValidation(
   return existingItems;
 }
 //receiveItemsValidation
-export async function receiveItemsValidation(
+export interface OverReceiveDecision {
+  overQuantity: number;
+  withinTolerance: boolean;
+}
+
+/**
+ * Accepted quantity vs outstanding. Accepting more than outstanding is an
+ * OVER-RECEIVE and is only allowed when:
+ * - the over-quantity is within the business's configured tolerance
+ *   (a percentage of the ORDERED quantity), or
+ * - the caller holds `purchases.over_receive`.
+ * Any over-receive requires a recorded reason; the decision is returned so
+ * the caller can write the receiving record + discrepancy with the approver.
+ */
+export function receiveItemsValidation(
   purchaseItem: PurchaseItem,
   receiveItem: Items,
-) {
+  options: { tolerancePercent: number; canOverReceive: boolean },
+): OverReceiveDecision | null {
   // -------------------------------------------------------
   // Receive quantity
   // -------------------------------------------------------
 
   if (receiveItem.receiveNow <= 0) {
-    return; // Skip items with zero or negative receiveNow
+    return null; // Skip items with zero or negative receiveNow
   }
 
-  const remainingQuantity =
-    purchaseItem.quantity - purchaseItem.receivedQuantity;
+  // Outstanding excludes cancelled quantities (short-receiving resolution).
+  const outstanding =
+    Number(purchaseItem.quantity) -
+    Number(purchaseItem.receivedQuantity) -
+    Number(purchaseItem.cancelledQuantity ?? 0);
 
-  // Strict receiving:
-  // Do not allow receiving more than ordered.
-  if (receiveItem.receiveNow > remainingQuantity) {
-    throw new BadRequestError(
-      `Cannot receive ${receiveItem.receiveNow} for item ${purchaseItem.id}. ` +
-        `Only ${remainingQuantity} remaining.`,
+  if (receiveItem.receiveNow <= outstanding) {
+    return null; // Within the ordered remainder — normal receiving.
+  }
+
+  const overQuantity = receiveItem.receiveNow - outstanding;
+  // Tolerance is a share of the ORDERED quantity, never of the over-amount.
+  const toleranceQuantity =
+    (Number(purchaseItem.quantity) * options.tolerancePercent) / 100;
+  const withinTolerance = overQuantity <= toleranceQuantity + 1e-9;
+
+  if (!options.canOverReceive && !withinTolerance) {
+    throw new ForbiddenError(
+      `Over-receiving ${overQuantity} unit(s) of item ${purchaseItem.id} exceeds the ${options.tolerancePercent}% tolerance and requires the "purchases.over_receive" permission.`,
     );
   }
+
+  if (!receiveItem.overReceiveReason?.trim()) {
+    throw new BadRequestError(
+      `An over-receiving reason is required when accepting more than the outstanding ${Math.max(outstanding, 0)} for item ${purchaseItem.id}.`,
+    );
+  }
+
+  return { overQuantity, withinTolerance };
 }
 //batchValidation
 export function batchValidation(purchaseItem: PurchaseItem, receiveItem: Items) {

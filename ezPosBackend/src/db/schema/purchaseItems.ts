@@ -31,7 +31,32 @@ export const purchaseItems = pgTable(
       scale: 3,
       mode: "number",
     }).notNull(),
-    cancelledQuantity: numeric("cancelled_quantity   ", {
+    /**
+     * Quantity-discrepancy split (migration 0052): `quantity` stays the
+     * ordered amount and is NEVER mutated; `receivedQuantity` stays the
+     * cumulative ACCEPTED quantity (all financial/landed/return math keys
+     * off it); delivered = accepted + rejected (informational); cancelled
+     * is set by short-receiving resolutions and is excluded from
+     * outstanding (quantity − received − cancelled).
+     *
+     * Historical note: cancelled_quantity existed in the baseline migration
+     * with trailing spaces in the identifier; 0052 renamed it clean.
+     */
+    deliveredQuantity: numeric("delivered_quantity", {
+      precision: 12,
+      scale: 3,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    rejectedQuantity: numeric("rejected_quantity", {
+      precision: 12,
+      scale: 3,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    cancelledQuantity: numeric("cancelled_quantity", {
       precision: 12,
       scale: 3,
       mode: "number",

@@ -7,27 +7,37 @@ import { serialNumbers } from "../../../db/schema/serialNumbers.js";
 import { purchases } from "../../../db/schema/purchases.js";
 import { purchasePayments } from "../../../db/schema/purchasePayments.js";
 import { productVariants } from "../../../db/schema/productVariants.js";
+import { purchaseReceivingRecords } from "../../../db/schema/purchaseReceivingRecords.js";
 import { receivedAmountFromBatches } from "./receive.calculations.js";
 
 // Every function takes the caller's server-verified businessId (from
 // requireBusinessContext) and scopes all reads and writes to it.
 // Pure calculations live in receive.calculations.ts; inventory writes
 // (stock/movements) live in modules/inventory — this file keeps the
-// receive-specific writers (batches, serials) and purchase persistence.
+// receive-specific writers (batches, serials, receiving records) and
+// purchase persistence.
 
 export async function updatePurchaseItems(
   tx: DbTransaction,
   businessId: number,
   purchaseItemId: number,
-  newReceivedQuantity: number,
+  quantities: {
+    receivedQuantity: number;
+    deliveredQuantity: number;
+    rejectedQuantity: number;
+  },
 ) {
   // D1 (batch-authoritative): the line's unit_cost stays the PO order cost.
   // The cost entered at each receive session is persisted on that session's
   // inventory_batches rows (purchase_price), never overwritten here.
+  // delivered/rejected accumulate the discrepancy split; `quantity` (the
+  // ordered amount) is NEVER mutated by receiving.
   await tx
     .update(purchaseItems)
     .set({
-      receivedQuantity: newReceivedQuantity,
+      receivedQuantity: quantities.receivedQuantity,
+      deliveredQuantity: quantities.deliveredQuantity,
+      rejectedQuantity: quantities.rejectedQuantity,
     })
     .where(
       and(
@@ -148,6 +158,7 @@ export async function getAllPurchaseItems(
     .select({
       quantity: purchaseItems.quantity,
       receivedQuantity: purchaseItems.receivedQuantity,
+      cancelledQuantity: purchaseItems.cancelledQuantity,
       unitCost: purchaseItems.unitCost,
     })
     .from(purchaseItems)
@@ -157,6 +168,56 @@ export async function getAllPurchaseItems(
         eq(purchaseItems.businessId, businessId),
       ),
     );
+}
+
+export interface ReceivingRecordInput {
+  purchaseId: number;
+  purchaseItemId: number;
+  variantId: number;
+  locationId: number;
+  acceptedQuantity: number;
+  rejectedQuantity: number;
+  unitCost: number;
+  rejectionCategory?: string | undefined;
+  rejectionReason?: string | undefined;
+  overReceived: boolean;
+  approvalReason?: string | undefined;
+  receivedByUserId: number;
+  approvedByUserId?: number | undefined;
+}
+
+/**
+ * Per-delivery audit rows (migration 0052). Rejected goods exist only
+ * here — they never reach batches, stock, or movements.
+ */
+export async function insertReceivingRecords(
+  tx: DbTransaction,
+  businessId: number,
+  records: ReceivingRecordInput[],
+) {
+  if (records.length === 0) return [];
+  return tx
+    .insert(purchaseReceivingRecords)
+    .values(
+      records.map((record) => ({
+        businessId,
+        purchaseId: record.purchaseId,
+        purchaseItemId: record.purchaseItemId,
+        variantId: record.variantId,
+        locationId: record.locationId,
+        deliveredQuantity: record.acceptedQuantity + record.rejectedQuantity,
+        acceptedQuantity: record.acceptedQuantity,
+        rejectedQuantity: record.rejectedQuantity,
+        unitCost: record.unitCost,
+        rejectionCategory: record.rejectionCategory ?? null,
+        rejectionReason: record.rejectionReason ?? null,
+        overReceived: record.overReceived,
+        approvalReason: record.approvalReason ?? null,
+        receivedByUserId: record.receivedByUserId,
+        approvedByUserId: record.approvedByUserId ?? null,
+      })),
+    )
+    .returning({ id: purchaseReceivingRecords.id, purchaseItemId: purchaseReceivingRecords.purchaseItemId });
 }
 
 /**

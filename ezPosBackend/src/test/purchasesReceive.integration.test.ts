@@ -138,6 +138,7 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
       number,
       { batchNumber: string; quantity: number }[]
     > = {},
+    overReceiveReason?: string,
   ) {
     return rows.map((row, i) => ({
       itemId: row.id,
@@ -151,6 +152,7 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
         expiryDate: "2027-01-01",
       })),
       serialNumbers: [],
+      ...(overReceiveReason ? { overReceiveReason } : {}),
     }));
   }
 
@@ -760,7 +762,7 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
     assert.match(String(again.body?.message), /already been completely received/);
   });
 
-  it("rejects over-receiving and rolls the transaction back completely", async () => {
+  it("rejects over-receiving beyond tolerance without the permission and rolls back", async () => {
     const owner = await createOwnerCtx(baseUrl, "Receive Over Co");
     const supplierId = await createSupplier(owner);
     const variantId = await seedVariant(owner.businessId);
@@ -780,8 +782,10 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
         paymentMethod: "cash",
       },
     );
+    // Owner wildcard (*) has over_receive... EXCEPT the reason is missing:
+    // beyond-tolerance + permission but no reason is still a 400.
     assert.equal(status, 400);
-    assert.match(String(body?.message), /Cannot receive 3 .* Only 2 remaining/);
+    assert.match(String(body?.message), /over-receiving reason is required/);
 
     // Rollback proof: nothing was written.
     const stock = await stockRow(owner.businessId, variantId);
@@ -836,7 +840,7 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
       },
     );
     assert.equal(status, 400);
-    assert.match(String(body?.message), /Only 10 remaining/);
+    assert.match(String(body?.message), /over-receiving reason is required/);
 
     // The VALID first item must not have been written either — one tx.
     const stock = await stockRow(owner.businessId, variantId);
@@ -928,4 +932,474 @@ describe("purchase receive integration", { skip: !runIntegration }, () => {
     const missing = await getJson(baseUrl, owner, "/api/purchases/999999");
     assert.equal(missing.status, 404);
   });
+
+  /** Manager has purchases.receive but NOT purchases.over_receive (RBAC default). */
+  async function createManagerCtx(owner: OwnerCtx): Promise<OwnerCtx> {
+    const role = (await pg!.query(
+      "SELECT id FROM roles WHERE business_id = $1 AND slug = 'manager'",
+      [owner.businessId],
+    )).rows[0] as { id: number };
+    const loc = (await pg!.query(
+      "SELECT id FROM locations WHERE business_id = $1 AND is_default = true",
+      [owner.businessId],
+    )).rows[0] as { id: number };
+    const email = `mgr-${Date.now()}-${(counter += 1)}@example.test`;
+    const created = await postJson(baseUrl, owner, "/api/users", {
+      fullName: "Receiving Manager",
+      email,
+      password: "strong-password-123",
+      roleIds: [Number(role.id)],
+      locationIds: [Number(loc.id)],
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: "strong-password-123" }),
+    });
+    assert.equal(login.status, 200);
+    const body = (await login.json()) as { accessToken: string; user: { id: number } };
+    return {
+      token: body.accessToken,
+      businessId: owner.businessId,
+      userId: body.user.id,
+      email,
+    };
+  }
+
+  it("accepts more than ordered with the over_receive permission and records the audit trail", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive OverOK Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    // Ordered 10, delivered 15, accepted 15, over-received 5.
+    const purchase = await createPurchase(owner, supplierId, variantId, 10, 100);
+    const rows = await purchaseItemRows(purchase.id);
+
+    const { status, body } = await postJson(
+      baseUrl,
+      owner,
+      "/api/purchases/receive",
+      {
+        purchaseId: purchase.id,
+        items: receivePlan(
+          rows,
+          [{ receiveNow: 15, unitCost: 100, sellingPrice: 150 }],
+          "none",
+          {},
+          "Supplier shipped full case",
+        ),
+        paymentAmount: 0,
+        paymentMethod: "cash",
+      } as never,
+    );
+    assert.equal(status, 201, `over-receive failed: ${JSON.stringify(body)}`);
+    assert.equal(body?.data?.status, "received");
+    assert.deepEqual(body?.data?.discrepancies, [
+      {
+        purchaseItemId: rows[0]!.id,
+        type: "over_receival",
+        overQuantity: 5,
+        withinTolerance: false,
+      },
+    ]);
+
+    // Accepted goods are ALL in stock, one batch at the session cost.
+    const stock = await stockRow(owner.businessId, variantId);
+    assert.equal(Number(stock?.quantity), 15);
+    const batch = (await pg!.query(
+      "SELECT quantity_received, quantity_remaining, purchase_price FROM inventory_batches WHERE purchase_item_id = $1",
+      [rows[0]!.id],
+    )).rows[0] as { quantity_received: string; quantity_remaining: string; purchase_price: string };
+    assert.equal(Number(batch.quantity_received), 15);
+    assert.equal(Number(batch.purchase_price), 100);
+
+    // The ordered quantity on the line is preserved; split recorded.
+    const line = (await pg!.query(
+      `SELECT quantity, received_quantity, delivered_quantity, rejected_quantity
+       FROM purchase_items WHERE id = $1`,
+      [rows[0]!.id],
+    )).rows[0] as { quantity: string; received_quantity: string; delivered_quantity: string; rejected_quantity: string };
+    assert.equal(Number(line.quantity), 10);
+    assert.equal(Number(line.received_quantity), 15);
+    assert.equal(Number(line.delivered_quantity), 15);
+    assert.equal(Number(line.rejected_quantity), 0);
+
+    // Audit trail: receiving record with approver + resolved discrepancy.
+    const record = (await pg!.query(
+      `SELECT delivered_quantity, accepted_quantity, over_received, approval_reason,
+              received_by_user_id, approved_by_user_id
+       FROM purchase_receiving_records WHERE purchase_item_id = $1`,
+      [rows[0]!.id],
+    )).rows[0] as Record<string, unknown>;
+    assert.equal(Number(record.accepted_quantity), 15);
+    assert.equal(Number(record.delivered_quantity), 15);
+    assert.equal(record.over_received, true);
+    assert.equal(record.approval_reason, "Supplier shipped full case");
+    assert.equal(Number(record.approved_by_user_id), owner.userId);
+
+    const discrepancy = (await pg!.query(
+      `SELECT type, quantity, status, resolved_by_user_id FROM purchase_discrepancies
+       WHERE purchase_item_id = $1`,
+      [rows[0]!.id],
+    )).rows[0] as Record<string, unknown>;
+    assert.equal(discrepancy.type, "over_receival");
+    assert.equal(Number(discrepancy.quantity), 5);
+    assert.equal(discrepancy.status, "resolved");
+  });
+
+  it("answers 403 for over-receiving beyond tolerance without the permission", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive Over403 Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    const purchase = await createPurchase(owner, supplierId, variantId, 10, 100);
+    const rows = await purchaseItemRows(purchase.id);
+    const manager = await createManagerCtx(owner);
+
+    const denied = await postJson(baseUrl, manager, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(rows, [
+        { receiveNow: 11, unitCost: 100, sellingPrice: 150 },
+      ]),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+      overReceiveReason: "one extra unit",
+    } as never);
+    assert.equal(denied.status, 403);
+    assert.match(
+      String(denied.body?.message),
+      /requires the "purchases.over_receive" permission/,
+    );
+
+    // Nothing was written.
+    const stock = await stockRow(owner.businessId, variantId);
+    assert.equal(Number(stock?.quantity ?? 0), 0);
+  });
+
+  it("allows over-receiving within the configured tolerance without the permission", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive OverTol Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    const purchase = await createPurchase(owner, supplierId, variantId, 10, 100);
+    const rows = await purchaseItemRows(purchase.id);
+    const manager = await createManagerCtx(owner);
+
+    // Tolerance 50% of ordered 10 = 5 units of slack.
+    const put = await fetch(
+      `${baseUrl}/api/purchases/receiving-settings`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${owner.token}`,
+          "X-Business-Id": String(owner.businessId),
+        },
+        body: JSON.stringify({ overReceiveTolerancePercent: 50 }),
+      },
+    );
+    const putBody = (await put.json()) as { success: boolean };
+    assert.equal(put.status, 200, JSON.stringify(putBody));
+
+    const ok = await postJson(baseUrl, manager, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(
+        rows,
+        [{ receiveNow: 15, unitCost: 100, sellingPrice: 150 }],
+        "none",
+        {},
+        "case pack rounding",
+      ),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    } as never);
+    assert.equal(ok.status, 201, `tolerance receive failed: ${JSON.stringify(ok.body)}`);
+    assert.deepEqual(ok.body?.data?.discrepancies, [
+      {
+        purchaseItemId: rows[0]!.id,
+        type: "over_receival",
+        overQuantity: 5,
+        withinTolerance: true,
+      },
+    ]);
+    // Beyond 5 would still be refused for a manager.
+    const purchase2 = await createPurchase(owner, supplierId, variantId, 10, 100);
+    const rows2 = await purchaseItemRows(purchase2.id);
+    const denied = await postJson(baseUrl, manager, "/api/purchases/receive", {
+      purchaseId: purchase2.id,
+      items: receivePlan(
+        rows2,
+        [{ receiveNow: 16, unitCost: 100, sellingPrice: 150 }],
+        "none",
+        {},
+        "still too many",
+      ),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    } as never);
+    assert.equal(denied.status, 403);
+  });
+
+  it("keeps landed-cost allocation correct after over-receiving (full allocation, no pending)", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive OverLC Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    const purchase = await createPurchase(owner, supplierId, variantId, 10, 100);
+    const rows = await purchaseItemRows(purchase.id);
+
+    const over = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(
+        rows,
+        [{ receiveNow: 15, unitCost: 100, sellingPrice: 150 }],
+        "none",
+        {},
+        "full case",
+      ),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    } as never);
+    assert.equal(over.status, 201);
+
+    // 200 capitalizable over 15 accepted units → everything allocates.
+    const doc = await postJson(
+      baseUrl,
+      owner,
+      `/api/purchases/${purchase.id}/landed-cost`,
+      {
+        method: "quantity",
+        expenses: [
+          { expenseType: "shipping", amount: 200, isCapitalizable: true },
+        ],
+      },
+    );
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    const docId = Number(doc.body.data.id);
+    const posted = await postJson(
+      baseUrl,
+      owner,
+      `/api/landed-costs/${docId}/post`,
+      {},
+    );
+    assert.equal(posted.status, 200, JSON.stringify(posted.body));
+
+    const detail = (await getJson(baseUrl, owner, `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 200);
+    assert.equal(Number(detail.data.document.pendingAllocationAmount), 0);
+    const batch = (await pg!.query(
+      "SELECT additional_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1",
+      [rows[0]!.id],
+    )).rows[0] as { additional_cost_per_unit: string };
+    // 200 / 15 accepted units.
+    assert.ok(
+      Math.abs(Number(batch.additional_cost_per_unit) - 200 / 15) < 0.0001,
+      `unexpected additional cost ${batch.additional_cost_per_unit}`,
+    );
+  });
+
+  /* ------------------------------------------------------------------
+   * Phase 8 (test matrix) gap fills:
+   * #7  multi-session receive crossing into over-receiving,
+   * #10 partial batch-tracked receiving,
+   * #11 serial-tracked receiving with rejected quantities.
+   * ------------------------------------------------------------------ */
+
+  it("accepts a later session that crosses the ordered amount (8 then 5 of 10)", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive MultiOver Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    const purchase = await createPurchase(owner, supplierId, variantId, 10, 100);
+    const rows = await purchaseItemRows(purchase.id);
+
+    // Session 1: 8 @ 100 (within the order).
+    const first = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(rows, [
+        { receiveNow: 8, unitCost: 100, sellingPrice: 150 },
+      ]),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    assert.equal(first.body?.data?.status, "partially_received");
+
+    // Session 2: 5 @ 200 — 2 complete the order, 3 are OVER-received.
+    const second = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(
+        rows,
+        [{ receiveNow: 5, unitCost: 200, sellingPrice: 150 }],
+        "none",
+        {},
+        "truck had extra pallets",
+      ),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(second.status, 201, JSON.stringify(second.body));
+    assert.equal(second.body?.data?.status, "received");
+    assert.deepEqual(second.body?.data?.discrepancies, [
+      {
+        purchaseItemId: rows[0]!.id,
+        type: "over_receival",
+        overQuantity: 3,
+        withinTolerance: false,
+      },
+    ]);
+
+    // Inventory: 13 accepted across two batches at their session costs.
+    const stock = await stockRow(owner.businessId, variantId);
+    assert.equal(Number(stock?.quantity), 13);
+    const batches = (await pg!.query(
+      `SELECT purchase_price, quantity_received FROM inventory_batches
+       WHERE purchase_item_id = $1 ORDER BY id`,
+      [rows[0]!.id],
+    )).rows as { purchase_price: string; quantity_received: string }[];
+    assert.deepEqual(
+      batches.map((b) => [Number(b.purchase_price), Number(b.quantity_received)]),
+      [
+        [100, 8],
+        [200, 5],
+      ],
+    );
+
+    // Line: ordered preserved, received 13, delivered 13, cost = PO cost.
+    const line = (await pg!.query(
+      `SELECT quantity, received_quantity, delivered_quantity, unit_cost
+       FROM purchase_items WHERE id = $1`,
+      [rows[0]!.id],
+    )).rows[0] as Record<string, string>;
+    assert.equal(Number(line.quantity), 10);
+    assert.equal(Number(line.received_quantity), 13);
+    assert.equal(Number(line.delivered_quantity), 13);
+    assert.equal(Number(line.unit_cost), 100);
+
+    // Payment cap: received value 1300 but the invoice total is 1000.
+    const header = (await pg!.query(
+      "SELECT due_amount FROM purchases WHERE id = $1",
+      [purchase.id],
+    )).rows[0] as Record<string, string>;
+    assert.equal(Number(header.due_amount), 1000);
+    const settle = await postJson(
+      baseUrl,
+      owner,
+      "/api/due-management/supplier-payment",
+      { purchaseId: purchase.id, amount: 1100, method: "cash" },
+    );
+    assert.equal(settle.status, 400);
+    assert.match(String(settle.body?.message), /Payment cannot be greater/);
+  });
+
+  it("receives batch-tracked items partially, then completes them", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive PartialBatch Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId, 0, "batch");
+    const purchase = await createPurchase(owner, supplierId, variantId, 3, 50);
+    const rows = await purchaseItemRows(purchase.id);
+
+    // Partial: 2 of 3 into one named batch.
+    const first = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(
+        rows,
+        [{ receiveNow: 2, unitCost: 50, sellingPrice: 100 }],
+        "batch",
+        { [rows[0]!.id]: [{ batchNumber: "BATCH-P1", quantity: 2 }] },
+      ),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    assert.equal(first.body?.data?.status, "partially_received");
+    const stock1 = await stockRow(owner.businessId, variantId);
+    assert.equal(Number(stock1?.quantity), 2);
+
+    // Complete: 1 more into a second batch.
+    const second = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: receivePlan(
+        rows,
+        [{ receiveNow: 1, unitCost: 50, sellingPrice: 100 }],
+        "batch",
+        { [rows[0]!.id]: [{ batchNumber: "BATCH-P2", quantity: 1 }] },
+      ),
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(second.status, 201, JSON.stringify(second.body));
+    assert.equal(second.body?.data?.status, "received");
+
+    const batches = (await pg!.query(
+      `SELECT batch_number, quantity_remaining FROM inventory_batches
+       WHERE purchase_item_id = $1 ORDER BY batch_number`,
+      [rows[0]!.id],
+    )).rows as { batch_number: string; quantity_remaining: string }[];
+    assert.deepEqual(
+      batches.map((b) => [b.batch_number, Number(b.quantity_remaining)]),
+      [
+        ["BATCH-P1", 2],
+        ["BATCH-P2", 1],
+      ],
+    );
+    const stock2 = await stockRow(owner.businessId, variantId);
+    assert.equal(Number(stock2?.quantity), 3);
+  });
+
+  it("creates serials for accepted goods only when a serial line also rejects", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Receive SerialReject Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId, 0, "serial");
+    const purchase = await createPurchase(owner, supplierId, variantId, 3, 50);
+    const rows = await purchaseItemRows(purchase.id);
+
+    const res = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: purchase.id,
+      items: [
+        {
+          itemId: rows[0]!.id,
+          trackingType: "serial",
+          receiveNow: 2,
+          rejectedQuantity: 1,
+          rejectionCategory: "damaged",
+          rejectionReason: "broken seal on one unit",
+          unitCost: 50,
+          sellingPrice: 100,
+          batches: [],
+          serialNumbers: ["SN-ACC-1", "SN-ACC-2"],
+        },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+
+    // Two serials for the two accepted units; the rejected unit never
+    // entered stock, batches, or serials.
+    const serials = (await pg!.query(
+      "SELECT serial_number, status FROM serial_numbers WHERE purchase_item_id = $1 ORDER BY serial_number",
+      [rows[0]!.id],
+    )).rows as { serial_number: string; status: string }[];
+    assert.deepEqual(
+      serials.map((s) => [s.serial_number, s.status]),
+      [
+        ["SN-ACC-1", "in_stock"],
+        ["SN-ACC-2", "in_stock"],
+      ],
+    );
+    const stock = await stockRow(owner.businessId, variantId);
+    assert.equal(Number(stock?.quantity), 2);
+    const batches = (await pg!.query(
+      "SELECT quantity_received FROM inventory_batches WHERE purchase_item_id = $1",
+      [rows[0]!.id],
+    )).rows as { quantity_received: string }[];
+    assert.equal(Number(batches[0]!.quantity_received), 2); // AUTO batch = accepted only
+
+    const line = (await pg!.query(
+      "SELECT received_quantity, delivered_quantity, rejected_quantity FROM purchase_items WHERE id = $1",
+      [rows[0]!.id],
+    )).rows[0] as Record<string, string>;
+    assert.equal(Number(line.received_quantity), 2);
+    assert.equal(Number(line.delivered_quantity), 3);
+    assert.equal(Number(line.rejected_quantity), 1);
+  });
 });
+
+

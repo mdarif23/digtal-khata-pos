@@ -8,6 +8,7 @@ import { createEntityPromiseToast } from "@/lib/toast-utils";
 import { toast } from "@/components/ui/toast";
 import { ItemsReceiveTable } from "../components/purchasesReceiveItems/ItemsReceiveTable";
 import { ReceivingSummary } from "../components/receiving/ReceivingSummary";
+import { OpenRejectionsPanel } from "../components/receiving/OpenRejectionsPanel";
 import { ReceivingPaymentSection } from "../components/receiving/ReceivingPaymentSection";
 import type { PaymentsInfoCard } from "../purchase.types";
 import {
@@ -17,6 +18,10 @@ import {
 import { usePurchasesStore } from "../usePurchaseStore";
 import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
 import { useReceivePurchase } from "../hooks/useReceivePurchase";
+import {
+  outstandingOf,
+  overReceiveOf,
+} from "../utils/receiveQuantities";
 import { useScanFailureToast } from "@/features/barcodes/scanning/useScanFailureToast";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
@@ -80,8 +85,11 @@ export const ReceiveItems = () => {
             : "none",
         receiveNow: Math.max(
           0,
-          Number(item.quantity) - Number(item.receivedQuantity),
+          Number(item.quantity) -
+            Number(item.receivedQuantity) -
+            Number(item.cancelledQuantity || 0),
         ),
+        rejectedQuantity: 0,
         unitCost: Number(item.unitCost) || 0,
         sellingPrice: Number(item.sellingPrice) || 0,
         batches: [],
@@ -170,10 +178,9 @@ export const ReceiveItems = () => {
     }
     const lineName =
       line.variantName ?? line.variantSku ?? `line ${lineIndex + 1}`;
-    const remaining = Math.max(
-      0,
-      Number(line.quantity) - Number(line.receivedQuantity),
-    );
+    // Scans fill the outstanding remainder (cancelled excluded); further
+    // scans are over-receiving and must be approved in the dialog.
+    const remaining = outstandingOf(line);
     if (remaining <= 0) {
       throw new Error(`${lineName} is already fully received.`);
     }
@@ -215,6 +222,29 @@ export const ReceiveItems = () => {
   useScanFailureToast(scanState);
 
   const onSubmit = async (data: ReceiveItemsFormValues) => {
+    // Over-receiving requires a per-line reason — catch it before the
+    // round-trip so the offending line can be corrected in its dialog.
+    const missingReason = data.items.find(
+      (item) =>
+        overReceiveOf(
+          receiveItems.find((line) => line.id === item.itemId) ??
+            ({
+              quantity: 0,
+              receivedQuantity: 0,
+              cancelledQuantity: 0,
+            } as (typeof receiveItems)[number]),
+          item.receiveNow,
+        ) && !item.overReceiveReason?.trim(),
+    );
+    if (missingReason) {
+      toast.add({
+        type: "error",
+        priority: "high",
+        description:
+          "One or more lines accept more than the outstanding quantity — open Discrepancy… on the line and record the over-receiving reason.",
+      });
+      return;
+    }
     try {
       const result = await createEntityPromiseToast({
         data,
@@ -360,6 +390,8 @@ export const ReceiveItems = () => {
               </p>
             )}
           </section>
+
+          <OpenRejectionsPanel purchaseId={purchaseId} />
 
           <ReceivingPaymentSection
             form={form}

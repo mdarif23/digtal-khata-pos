@@ -32,6 +32,10 @@ import {
   serialAvailabilityValidation,
   serialNumberValidation,
 } from "./receive/receive.validation.js";
+import { getReceivingSettings } from "./receivingSettings.service.js";
+import {
+  getPurchaseCancelledValueInTx,
+} from "./outstandingResolution.service.js";
 import {
   calculatePurchaseStatus,
   calculatePayments,
@@ -42,11 +46,14 @@ import {
   getPurchaseReceivedAmountInTx,
   insertInventoryBatches,
   insertPurchasePayments,
+  insertReceivingRecords,
   insertSerialNumbers,
   updateProductVariants,
   updatePurchase,
   updatePurchaseItems,
+  type ReceivingRecordInput,
 } from "./receive/receive.service.js";
+import { purchaseDiscrepancies } from "../../db/schema/purchaseDiscrepancies.js";
 import {
   incrementStockForReceive,
   recordStockMovement,
@@ -430,9 +437,18 @@ export async function createReceivePurchase(
   locationId: number,
   data: ReceiveItemsFormValues,
   actorUserId?: number,
+  canOverReceive = false,
 ) {
   const { purchaseId, items, paymentAmount, paymentMethod, paymentNotes } =
     data;
+
+  // Over-receiving tolerance (migration 0052). Defaults to 0% — every
+  // over-receive then requires the purchases.over_receive permission.
+  const settings = await getReceivingSettings(businessId);
+  const overReceiveOptions = {
+    tolerancePercent: settings.overReceiveTolerancePercent,
+    canOverReceive,
+  };
 
   return db.transaction(async (tx) => {
     const itemIds = basicRequestValidation(items);
@@ -465,6 +481,12 @@ export async function createReceivePurchase(
 
     const receiveItemMap = new Map(items.map((item) => [item.itemId, item]));
 
+    // Per-line decisions, kept for the receiving records + discrepancies.
+    const overReceiveDecisions = new Map<
+      number,
+      { overQuantity: number; withinTolerance: boolean }
+    >();
+
     for (const purchaseItem of existingItems) {
       const receiveItem = receiveItemMap.get(purchaseItem.id);
       if (!receiveItem) {
@@ -472,7 +494,14 @@ export async function createReceivePurchase(
           `Missing receiving information for purchase item ${purchaseItem.id}.`,
         );
       }
-      await receiveItemsValidation(purchaseItem, receiveItem);
+      const decision = receiveItemsValidation(
+        purchaseItem,
+        receiveItem,
+        overReceiveOptions,
+      );
+      if (decision) {
+        overReceiveDecisions.set(purchaseItem.id, decision);
+      }
 
       if (receiveItem.receiveNow > 0 && receiveItem.trackingType === "batch") {
         batchValidation(purchaseItem, receiveItem);
@@ -487,24 +516,63 @@ export async function createReceivePurchase(
     // so the client gets a clear 400 instead of a raw constraint error.
     await serialAvailabilityValidation(tx, businessId, items);
 
+    // Per-delivery audit rows (one per item with any delivered quantity).
+    // Rejected goods exist ONLY here — they never reach batches, stock,
+    // movements, or valuation.
+    const receivingRecordInputs: ReceivingRecordInput[] = [];
+
     for (const purchaseItem of existingItems) {
       const receiveItem = receiveItemMap.get(purchaseItem.id)!;
+      const rejectedQuantity = Number(receiveItem.rejectedQuantity ?? 0);
 
-      if (receiveItem.receiveNow <= 0) {
+      if (receiveItem.receiveNow <= 0 && rejectedQuantity <= 0) {
         continue;
       }
 
       const newReceivedQuantity =
         purchaseItem.receivedQuantity + receiveItem.receiveNow;
+      const newDeliveredQuantity =
+        Number(purchaseItem.deliveredQuantity ?? 0) +
+        receiveItem.receiveNow +
+        rejectedQuantity;
+      const newRejectedQuantity =
+        Number(purchaseItem.rejectedQuantity ?? 0) + rejectedQuantity;
 
       // D1 (batch-authoritative): the line's unit_cost keeps the PO order
       // cost; this session's cost lands on the batches created below.
-      await updatePurchaseItems(
-        tx,
-        businessId,
-        purchaseItem.id,
-        newReceivedQuantity,
-      );
+      // The ordered `quantity` column is never mutated by receiving.
+      await updatePurchaseItems(tx, businessId, purchaseItem.id, {
+        receivedQuantity: newReceivedQuantity,
+        deliveredQuantity: newDeliveredQuantity,
+        rejectedQuantity: newRejectedQuantity,
+      });
+
+      const overDecision = overReceiveDecisions.get(purchaseItem.id);
+
+      if (receiveItem.receiveNow > 0 || rejectedQuantity > 0) {
+        receivingRecordInputs.push({
+          purchaseId,
+          purchaseItemId: purchaseItem.id,
+          variantId: purchaseItem.variantId,
+          locationId,
+          acceptedQuantity: receiveItem.receiveNow,
+          rejectedQuantity,
+          unitCost: receiveItem.unitCost,
+          rejectionCategory: receiveItem.rejectionCategory,
+          rejectionReason: receiveItem.rejectionReason,
+          overReceived: overDecision !== undefined,
+          approvalReason: receiveItem.overReceiveReason,
+          receivedByUserId: actorUserId ?? 0,
+          approvedByUserId: overDecision ? actorUserId : undefined,
+        });
+      }
+
+      // Only ACCEPTED goods flow into inventory below — rejected goods are
+      // never stocked, valued, or payable.
+      if (receiveItem.receiveNow <= 0) {
+        continue;
+      }
+
       await updateProductVariants(
         tx,
         businessId,
@@ -559,6 +627,67 @@ export async function createReceivePurchase(
       }
     }
 
+    // Write the audit trail + over-receiving discrepancy records.
+    const insertedRecords = await insertReceivingRecords(
+      tx,
+      businessId,
+      receivingRecordInputs,
+    );
+    const recordIdByItem = new Map(
+      insertedRecords.map((row) => [row.purchaseItemId, row.id]),
+    );
+    const discrepancyRows: (typeof purchaseDiscrepancies.$inferInsert)[] = [
+      ...[...overReceiveDecisions.entries()].map(
+        ([purchaseItemId, decision]) => ({
+          businessId,
+          purchaseId,
+          purchaseItemId,
+          receivingRecordId: recordIdByItem.get(purchaseItemId) ?? null,
+          type: "over_receival" as const,
+          quantity: decision.overQuantity,
+          reason: receiveItemMap.get(purchaseItemId)!.overReceiveReason ?? null,
+          status: "resolved" as const,
+          resolution: null,
+          requestedByUserId: actorUserId ?? 0,
+          resolvedByUserId: actorUserId ?? 0,
+          resolvedAt: new Date(),
+        }),
+      ),
+    ];
+
+    // Rejected goods (Phase 4): each rejection opens a discrepancy that
+    // stays OPEN until a supplier_credit / replacement resolution is
+    // recorded. The goods themselves never entered inventory.
+    for (const record of receivingRecordInputs) {
+      if (record.rejectedQuantity <= 0) continue;
+      discrepancyRows.push({
+        businessId,
+        purchaseId,
+        purchaseItemId: record.purchaseItemId,
+        receivingRecordId: recordIdByItem.get(record.purchaseItemId) ?? null,
+        type: "rejection" as const,
+        quantity: record.rejectedQuantity,
+        reason: record.rejectionReason ?? null,
+        category: record.rejectionCategory ?? null,
+        status: "open" as const,
+        resolution: null,
+        requestedByUserId: actorUserId ?? 0,
+        resolvedByUserId: null,
+        resolvedAt: null,
+      });
+    }
+    if (discrepancyRows.length > 0) {
+      await tx.insert(purchaseDiscrepancies).values(discrepancyRows);
+    }
+    const discrepancySummary = [...overReceiveDecisions.entries()].map(
+      ([purchaseItemId, decision]) => ({
+        purchaseItemId,
+        type: "over_receival" as const,
+        overQuantity: decision.overQuantity,
+        withinTolerance: decision.withinTolerance,
+      }),
+    );
+
     // Landed-cost delta (Part F): a posted landed-cost document on this
     // purchase adjusts incrementally in the SAME transaction — the new
     // batches are visible to its target recomputation. No-op otherwise.
@@ -579,8 +708,14 @@ export async function createReceivePurchase(
     const newStatus = calculatePurchaseStatus(allPurchaseItems);
 
     // Payment limit is based on the value of goods ACTUALLY received
-    // (batch-authoritative, D1) capped by the invoice total.
+    // (batch-authoritative, D1) capped by the invoice total net of
+    // cancelled quantities (Phase 3).
     const receivedAmount = await getPurchaseReceivedAmountInTx(
+      tx,
+      businessId,
+      purchaseId,
+    );
+    const cancelledAmount = await getPurchaseCancelledValueInTx(
       tx,
       businessId,
       purchaseId,
@@ -595,6 +730,7 @@ export async function createReceivePurchase(
       paymentAmount,
       totalAmount: purchase.totalAmount,
       receivedAmount,
+      cancelledAmount,
     });
 
     const paymentStatus = calculatePaymentStatus(
@@ -678,6 +814,8 @@ export async function createReceivePurchase(
         // adjusted, by how much, and which document. The frontend renders
         // this as a notice — it never computes landed-cost amounts itself.
         landedCost,
+        // Over-receiving outcome per line (empty for normal receives).
+        discrepancies: discrepancySummary,
       },
     };
   });
