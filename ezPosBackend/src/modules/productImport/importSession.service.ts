@@ -483,8 +483,8 @@ async function executeGroupCreate(input: {
         alertQuantity: row.alertQuantity ?? 0,
         isDefault: index === 0,
         status: row.status === "draft" ? "active" : row.status,
-        weight: null,
-        weightUnit: null,
+        weight: row.weight,
+        weightUnit: row.weightUnit,
       })
       .returning({ id: productVariants.id });
     variantIds.push(variant!.id);

@@ -313,6 +313,8 @@ export const TEMPLATE_COLUMNS: TemplateColumn[] = [
   { header: "batch_number", description: "Batch number (required when tracking_type = batch).", required: false, example: "BATCH-001" },
   { header: "expiry_date", description: "Expiry date, YYYY-MM-DD (batch-tracked goods).", required: false, example: "2027-12-31" },
   { header: "serial_numbers", description: "Semicolon-separated serial numbers (required when tracking_type = serial; count must equal opening_stock).", required: false, example: "SN1;SN2" },
+  { header: "weight", description: "Variant weight for landed-cost weight allocation (0 or empty = none).", required: false, example: "0.45" },
+  { header: "weight_unit", description: "kg | g | lb | oz (default kg).", required: false, example: "kg" },
   { header: "image_url", description: "https:// image URL stored as the product image.", required: false, example: "https://example.com/ball.jpg" },
   { header: "status", description: "draft | active | inactive (default active). Import as draft to stay under the product plan limit.", required: false, example: "active" },
 ];

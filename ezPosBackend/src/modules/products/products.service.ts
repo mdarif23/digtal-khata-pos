@@ -393,6 +393,9 @@ export async function getAllProducts(businessId: number, locationId: number) {
   return db
     .select({
       ...getTableColumns(products),
+      imageUrl: sql<
+        string | null
+      >`(SELECT pi.image_url FROM product_images pi WHERE pi.product_id = ${products.id} ORDER BY pi.is_primary DESC, pi.sort_order ASC LIMIT 1)`,
       variants: sql`
         COALESCE(json_agg(
           jsonb_build_object(
@@ -400,6 +403,8 @@ export async function getAllProducts(businessId: number, locationId: number) {
             'productId', ${productVariants.productId},
             'sku', ${productVariants.sku},
             'barcode', ${productVariants.barcode},
+            'weight', ${productVariants.weight},
+            'weightUnit', ${productVariants.weightUnit},
             'sellingPrice', ${productVariants.sellingPrice},
             'alertQuantity', ${productVariants.alertQuantity},
             'isDefault', ${productVariants.isDefault},

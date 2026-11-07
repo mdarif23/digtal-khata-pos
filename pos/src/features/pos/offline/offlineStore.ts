@@ -268,8 +268,8 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
       // so they are in place the moment the connection drops.
       try {
         const { prepareOffline } = await import("./allocations.js");
-        const { useProductStore } = await import(
-          "@/features/products/usedashboardProductStore.js"
+        const { default: useProductStore } = await import(
+          "@/features/products/useProductStore.js"
         );
         const products = useProductStore.getState().products ?? [];
         const variantIds = products

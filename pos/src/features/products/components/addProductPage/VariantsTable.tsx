@@ -31,6 +31,7 @@ export function VariantsTable({
   allVariants,
   onForgetVariant,
   isEditing = false,
+  inventorySummary,
 }: VariantRowProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const variants = form.watch("variants") || [];
@@ -172,6 +173,7 @@ export function VariantsTable({
                 onAddVariant={addVariant}
                 onRemoveVariant={removeVariant}
                 isEditing={isEditing}
+                inventorySummary={inventorySummary}
               />
             ))}
           </TableBody>

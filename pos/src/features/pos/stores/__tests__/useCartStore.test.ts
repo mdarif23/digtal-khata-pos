@@ -20,8 +20,8 @@ vi.mock("../../../../api/axios.js", () => ({
 
 const catalogState = vi.hoisted(() => ({ products: [] as any[] }));
 
-vi.mock("@/features/products/usedashboardProductStore.js", () => ({
-  useProductStore: { getState: () => catalogState },
+vi.mock("@/features/products/useProductStore.js", () => ({
+  default: { getState: () => catalogState },
 }));
 
 import {

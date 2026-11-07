@@ -13,7 +13,7 @@ import { toast } from "@/components/ui/toast.js";
 import { createExchangeApi } from "../../sales.api.js";
 import { quoteSaleApi } from "../../quote.api.js";
 import { useSalesStore } from "../../stores/useSalesStore.js";
-import { useProductStore } from "@/features/products/usedashboardProductStore.js";
+import useProductStore from "@/features/products/useProductStore.js";
 import type { SalesStoreType } from "../types/sales.types.js";
 import { buildVariantName } from "@/lib/variantDisplay";
 import type { LookupMatch } from "@/features/barcodes/barcode.api.js";
@@ -62,7 +62,7 @@ export function ExchangeDialog({
 
   const returnableItems = useMemo(
     () =>
-      (sale.items ?? []).filter(
+      ((sale.items ?? []) as SalesStoreType[]).filter(
         (item) => item.returnedQuantity < item.soldQuantity,
       ),
     [sale],
@@ -120,7 +120,7 @@ export function ExchangeDialog({
       .filter(
         (p) =>
           p.status !== "inactive" &&
-          (p.productName.toLowerCase().includes(query) ||
+          (p.name.toLowerCase().includes(query) ||
             (p.variants ?? []).some(
               (v) =>
                 (v.sku ?? "").toLowerCase().includes(query) ||
@@ -149,10 +149,10 @@ export function ExchangeDialog({
       throw new Error(`${match.productName} is not in the loaded catalog.`);
     }
     if (row.product.status === "inactive") {
-      throw new Error(`${row.product.productName} is inactive.`);
+      throw new Error(`${row.product.name} is inactive.`);
     }
     const variantLabel = buildVariantName(
-      row.product.productName,
+      row.product.name,
       row.variant.options,
     );
     setReplacements((current) => {
@@ -268,7 +268,7 @@ export function ExchangeDialog({
                   Nothing left to return on this sale.
                 </div>
               )}
-              {returnableItems.map((item) => (
+              {returnableItems.map((item: SalesStoreType) => (
                 <label
                   key={item.saleItemsId}
                   className="flex cursor-pointer items-center gap-2 text-sm"
@@ -317,7 +317,7 @@ export function ExchangeDialog({
                 {searchResults.flatMap((product) =>
                   (product.variants ?? []).map((variant) => {
                     const variantLabel = buildVariantName(
-                      product.productName,
+                      product.name,
                       variant.options,
                     );
                     return (

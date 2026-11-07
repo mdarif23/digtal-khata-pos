@@ -17,6 +17,7 @@ export function VariantTableRow({
   onAddVariant,
   onRemoveVariant,
   isEditing = false,
+  inventorySummary,
 }: VariantTableRowProps) {
   const variants = form.watch("variants") || [];
   const variantIndex = variants.findIndex((item) =>
@@ -136,6 +137,7 @@ export function VariantTableRow({
               canRemoveVariant={false}
               canEditImages={!isEditing}
               canEditStock={!isEditing}
+              inventorySummary={inventorySummary}
             />
           </TableCell>
         </TableRow>

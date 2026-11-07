@@ -1,5 +1,6 @@
 import {
   ProductStoreType,
+  ProductType,
   VariantOptionData,
   VariantTypeData,
 } from "@/features/products/product.types";
@@ -29,7 +30,7 @@ import {
   updateVariantTypeApi,
 } from "./product.api";
 
-const useProductStore = create<ProductStoreType>((set) => ({
+const useProductStore = create<ProductStoreType>((set, get) => ({
   products: [],
   productSelectOptions: {
     brands: [],
@@ -43,12 +44,49 @@ const useProductStore = create<ProductStoreType>((set) => ({
   getProducts: async () => {
     set({ loading: true, error: null });
     try {
-      const productsData = await getProductsApi();
+      // Offline POS (P2): the canonical catalog owns the IndexedDB cache —
+      // the same fallback contract the legacy store had, so offline checkout
+      // keeps working with one source of truth.
+      const { loadProductsWithCache } = await import(
+        "../pos/offline/catalog.js"
+      );
+      const { data: productsData } = await loadProductsWithCache<ProductType>(
+        getProductsApi,
+      );
       set({ products: productsData, loading: false, error: null });
     } catch (err: unknown) {
       set({ error: getErrorMessage(err), loading: false });
     }
   },
+  // P2: per-variant stock adjustments for POS carting — these hit the SAME
+  // catalog the product grid reads (fixes the legacy store-drift bug where
+  // carting mutated a catalog the grid never saw). Clamped at 0 to match
+  // backend behavior (FIFO sales can never drive stock negative).
+  returnVariantStock: (variantId, quantity) =>
+    set((state) => ({
+      products: state.products.map((product) => ({
+        ...product,
+        variants: product.variants.map((variant) =>
+          variant.id === variantId
+            ? { ...variant, quantity: variant.quantity + quantity }
+            : variant,
+        ),
+      })),
+    })),
+  takeVariantStock: (variantId, quantity) =>
+    set((state) => ({
+      products: state.products.map((product) => ({
+        ...product,
+        variants: product.variants.map((variant) =>
+          variant.id === variantId
+            ? {
+                ...variant,
+                quantity: Math.max(0, variant.quantity - quantity),
+              }
+            : variant,
+        ),
+      })),
+    })),
   adjustVariantStock: async (variantId, data) => {
     const result = await adjustVariantStockApi(variantId, data);
     set((state) => ({
@@ -83,6 +121,9 @@ const useProductStore = create<ProductStoreType>((set) => ({
   },
   createProduct: async (data) => {
     const response = await createProductApi(data);
+    // The POST returns only { productId } — refresh the catalog so the new
+    // product is visible immediately (P3: create-cache synchronization).
+    await get().getProducts();
     return response.data;
   },
   updateProduct: async (id, data) => {

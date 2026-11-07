@@ -5,6 +5,8 @@ import {
   inArray,
   sql,
   type ExtractTablesWithRelations,
+  gt,
+  asc,
 } from "drizzle-orm";
 import { brands } from "../../db/schema/brands.js";
 import { categories } from "../../db/schema/categories.js";
@@ -572,6 +574,8 @@ export async function getProductForEdit(businessId: number, id: number) {
       alertQuantity: productVariants.alertQuantity,
       isDefault: productVariants.isDefault,
       status: productVariants.status,
+      weight: productVariants.weight,
+      weightUnit: productVariants.weightUnit,
     })
     .from(productVariants)
     .where(
@@ -617,6 +621,68 @@ export async function getProductForEdit(businessId: number, id: number) {
     optionsByVariant.set(option.variantId, options);
   }
 
+  // Phase 7 (edit UX): read-only inventory summary — batches/expiry/serials
+  // are immutable from the form but must at least be VISIBLE. Stock itself
+  // stays out of the form (stock adjustment / counts own it).
+  const inventoryByVariant = new Map<
+    number,
+    {
+      totalStock: number;
+      batches: { batchNumber: string; expiryDate: string | null; quantityRemaining: number }[];
+      serialCount: number;
+    }
+  >();
+  if (variants.length > 0) {
+    const variantIds = variants.map((variant) => variant.id);
+    const [batchRows, serialRows] = await Promise.all([
+      db
+        .select({
+          variantId: inventoryBatches.variantId,
+          batchNumber: inventoryBatches.batchNumber,
+          expiryDate: inventoryBatches.expiryDate,
+          quantityRemaining: inventoryBatches.quantityRemaining,
+        })
+        .from(inventoryBatches)
+        .where(
+          and(
+            eq(inventoryBatches.businessId, businessId),
+            inArray(inventoryBatches.variantId, variantIds),
+            gt(inventoryBatches.quantityRemaining, 0),
+          ),
+        )
+        .orderBy(asc(inventoryBatches.id)),
+      db
+        .select({
+          variantId: serialNumbers.variantId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(serialNumbers)
+        .where(
+          and(
+            eq(serialNumbers.businessId, businessId),
+            eq(serialNumbers.status, "in_stock"),
+            inArray(serialNumbers.variantId, variantIds),
+          ),
+        )
+        .groupBy(serialNumbers.variantId),
+    ]);
+    const serialCountByVariant = new Map(
+      serialRows.map((row) => [row.variantId, Number(row.count)]),
+    );
+    for (const variant of variants) {
+      const batches = batchRows.filter((row) => row.variantId === variant.id);
+      inventoryByVariant.set(variant.id, {
+        totalStock: batches.reduce((sum, b) => sum + Number(b.quantityRemaining), 0),
+        batches: batches.map((b) => ({
+          batchNumber: b.batchNumber,
+          expiryDate: b.expiryDate ? b.expiryDate.toISOString().slice(0, 10) : null,
+          quantityRemaining: Number(b.quantityRemaining),
+        })),
+        serialCount: serialCountByVariant.get(variant.id) ?? 0,
+      });
+    }
+  }
+
   return {
     name: product.name,
     categoryId: product.categoryId,
@@ -642,6 +708,8 @@ export async function getProductForEdit(businessId: number, id: number) {
         }),
       ),
       barcode: variant.barcode ?? "",
+      weight: variant.weight === null || variant.weight === undefined ? null : Number(variant.weight),
+      weightUnit: variant.weightUnit ?? null,
       alertQuantity: variant.alertQuantity ?? 0,
       status: variant.status ?? "active",
       imageUrl: null,
@@ -651,6 +719,11 @@ export async function getProductForEdit(businessId: number, id: number) {
       quantity: 0,
       expiryDate: null,
       serialNumbers: [],
+      inventory: inventoryByVariant.get(variant.id) ?? {
+        totalStock: 0,
+        batches: [],
+        serialCount: 0,
+      },
     })),
   };
 }
@@ -831,8 +904,14 @@ export async function updateProduct(
           alertQuantity: variant.alertQuantity,
           isDefault: variant.isDefault,
           status: variant.status,
-          weight: variant.weight ?? null,
-          weightUnit: variant.weightUnit ?? null,
+          // Explicit update semantics (Phase 4): an omitted weight must NOT
+          // erase the stored value — only a provided value updates it.
+          ...(variant.weight !== undefined
+            ? { weight: variant.weight }
+            : {}),
+          ...(variant.weightUnit !== undefined
+            ? { weightUnit: variant.weightUnit }
+            : {}),
         })
         .where(
           and(

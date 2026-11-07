@@ -36,6 +36,7 @@ export function VariantsInfoCard({
   remove,
   fields,
   isEditing = false,
+  inventorySummary,
 }: AccordionCardProps) {
   const [selectedVariantTypeNames, setSelectedVariantTypeNames] = useState<
     string[]
@@ -238,6 +239,7 @@ export function VariantsInfoCard({
               allVariants={allVariants}
               onForgetVariant={forgetVariantDraft}
               isEditing={isEditing}
+                inventorySummary={inventorySummary}
             />
           </>
         ) : (

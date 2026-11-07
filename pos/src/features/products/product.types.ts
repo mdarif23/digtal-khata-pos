@@ -80,6 +80,8 @@ export type StockAdjustmentResult = {
   quantity: number;
   change: number;
 };
+export type { ProductType };
+
 export interface ProductStoreType {
   products: ProductType[];
   productSelectOptions: {
@@ -95,6 +97,8 @@ export interface ProductStoreType {
   loading: boolean;
   error: string | null;
   getProducts: () => void;
+  returnVariantStock: (variantId: number, quantity: number) => void;
+  takeVariantStock: (variantId: number, quantity: number) => void;
   adjustVariantStock: (
     variantId: number,
     data: StockAdjustmentInput,
@@ -174,6 +178,11 @@ export interface ProductInfoInputProps {
   canRemoveVariant?: boolean;
   canEditImages?: boolean;
   canEditStock?: boolean;
+  inventorySummary?: {
+    totalStock: number;
+    batches: { batchNumber: string; expiryDate: string | null; quantityRemaining: number }[];
+    serialCount: number;
+  } | null;
 }
 export interface AccordionCardProps {
   form: UseFormReturn<ProductTypeInput>;
@@ -182,6 +191,7 @@ export interface AccordionCardProps {
   remove: UseFieldArrayRemove;
   fields: FieldArrayWithId<ProductTypeInput, "variants">[];
   isEditing?: boolean;
+  inventorySummary?: ProductInfoInputProps["inventorySummary"];
 }
 export interface VariantRowProps {
   form: UseFormReturn<ProductTypeInput>;
@@ -191,6 +201,7 @@ export interface VariantRowProps {
   allVariants: GeneratedVariant[];
   onForgetVariant: (variant: ProductTypeInput["variants"][number]) => void;
   isEditing?: boolean;
+  inventorySummary?: ProductInfoInputProps["inventorySummary"];
 }
 export interface InputFileProps {
   urlName: FieldPath<ProductTypeInput>;
@@ -235,4 +246,5 @@ export type VariantTableRowProps = {
   onAddVariant: (variant: GeneratedVariant) => void;
   onRemoveVariant: (variantIndex: number) => void;
   isEditing?: boolean;
+  inventorySummary?: ProductInfoInputProps["inventorySummary"];
 };

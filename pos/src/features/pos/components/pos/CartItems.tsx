@@ -4,7 +4,7 @@ import { FiMinusCircle } from "react-icons/fi";
 import { useWatch } from "react-hook-form";
 import { ClearCartDialog } from "./ClearCartDialog.js";
 import type { DiscountType } from "../../types/cart.types.js";
-import { useProductStore } from "@/features/products/usedashboardProductStore.js";
+import useProductStore from "@/features/products/useProductStore.js";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
 import type {
   CustomerDue,
@@ -234,15 +234,10 @@ export default function CartItems() {
 
 // ---------- one cart row ----------
 function CartItemRow({ item }: { item: CartItem }) {
-  const addProductQuantityToCart = useProductStore(
-    (s) => s.addProductQuantityToCart,
-  );
-  const removeProductQuantityToCart = useProductStore(
-    (s) => s.removeProductQuantityToCart,
-  );
-  const restoreSingleProductQuantityToCart = useProductStore(
-    (s) => s.restoreSingleProductQuantityToCart,
-  );
+  // P2: stock returns/units now adjust the CANONICAL catalog's variant
+  // quantity — the same store the POS grid reads (fixes the store-drift bug).
+  const returnVariantStock = useProductStore((s) => s.returnVariantStock);
+  const takeVariantStock = useProductStore((s) => s.takeVariantStock);
   const addCartQuantity = useCartStore((s) => s.addCartQuantity);
   const removeCartQuantity = useCartStore((s) => s.removeCartQuantity);
   const removeCartItem = useCartStore((s) => s.removeCartItem);
@@ -326,7 +321,7 @@ function CartItemRow({ item }: { item: CartItem }) {
                   type="button"
                   aria-label="Remove item"
                   onClick={() => {
-                    restoreSingleProductQuantityToCart(item.id, item.quantity);
+                    returnVariantStock(variantId, item.quantity);
                     removeCartItem(variantId);
                   }}
                   className="cursor-pointer rounded-full text-muted-foreground transition hover:text-destructive"
@@ -342,7 +337,7 @@ function CartItemRow({ item }: { item: CartItem }) {
                 aria-label="Decrease quantity"
                 disabled={quantity <= 1}
                 onClick={() => {
-                  addProductQuantityToCart(item.id);
+                  returnVariantStock(variantId, 1);
                   removeCartQuantity(variantId);
                 }}
                 className="cursor-pointer rounded-full transition hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
@@ -360,7 +355,7 @@ function CartItemRow({ item }: { item: CartItem }) {
                 type="button"
                 aria-label="Increase quantity"
                 onClick={() => {
-                  removeProductQuantityToCart(item.id);
+                  takeVariantStock(variantId, 1);
                   addCartQuantity(variantId);
                 }}
                 className="cursor-pointer rounded-full transition hover:text-primary"
@@ -372,7 +367,7 @@ function CartItemRow({ item }: { item: CartItem }) {
                 type="button"
                 aria-label="Remove item"
                 onClick={() => {
-                  restoreSingleProductQuantityToCart(item.id, item.quantity);
+                  returnVariantStock(variantId, item.quantity);
                   removeCartItem(variantId);
                 }}
                 className="cursor-pointer rounded-full text-muted-foreground transition hover:text-destructive"

@@ -27,6 +27,7 @@ export function ProductInfoInput({
   canRemoveVariant = true,
   canEditImages = true,
   canEditStock = true,
+  inventorySummary = null,
 }: ProductInfoInputProps) {
   const [isPasteDialogOpen, setIsPasteDialogOpen] = useState(false);
   const [pastedSerials, setPastedSerials] = useState("");
@@ -143,6 +144,59 @@ export function ProductInfoInput({
         name={`variants.${variantIndex}.barcode`}
         form={form}
       />
+      <div>
+        <FieldLabel className="text-sm">Weight</FieldLabel>
+        <div className="mt-1 flex gap-2">
+          <InputField
+            placeholder="0.0000"
+            label=""
+            type="number"
+            name={`variants.${variantIndex}.weight`}
+            form={form}
+          />
+          <Controller
+            control={form.control}
+            name={`variants.${variantIndex}.weightUnit`}
+            render={({ field }) => (
+              <select
+                aria-label="Weight unit"
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                value={field.value ?? "kg"}
+                onChange={(e) => field.onChange(e.target.value)}
+              >
+                <option value="kg">kg</option>
+                <option value="g">g</option>
+                <option value="lb">lb</option>
+                <option value="oz">oz</option>
+              </select>
+            )}
+          />
+        </div>
+      </div>
+      {!canEditStock && inventorySummary && (
+        <div className="md:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-xs text-slate-600">
+          <p className="font-semibold text-slate-700">
+            Current inventory — {inventorySummary.totalStock} in stock across all locations
+            {inventorySummary.serialCount > 0
+              ? ` · ${inventorySummary.serialCount} serial number(s) in stock`
+              : ""}
+          </p>
+          {inventorySummary.batches.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {inventorySummary.batches.map((batch) => (
+                <li key={batch.batchNumber}>
+                  Batch <span className="font-mono">{batch.batchNumber}</span> —{" "}
+                  {batch.quantityRemaining} remaining
+                  {batch.expiryDate ? ` · expires ${batch.expiryDate}` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-1 text-slate-400">
+            Read-only — stock changes go through Stock Adjustment or stock counts.
+          </p>
+        </div>
+      )}
       {source === "opening" && trackingType === "batch" && (
         <InputField
           placeholder="Enter batch number"
