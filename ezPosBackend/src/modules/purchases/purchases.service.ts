@@ -9,7 +9,7 @@ import { variantValues } from "../../db/schema/variantValues.js";
 import { purchaseItems } from "../../db/schema/purchaseItems.js";
 import { purchases } from "../../db/schema/purchases.js";
 import { landedCosts } from "../../db/schema/landedCosts.js";
-import { and, asc, eq, getTableColumns, inArray } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { products } from "../../db/schema/products.js";
 import {
   ConflictError,
@@ -228,8 +228,19 @@ function purchasesWithLandedCostQuery() {
     .select({
       ...getTableColumns(purchases),
       supplierName: suppliers.name,
+      // Feeds the list page's supplier search (Phase 2, §2.4).
+      supplierPhone: suppliers.phone,
       landedCostDocStatus: landedCosts.status,
       landedCostPending: landedCosts.pendingAllocationAmount,
+      // Derived (Phase 3 — no schema change): a purchase whose lines
+      // accepted ZERO goods but wrote some off is workflow-complete
+      // (status "received") without anything physically arriving. The
+      // list surfaces this so the UI never presents it as received goods.
+      fullyCancelled: sql<boolean>`(
+        SELECT COALESCE(SUM(pi.received_quantity), 0) = 0
+          AND COALESCE(SUM(pi.cancelled_quantity), 0) > 0
+        FROM purchase_items pi WHERE pi.purchase_id = ${purchases.id}
+      )`,
     })
     .from(purchases)
     .leftJoin(suppliers, eq(purchases.supplierId, suppliers.id))
