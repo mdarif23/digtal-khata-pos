@@ -384,6 +384,13 @@
 			"when": 1794500003000,
 			"tag": "0054_owner_finance",
 			"breakpoints": true
+		},
+		{
+			"idx": 55,
+			"version": "7",
+			"when": 1794500004000,
+			"tag": "0055_payroll",
+			"breakpoints": true
 		}
 	]
 }

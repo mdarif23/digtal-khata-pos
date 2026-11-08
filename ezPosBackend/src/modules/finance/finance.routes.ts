@@ -8,6 +8,7 @@ import {
 } from "../../middleware/permissions.js";
 import * as ctrl from "./finance.controller.js";
 import * as ownerCtrl from "./finance.owner.controller.js";
+import * as payrollCtrl from "./finance.payroll.controller.js";
 
 /**
  * Finance & Growth routes (Stage 3: ledger foundation). Business-scoped via
@@ -76,6 +77,35 @@ router.get("/api/finance/profit-allocations", ...ownerRead, requirePermission("f
 router.post("/api/finance/profit-allocations", ...ownerWrite, requirePermission("finance.profit.allocate"), ownerCtrl.createAllocation);
 router.post("/api/finance/profit-allocations/:id/reverse", ...ownerWrite, requirePermission("finance.profit.allocate"), ownerCtrl.reverseAllocation);
 router.post("/api/finance/profit-allocations/lines/:id/realize", ...ownerWrite, requirePermission("finance.profit.allocate"), ownerCtrl.realizeAllocationLine);
+
+
+// ---------------------------------------------------------------------------
+// Staff & Payroll (Stage 5): employees, structures, advances, periods,
+// payments, payslips. Cashier roles hold no payroll keys.
+// ---------------------------------------------------------------------------
+
+const payrollRead = [requireAuth, requireBusinessContext()] as const;
+const payrollWrite = [...payrollRead, requireFullAccess] as const;
+
+router.get("/api/payroll/employees", ...payrollRead, requirePermission("payroll.view"), payrollCtrl.listEmployees);
+router.get("/api/payroll/employees/:id", ...payrollRead, requirePermission("payroll.view"), payrollCtrl.getEmployee);
+router.post("/api/payroll/employees", ...payrollWrite, requirePermission("payroll.manage"), payrollCtrl.createEmployee);
+router.patch("/api/payroll/employees/:id", ...payrollWrite, requirePermission("payroll.manage"), payrollCtrl.updateEmployee);
+router.post("/api/payroll/employees/:id/salary-structures", ...payrollWrite, requirePermission("payroll.manage"), payrollCtrl.createSalaryStructure);
+router.post("/api/payroll/employees/:id/advances", ...payrollWrite, requirePermission("payroll.manage"), payrollCtrl.giveAdvance);
+router.get("/api/payroll/employees/:id/advances", ...payrollRead, requirePermission("payroll.view"), payrollCtrl.listAdvances);
+
+router.get("/api/payroll/periods", ...payrollRead, requirePermission("payroll.view"), payrollCtrl.listPeriods);
+router.get("/api/payroll/periods/:id", ...payrollRead, requirePermission("payroll.view"), payrollCtrl.getPeriod);
+router.post("/api/payroll/periods", ...payrollWrite, requirePermission("payroll.process"), payrollCtrl.createPeriod);
+router.patch("/api/payroll/periods/:id/records/:recordId", ...payrollWrite, requirePermission("payroll.process"), payrollCtrl.updateRecord);
+router.post("/api/payroll/periods/:id/approve", ...payrollWrite, requirePermission("payroll.approve"), payrollCtrl.approvePeriod);
+router.post("/api/payroll/periods/:id/cancel", ...payrollWrite, requirePermission("payroll.approve"), payrollCtrl.cancelPeriod);
+router.post("/api/payroll/periods/:id/reopen", ...payrollWrite, requirePermission("payroll.approve"), payrollCtrl.reopenPeriod);
+
+router.post("/api/payroll/records/:recordId/payments", ...payrollWrite, requirePermission("payroll.pay"), payrollCtrl.recordPayment);
+router.post("/api/payroll/payments/:id/void", ...payrollWrite, requirePermission("payroll.pay"), payrollCtrl.voidPayment);
+router.get("/api/payroll/records/:recordId/payslip", ...payrollRead, requirePermission("payroll.view"), payrollCtrl.getPayslip);
 
 export default router;
 
