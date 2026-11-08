@@ -3121,7 +3121,7 @@ export async function quoteSaleTotals(
     );
     const promoInput = toCartPromotionInput(promoEvaluation);
     const groupBlock =
-      groupPricing.groupId != null
+      groupPricing.groupId != null && groupPricing.total > 0
         ? {
             group: {
               id: groupPricing.groupId,
