@@ -24,6 +24,17 @@ function csvFor(rows: string[][]): Buffer {
   );
 }
 
+/** CSV with the UOM packaging columns (package_unit..package_barcode after unit). */
+function csvForWithPackaging(rows: string[][]): Buffer {
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const header =
+    "product_name,product_type,category,brand,unit,package_unit,package_factor,package_sale_price,package_barcode,description,sku,has_variants,variant_options,barcode,selling_price,purchase_price,alert_quantity,tracking_type,opening_stock,location,batch_number,expiry_date,image_url,status";
+  return Buffer.from(
+    "\uFEFF" + [header, ...rows.map((r) => r.map(escape).join(","))].join("\r\n"),
+    "utf8",
+  );
+}
+
 describe("product import/export integration", { skip: !runIntegration }, () => {
   let server: import("node:http").Server | undefined;
   let baseUrl = "";
@@ -326,5 +337,120 @@ describe("product import/export integration", { skip: !runIntegration }, () => {
     assert.ok(created);
     const variant = created.variants.find((v: any) => v.sku === `WT-${stamp}`);
     assert.equal(Number(variant.weight), 0.45);
+  });
+
+  // ---------------------------------------------------------------
+  // UOM import (Phase 6+): packaging columns create conversions +
+  // package-barcode aliases; invalid configs are validation errors.
+  // ---------------------------------------------------------------
+
+  it("imports packaging: conversion row + package barcode alias resolve as a package", async () => {
+    const bytes = csvForWithPackaging([
+      [
+        `Toy Car ${stamp}`, "physical", "", "", "Piece", "Box", "12", "1500",
+        `8901230000049`, "", `TCI-${stamp}`, "false", "", "8901230000032",
+        "130", "100", "", "none", "60", "", "", "", "", "active",
+      ],
+    ]);
+    const up = await upload(owner, "packaged.csv", bytes);
+    assert.equal(up.status, 201, JSON.stringify(up.body));
+    const sessionId = up.body.data.sessionId as number;
+    const validated = await api(owner, "POST", `/api/products/import/${sessionId}/validate`);
+    assert.equal(validated.status, 200, JSON.stringify(validated.body));
+    assert.equal(validated.body.data.totals.validRows, 1);
+    const executed = await api(owner, "POST", `/api/products/import/${sessionId}/execute`);
+    assert.equal(executed.status, 200, JSON.stringify(executed.body));
+    assert.equal(executed.body.data.created, 1);
+
+    const { default: pg } = await import("pg");
+    const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    const conv = await client.query(
+      `SELECT puc.conversion_factor, puc.sale_price, u.name AS unit_name
+       FROM product_unit_conversions puc
+       JOIN units u ON u.id = puc.unit_id
+       JOIN products p ON p.id = puc.product_id
+       WHERE p.business_id = $1 AND p.name = $2`,
+      [owner.businessId, `Toy Car ${stamp}`],
+    );
+    client.end();
+    assert.equal(conv.rowCount, 1);
+    assert.equal(Number(conv.rows[0].conversion_factor), 12);
+    assert.equal(Number(conv.rows[0].sale_price), 1500);
+    assert.equal(conv.rows[0].unit_name, "Box");
+
+    // The package barcode resolves to the variant WITH unit context —
+    // scanning it means one Box, not one piece.
+    const lookup = await api(owner, "GET", "/api/barcodes/lookup/8901230000049");
+    assert.equal(lookup.status, 200, JSON.stringify(lookup.body));
+    assert.equal(lookup.body.data.matchType, "alias");
+    assert.equal(lookup.body.data.unit.conversionFactor, 12);
+    assert.equal(lookup.body.data.unit.salePrice, 1500);
+  });
+
+  it("rejects invalid packaging configs at validation", async () => {
+    const bytes = csvForWithPackaging([
+      // factor 0 with a unit set
+      [`Bad Zero ${stamp}`, "physical", "", "", "Piece", "Box", "0", "", "", "", `BZ-${stamp}`, "false", "", "", "100", "", "", "none", "", "", "", "", "", "active"],
+      // unit without factor
+      [`Bad Missing ${stamp}`, "physical", "", "", "Piece", "Box", "", "", "", "", `BM-${stamp}`, "false", "", "", "100", "", "", "none", "", "", "", "", "", "active"],
+      // package barcode same as the piece barcode
+      [`Bad Dup ${stamp}`, "physical", "", "", "Piece", "Box", "12", "", "8901230000056", "", `BD-${stamp}`, "false", "", "8901230000056", "100", "", "", "none", "", "", "", "", "", "active"],
+    ]);
+    const up = await upload(owner, "badpack.csv", bytes);
+    assert.equal(up.status, 201, JSON.stringify(up.body));
+    const sessionId = up.body.data.sessionId as number;
+    const validated = await api(owner, "POST", `/api/products/import/${sessionId}/validate`);
+    assert.equal(validated.status, 200, JSON.stringify(validated.body));
+    assert.equal(validated.body.data.totals.errorRows, 3, JSON.stringify(validated.body.data.totals));
+  });
+
+  it("update mode adds packaging to an existing product", async () => {
+    const base = csvFor([
+      [`Tea Loose ${stamp}`, "physical", "", "", "Piece", "", `TEA-${stamp}`, "false", "", "", "200", "", "", "none", "", "", "", "", "", "active"],
+    ]);
+    const up1 = await upload(owner, "tea-base.csv", base);
+    assert.equal(up1.status, 201);
+    const validatedBase = await api(
+      owner,
+      "POST",
+      `/api/products/import/${up1.body.data.sessionId}/validate`,
+    );
+    assert.equal(validatedBase.status, 200, JSON.stringify(validatedBase.body));
+    const executedBase = await api(
+      owner,
+      "POST",
+      `/api/products/import/${up1.body.data.sessionId}/execute`,
+    );
+    assert.equal(executedBase.status, 200, JSON.stringify(executedBase.body));
+    assert.equal(executedBase.body.data.created, 1);
+
+    const packaged = csvForWithPackaging([
+      [`Tea Loose ${stamp}`, "physical", "", "", "Piece", "Carton", "24", "4800", "", "", `TEA-${stamp}`, "false", "", "", "200", "", "", "none", "", "", "", "", "", "active"],
+    ]);
+    const up2 = await upload(owner, "tea-pack.csv", packaged);
+    assert.equal(up2.status, 201);
+    const patched = await api(owner, "PATCH", `/api/products/import/${up2.body.data.sessionId}`, {
+      mapping: up2.body.data.mapping,
+      mode: "upsert",
+    });
+    assert.equal(patched.status, 200, JSON.stringify(patched.body));
+    const executed = await api(owner, "POST", `/api/products/import/${up2.body.data.sessionId}/execute`);
+    assert.equal(executed.status, 200, JSON.stringify(executed.body));
+    assert.equal(executed.body.data.updated, 1, JSON.stringify(executed.body));
+
+    const { default: pg } = await import("pg");
+    const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    const conv = await client.query(
+      `SELECT puc.conversion_factor FROM product_unit_conversions puc
+       JOIN products p ON p.id = puc.product_id
+       JOIN units u ON u.id = puc.unit_id
+       WHERE p.business_id = $1 AND p.name = $2 AND u.name = 'Carton'`,
+      [owner.businessId, `Tea Loose ${stamp}`],
+    );
+    client.end();
+    assert.equal(conv.rowCount, 1);
+    assert.equal(Number(conv.rows[0].conversion_factor), 24);
   });
 });

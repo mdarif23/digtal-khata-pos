@@ -9,6 +9,9 @@ import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { locations as locationsTable } from "../../db/schema/locations.js";
 import { productVariants } from "../../db/schema/productVariants.js";
+import { productUnitConversions } from "../../db/schema/productUnitConversions.js";
+import { purchaseItems } from "../../db/schema/purchaseItems.js";
+import { variantBarcodeAliases } from "../../db/schema/variantBarcodeAliases.js";
 import { products as productsTable } from "../../db/schema/products.js";
 import { serialNumbers } from "../../db/schema/serialNumbers.js";
 import { units as unitsTable } from "../../db/schema/units.js";
@@ -422,6 +425,189 @@ async function findOrCreateOptionIds(
   return { typeId: type!.id, typeName: type!.name, optionId: optionRow!.id };
 }
 
+/**
+ * UOM import (Phase 6+): materialize the row's optional packaging config.
+ * Creates (or updates, in the update path) ONE product-level conversion
+ * row — direct-to-base factor, sale enabled, optional per-unit price — and
+ * the optional package barcode as a variant alias carrying the conversion
+ * qualifier. Everything re-validated here: the unit must exist (created
+ * only when the session authorizes it), the factor must be positive, the
+ * unit must not be the product's base unit, and the barcode must not
+ * collide with any primary/alias code in the business (the validation
+ * phase already flags these; this is the commit-time backstop).
+ */
+async function upsertImportPackaging(input: {
+  tx: Tx;
+  businessId: number;
+  sessionId: number;
+  product: {
+    packageUnit: string | null;
+    packageFactor: number | null;
+    packageSalePrice: number | null;
+    packageBarcode: string | null;
+    unit: string | null;
+  };
+  productId: number;
+  defaultVariantId: number;
+  createMissingUnits: boolean;
+  mode: "create" | "update";
+  cache: MasterDataCache;
+}): Promise<void> {
+  const { tx, businessId, product } = input;
+  if (!product.packageUnit || product.packageFactor == null || product.packageFactor <= 0) {
+    return;
+  }
+
+  const [existingProduct] = await tx
+    .select({ unitId: productsTable.unitId })
+    .from(productsTable)
+    .where(
+      and(
+        eq(productsTable.id, input.productId),
+        eq(productsTable.businessId, businessId),
+      ),
+    )
+    .limit(1);
+  const unitId = await resolveMasterDataId(
+    tx, businessId, input.cache, "unit", product.packageUnit,
+    input.createMissingUnits, null,
+  );
+  if (unitId === null) {
+    throw new BadRequestError(
+      `Packaging unit "${product.packageUnit}" does not exist and creating units is disabled.`,
+    );
+  }
+  if (existingProduct?.unitId != null && unitId === existingProduct.unitId) {
+    throw new BadRequestError(
+      "The packaging unit cannot be the product's base unit.",
+    );
+  }
+
+  // One row per (product, product-scope, unit): update the existing config
+  // when the unit matches, otherwise add a second packaging unit.
+  const [existing] = await tx
+    .select()
+    .from(productUnitConversions)
+    .where(
+      and(
+        eq(productUnitConversions.businessId, businessId),
+        eq(productUnitConversions.productId, input.productId),
+        sql`${productUnitConversions.variantId} IS NULL`,
+        eq(productUnitConversions.unitId, unitId),
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    // Factor immutability (migration 0061 rule): only when nothing
+    // references the row; prices stay updatable either way.
+    const [ref] = await tx
+      .select({ one: sql<number>`1` })
+      .from(purchaseItems)
+      .where(
+        and(
+          eq(purchaseItems.businessId, businessId),
+          eq(purchaseItems.uomConversionId, existing.id),
+        ),
+      )
+      .limit(1);
+    const referenced = Boolean(ref);
+    await tx
+      .update(productUnitConversions)
+      .set({
+        ...(referenced
+          ? {}
+          : { conversionFactor: product.packageFactor }),
+        salePrice: product.packageSalePrice ?? existing.salePrice,
+        status: "active",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(productUnitConversions.id, existing.id),
+          eq(productUnitConversions.businessId, businessId),
+        ),
+      );
+  } else {
+    await tx.insert(productUnitConversions).values({
+      businessId,
+      productId: input.productId,
+      variantId: null,
+      unitId,
+      conversionFactor: product.packageFactor,
+      isPurchaseEnabled: true,
+      isSaleEnabled: true,
+      salePrice: product.packageSalePrice ?? null,
+      status: "active",
+    });
+  }
+
+  // Package barcode → alias of the default variant, qualified by the
+  // conversion row so a scan means ONE package.
+  if (product.packageBarcode) {
+    const [conversion] = await tx
+      .select({ id: productUnitConversions.id })
+      .from(productUnitConversions)
+      .where(
+        and(
+          eq(productUnitConversions.businessId, businessId),
+          eq(productUnitConversions.productId, input.productId),
+          sql`${productUnitConversions.variantId} IS NULL`,
+          eq(productUnitConversions.unitId, unitId),
+          eq(productUnitConversions.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!conversion) throw new Error("Packaging conversion missing after upsert.");
+
+    const code = product.packageBarcode.slice(0, 100);
+    const [primaryOwner] = await tx
+      .select({ id: productVariants.id })
+      .from(productVariants)
+      .where(
+        and(
+          eq(productVariants.businessId, businessId),
+          eq(productVariants.barcode, code),
+        ),
+      )
+      .limit(1);
+    if (primaryOwner) {
+      throw new ConflictError(
+        `Package barcode ${code} is already a primary barcode in this business.`,
+      );
+    }
+    const [aliasOwner] = await tx
+      .select({ id: variantBarcodeAliases.id, variantId: variantBarcodeAliases.variantId, uomConversionId: variantBarcodeAliases.uomConversionId })
+      .from(variantBarcodeAliases)
+      .where(
+        and(
+          eq(variantBarcodeAliases.businessId, businessId),
+          eq(variantBarcodeAliases.barcode, code),
+        ),
+      )
+      .limit(1);
+    if (aliasOwner) {
+      if (
+        aliasOwner.variantId === input.defaultVariantId &&
+        aliasOwner.uomConversionId === conversion.id
+      ) {
+        return; // idempotent re-import
+      }
+      throw new ConflictError(
+        `Package barcode ${code} is already registered as another code in this business.`,
+      );
+    }
+    await tx.insert(variantBarcodeAliases).values({
+      businessId,
+      variantId: input.defaultVariantId,
+      barcode: code,
+      barcodeFormat: detectBarcodeFormat(code),
+      source: "external",
+      uomConversionId: conversion.id,
+    });
+  }
+}
+
 async function executeGroupCreate(input: {
   tx: Tx;
   businessId: number;
@@ -564,6 +750,19 @@ async function executeGroupCreate(input: {
     }
   }
 
+  // UOM import: optional packaging config + package barcode alias.
+  await upsertImportPackaging({
+    tx,
+    businessId,
+    sessionId: input.sessionId,
+    product,
+    productId: createdProduct!.id,
+    defaultVariantId: variantIds[0]!,
+    createMissingUnits: input.createMissingMasterData,
+    mode: "create",
+    cache,
+  });
+
   await recordAuditInTx(tx, {
     businessId,
     actorUserId: input.userId,
@@ -583,6 +782,7 @@ async function executeGroupUpdate(input: {
   group: ReturnType<typeof groupRows>[number];
   cache: MasterDataCache;
   updateFields: string[] | null;
+  createMissingMasterData: boolean;
 }): Promise<{ productId: number; variantIds: number[]; action: "updated" }> {
   const { tx, businessId, group, cache } = input;
   const product = group.product;
@@ -634,6 +834,32 @@ async function executeGroupUpdate(input: {
             eq(productsTable.businessId, businessId),
           ),
         );
+    }
+  }
+
+  // UOM import (update path): apply packaging changes only when the
+  // session's update-fields list includes them (null = all fields).
+  const wantsPackaging =
+    fields === null ||
+    fields.some((f) =>
+      ["package_unit", "package_factor", "package_sale_price", "package_barcode"].includes(f),
+    );
+  if (wantsPackaging) {
+    const productMatch = (
+      product as NormalizedRow & { match?: { variantId: number; productId: number } }
+    ).match;
+    if (productMatch) {
+      await upsertImportPackaging({
+        tx,
+        businessId,
+        sessionId: input.sessionId,
+        product,
+        productId: productMatch.productId,
+        defaultVariantId: productMatch.variantId,
+        createMissingUnits: input.createMissingMasterData,
+        mode: "update",
+        cache,
+      });
     }
   }
 
@@ -849,6 +1075,7 @@ export async function executeImportSession(input: {
                   group,
                   cache,
                   updateFields: options.updateFields ?? null,
+                  createMissingMasterData: options.createMissingMasterData ?? true,
                 })
               : executeGroupCreate({
                   tx,

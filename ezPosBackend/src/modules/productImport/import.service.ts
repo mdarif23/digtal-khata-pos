@@ -5,6 +5,7 @@ import { categories as categoriesTable } from "../../db/schema/categories.js";
 import { locations as locationsTable } from "../../db/schema/locations.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { products as productsTable } from "../../db/schema/products.js";
+import { variantBarcodeAliases } from "../../db/schema/variantBarcodeAliases.js";
 import { serialNumbers } from "../../db/schema/serialNumbers.js";
 import { units as unitsTable } from "../../db/schema/units.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../utils/handleError.js";
@@ -35,6 +36,10 @@ export const CANONICAL_FIELDS = [
   "category",
   "brand",
   "unit",
+  "package_unit",
+  "package_factor",
+  "package_sale_price",
+  "package_barcode",
   "description",
   "sku",
   "has_variants",
@@ -65,6 +70,10 @@ const FIELD_ALIASES: Record<string, CanonicalField> = Object.fromEntries(
     ["category name", "category"], ["product category", "category"],
     ["brand name", "brand"], ["product brand", "brand"],
     ["unit name", "unit"], ["uom", "unit"], ["measurement", "unit"],
+    ["package unit", "package_unit"], ["packaging unit", "package_unit"], ["box unit", "package_unit"], ["carton unit", "package_unit"],
+    ["package factor", "package_factor"], ["packaging factor", "package_factor"], ["units per package", "package_factor"], ["pack size", "package_factor"], ["units per box", "package_factor"],
+    ["package sale price", "package_sale_price"], ["package price", "package_sale_price"], ["box price", "package_sale_price"], ["carton price", "package_sale_price"],
+    ["package barcode", "package_barcode"], ["box barcode", "package_barcode"], ["carton barcode", "package_barcode"], ["packaging barcode", "package_barcode"],
     ["product description", "description"], ["desc", "description"],
     ["product sku", "sku"], ["variant sku", "sku"], ["item sku", "sku"], ["sku code", "sku"],
     ["has variants", "has_variants"], ["variants", "has_variants"],
@@ -95,6 +104,11 @@ export interface NormalizedRow {
   category: string | null;
   brand: string | null;
   unit: string | null;
+  /** UOM import (Phase 6+): optional product-level packaging config. */
+  packageUnit: string | null;
+  packageFactor: number | null;
+  packageSalePrice: number | null;
+  packageBarcode: string | null;
   description: string | null;
   sku: string | null;
   hasVariants: boolean;
@@ -324,7 +338,7 @@ export function normalizeRow(
 
   const barcode = normalizeText(get("barcode"));
   if (barcode) {
-    if (barcode.length > 100 || /[ -]/.test(barcode)) {
+    if (barcode.length > 100 || /[\x00-\x1f\x7f]/.test(barcode)) {
       issues.push({
         code: "invalid_barcode",
         message: `Barcode "${barcode}" is not a valid barcode value.`,
@@ -386,6 +400,75 @@ export function normalizeRow(
     }
   }
 
+  // UOM import (Phase 6+): optional product-level packaging. Both the unit
+  // and a positive factor are required together; prices/barcodes are extra.
+  const packageUnit = normalizeText(get("package_unit"));
+  const packageFactor = normalizeNumber(
+    get("package_factor"),
+    "package_factor",
+    issues,
+    rowNumber,
+  );
+  if (packageUnit && (packageFactor === null || packageFactor <= 0)) {
+    issues.push({
+      code: "invalid_package_factor",
+      message: `Packaging unit "${packageUnit}" needs a positive units-per-package factor.`,
+      field: "package_factor",
+    });
+  } else if (!packageUnit && packageFactor !== null) {
+    issues.push({
+      code: "missing_package_unit",
+      message: "A package factor needs a packaging unit (e.g. Box).",
+      field: "package_unit",
+    });
+  } else if (packageUnit && packageFactor !== null && packageFactor > 0) {
+    if (unit && packageUnit.toLowerCase() === unit.toLowerCase()) {
+      issues.push({
+        code: "package_unit_is_base",
+        message: "The packaging unit cannot be the product's own base unit.",
+        field: "package_unit",
+      });
+    }
+  }
+  const packageSalePrice = normalizeNumber(
+    get("package_sale_price"),
+    "package_sale_price",
+    issues,
+    rowNumber,
+  );
+  if (packageSalePrice !== null && packageSalePrice < 0) {
+    issues.push({
+      code: "invalid_price",
+      message: "Package sale price cannot be negative.",
+      field: "package_sale_price",
+    });
+  }
+  const packageBarcode = normalizeText(get("package_barcode"));
+  if (packageBarcode) {
+    if (packageBarcode.length > 100 || /[\x00-\x1f\x7f]/.test(packageBarcode)) {
+      issues.push({
+        code: "invalid_barcode",
+        message: `Package barcode "${packageBarcode}" is not a valid barcode value.`,
+        field: "package_barcode",
+      });
+    } else if (
+      /^\d{8}$|^\d{12}$|^\d{13}$/.test(packageBarcode) &&
+      !gtinCheckDigitIsValid(packageBarcode)
+    ) {
+      issues.push({
+        code: "invalid_barcode",
+        message: `Package barcode "${packageBarcode}" looks like an EAN-8/UPC-A/EAN-13 code but fails GS1 validation.`,
+        field: "package_barcode",
+      });
+    } else if (barcode && packageBarcode.toLowerCase() === barcode.toLowerCase()) {
+      issues.push({
+        code: "duplicate_in_file",
+        message: "The package barcode must differ from the piece barcode.",
+        field: "package_barcode",
+      });
+    }
+  }
+
   const statusText = (normalizeText(get("status")) ?? "active").toLowerCase();
   const status = (["draft", "active", "inactive"] as const).includes(
     statusText as never,
@@ -438,6 +521,11 @@ export function normalizeRow(
       category,
       brand,
       unit,
+      packageUnit,
+      packageFactor: packageFactor !== null && packageFactor > 0 ? packageFactor : null,
+      packageSalePrice:
+        packageSalePrice === null ? null : roundMoney(packageSalePrice),
+      packageBarcode,
       description: normalizeText(get("description")),
       sku,
       hasVariants,
@@ -593,6 +681,25 @@ export async function loadImportDbContext(
     locations: new Map(),
     serials: new Set(serialRows.map((r) => r.serial)),
   };
+  // UOM import: package barcodes live on variant_barcode_aliases — they
+  // must collide with NOTHING (primary or alias) for a lookup to stay
+  // deterministic.
+  const aliasRows = await db
+    .select({
+      barcode: variantBarcodeAliases.barcode,
+      variantId: productVariants.id,
+      productName: productsTable.name,
+    })
+    .from(variantBarcodeAliases)
+    .innerJoin(
+      productVariants,
+      and(
+        eq(productVariants.id, variantBarcodeAliases.variantId),
+        eq(productVariants.businessId, variantBarcodeAliases.businessId),
+      ),
+    )
+    .innerJoin(productsTable, eq(productsTable.id, productVariants.productId))
+    .where(eq(variantBarcodeAliases.businessId, businessId));
   const nameCounts = new Map<string, number>();
   for (const row of variantRows) {
     context.variantSkus.set(row.sku.toLowerCase(), {
@@ -611,6 +718,15 @@ export async function loadImportDbContext(
       row.productName.toLowerCase(),
       (nameCounts.get(row.productName.toLowerCase()) ?? 0) + 1,
     );
+  }
+  for (const row of aliasRows) {
+    if (!context.barcodes.has(row.barcode.toLowerCase())) {
+      context.barcodes.set(row.barcode.toLowerCase(), {
+        variantId: row.variantId,
+        productId: 0,
+        productName: row.productName,
+      });
+    }
   }
   for (const [name, count] of nameCounts) {
     context.productNames.set(name, { productId: 0, hasVariants: count > 1 });
@@ -632,6 +748,7 @@ export function validateGroups(
 ): void {
   const inFileSkus = new Map<string, number[]>();
   const inFileBarcodes = new Map<string, number[]>();
+  const inFilePackageBarcodes = new Map<string, number[]>();
   const inFileOptionSets = new Map<string, number[]>();
   for (const group of groups) {
     for (const row of group.rows) {
@@ -644,6 +761,12 @@ export function validateGroups(
       if (row.barcode) {
         inFileBarcodes.set(row.barcode.toLowerCase(), [
           ...(inFileBarcodes.get(row.barcode.toLowerCase()) ?? []),
+          row.rowNumber,
+        ]);
+      }
+      if (row.packageBarcode) {
+        inFilePackageBarcodes.set(row.packageBarcode.toLowerCase(), [
+          ...(inFilePackageBarcodes.get(row.packageBarcode.toLowerCase()) ?? []),
           row.rowNumber,
         ]);
       }
@@ -685,6 +808,40 @@ export function validateGroups(
           message: `Barcode "${row.barcode}" appears on multiple rows in this file.`,
           field: "barcode",
         });
+      }
+      if (
+        row.packageBarcode &&
+        (inFilePackageBarcodes.get(row.packageBarcode.toLowerCase())?.length ?? 0) > 1
+      ) {
+        issues.push({
+          code: "duplicate_in_file",
+          message: `Package barcode "${row.packageBarcode}" appears on multiple rows in this file.`,
+          field: "package_barcode",
+        });
+      }
+      if (row.packageBarcode) {
+        const collision = context.barcodes.get(row.packageBarcode.toLowerCase());
+        if (collision) {
+          issues.push({
+            code: "package_barcode_exists",
+            message: `Package barcode "${row.packageBarcode}" is already registered in this business (product: ${collision.productName}).`,
+            field: "package_barcode",
+          });
+        }
+      }
+      // Packaging is product-level: every row of a group must agree.
+      if (row !== group.product && (row.packageUnit || group.product.packageUnit)) {
+        const same =
+          (row.packageUnit ?? "").toLowerCase() ===
+            (group.product.packageUnit ?? "").toLowerCase() &&
+          (row.packageFactor ?? 0) === (group.product.packageFactor ?? 0);
+        if (!same) {
+          issues.push({
+            code: "package_conflict",
+            message: "Packaging differs between rows of the same product — one configuration per product.",
+            field: "package_unit",
+          });
+        }
       }
       if (group.hasVariants && row.optionsLabel) {
         const key = `${row.groupKey}::${row.optionsLabel.toLowerCase()}`;
