@@ -5,6 +5,7 @@ import { integrations } from "../../db/schema/integrations.js";
 import { locations } from "../../db/schema/locations.js";
 import { businessMemberships } from "../../db/schema/businessMemberships.js";
 import { roles } from "../../db/schema/roles.js";
+import { units } from "../../db/schema/units.js";
 import { userRoles } from "../../db/schema/userRoles.js";
 import { subscriptionPlans } from "../../db/schema/subscriptionPlans.js";
 import { subscriptions } from "../../db/schema/subscriptions.js";
@@ -217,6 +218,12 @@ export async function createBusinessForUser(
       DEFAULT_ROLE_PERMISSIONS.owner,
     );
     await ensureDefaultRolesInTx(tx, business.id);
+
+    // Seed a default measurement unit so Add Product works immediately —
+    // a fresh business otherwise dead-ends on the required unit dropdown.
+    await tx
+      .insert(units)
+      .values({ businessId: business.id, name: "Piece", abbreviation: "pc" });
 
     await tx.insert(businessMemberships).values({
       userId,

@@ -5,6 +5,7 @@ import { buildApp } from "./app.js";
 import { pool } from "./config/db.js";
 import { ensureRbacSeed } from "./rbac/seed.js";
 import { startScheduler, stopScheduler } from "./jobs/scheduler.js";
+import { bootstrapPlatformAdmin } from "./services/platformAdminBootstrap.js";
 import {
   isSyncEnabled,
   startSyncAgent,
@@ -17,6 +18,12 @@ const app = buildApp();
 // permission rows at any time. Failures are logged; the server still starts.
 ensureRbacSeed().catch((err) => {
   console.error("RBAC permission seed failed:", err);
+});
+
+// Declarative platform-admin bootstrap (PLATFORM_ADMIN_EMAIL) — logged only
+// when it actually promotes someone; never blocks startup.
+bootstrapPlatformAdmin().catch((err) => {
+  console.error("Platform-admin bootstrap failed:", err);
 });
 
 // Subscription lifecycle sweeps (trial expiry, reminders, grace suspension)
