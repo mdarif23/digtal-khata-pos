@@ -34,6 +34,20 @@ export interface PurchaseCart extends Omit<ProductType, "variants"> {
   purchasePrice: number;
   purchaseDiscount: number;
   purchaseTax: number;
+  /**
+   * UOM (migration 0062): the packaging unit the line is entered in.
+   * Null = the product's base unit. purchaseQty/purchasePrice are in THIS
+   * unit; the server converts authoritatively from uomConversionId.
+   */
+  uomConversionId: number | null;
+  unitName: string;
+  /** Base units per selected unit (1 for the base). */
+  conversionFactor: number;
+  /**
+   * False while the async default-purchase-unit resolution is still allowed
+   * to overwrite the prefill; set once the operator edits any line field.
+   */
+  unitTouched: boolean;
 }
 export interface PurchasesItems {
   productName: string;
@@ -60,6 +74,15 @@ export interface PurchasesItems {
   receiveNow: number;
   trackingType: string;
   availableStock: number | null;
+  /**
+   * UOM snapshot on the ORDER line (migration 0062). quantity/unitCost are
+   * stored BASE figures; enteredQuantity/enteredUnitPrice preserve what the
+   * operator ordered in uomConversionId's unit (null = base-ordered line).
+   */
+  uomConversionId: number | null;
+  enteredQuantity: number | null;
+  enteredUnitPrice: number | null;
+  conversionFactor: number | null;
 }
 
 export type RejectionCategory = "damaged" | "incorrect" | "expired" | "other";
@@ -187,6 +210,15 @@ export interface PurchaseDetailItem {
   tax: number;
   sellingPrice: number;
   availableStock: number | null;
+  /**
+   * UOM snapshot on the order line (migration 0062): the unit the operator
+   * ordered in, with the entered quantity/price they typed. Null entered
+   * figures = a legacy base-ordered line (drawers render it unchanged).
+   */
+  uomConversionId: number | null;
+  enteredQuantity: number | null;
+  enteredUnitPrice: number | null;
+  conversionFactor: number | null;
 }
 
 /**
@@ -362,7 +394,13 @@ export interface PurchasesReturnItems {
 }
 export interface ChangedItems {
   purchaseItemId: number;
+  /**
+   * Base units when uomConversionId is null/absent; otherwise the quantity
+   * in that packaging unit (the server converts authoritatively).
+   */
   quantity: number;
+  /** UOM (migration 0062): the packaging unit this quantity is entered in. */
+  uomConversionId?: number | null;
 }
 export interface PurchaseReturnInput {
   orderId: number;
@@ -476,10 +514,14 @@ export interface GroupedVariantOption {
 }
 export type CreatePurchaseItem = {
   variantId: number;
+  /** In the ENTERED unit when uomConversionId is set (null = base unit). */
   quantity: number;
+  /** Per entered unit. */
   purchasePrice: number;
   discount: number;
   tax: number;
+  /** UOM (migration 0062): the packaging unit this line is entered in. */
+  uomConversionId?: number | null;
 };
 
 export type CreatePurchaseInput = {

@@ -9,6 +9,40 @@ import type {
 } from "@/features/products/product.schema.js";
 
 /**
+ * Packaging-unit scans: the backend lookup may attach a sell unit to a
+ * match — the scanned code then means ONE PACKAGE of that unit (a "Box"
+ * barcode adds 1 Box, not 12 loose pieces). The catalog-local matches have
+ * no unit (base); only server matches carry it, so this is a structural
+ * widening of the shared LookupMatch type rather than a barcode.api change.
+ */
+export interface ScannedSellUnit {
+  conversionId: number;
+  unitId: number;
+  unitName: string;
+  unitAbbreviation: string | null;
+  conversionFactor: number;
+  salePrice: number;
+}
+
+export type LookupMatchWithUnit = LookupMatch & {
+  unit?: ScannedSellUnit | null;
+};
+
+/** The scanned unit of a lookup match, or null for a plain piece scan. */
+export function getScannedUnit(match: LookupMatch): ScannedSellUnit | null {
+  const unit = (match as LookupMatchWithUnit).unit;
+  if (
+    unit &&
+    typeof unit.conversionId === "number" &&
+    typeof unit.conversionFactor === "number" &&
+    unit.conversionFactor > 0
+  ) {
+    return unit;
+  }
+  return null;
+}
+
+/**
  * Catalog-backed identification for the scanner service: pages whose data
  * lives in a loaded product catalog resolve scans locally first (instant,
  * offline-capable) and fall back to the server lookup for alias barcodes

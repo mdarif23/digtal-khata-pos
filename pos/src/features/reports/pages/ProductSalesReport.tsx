@@ -98,6 +98,11 @@ export function ProductSalesReport() {
       render: (r) => (
         <span className="font-semibold text-slate-900">
           {formatNumber(r.qtySold)}
+          {r.unitLabel ? (
+            <span className="ml-1 text-xs font-normal text-slate-500">
+              {r.unitLabel}
+            </span>
+          ) : null}
         </span>
       ),
     },

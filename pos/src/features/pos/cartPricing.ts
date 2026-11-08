@@ -9,6 +9,8 @@ type PricedItem = {
   quantity: number | string;
   discount?: DiscountInput;
   variants: { sellingPrice: number | string }[];
+  /** Price per SELECTED unit (packaging-unit lines); falls back to the variant price. */
+  unitPrice?: number | string;
 };
 
 export const money = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -45,7 +47,7 @@ export function getCartTotals(
   let itemDiscount = 0;
 
   for (const item of cart) {
-    const price = item.variants[0]?.sellingPrice;
+    const price = item.unitPrice ?? item.variants[0]?.sellingPrice;
     if (price == null) continue;
     const line = getLinePricing(price, item.quantity, item.discount);
     itemsBase += line.base;

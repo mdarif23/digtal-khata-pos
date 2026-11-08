@@ -7,6 +7,8 @@
  * availableStock is the RECEIVING location's stock.
  */
 
+import { scanStepInLineUnit } from "./uom.js";
+
 export interface ReturnItemLine {
   quantity: number;
   receivedQuantity: number;
@@ -80,12 +82,20 @@ export function estimateReturnUnitPrice(item: ReturnItemLine): number {
  * takes the scanned unit, subject to the variant-wide stock cap at the
  * receiving location (all sibling lines share that stock). Returns the
  * UPDATED selection map, or null when no line can take another unit.
+ *
+ * UOM (migration 0062): returnQuantities are held in each line's SELECTED
+ * unit, so every comparison here converts to base units via factorByLine.
+ * A scanned package (scanFactor) is countable only on lines whose unit is
+ * an exact divisor of it — a box scan never mis-counts as a fraction of a
+ * box line's unit; such lines are skipped and the scan moves on.
  */
 export function allocateScannedUnit({
   lines,
   variantId,
   returnedByItem,
   returnQuantities,
+  factorByLine,
+  scanFactor = 1,
 }: {
   /** The purchase's lines, in purchase-order sequence. */
   lines: {
@@ -96,14 +106,23 @@ export function allocateScannedUnit({
   }[];
   variantId: number;
   returnedByItem: Map<number, number>;
+  /** Per-line quantities in each line's SELECTED unit. */
   returnQuantities: Record<number, number>;
+  /** Base units per selected unit, per line (defaults to 1). */
+  factorByLine?: Map<number, number>;
+  /** Base units per scanned unit (1 = base-unit barcode). */
+  scanFactor?: number;
 }): Record<number, number> | null {
+  const factorOf = (lineId: number): number =>
+    factorByLine?.get(lineId) ?? 1;
   const variantLines = lines.filter((line) => line.variantId === variantId);
   if (variantLines.length === 0) return null;
 
   // Sibling selections share the variant's stock at the receiving location.
   const selectedForVariant = variantLines.reduce(
-    (sum, line) => sum + (returnQuantities[line.id] ?? 0),
+    (sum, line) =>
+      sum +
+      (returnQuantities[line.id] ?? 0) * factorOf(line.id),
     0,
   );
   const remainingStock = Math.max(
@@ -113,16 +132,20 @@ export function allocateScannedUnit({
   if (remainingStock <= 0) return null;
 
   for (const line of variantLines) {
-    const remainingReceived = Math.max(
-      0,
-      Number(line.receivedQuantity) -
-        (returnedByItem.get(line.id) ?? 0) -
-        (returnQuantities[line.id] ?? 0),
-    );
+    const factor = factorOf(line.id);
+    const remainingReceived =
+      Math.max(
+        0,
+        Number(line.receivedQuantity) - (returnedByItem.get(line.id) ?? 0),
+      ) -
+      (returnQuantities[line.id] ?? 0) * factor;
     if (remainingReceived > 0) {
+      // The scanned unit must be a whole multiple of the line's unit.
+      const step = scanStepInLineUnit(factor, scanFactor);
+      if (step === null) continue;
       return {
         ...returnQuantities,
-        [line.id]: (returnQuantities[line.id] ?? 0) + 1,
+        [line.id]: (returnQuantities[line.id] ?? 0) + step,
       };
     }
   }

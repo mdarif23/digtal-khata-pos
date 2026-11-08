@@ -94,6 +94,9 @@ export interface ProductSalesRow {
   brandName: string;
   sku: string;
   qtySold: number;
+  /** Base-unit abbreviation from the product's unit (e.g. "pc"); all
+   *  quantities in this report are base units, so rows aggregate honestly. */
+  unitLabel?: string | null;
   grossSales: number;
   totalDiscount: number;
   netSales: number;

@@ -108,9 +108,20 @@ export async function renderReceiptHtml(input: ReceiptRenderInput): Promise<Rece
     return parts.map((p) => `<div class="sub">${p}</div>`).join("");
   };
 
+  // UOM (migration 0062): a line sold in a packaging unit shows the entered
+  // unit ("1 Box") with the base equivalent ("= 12 pcs"); base lines are
+  // unchanged.
+  const qtyDisplay = (item: SaleReceiptData["items"][number]): string => {
+    if (item.enteredUnitAbbreviation && item.enteredQuantity != null) {
+      const base = item.quantity;
+      return `${item.enteredQuantity} ${item.enteredUnitAbbreviation} (= ${base} ${item.unitName ?? ""})`.replace(/\s+/g, " ").trim();
+    }
+    return String(item.quantity);
+  };
+
   const itemLine = (item: SaleReceiptData["items"][number]): string => {
     if (compact) {
-      const qtyPart = showQtyCol ? `${item.quantity} ${showPriceCol ? `x ${money(item.unitPrice)}` : ""}` : "";
+      const qtyPart = showQtyCol ? `${qtyDisplay(item)} ${showPriceCol ? `x ${money(item.enteredUnitPrice ?? item.unitPrice)}` : ""}` : "";
       const totalPart = showTotalCol ? money(item.lineTotal) : "";
       return `
       <div class="item-block">
@@ -125,8 +136,8 @@ export async function renderReceiptHtml(input: ReceiptRenderInput): Promise<Rece
           ${v.productName ? `<div class="item-title">${esc(item.productName)}</div>` : ""}
           ${itemSubLines(item)}
         </td>
-        ${showQtyCol ? `<td class="text-center">${item.quantity}</td>` : ""}
-        ${showPriceCol ? `<td class="text-right">${money(item.unitPrice)}</td>` : ""}
+        ${showQtyCol ? `<td class="text-center">${esc(qtyDisplay(item))}</td>` : ""}
+        ${showPriceCol ? `<td class="text-right">${money(item.enteredUnitPrice ?? item.unitPrice)}</td>` : ""}
         ${showTotalCol ? `<td class="text-right bold">${money(item.lineTotal)}</td>` : ""}
       </tr>`;
   };

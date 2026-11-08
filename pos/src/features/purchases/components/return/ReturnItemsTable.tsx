@@ -5,6 +5,15 @@ import {
   estimateReturnUnitPrice,
   maxReturnableForItem,
 } from "../../utils/returnCalculations";
+import {
+  enteredToBaseQuantity,
+  roundQuantity,
+  unitCostFromBase,
+  unitOptionLabel,
+} from "../../utils/uom";
+import type {
+  PurchaseUnitOption,
+} from "../../hooks/usePurchaseUnits";
 import { AvailableStockIndicator } from "./AvailableStockIndicator";
 import { ReturnQuantityInput } from "./ReturnQuantityInput";
 
@@ -13,6 +22,10 @@ import { ReturnQuantityInput } from "./ReturnQuantityInput";
  * returned. The unit cost shown is the client's per-unit credit ESTIMATE —
  * the server credits actual batch costs (FIFO) and its total is displayed
  * after processing.
+ *
+ * UOM (migration 0062): each line's return quantity is entered in its
+ * SELECTED packaging unit (defaulting to the PO line's unit); the server
+ * base figures are converted to that unit (floored) for display only.
  */
 export function ReturnItemsTable({
   orderItems,
@@ -20,6 +33,9 @@ export function ReturnItemsTable({
   returnQuantities,
   lineCredits,
   serialsByItem,
+  unitsByVariant,
+  resolveLineUnit,
+  onUnitChange,
   selectedSerials,
   onToggleSerial,
   onQuantityChange,
@@ -28,6 +44,7 @@ export function ReturnItemsTable({
    *  location's stock (Phase 1) — never the caller's active location. */
   orderItems: PurchaseDetailItem[];
   returnedByItem: Map<number, number>;
+  /** Per-line quantities in each line's SELECTED unit. */
   returnQuantities: Record<number, number>;
   /** Phase 2: server-authoritative per-line credits from the return
    *  preview. Absent for a line = the preview has not caught up; the
@@ -35,6 +52,15 @@ export function ReturnItemsTable({
   lineCredits?: Map<number, number>;
   /** Phase 5: eligible serials per serial-tracked line (picker data). */
   serialsByItem?: Map<number, { id: number; serialNumber: string }[]>;
+  /** UOM (migration 0062): purchase-unit options per variant (fetched only
+   *  for lines ordered in a packaging unit). */
+  unitsByVariant: Map<number, PurchaseUnitOption[]>;
+  /** The line's selected unit (defaults to the PO line's entered unit). */
+  resolveLineUnit: (item: PurchaseDetailItem) => {
+    conversionId: number | null;
+    unit: PurchaseUnitOption | null;
+  };
+  onUnitChange: (item: PurchaseDetailItem, unit: PurchaseUnitOption) => void;
   /** Phase 5: the caller's selected serial ids per line. */
   selectedSerials?: Map<number, number[]>;
   onToggleSerial?: (
@@ -74,11 +100,11 @@ export function ReturnItemsTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[980px] text-left text-sm">
+      <table className="w-full min-w-[1020px] text-left text-sm">
         <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
           <tr>
             <th className="px-4 py-3 font-medium">Product</th>
-            <th className="px-3 py-3 font-medium">Unit</th>
+            <th className="w-44 px-3 py-3 font-medium">Unit</th>
             <th className="px-3 py-3 text-right font-medium">Ordered</th>
             <th className="px-3 py-3 text-right font-medium">Received</th>
             <th className="px-3 py-3 text-right font-medium">Returned</th>
@@ -91,11 +117,22 @@ export function ReturnItemsTable({
         <tbody className="divide-y">
           {orderItems.map((item) => {
             const returned = returnedByItem.get(item.id) ?? 0;
+            const { conversionId, unit } = resolveLineUnit(item);
+            const factor = unit?.conversionFactor ?? 1;
+            const unitName = unit?.unitName ?? item.productUnit ?? "units";
+            const baseUnitName = item.productUnit ?? "units";
+            const serialLocked = item.trackingType === "serial";
+            // Sibling selections are converted to base before the
+            // variant-wide stock cap (quantities are held per line unit).
             const selectedForVariant = orderItems.reduce(
               (sum, otherItem) =>
                 otherItem.variantId === item.variantId &&
                 otherItem.id !== item.id
-                  ? sum + (returnQuantities[otherItem.id] ?? 0)
+                  ? sum +
+                    enteredToBaseQuantity(
+                      returnQuantities[otherItem.id] ?? 0,
+                      resolveLineUnit(otherItem).unit?.conversionFactor ?? 1,
+                    )
                   : sum,
               0,
             );
@@ -103,14 +140,26 @@ export function ReturnItemsTable({
               0,
               Number(item.availableStock ?? 0) - selectedForVariant,
             );
-            const maxReturn = maxReturnableForItem(
+            const maxReturnBase = maxReturnableForItem(
               item,
               returned,
               selectedForVariant,
             );
+            const maxReturn = Math.floor(
+              roundQuantity(maxReturnBase / factor),
+            );
             const quantity = returnQuantities[item.id] ?? 0;
             const unitPrice = estimateReturnUnitPrice(item);
             const authoritativeCredit = lineCredits?.get(item.id);
+            const orderedLabel =
+              item.enteredQuantity != null
+                ? `${item.enteredQuantity} ${item.productUnit ?? ""}`.trim()
+                : String(item.quantity);
+            const orderedBaseHint =
+              item.enteredQuantity != null &&
+              Number(item.conversionFactor) !== 1
+                ? `= ${item.quantity} ${baseUnitName}`
+                : null;
             return (
               <tr key={item.id}>
                 <td className="px-4 py-3">
@@ -134,28 +183,99 @@ export function ReturnItemsTable({
                     {item.trackingType} tracking
                   </p>
                 </td>
-                <td className="px-3 py-3 text-muted-foreground">
-                  {item.productUnit || "—"}
+                <td className="px-3 py-2">
+                  {serialLocked ? (
+                    <span
+                      className="text-muted-foreground"
+                      title="Serial-tracked items are returned per piece in the base unit."
+                    >
+                      {baseUnitName}
+                      <span className="mt-0.5 block text-xs text-muted-foreground/80">
+                        Base unit (serials)
+                      </span>
+                    </span>
+                  ) : (() => {
+                    const units = unitsByVariant.get(item.variantId);
+                    if (!units || units.length <= 1) {
+                      return (
+                        <span className="text-muted-foreground">
+                          {unitName}
+                        </span>
+                      );
+                    }
+                    return (
+                      <select
+                        aria-label={`${item.variantName || item.productName} unit`}
+                        value={conversionId === null ? "base" : String(conversionId)}
+                        onChange={(event) => {
+                          const next =
+                            event.target.value === "base"
+                              ? (units[0] ?? null)
+                              : (units.find(
+                                  (option) =>
+                                    String(option.uomConversionId) ===
+                                    event.target.value,
+                                ) ?? null);
+                          if (next) onUnitChange(item, next);
+                        }}
+                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                      >
+                        {units.map((option) => (
+                          <option
+                            key={option.uomConversionId ?? "base"}
+                            value={
+                              option.uomConversionId === null
+                                ? "base"
+                                : String(option.uomConversionId)
+                            }
+                          >
+                            {unitOptionLabel(option, units[0]?.unitName)}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })()}
                 </td>
-                <td className="px-3 py-3 text-right">{item.quantity}</td>
+                <td className="px-3 py-3 text-right">
+                  {orderedLabel}
+                  {orderedBaseHint && (
+                    <span className="block text-xs text-muted-foreground">
+                      {orderedBaseHint}
+                    </span>
+                  )}
+                </td>
                 <td className="px-3 py-3 text-right">
                   {item.receivedQuantity}
+                  <span className="block text-xs text-muted-foreground">
+                    {baseUnitName}
+                  </span>
                 </td>
-                <td className="px-3 py-3 text-right">{returned}</td>
+                <td className="px-3 py-3 text-right">
+                  {returned}
+                  <span className="block text-xs text-muted-foreground">
+                    {baseUnitName}
+                  </span>
+                </td>
                 <td className="px-3 py-3">
                   <AvailableStockIndicator
                     availableStock={availableStock}
-                    maxReturn={maxReturn}
+                    maxReturn={maxReturnBase}
                   />
                 </td>
                 <td className="px-3 py-2">
                   <ReturnQuantityInput
                     value={quantity}
                     maxReturn={maxReturn}
+                    unitName={factor !== 1 ? unitName : undefined}
                     label={`Return quantity for ${item.variantName || item.productName}`}
                     disabled={maxReturn <= 0}
                     onChange={(value) => onQuantityChange(item, value)}
                   />
+                  {factor !== 1 && (
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      1 {unitName} = {factor} {baseUnitName}
+                    </span>
+                  )}
                   {item.trackingType === "serial" &&
                     (serialsByItem?.get(item.id)?.length ?? 0) > 0 && (
                       <fieldset
@@ -196,11 +316,17 @@ export function ReturnItemsTable({
                     )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right">
-                  ৳ {formatCurrency(unitPrice)}
+                  ৳ {formatCurrency(unitCostFromBase(unitPrice, factor))}
+                  <span className="block text-xs text-muted-foreground">
+                    per {unitName}
+                  </span>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right font-medium">
                   ৳{" "}
-                  {formatCurrency(authoritativeCredit ?? quantity * unitPrice)}
+                  {formatCurrency(
+                    authoritativeCredit ??
+                      quantity * unitCostFromBase(unitPrice, factor),
+                  )}
                   {authoritativeCredit === undefined && quantity > 0 ? (
                     <span className="text-muted-foreground">*</span>
                   ) : null}

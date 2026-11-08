@@ -54,6 +54,12 @@ export interface LabelItem {
   barcode: string;
   barcodeFormat: string | null;
   sellingPrice: number;
+  /**
+   * UOM (migration 0062): optional packaging line, e.g. "Box of 12" —
+   * printed under the code when the label's alias stands for a package.
+   * Absent/null keeps the default layout untouched.
+   */
+  packageUnitLine?: string | null;
 }
 
 export const LABEL_SIZES: LabelSize[] = [

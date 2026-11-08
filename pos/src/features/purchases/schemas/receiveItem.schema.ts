@@ -37,6 +37,11 @@ export const receiveItemsFormSchema = z.object({
         serialNumbers: z.array(
           z.string().min(1, "Serial number cannot be empty"),
         ),
+        // UOM (migration 0062): the packaging unit receiveNow,
+        // rejectedQuantity and batches are entered in. Null/absent = the
+        // product's base unit — the server converts authoritatively and
+        // re-validates the cross-field sums for package units.
+        uomConversionId: z.number().int().positive().nullish(),
       })
       .superRefine((data, ctx) => {
         if (

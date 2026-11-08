@@ -62,6 +62,10 @@ function fieldLines(item: LabelItem, config: LabelConfig): string[] {
   if (config.includeProductName) lines.push(item.productName);
   if (config.includeVariantName && item.variantLabel) lines.push(item.variantLabel);
   if (config.includeSku) lines.push(`SKU: ${item.sku}`);
+  // UOM (migration 0062): the packaging line (e.g. "Box of 12") for labels
+  // whose alias stands for a package. Optional — the default layout is
+  // untouched otherwise.
+  if (item.packageUnitLine) lines.push(item.packageUnitLine);
   return lines;
 }
 

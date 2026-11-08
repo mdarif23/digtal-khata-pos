@@ -3,15 +3,68 @@ import { ProductType } from "@/features/products/product.schema";
 import { ProductsTypes } from "@/features/products/products.types";
 import type React from "react";
 import { UseFormReturn } from "react-hook-form";
+
+/**
+ * A sell unit selected for a cart line (packaging-unit selling). The base
+ * unit is `uomConversionId: null` with `conversionFactor: 1`; a package unit
+ * (e.g. "Box") carries the UOM conversion id and how many base units one
+ * package contains.
+ */
+export interface SellUnitRef {
+  uomConversionId: number | null;
+  unitName: string;
+  unitAbbreviation: string | null;
+  /** Base units per ONE package of this unit (1 for the base unit). */
+  conversionFactor: number;
+  /** Price per ONE package of this unit. */
+  salePrice: number;
+}
+
 export interface CartType extends ProductType {
+  /**
+   * Quantity in the SELECTED sell unit (2 = two boxes on a Box line). This
+   * is what gets sent to the server; stock bookkeeping converts to base at
+   * the call sites with `conversionFactor`.
+   */
   quantity: number;
   discount?: {
     type: "fixed" | "percentage";
     value: number;
   } | null;
   serialNumbers?: string[];
+  // --- packaging-unit selling (all optional: legacy/persisted lines are
+  // --- base-unit lines and must render exactly as before) ---
+  /** null/undefined = base unit line. */
+  uomConversionId?: number | null;
+  /** Mirror of `quantity` in the selected unit (hold-payload field). */
+  enteredQuantity?: number;
+  unitName?: string | null;
+  unitAbbreviation?: string | null;
+  conversionFactor?: number;
+  /** Price per one selected unit; falls back to variant.sellingPrice. */
+  unitPrice?: number;
 }
 export type DiscountType = "percentage" | "fixed";
+
+/** Normalized unit id of a cart line — `null` means the base unit. */
+export function lineUnitId(
+  line: Pick<CartType, "uomConversionId"> | undefined,
+): number | null {
+  return line?.uomConversionId ?? null;
+}
+
+/** True when the line belongs to the given unit (null = base unit). */
+export function lineMatchesUnit(
+  line: CartType,
+  uomConversionId: number | null | undefined,
+): boolean {
+  return lineUnitId(line) === (uomConversionId ?? null);
+}
+
+export type SwitchUnitResult =
+  | { ok: true; convertedQuantity: number; merged: boolean }
+  | { ok: false; reason: "line-not-found" | "below-one-package" };
+
 export interface CartStore {
   cart: CartType[];
   /**
@@ -23,11 +76,32 @@ export interface CartStore {
   checkoutIdempotencyKey: string | null;
   beginCheckout: () => string;
   clearCheckoutIdempotency: () => void;
-  addToCart: (product: ProductType) => void;
-  removeCartItem: (id: number) => void;
-  addCartQuantity: (id: number) => void;
-  removeCartQuantity: (id: number) => void;
-  addCustomCartQuantity: (id: number, customCartQuantity: number) => void;
+  /**
+   * Adds a line. `unit` selects the sell unit (packaging-unit selling) —
+   * omit it for the base unit (single-unit products never pass one).
+   * Lines are keyed by (variant, unit): 1 Box and 3 Pcs are separate lines.
+   */
+  addToCart: (product: ProductType, unit?: SellUnitRef) => void;
+  /** `uomConversionId` scopes the action to one unit line (null = base). */
+  removeCartItem: (id: number, uomConversionId?: number | null) => void;
+  addCartQuantity: (id: number, uomConversionId?: number | null) => void;
+  removeCartQuantity: (id: number, uomConversionId?: number | null) => void;
+  addCustomCartQuantity: (
+    id: number,
+    customCartQuantity: number,
+    uomConversionId?: number | null,
+  ) => void;
+  /**
+   * Switches a line's sell unit, converting the entered quantity so the
+   * BASE amount is preserved (2 Box -> 24 Pcs; 13 Pcs -> 1 Box, remainder
+   * floors). When a line with the target unit already exists the converted
+   * quantity merges into it and the source line is removed.
+   */
+  switchLineUnit: (
+    variantId: number,
+    fromUomConversionId: number | null | undefined,
+    unit: SellUnitRef,
+  ) => SwitchUnitResult;
   resetCart: () => void;
   addHoldItemsToCart: (holdItems: CartType[]) => void;
   addDiscount: (

@@ -99,11 +99,14 @@ function Pos() {
       idempotencyKey,
       items: cart.map((item) => ({
         variantId: item.variants[0]?.id ?? 0,
+        // Quantity is in the SELECTED unit (2 = two boxes); unitPrice is per
+        // selected unit — both advisory, the server re-resolves them.
         quantity: item.quantity,
-        unitPrice: item.variants[0]?.sellingPrice ?? 0,
+        unitPrice: item.unitPrice ?? item.variants[0]?.sellingPrice ?? 0,
         discount: item.discount ?? null,
         serialNumbers:
           item.trackingType === "serial" ? item.serialNumbers : undefined,
+        uomConversionId: item.uomConversionId ?? null,
       })),
     };
 

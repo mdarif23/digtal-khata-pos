@@ -29,6 +29,7 @@ import { defaultValues } from "../constants/form-defaults.js";
 import { VariantsInfoCard } from "../components/addProductPage/VariantsInfoCard.js";
 import { GeneralInfoCard } from "../components/addProductPage/GeneralInfoCard.js";
 import { ShippingInfoCard } from "../components/addProductPage/ShippingInfoCard.js";
+import { UnitsPackagingCard } from "../components/addProductPage/UnitsPackagingCard.js";
 import { RightColumnInfoCard } from "../components/addProductPage/RightColumnInfoCard.js";
 import { SaveAndUpdateActionsCard } from "../components/addProductPage/SaveAndUpdateActionsCard.js";
 import useProductStore from "@/features/products/useProductStore.js";
@@ -317,6 +318,13 @@ const ProductStockForm = () => {
                   isEditing && productId !== undefined
                     ? editInventory[Number(productId)]
                     : undefined
+                }
+              />
+              {/* Units & Packaging is a post-create step: the backend needs a
+                  productId, so create mode shows an informational empty state. */}
+              <UnitsPackagingCard
+                productId={
+                  isEditing && productId !== undefined ? Number(productId) : null
                 }
               />
             </div>

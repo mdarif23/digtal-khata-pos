@@ -13,7 +13,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "../../utils/formatCurrency";
-import { outstandingOf, overReceiveOf } from "../../utils/receiveQuantities";
+import {
+  outstandingOf,
+  overReceiveInUnitOf,
+} from "../../utils/receiveQuantities";
 import type { PurchasesItems } from "../../purchase.types";
 import type {
   ReceiveItemsFormValues,
@@ -31,15 +34,24 @@ const CATEGORY_LABELS: Record<(typeof REJECTION_CATEGORIES)[number], string> = {
  * Per-line discrepancy details (Phase 5): the delivered/accepted/rejected
  * split and the over-receiving approval. Kept out of the main table — this
  * dialog carries everything the discrepancy workflow needs.
+ *
+ * UOM (migration 0062): quantities are entered in the line's SELECTED unit
+ * (factor 1 = base), so the over-receive check converts to base and the
+ * surplus is reported in the selected unit.
  */
 export function ReceivingDiscrepancyDialog({
   item,
   form,
   index,
+  conversionFactor = 1,
+  unitName,
 }: {
   item: PurchasesItems;
   form: UseFormReturn<ReceiveItemsFormValues>;
   index: number;
+  /** The selected unit's factor (1 = base). */
+  conversionFactor?: number;
+  unitName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const receiveNow =
@@ -63,7 +75,12 @@ export function ReceivingDiscrepancyDialog({
   });
 
   const outstanding = outstandingOf(item);
-  const over = overReceiveOf(item, Number(receiveNow) || 0);
+  const over = overReceiveInUnitOf(
+    item,
+    Number(receiveNow) || 0,
+    conversionFactor,
+  );
+  const unitSuffix = unitName ? ` ${unitName}` : "";
   const delivered = Number(receiveNow || 0) + Number(rejectedQuantity || 0);
   const rejectionValid =
     Number(rejectedQuantity) <= 0 ||
@@ -97,7 +114,7 @@ export function ReceivingDiscrepancyDialog({
                 <TriangleAlert /> Over +{over.overQuantity}
               </>
             ) : Number(rejectedQuantity) > 0 ? (
-              <>Rejected {rejectedQuantity}</>
+              <>Rejected {rejectedQuantity}{unitSuffix}</>
             ) : (
               "Discrepancy…"
             )}
@@ -117,15 +134,15 @@ export function ReceivingDiscrepancyDialog({
           <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/50 p-3 text-center">
             <div>
               <p className="text-xs text-muted-foreground">Delivered</p>
-              <p className="font-semibold">{delivered}</p>
+              <p className="font-semibold">{delivered}{unitSuffix}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Accepted</p>
-              <p className="font-semibold text-emerald-700">{receiveNow}</p>
+              <p className="font-semibold text-emerald-700">{receiveNow}{unitSuffix}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Rejected</p>
-              <p className="font-semibold text-rose-700">{rejectedQuantity}</p>
+              <p className="font-semibold text-rose-700">{rejectedQuantity}{unitSuffix}</p>
             </div>
           </div>
 
@@ -134,7 +151,8 @@ export function ReceivingDiscrepancyDialog({
               <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
               <div>
                 <p className="font-medium">
-                  Over-receiving {over.overQuantity} unit
+                  Over-receiving {over.overQuantity}
+                  {unitName ?? " unit"}
                   {over.overQuantity === 1 ? "" : "s"}
                 </p>
                 <p className="mt-1 text-xs">
@@ -171,6 +189,7 @@ export function ReceivingDiscrepancyDialog({
             </p>
             <label className="block space-y-1 font-medium">
               Rejected quantity
+              {unitName ? ` (${unitName})` : ""}
               <Input
                 type="number"
                 min={0}
