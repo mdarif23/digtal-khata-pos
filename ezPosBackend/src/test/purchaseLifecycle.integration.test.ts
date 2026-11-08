@@ -277,6 +277,8 @@ describe("purchase lifecycle integration", { skip: !runIntegration }, () => {
       adjusted: true,
       amount: 60,
       documentId: docId,
+      state: "adjusted",
+      reason: null,
     });
 
     // Re-fetch the document — the reversal below happened after the delta.

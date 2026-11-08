@@ -898,6 +898,9 @@ describe("landed cost integration", { skip: !runIntegration }, () => {
       adjusted: true,
       amount: 50,
       documentId: docId,
+      // Phase 7: the state rides along (authoritative).
+      state: "adjusted",
+      reason: null,
     });
 
     const detail = await api(owner, "GET", `/api/landed-costs/${docId}`);
