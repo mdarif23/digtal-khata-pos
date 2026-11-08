@@ -7,6 +7,7 @@ import {
   requireAnyPermission,
 } from "../../middleware/permissions.js";
 import * as ctrl from "./finance.controller.js";
+import * as ownerCtrl from "./finance.owner.controller.js";
 
 /**
  * Finance & Growth routes (Stage 3: ledger foundation). Business-scoped via
@@ -52,4 +53,29 @@ router.post("/api/finance/periods/:id/reopen", ...write, requirePermission("fina
 // Trial balance
 router.get("/api/finance/trial-balance", ...read, requirePermission("finance.journal.view"), ctrl.getTrialBalance);
 
+
+// ---------------------------------------------------------------------------
+// Owner finance (Stage 4): owners, capital transactions, profit allocations.
+// Investment/withdrawal management is deliberately separate from viewing —
+// cashier roles hold none of these keys.
+// ---------------------------------------------------------------------------
+
+const ownerRead = [requireAuth, requireBusinessContext()] as const;
+const ownerWrite = [...ownerRead, requireFullAccess] as const;
+
+router.get("/api/finance/owners", ...ownerRead, requireAnyPermission(["finance.investment.view", "finance.withdrawal.view", "finance.profit.view"]), ownerCtrl.listOwners);
+router.post("/api/finance/owners", ...ownerWrite, requirePermission("finance.investment.manage"), ownerCtrl.createOwner);
+router.patch("/api/finance/owners/:id", ...ownerWrite, requirePermission("finance.investment.manage"), ownerCtrl.updateOwner);
+
+router.get("/api/finance/capital-transactions", ...ownerRead, requireAnyPermission(["finance.investment.view", "finance.withdrawal.view"]), ownerCtrl.listCapitalTransactions);
+router.post("/api/finance/capital-transactions", ...ownerWrite, requirePermission("finance.investment.manage"), ownerCtrl.recordCapitalTransaction);
+router.get("/api/finance/capital-summary", ...ownerRead, requireAnyPermission(["finance.investment.view", "finance.withdrawal.view"]), ownerCtrl.getCapitalSummary);
+
+router.get("/api/finance/profit", ...ownerRead, requirePermission("finance.profit.view"), ownerCtrl.getProfit);
+router.get("/api/finance/profit-allocations", ...ownerRead, requirePermission("finance.profit.view"), ownerCtrl.listAllocations);
+router.post("/api/finance/profit-allocations", ...ownerWrite, requirePermission("finance.profit.allocate"), ownerCtrl.createAllocation);
+router.post("/api/finance/profit-allocations/:id/reverse", ...ownerWrite, requirePermission("finance.profit.allocate"), ownerCtrl.reverseAllocation);
+router.post("/api/finance/profit-allocations/lines/:id/realize", ...ownerWrite, requirePermission("finance.profit.allocate"), ownerCtrl.realizeAllocationLine);
+
 export default router;
+

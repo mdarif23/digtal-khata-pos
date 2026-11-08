@@ -377,6 +377,13 @@
 			"when": 1794500002000,
 			"tag": "0053_finance_ledger_foundation",
 			"breakpoints": true
+		},
+		{
+			"idx": 54,
+			"version": "7",
+			"when": 1794500003000,
+			"tag": "0054_owner_finance",
+			"breakpoints": true
 		}
 	]
 }
