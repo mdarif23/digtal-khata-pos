@@ -11,6 +11,7 @@ import * as ownerCtrl from "./finance.owner.controller.js";
 import * as payrollCtrl from "./finance.payroll.controller.js";
 import * as overviewCtrl from "./finance.overview.controller.js";
 import * as toolsCtrl from "./finance.tools.controller.js";
+import * as reportsCtrl from "./finance.reports.controller.js";
 
 /**
  * Finance & Growth routes (Stage 3: ledger foundation). Business-scoped via
@@ -31,6 +32,32 @@ router.post("/api/finance/activation", ...write, requirePermission("finance.acti
 router.get("/api/finance/overview", ...read, requireAnyPermission(["finance.overview.view", "finance.profit.view"]), overviewCtrl.getOverview);
 router.get("/api/finance/cash-flow", ...read, requirePermission("finance.overview.view"), overviewCtrl.getCashFlowReport);
 router.get("/api/finance/growth", ...read, requirePermission("finance.profit.view"), overviewCtrl.getGrowth);
+
+// Loans, assets & depreciation, balance sheet (Stage 7)
+router.get("/api/finance/loans", ...read, requirePermission("loans.view"), toolsCtrl.listLoans);
+router.post("/api/finance/loans", ...write, requirePermission("loans.manage"), toolsCtrl.createLoan);
+router.get("/api/finance/loans/:id/repayments", ...read, requirePermission("loans.view"), toolsCtrl.listRepayments);
+router.post("/api/finance/loans/:id/repayments", ...write, requirePermission("loans.manage"), toolsCtrl.recordRepayment);
+
+router.get("/api/finance/assets", ...read, requirePermission("finance.assets.view"), toolsCtrl.listAssets);
+router.post("/api/finance/assets", ...write, requirePermission("finance.assets.manage"), toolsCtrl.createAsset);
+router.post("/api/finance/assets/depreciation/run", ...write, requirePermission("finance.assets.manage"), toolsCtrl.runDepreciation);
+
+router.get("/api/finance/balance-sheet", ...read, requirePermission("finance.overview.view"), toolsCtrl.getBalanceSheet);
+
+// Reports, reconciliation & audit trail (Stage 8). CSV via ?format=csv.
+router.get("/api/finance/reports/pnl", ...read, requirePermission("finance.profit.view"), reportsCtrl.getPnl);
+router.get("/api/finance/reports/owner-investments", ...read, requirePermission("finance.investment.view"), reportsCtrl.getOwnerInvestments);
+router.get("/api/finance/reports/owner-withdrawals", ...read, requirePermission("finance.withdrawal.view"), reportsCtrl.getOwnerWithdrawals);
+router.get("/api/finance/reports/profit-allocations", ...read, requirePermission("finance.profit.view"), reportsCtrl.getProfitAllocations);
+router.get("/api/finance/reports/retained-earnings", ...read, requirePermission("finance.profit.view"), reportsCtrl.getRetainedEarnings);
+router.get("/api/finance/reports/payroll", ...read, requirePermission("payroll.view"), reportsCtrl.getPayrollReport);
+router.get("/api/finance/reports/salary-outstanding", ...read, requirePermission("payroll.view"), reportsCtrl.getSalaryOutstanding);
+router.get("/api/finance/reports/loan-outstanding", ...read, requirePermission("loans.view"), reportsCtrl.getLoanOutstanding);
+router.get("/api/finance/reports/budget-variance", ...read, requirePermission("budget.view"), reportsCtrl.getBudgetVariance);
+router.get("/api/finance/reports/transactions", ...read, requirePermission("finance.journal.view"), reportsCtrl.getTransactions);
+router.get("/api/finance/reconciliation", ...read, requirePermission("finance.reconcile.manage"), reportsCtrl.getReconciliation);
+router.get("/api/finance/audit-log", ...read, requireAnyPermission(["finance.journal.view", "finance.view"]), reportsCtrl.getAuditTrail);
 
 // Chart of accounts
 router.get("/api/finance/accounts", ...read, requireAnyPermission(["finance.journal.view", "finance.accounts.manage"]), ctrl.listAccounts);
@@ -61,7 +88,6 @@ router.post("/api/finance/periods/:id/reopen", ...write, requirePermission("fina
 // Trial balance
 router.get("/api/finance/trial-balance", ...read, requirePermission("finance.journal.view"), ctrl.getTrialBalance);
 
-
 // ---------------------------------------------------------------------------
 // Owner finance (Stage 4): owners, capital transactions, profit allocations.
 // Investment/withdrawal management is deliberately separate from viewing —
@@ -84,7 +110,6 @@ router.get("/api/finance/profit-allocations", ...ownerRead, requirePermission("f
 router.post("/api/finance/profit-allocations", ...ownerWrite, requirePermission("finance.profit.allocate"), ownerCtrl.createAllocation);
 router.post("/api/finance/profit-allocations/:id/reverse", ...ownerWrite, requirePermission("finance.profit.allocate"), ownerCtrl.reverseAllocation);
 router.post("/api/finance/profit-allocations/lines/:id/realize", ...ownerWrite, requirePermission("finance.profit.allocate"), ownerCtrl.realizeAllocationLine);
-
 
 // ---------------------------------------------------------------------------
 // Staff & Payroll (Stage 5): employees, structures, advances, periods,
@@ -114,18 +139,4 @@ router.post("/api/payroll/records/:recordId/payments", ...payrollWrite, requireP
 router.post("/api/payroll/payments/:id/void", ...payrollWrite, requirePermission("payroll.pay"), payrollCtrl.voidPayment);
 router.get("/api/payroll/records/:recordId/payslip", ...payrollRead, requirePermission("payroll.view"), payrollCtrl.getPayslip);
 
-
-// Loans, assets & depreciation, balance sheet (Stage 7)
-router.get("/api/finance/loans", ...read, requirePermission("loans.view"), toolsCtrl.listLoans);
-router.post("/api/finance/loans", ...write, requirePermission("loans.manage"), toolsCtrl.createLoan);
-router.get("/api/finance/loans/:id/repayments", ...read, requirePermission("loans.view"), toolsCtrl.listRepayments);
-router.post("/api/finance/loans/:id/repayments", ...write, requirePermission("loans.manage"), toolsCtrl.recordRepayment);
-
-router.get("/api/finance/assets", ...read, requirePermission("finance.assets.view"), toolsCtrl.listAssets);
-router.post("/api/finance/assets", ...write, requirePermission("finance.assets.manage"), toolsCtrl.createAsset);
-router.post("/api/finance/assets/depreciation/run", ...write, requirePermission("finance.assets.manage"), toolsCtrl.runDepreciation);
-
-router.get("/api/finance/balance-sheet", ...read, requirePermission("finance.overview.view"), toolsCtrl.getBalanceSheet);
-
 export default router;
-
