@@ -11,9 +11,17 @@ import {
 const runtimeApiUrl =
   typeof window !== "undefined" &&
   (window as { ezposConfig?: { apiUrl?: string } }).ezposConfig?.apiUrl;
+const baseURL = runtimeApiUrl || import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 const api = axios.create({
-  baseURL: runtimeApiUrl || import.meta.env.VITE_API_URL || "http://localhost:3000/api",
+  baseURL,
 });
+
+/**
+ * Absolute base for raw fetch / link-href API calls (product import upload,
+ * export downloads) that bypass the axios instance. Same resolution order as
+ * the instance baseURL so non-axios requests work in dev, LAN, and prod.
+ */
+export const API_BASE_URL = baseURL;
 
 /**
  * Session bootstrap (multi-tenancy).
