@@ -10,6 +10,7 @@ import * as ctrl from "./finance.controller.js";
 import * as ownerCtrl from "./finance.owner.controller.js";
 import * as payrollCtrl from "./finance.payroll.controller.js";
 import * as overviewCtrl from "./finance.overview.controller.js";
+import * as toolsCtrl from "./finance.tools.controller.js";
 
 /**
  * Finance & Growth routes (Stage 3: ledger foundation). Business-scoped via
@@ -112,6 +113,19 @@ router.post("/api/payroll/periods/:id/reopen", ...payrollWrite, requirePermissio
 router.post("/api/payroll/records/:recordId/payments", ...payrollWrite, requirePermission("payroll.pay"), payrollCtrl.recordPayment);
 router.post("/api/payroll/payments/:id/void", ...payrollWrite, requirePermission("payroll.pay"), payrollCtrl.voidPayment);
 router.get("/api/payroll/records/:recordId/payslip", ...payrollRead, requirePermission("payroll.view"), payrollCtrl.getPayslip);
+
+
+// Loans, assets & depreciation, balance sheet (Stage 7)
+router.get("/api/finance/loans", ...read, requirePermission("loans.view"), toolsCtrl.listLoans);
+router.post("/api/finance/loans", ...write, requirePermission("loans.manage"), toolsCtrl.createLoan);
+router.get("/api/finance/loans/:id/repayments", ...read, requirePermission("loans.view"), toolsCtrl.listRepayments);
+router.post("/api/finance/loans/:id/repayments", ...write, requirePermission("loans.manage"), toolsCtrl.recordRepayment);
+
+router.get("/api/finance/assets", ...read, requirePermission("finance.assets.view"), toolsCtrl.listAssets);
+router.post("/api/finance/assets", ...write, requirePermission("finance.assets.manage"), toolsCtrl.createAsset);
+router.post("/api/finance/assets/depreciation/run", ...write, requirePermission("finance.assets.manage"), toolsCtrl.runDepreciation);
+
+router.get("/api/finance/balance-sheet", ...read, requirePermission("finance.overview.view"), toolsCtrl.getBalanceSheet);
 
 export default router;
 

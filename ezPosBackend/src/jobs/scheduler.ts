@@ -5,6 +5,8 @@ import { runIntegrationSweeps } from "./integrationJobs.js";
 import { processWebhookDeliveries } from "../modules/webhooks/webhookDelivery.service.js";
 import { generateDueExpensesForAllBusinesses } from "../modules/expenses/expenses.templates.service.js";
 import { runBackupSweeps } from "../modules/backups/backups.service.js";
+import { runBudgetAlertSweeps } from "../modules/expenses/expenses.budgets.alerts.js";
+import { runAssetDepreciationSweeps } from "../modules/finance/finance.tools.service.js";
 
 /**
  * In-process scheduler: sweeps subscription lifecycle jobs on a fixed
@@ -31,6 +33,8 @@ export function startScheduler(): void {
       processWebhookDeliveries(),
       generateDueExpensesForAllBusinesses(),
       runBackupSweeps(),
+      runBudgetAlertSweeps(),
+      runAssetDepreciationSweeps(),
     ])
       .then(([sub, commerce, integrations, deliveries, expenses, backups]) => {
         const total =

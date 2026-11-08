@@ -9,6 +9,7 @@ import {
   serial,
   timestamp,
   uniqueIndex,
+  varchar,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { businesses } from "./businesses.js";
@@ -17,10 +18,11 @@ import { locations } from "./locations.js";
 import { users } from "./users.js";
 
 /**
- * Monthly expense budgets (Phase 6). Plans, not financial records — they are
- * hard-deletable. category_id/location_id NULL means "all categories /
- * locations"; the scope+month uniqueness coalesces NULLs to 0 (plain UNIQUE
- * treats NULLs as distinct). `month` is always the first day of the month.
+ * Expense budgets (Phase 6, extended in Stage 7). Plans, not financial
+ * records — they are hard-deletable. category_id/location_id NULL means
+ * "all categories / locations"; the scope+period uniqueness coalesces NULLs
+ * to 0 (plain UNIQUE treats NULLs as distinct). `month` stores the PERIOD
+ * START (month / quarter / year start per period_type).
  */
 export const expenseBudgets = pgTable(
   "expense_budgets",
@@ -37,6 +39,18 @@ export const expenseBudgets = pgTable(
       scale: 2,
       mode: "number",
     }).notNull(),
+    /** monthly (default) | quarterly | yearly. */
+    periodType: varchar("period_type", { length: 20 })
+      .default("monthly")
+      .notNull(),
+    /** Utilization % that triggers a budget_alert notification. */
+    warningThresholdPercent: numeric("warning_threshold_percent", {
+      precision: 5,
+      scale: 2,
+      mode: "number",
+    })
+      .default(80)
+      .notNull(),
     createdBy: integer("created_by"),
     createdAt: timestamp("created_at", { mode: "string" }).default(
       sql`CURRENT_TIMESTAMP`,
@@ -61,8 +75,9 @@ export const expenseBudgets = pgTable(
       foreignColumns: [users.id],
       name: "expense_budgets_created_by_users_fk",
     }),
-    uniqueIndex("expense_budgets_scope_month_unique").on(
+    uniqueIndex("expense_budgets_scope_period_unique").on(
       table.businessId,
+      table.periodType,
       sql`coalesce(category_id, 0)`,
       sql`coalesce(location_id, 0)`,
       table.month,
@@ -70,8 +85,14 @@ export const expenseBudgets = pgTable(
     index("expense_budgets_business_month_idx").on(table.businessId, table.month),
     check("expense_budgets_amount_check", sql`amount > 0`),
     check(
-      "expense_budgets_month_check",
-      sql`month = date_trunc('month', month)::date`,
+      "expense_budgets_period_check",
+      sql`("period_type" = 'monthly' AND "month" = date_trunc('month', "month")::date)
+        OR ("period_type" = 'quarterly' AND "month" = date_trunc('quarter', "month")::date)
+        OR ("period_type" = 'yearly' AND "month" = date_trunc('year', "month")::date)`,
+    ),
+    check(
+      "expense_budgets_warning_threshold_check",
+      sql`"warning_threshold_percent" > 0 AND "warning_threshold_percent" <= 100`,
     ),
   ],
 );

@@ -173,9 +173,13 @@ export const expenseTemplateIdSchema = z.coerce.number().int().positive();
 export const expenseBudgetWriteSchema = z.object({
   category_id: z.number().int().positive().nullable(),
   location_id: z.number().int().positive().nullable().optional(),
-  /** First day of the budgeted month (YYYY-MM-01). */
+  /** First day of the budgeted period (YYYY-MM-01). */
   month: z.iso.date(),
   amount: z.number().finite().positive(),
+  /** monthly (default, legacy behavior) | quarterly | yearly. */
+  period_type: z.enum(["monthly", "quarterly", "yearly"]).optional(),
+  /** Utilization % that triggers a budget_alert (1-100). */
+  warning_threshold_percent: z.number().min(1).max(100).optional(),
 });
 
 export type ExpenseBudgetWriteInput = z.infer<typeof expenseBudgetWriteSchema>;
