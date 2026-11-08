@@ -43,6 +43,12 @@ export interface CartType extends ProductType {
   conversionFactor?: number;
   /** Price per one selected unit; falls back to variant.sellingPrice. */
   unitPrice?: number;
+  /**
+   * Permission-gated price override (Phase 6): the cashier's price replaces
+   * the DB selling price for THIS line only. unitPrice is in the selected
+   * sell unit; the server re-checks permission + minimum floors.
+   */
+  priceOverride?: { unitPrice: number; reason?: string } | null;
 }
 export type DiscountType = "percentage" | "fixed";
 
@@ -114,6 +120,19 @@ export interface CartStore {
     variantId: number | undefined,
     serials: string[],
   ) => void;
+  /**
+   * Phase 6: sets/clears the price override on one unit line. The caller is
+   * responsible for gating the UI on pricing.price_override; the server
+   * re-checks the permission and the minimum floors.
+   */
+  setLinePriceOverride: (
+    variantId: number,
+    uomConversionId: number | null | undefined,
+    override: { unitPrice: number; reason?: string } | null,
+  ) => void;
+  /** Mandatory approval reason when a line lands below its minimum floor. */
+  belowMinimumReason: string;
+  setBelowMinimumReason: (reason: string) => void;
 }
 export interface CashForm {
   discount: number;

@@ -80,6 +80,14 @@ const cartItemPayloadSchema = z.object({
   serialNumbers: z.array(z.string().trim().min(1)).optional(),
   // Packaging-unit selling: null = base unit line.
   uomConversionId: z.number().int().positive().nullable().optional(),
+  // Phase 6: permission-gated price override (unit price in the selected
+  // sell unit). The server re-checks the permission and the minimum floors.
+  priceOverride: z
+    .object({
+      unitPrice: z.number().min(0),
+      reason: z.string().trim().max(300).optional(),
+    })
+    .nullish(),
 });
 
 // 2. Define the full Payload schema
@@ -98,6 +106,10 @@ export const createSalePayloadSchema = z.object({
 
   // Client-generated key making checkout retries idempotent (see useCartStore).
   idempotencyKey: z.string().min(8).max(120).optional(),
+
+  // Mandatory when a line lands below its minimum floor and the cashier holds
+  // pricing.below_minimum_override (Phase 6).
+  belowMinimumReason: z.string().trim().max(300).optional(),
 
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),

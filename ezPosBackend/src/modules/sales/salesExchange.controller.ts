@@ -105,6 +105,14 @@ const quoteSchema = z.object({
           .nullable()
           .optional(),
         uomConversionId: z.number().int().positive().nullish(),
+        // Phase 6 preview: the quoted total reflects a permitted price
+        // override before checkout (the createSale gate still applies).
+        priceOverride: z
+          .object({
+            unitPrice: z.number().min(0),
+            reason: z.string().trim().max(300).optional(),
+          })
+          .nullish(),
       }),
     )
     .min(1)

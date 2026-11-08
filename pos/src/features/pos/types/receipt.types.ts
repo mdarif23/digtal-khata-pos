@@ -40,6 +40,18 @@ export interface SaleReceiptItem {
   /** Historical tax snapshot (Module 4): tax content of this line. */
   taxAmount: number;
   taxDetail: SaleReceiptTaxDetail[];
+  /**
+   * Discount attribution snapshots (Phases 4-6): group pricing, promotions
+   * and price overrides in application order — rendered as a per-line
+   * breakdown when present.
+   */
+  priceAdjustments?: {
+    kind: "group" | "promotion" | "manual" | "coupon";
+    refId: number | null;
+    name: string | null;
+    amount: number;
+    reason?: string | null;
+  }[];
 }
 
 export interface SaleReceiptPayment {

@@ -49,6 +49,8 @@ export interface SalePriceAdjustment {
   refId: number | null;
   name: string | null;
   amount: number;
+  /** Phase 6: mandatory on below-minimum approvals; optional on overrides. */
+  reason?: string | null;
 }
 
 // ---------------------------------------------------------------------------

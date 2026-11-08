@@ -95,6 +95,22 @@ export function renderInvoiceHtml(input: InvoiceRenderInput): InvoiceHtml {
       cell: (item) => {
         const lines = [`<div class="bold">${esc(item.productName)}</div>`];
         if (item.variantName) lines.push(`<div class="muted small">${esc(item.variantName)}</div>`);
+        // Discount attribution (Phases 4-6): group pricing, promotions and
+        // price overrides, in application order.
+        for (const adj of item.priceAdjustments ?? []) {
+          if (adj.kind === "manual") {
+            if (adj.reason) lines.push(`<div class="muted small">${esc(adj.name ?? "Price override")}: ${esc(adj.reason)}</div>`);
+            else if (adj.amount !== 0) {
+              lines.push(
+                `<div class="muted small">${esc(adj.name ?? "Price override")}: ${adj.amount < 0 ? "+" : "-"}${money(Math.abs(adj.amount))}</div>`,
+              );
+            }
+            continue;
+          }
+          if (adj.amount > 0) {
+            lines.push(`<div class="muted small">${esc(adj.name ?? adj.kind)}: -${money(adj.amount)}</div>`);
+          }
+        }
         return lines.join("");
       },
     });
