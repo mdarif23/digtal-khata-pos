@@ -24,7 +24,10 @@ import { users } from "./users.js";
  * items is the slim, serializable cart snapshot: variantId, quantity,
  * discount, serialNumbers, productName. Prices and stock are NOT trusted
  * from the hold — on resume the register uses live catalog data and the
- * backend re-validates everything at sale time.
+ * backend re-validates everything at sale time. UOM lines (migration 0062)
+ * carry uomConversionId + enteredQuantity; on resume the factor is
+ * re-resolved from the (possibly reconfigured) packaging row, consistent
+ * with the not-trusted-prices contract.
  */
 export const heldSales = pgTable(
   "held_sales",
@@ -46,6 +49,8 @@ export const heldSales = pgTable(
           discount?: { type: "percentage" | "fixed"; value: number } | null;
           serialNumbers?: string[];
           productName: string;
+          uomConversionId?: number | null;
+          enteredQuantity?: number | null;
         }[]
       >()
       .notNull(),

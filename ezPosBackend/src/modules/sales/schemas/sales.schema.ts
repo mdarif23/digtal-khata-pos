@@ -17,18 +17,36 @@ export const paymentSchema = z.object({
 });
 
 // 1. Define what a single cart item should look like when sent to the DB
-const cartItemPayloadSchema = z.object({
-  variantId: z.number().int().positive("Variant ID is required"),
-  quantity: z.number().int().positive("Quantity must be at least 1"),
-  unitPrice: z.number().nonnegative("Unit price cannot be negative"),
-  discount: z
-    .object({
-      type: z.enum(["percentage", "fixed"]),
-      value: z.number().min(0),
-    })
-    .nullable(),
-  serialNumbers: z.array(z.string().trim().min(1)).optional()
-});
+const cartItemPayloadSchema = z
+  .object({
+    variantId: z.number().int().positive("Variant ID is required"),
+    // Quantity in the ENTERED selling unit (base when uomConversionId is
+    // absent). UOM lines may be fractional at the entered level (1.5 Box);
+    // the server converts to whole base units authoritatively.
+    quantity: z.number().positive("Quantity must be at least 1"),
+    unitPrice: z.number().nonnegative("Unit price cannot be negative"),
+    discount: z
+      .object({
+        type: z.enum(["percentage", "fixed"]),
+        value: z.number().min(0),
+      })
+      .nullable(),
+    serialNumbers: z.array(z.string().trim().min(1)).optional(),
+    // UOM (migration 0062): the selling unit for this line. The server
+    // resolves the authoritative factor/price — client values advisory.
+    uomConversionId: z.number().int().positive().nullish(),
+  })
+  .superRefine((data, ctx) => {
+    // Identity lines stay integer (legacy contract); UOM lines convert to
+    // whole base units in the service (INTEGER stock invariant).
+    if (data.uomConversionId == null && !Number.isInteger(data.quantity)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["quantity"],
+        message: "Quantity must be a whole number.",
+      });
+    }
+  });
 
 // 2. Define the full Payload schema
 export const createSalePayloadSchema = z.object({

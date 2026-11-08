@@ -15,7 +15,8 @@ const exchangeSchema = z.object({
     .array(
       z.object({
         variantId: z.number().int().positive(),
-        quantity: z.number().int().positive(),
+        // ENTERED quantity — fractional allowed only with a packaging unit.
+        quantity: z.number().positive(),
         discount: z
           .object({
             type: z.enum(["percentage", "fixed"]),
@@ -23,10 +24,19 @@ const exchangeSchema = z.object({
           })
           .nullable()
           .optional(),
+        uomConversionId: z.number().int().positive().nullish(),
       }),
     )
     .min(1)
-    .max(50),
+    .max(50)
+    // Identity lines stay integer (legacy contract).
+    .refine(
+      (items) =>
+        items.every(
+          (i) => i.uomConversionId != null || Number.isInteger(i.quantity),
+        ),
+      { message: "Quantity must be a whole number." },
+    ),
   additionalPayments: z
     .array(
       z.object({
@@ -85,7 +95,8 @@ const quoteSchema = z.object({
     .array(
       z.object({
         variantId: z.number().int().positive(),
-        quantity: z.number().int().positive(),
+        // ENTERED quantity — fractional allowed only with a packaging unit.
+        quantity: z.number().positive(),
         discount: z
           .object({
             type: z.enum(["percentage", "fixed"]),
@@ -93,10 +104,18 @@ const quoteSchema = z.object({
           })
           .nullable()
           .optional(),
+        uomConversionId: z.number().int().positive().nullish(),
       }),
     )
     .min(1)
-    .max(200),
+    .max(200)
+    .refine(
+      (items) =>
+        items.every(
+          (i) => i.uomConversionId != null || Number.isInteger(i.quantity),
+        ),
+      { message: "Quantity must be a whole number." },
+    ),
   cartDiscount: z
     .object({
       type: z.enum(["percentage", "fixed"]),

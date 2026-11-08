@@ -54,6 +54,7 @@ import {
   getTopSellingProducts,
 } from "./dashboardMatrix.service.js";
 import type { CreateSalePayload } from "./schemas/sales.schema.js";
+import { normalizeSaleItemsToBase } from "./sales.uom.js";
 import type { SaleRefundRequest } from "./schemas/sales.schema.js";
 import { customers } from "../../db/schema/customers.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
@@ -95,6 +96,11 @@ import {
   recordCashSaleInTx,
 } from "../cashRegisters/cashRegisters.service.js";
 import { units } from "../../db/schema/units.js";
+import { alias } from "drizzle-orm/pg-core";
+import { productUnitConversions } from "../../db/schema/productUnitConversions.js";
+
+/** The units table aliased for the ENTERED unit join on UOM sale lines. */
+const enteredUnits = alias(units, "entered_units");
 import { users } from "../../db/schema/users.js";
 import {
   getDocumentBranding,
@@ -530,11 +536,28 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
       taxAmount: saleItems.taxAmount,
       taxDetail: saleItems.taxDetail,
       unitName: units.abbreviation,
+      // UOM snapshot (migration 0062): receipts can show "1 Box" instead of
+      // "12 pcs" when the line was sold in a packaging unit.
+      enteredQuantity: saleItems.enteredQuantity,
+      enteredUnitPrice: saleItems.enteredUnitPrice,
+      conversionFactor: saleItems.conversionFactor,
+      enteredUnitAbbreviation: enteredUnits.abbreviation,
     })
     .from(saleItems)
     .innerJoin(productVariants, eq(saleItems.variantId, productVariants.id))
     .innerJoin(products, eq(productVariants.productId, products.id))
     .leftJoin(units, eq(products.unitId, units.id))
+    .leftJoin(
+      productUnitConversions,
+      and(
+        eq(productUnitConversions.id, saleItems.uomConversionId),
+        eq(productUnitConversions.businessId, saleItems.businessId),
+      ),
+    )
+    .leftJoin(
+      enteredUnits,
+      eq(enteredUnits.id, productUnitConversions.unitId),
+    )
     .where(
       and(
         eq(saleItems.saleId, saleId),
@@ -627,6 +650,12 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
         lineTotal: Number(item.lineTotal),
         taxAmount: Number(item.taxAmount),
         taxDetail: item.taxDetail,
+        // UOM snapshot (migration 0062): receipts can show "1 Box" instead
+        // of "12 pcs" when the line was sold in a packaging unit.
+        enteredQuantity: item.enteredQuantity == null ? null : Number(item.enteredQuantity),
+        enteredUnitPrice: item.enteredUnitPrice == null ? null : Number(item.enteredUnitPrice),
+        conversionFactor: item.conversionFactor == null ? null : Number(item.conversionFactor),
+        enteredUnitAbbreviation: item.enteredUnitAbbreviation ?? null,
       };
     }),
     subtotal: Number(sale.subtotal ?? 0),
@@ -824,18 +853,29 @@ export async function createSale(
       items,
     );
 
-    // 3. Lock inventory rows and validate stock.
-    await validateStock(tx, businessId, locationId, variantIds, items, {
+    // UOM boundary (migration 0062): convert entered selling units to
+    // base-unit lines ONCE. quantity/unitPrice on every line below are
+    // BASE figures; the entered unit is preserved as an immutable
+    // snapshot. Identity payloads pass through untouched.
+    const baseItems = await normalizeSaleItemsToBase(
+      tx,
+      businessId,
+      existingVariants,
+      items,
+    );
+
+    // 3. Lock inventory rows and validate stock (aggregated base demand).
+    await validateStock(tx, businessId, locationId, variantIds, baseItems, {
       ...(options.allowNegativeStock ? { allowNegative: true } : {}),
     });
 
     // 2. Trusted prices and tracking types come from the database
     const variantMap = new Map(existingVariants.map((v) => [v.id, v]));
 
-    const trustedItems = items
+    const trustedItems = baseItems
       .map((item) => {
         const variant = variantMap.get(item.variantId);
-        const unitPrice = Number(variant?.sellingPrice);
+        const unitPrice = item.unitPrice;
         if (!variant || !Number.isFinite(unitPrice) || unitPrice < 0) {
           throw new NotFoundError(
             `Valid selling price not found for variant ${item.variantId}.`,
@@ -1030,6 +1070,12 @@ export async function createSale(
           discount: line.discountAmount,
           taxAmount: lineTax?.taxAmount ?? 0,
           taxDetail: lineTax?.detail ?? [],
+          // UOM snapshot: the selling unit the cashier selected (null =
+          // base unit, every legacy line).
+          uomConversionId: item.uomSnapshot?.conversionId ?? null,
+          enteredQuantity: item.uomSnapshot?.enteredQuantity ?? null,
+          enteredUnitPrice: item.uomSnapshot?.enteredUnitPrice ?? null,
+          conversionFactor: item.uomSnapshot?.conversionFactor ?? null,
         })
         .returning({ id: saleItems.id });
       if (!saleItem) throw new Error("Failed to create sale item.");
@@ -2039,6 +2085,7 @@ export interface ExchangePayload {
     variantId: number;
     quantity: number;
     discount?: { type: "percentage" | "fixed"; value: number } | null | undefined;
+    uomConversionId?: number | null | undefined;
   }[];
   /** Required when the replacement is worth more than the returned value. */
   additionalPayments?: {
@@ -2275,6 +2322,7 @@ export async function createSaleExchange(
       quantity: r.quantity,
       unitPrice: 0, // replaced by the DB price below
       discount: r.discount ?? null,
+      uomConversionId: r.uomConversionId ?? null,
     }));
     const { variantIds, existingVariants } = await validateVariants(
       tx,
@@ -2289,10 +2337,18 @@ export async function createSaleExchange(
         );
       }
     }
-    const trustedReplacements = replacementItems
+    // UOM boundary: identical conversion to createSale (base quantities +
+    // per-base prices; entered units preserved as snapshots).
+    const baseReplacements = await normalizeSaleItemsToBase(
+      tx,
+      businessId,
+      existingVariants,
+      replacementItems,
+    );
+    const trustedReplacements = baseReplacements
       .map((item) => {
         const variant = variantMap.get(item.variantId);
-        const unitPrice = Number(variant?.sellingPrice);
+        const unitPrice = item.unitPrice;
         if (!variant || !Number.isFinite(unitPrice) || unitPrice < 0) {
           throw new NotFoundError(
             `Valid selling price not found for variant ${item.variantId}.`,
@@ -2637,8 +2693,10 @@ export async function createSaleExchange(
 export interface SaleQuotePayload {
   items: {
     variantId: number;
+    /** ENTERED quantity — in the line's selling unit (base when no UOM). */
     quantity: number;
     discount?: DiscountInput | null | undefined;
+    uomConversionId?: number | null | undefined;
   }[];
   cartDiscount?: DiscountInput | null | undefined;
   vatPercent?: number | null | undefined;
@@ -2659,6 +2717,7 @@ export async function quoteSaleTotals(
     const variants = await tx
       .select({
         id: productVariants.id,
+        productId: productVariants.productId,
         sellingPrice: productVariants.sellingPrice,
       })
       .from(productVariants)
@@ -2671,8 +2730,21 @@ export async function quoteSaleTotals(
     const priceById = new Map(
       variants.map((v) => [v.id, Number(v.sellingPrice)]),
     );
-    const trustedItems = payload.items.map((item) => {
-      const unitPrice = priceById.get(item.variantId);
+    // UOM boundary: identical conversion to createSale, so a quoted total
+    // always matches the checkout total for the same cart.
+    const baseItems = await normalizeSaleItemsToBase(
+      tx,
+      businessId,
+      variants,
+      payload.items.map((item) => ({
+        variantId: item.variantId,
+        quantity: item.quantity,
+        discount: item.discount ?? null,
+        uomConversionId: item.uomConversionId ?? null,
+      })),
+    );
+    const trustedItems = baseItems.map((item) => {
+      const unitPrice = item.unitPrice;
       if (unitPrice === undefined || !Number.isFinite(unitPrice) || unitPrice < 0) {
         throw new NotFoundError(
           `Valid selling price not found for variant ${item.variantId}.`,
@@ -2682,7 +2754,7 @@ export async function quoteSaleTotals(
         variantId: item.variantId,
         quantity: item.quantity,
         unitPrice,
-        discount: item.discount ?? null,
+        discount: item.discount,
       };
     });
 
