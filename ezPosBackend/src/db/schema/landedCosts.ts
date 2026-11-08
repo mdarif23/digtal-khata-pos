@@ -12,6 +12,7 @@ import {
   serial,
   timestamp,
   unique,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -42,7 +43,7 @@ import { users } from "./users.js";
 
 export const landedCostAllocationMethodEnum = pgEnum(
   "landed_cost_allocation_method",
-  ["quantity", "value", "weight", "manual"],
+  ["quantity", "value", "weight", "manual", "equal"],
 );
 
 export const landedCostStatusEnum = pgEnum("landed_cost_status", [
@@ -83,6 +84,11 @@ export const landedCostPostingTypeEnum = pgEnum("landed_cost_posting_type", [
 export const landedCostPaymentSourceEnum = pgEnum(
   "landed_cost_payment_source",
   ["expense_payment", "supplier_payable", "cash", "unpaid"],
+);
+
+export const landedCostExpenseSourceEnum = pgEnum(
+  "landed_cost_expense_source",
+  ["purchase", "additional_expense"],
 );
 
 export const landedCostSettlementTypeEnum = pgEnum(
@@ -208,12 +214,32 @@ export const landedCostExpenses = pgTable(
       .default("unpaid"),
     settlementReferenceId: integer("settlement_reference_id"),
 
+    // Source identity (migration 0053): 'purchase' rows MIRROR a purchase
+    // financial record (source_key 'shipping_cost' →
+    // purchases.shipping_cost; the amount is a snapshot of it) and are
+    // server-generated — they bring no new payable and no duplicate
+    // expense. 'additional_expense' rows are user-entered (all pre-0053
+    // rows). The partial unique index makes the same purchase-origin
+    // source impossible twice per document (documents are unique per
+    // purchase, so once per purchase).
+    sourceType: landedCostExpenseSourceEnum("source_type")
+      .notNull()
+      .default("additional_expense"),
+    sourceKey: varchar("source_key", { length: 50 }),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
   },
   (table) => [
     index("landed_cost_expenses_document_idx").on(table.landedCostId),
+    uniqueIndex("landed_cost_expenses_source_uq")
+      .on(table.landedCostId, table.sourceKey)
+      .where(sql`source_type = 'purchase'`),
+    check(
+      "landed_cost_expenses_source_check",
+      sql`${table.sourceType} <> 'purchase' OR ${table.sourceKey} IS NOT NULL`,
+    ),
     unique("landed_cost_expenses_id_business_uq").on(table.id, table.businessId),
     check(
       "landed_cost_expenses_amount_check",
@@ -452,6 +478,11 @@ export const landedCostPostings = pgTable(
     paymentSource: landedCostPaymentSourceEnum("payment_source").notNull(),
     paymentReferenceType: varchar("payment_reference_type", { length: 50 }),
     paymentReferenceId: integer("payment_reference_id"),
+    // Phase 9 source attribution: the expense row this posting was derived
+    // from (capitalization / period-expense postings are written
+    // per-expense). NULL = legacy rows and event-level postings
+    // (cogs_adjustment / reversal) — document-level by nature.
+    expenseId: integer("expense_id"),
     description: varchar("description", { length: 255 }),
 
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -473,6 +504,11 @@ export const landedCostPostings = pgTable(
       columns: [table.adjustmentId, table.businessId],
       foreignColumns: [landedCostAdjustments.id, landedCostAdjustments.businessId],
       name: "landed_cost_postings_adjustment_business_fkey",
+    }),
+    foreignKey({
+      columns: [table.expenseId, table.businessId],
+      foreignColumns: [landedCostExpenses.id, landedCostExpenses.businessId],
+      name: "landed_cost_postings_expense_business_fkey",
     }),
   ],
 );

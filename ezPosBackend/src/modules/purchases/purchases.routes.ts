@@ -39,6 +39,14 @@ router.get(
 // NOTE: the numeric guard falls through with next("route") so literal
 // sibling segments mounted by other routers (/api/purchases/return-items)
 // still match — Express 5 path-to-regexp does not support `:id(\\d+)`.
+// Aggregated purchase-list summary (Phase 4): one grouped query carrying
+// item quantity aggregates + server-authoritative receiving/return status.
+router.get(
+  "/api/purchases/list",
+  ...read,
+  requirePermission("purchases.view"),
+  purchasesController.getPurchasesList,
+);
 router.get(
   "/api/purchases/:id",
   ...read,

@@ -6,7 +6,6 @@ import {
   getPurchasesApi,
   getPurchasesItemsApi,
   getPurchasesReturnItemsApi,
-  purchaseReturnApi,
 } from "./purchase.api.js";
 import { getErrorMessage } from "@/utils/getErrorMessage.js";
 export const usePurchasesStore = create<PurchasesStore>((set) => ({
@@ -46,9 +45,6 @@ export const usePurchasesStore = create<PurchasesStore>((set) => ({
     } catch (err: unknown) {
       set({ error: getErrorMessage(err), loading: false });
     }
-  },
-  purchaseReturn: async (data) => {
-    return purchaseReturnApi(data);
   },
   createReceivePurchase: async (data) => {
     const response = await createReceivePurchaseApi(data);

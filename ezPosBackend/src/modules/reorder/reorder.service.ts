@@ -133,6 +133,7 @@ export async function convertSuggestionsToPurchase(
     purchaseDate: new Date(),
     notes: input.note ?? "Created from reorder suggestions",
     discount: 0,
+    discountBasis: "fixed",
     tax: 0,
     shippingCost: 0,
   });

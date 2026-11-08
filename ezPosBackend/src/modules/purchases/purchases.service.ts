@@ -7,9 +7,12 @@ import {
 import { variantOptions } from "../../db/schema/variantOptions.js";
 import { variantValues } from "../../db/schema/variantValues.js";
 import { purchaseItems } from "../../db/schema/purchaseItems.js";
+import { purchaseReturns } from "../../db/schema/purchaseReturns.js";
+import { supplierLedger } from "../../db/schema/supplierLedger.js";
+import { purchaseReturnItems } from "../../db/schema/purchaseReturnItems.js";
 import { purchases } from "../../db/schema/purchases.js";
 import { landedCosts } from "../../db/schema/landedCosts.js";
-import { and, asc, eq, getTableColumns, inArray } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { roundMoney } from "../../utils/roundMoney.js";
 import {
   postPurchasePaymentLedgerEntry,
@@ -21,6 +24,9 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import type { CreatePurchaseInput } from "./schemas/purchase.schema.js";
+import {
+  calculatePurchaseFinancials,
+} from "./purchaseFinancials.service.js";
 import { suppliers } from "../../db/schema/suppliers.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { units } from "../../db/schema/units.js";
@@ -28,6 +34,7 @@ import type { ReceiveItemsFormValues } from "./schemas/receiveItem.schema.js";
 import { checkPriceIncreasesInTx } from "../procurement/priceAlerts.service.js";
 import { applyReceiveDeltaInTx, lockDocumentForPurchaseInTx } from "../landed-cost/landed-cost.lifecycle.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
+import { locations } from "../../db/schema/locations.js";
 import {
   basicRequestValidation,
   batchValidation,
@@ -82,6 +89,7 @@ export async function createPurchase(
       purchaseDate,
       notes,
       discount,
+      discountBasis,
       tax,
       shippingCost,
     } = data;
@@ -129,26 +137,22 @@ export async function createPurchase(
       }
     }
 
-    // 3. Calculate totals
-    const subtotal = Number(
-      items
-        .reduce(
-          (sum, item) =>
-            sum +
-            Number(
-              (
-                item.purchasePrice * item.quantity -
-                item.discount +
-                item.tax
-              ).toFixed(2),
-            ),
-          0,
-        )
-        .toFixed(2),
-    );
-    const totalAmount = Number(
-      (subtotal - discount + tax + shippingCost).toFixed(2),
-    );
+    // 3. Calculate totals — the authoritative financial service (Phase 2).
+    // Same per-line-round-then-sum formula as before, now single-sourced.
+    const financials = calculatePurchaseFinancials({
+      lines: items.map((item) => ({
+        quantity: item.quantity,
+        unitPrice: item.purchasePrice,
+        discount: item.discount,
+        tax: item.tax,
+      })),
+      orderDiscount: discount,
+      orderDiscountBasis: discountBasis,
+      orderTax: tax,
+      supplierShipping: shippingCost,
+    });
+    const subtotal = financials.itemsSubtotal;
+    const totalAmount = financials.grandTotal;
 
     // 4. Per-business PO number. The number comes from the business's own
     // document_sequences counter inside this transaction (rollback-safe);
@@ -169,7 +173,11 @@ export async function createPurchase(
         purchaseDate,
         notes,
         subtotal,
-        discount: String(discount),
+        // The RESOLVED invoice discount (Phase 12 fix): a percentage
+        // discount is stored as the money it resolves to, so the stored
+        // header always reconciles with totalAmount and the acquisition
+        // classification reads the real discount, not the raw percent.
+        discount: String(financials.orderDiscount),
         tax: String(tax),
         shippingCost: String(shippingCost),
         totalAmount,
@@ -233,8 +241,19 @@ function purchasesWithLandedCostQuery() {
     .select({
       ...getTableColumns(purchases),
       supplierName: suppliers.name,
+      // Feeds the list page's supplier search (Phase 2, §2.4).
+      supplierPhone: suppliers.phone,
       landedCostDocStatus: landedCosts.status,
       landedCostPending: landedCosts.pendingAllocationAmount,
+      // Derived (Phase 3 — no schema change): a purchase whose lines
+      // accepted ZERO goods but wrote some off is workflow-complete
+      // (status "received") without anything physically arriving. The
+      // list surfaces this so the UI never presents it as received goods.
+      fullyCancelled: sql<boolean>`(
+        SELECT COALESCE(SUM(pi.received_quantity), 0) = 0
+          AND COALESCE(SUM(pi.cancelled_quantity), 0) > 0
+        FROM purchase_items pi WHERE pi.purchase_id = ${purchases.id}
+      )`,
     })
     .from(purchases)
     .leftJoin(suppliers, eq(purchases.supplierId, suppliers.id))
@@ -427,13 +446,135 @@ export async function getPurchaseDetail(businessId: number, purchaseId: number) 
     variantName: variantNameFromMap(optionsByVariant, row.variantId, row.productName),
   }));
 
+  // Return status (Phase 11) mirrors the list's derivation: returned
+  // quantities vs accepted received quantities, two-status independent.
+  // Phase 1 (return module): the same query now groups PER ITEM so the
+  // return context can carry previously-returned quantities per line.
+  const returnRows = await db
+    .select({
+      purchaseItemId: purchaseReturnItems.purchaseItemId,
+      returned: sql<string>`COALESCE(SUM(${purchaseReturnItems.quantity}), 0)`,
+    })
+    .from(purchaseReturnItems)
+    .innerJoin(
+      purchaseReturns,
+      and(
+        eq(purchaseReturnItems.purchaseReturnId, purchaseReturns.id),
+        eq(purchaseReturnItems.businessId, purchaseReturns.businessId),
+      ),
+    )
+    .where(
+      and(
+        eq(purchaseReturns.purchaseId, purchaseId),
+        eq(purchaseReturns.businessId, businessId),
+      ),
+    )
+    .groupBy(purchaseReturnItems.purchaseItemId);
+  const returnedByItem = new Map(
+    returnRows.map((row) => [row.purchaseItemId, Number(row.returned)]),
+  );
+  const returnedQuantity = returnRows.reduce(
+    (sum, row) => sum + Number(row.returned),
+    0,
+  );
+  const receivedQuantity = items.reduce(
+    (sum, item) => sum + Number(item.receivedQuantity),
+    0,
+  );
+  const returnStatus: "Returned" | "Partially returned" | null =
+    returnedQuantity === 0
+      ? null
+      : returnedQuantity >= receivedQuantity
+        ? "Returned"
+        : "Partially returned";
+
+  // Phase 1 (return module): the return context evaluates eligibility at
+  // the purchase's RECEIVING location — never the caller's active
+  // location. The return service deducts stock there, so the page's
+  // availability and clamps must be computed against the same place.
+  const receivingLocationId = purchase.locationId;
+  const [receivingLocation] = receivingLocationId
+    ? await db
+        .select({ name: locations.name })
+        .from(locations)
+        .where(
+          and(
+            eq(locations.id, receivingLocationId),
+            eq(locations.businessId, businessId),
+          ),
+        )
+        .limit(1)
+    : [];
+  const stockRows =
+    receivingLocationId && variantIds.length
+      ? await db
+          .select({
+            variantId: inventoryStock.variantId,
+            quantity: inventoryStock.quantity,
+          })
+          .from(inventoryStock)
+          .where(
+            and(
+              eq(inventoryStock.businessId, businessId),
+              eq(inventoryStock.locationId, receivingLocationId),
+              inArray(inventoryStock.variantId, variantIds),
+            ),
+          )
+      : [];
+  const stockByVariant = new Map(
+    stockRows.map((row) => [row.variantId, Number(row.quantity ?? 0)]),
+  );
+  // Phase 3 - supplier credit visibility: the supplier's recorded credit
+  // balance (returns + cancellations). supplier_ledger is CREDIT-ONLY in
+  // this system (payments never write it, nothing consumes credits), so
+  // the sum IS the unapplied credit balance. It is not a cash refund.
+  let supplierCreditBalance = 0;
+  if (purchase.supplierId !== null) {
+    const [ledgerAgg] = await db
+      .select({
+        credits: sql<string>`COALESCE(SUM(${supplierLedger.credit}), 0)`,
+      })
+      .from(supplierLedger)
+      .where(
+        and(
+          eq(supplierLedger.supplierId, purchase.supplierId),
+          eq(supplierLedger.businessId, businessId),
+        ),
+      );
+    supplierCreditBalance = Math.max(0, Number(ledgerAgg?.credits ?? 0));
+  }
+
+  const canReturn = purchase.supplierId !== null && receivingLocationId !== null;
+  const returnContext = {
+    locationId: receivingLocationId,
+    locationName: receivingLocation?.name ?? null,
+    canReturn,
+    reason: canReturn
+      ? null
+      : purchase.supplierId === null
+        ? ("no_supplier" as const)
+        : ("not_received" as const),
+    items: items.map((item) => ({
+      purchaseItemId: item.id,
+      orderedQuantity: Number(item.quantity),
+      receivedQuantity: Number(item.receivedQuantity),
+      returnedQuantity: returnedByItem.get(item.id) ?? 0,
+      // Stock of the line's VARIANT at the receiving location — returns
+      // draw from a variant-wide batch pool (shared across sibling lines).
+      availableStock: stockByVariant.get(item.variantId) ?? 0,
+    })),
+  };
+
   const { landedCostDocStatus, landedCostPending, ...purchaseHeader } = purchase;
   return {
     purchase: {
       ...purchaseHeader,
       landedCostStatus: deriveLandedCostStatus({ landedCostDocStatus, landedCostPending }),
+      returnStatus,
+      supplierCreditBalance,
     },
     items,
+    returnContext,
   };
 }
 

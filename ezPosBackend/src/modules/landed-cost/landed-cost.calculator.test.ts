@@ -183,6 +183,22 @@ describe("landed-cost calculator: weight", () => {
     assert.ok(nearly(result.lines[0]!.batches[0]!.weightSnapshot!, 4));
   });
 
+  it("treats explicit zero weight as missing (useful error, no crash)", () => {
+    assert.throws(
+      () =>
+        calculateAllocation({
+          method: "weight",
+          total: 100,
+          lines: [
+            { purchaseItemId: 1, variantId: 1, unitCost: 100, discount: 0, variantWeight: 0, variantWeightUnit: "kg", productDefaultWeightKg: null, batches: [{ batchId: 1, batchNumber: "B1", quantityReceived: 5 }] },
+          ],
+        }),
+      (err: unknown) =>
+        err instanceof LandedCostValidationError &&
+        err.issues.some((issue) => issue.code === "missing_weight"),
+    );
+  });
+
   it("rejects lines with no weight at all", () => {
     assert.throws(
       () =>
@@ -228,6 +244,54 @@ describe("landed-cost calculator: manual", () => {
         err.issues.some((i) => i.code === "manual_mismatch") &&
         err.issues.some((i) => i.code === "incomplete_manual_allocation"),
     );
+  });
+});
+
+describe("landed-cost calculator: equal", () => {
+  it("splits the total equally across lines (exact residual on line 1)", () => {
+    const result = calculateAllocation({
+      method: "equal",
+      total: 400,
+      lines: [
+        { purchaseItemId: 1, variantId: 1, unitCost: 100, discount: 0, batches: [{ batchId: 1, batchNumber: "B1", quantityReceived: 10 }] },
+        { purchaseItemId: 2, variantId: 2, unitCost: 100, discount: 0, batches: [{ batchId: 2, batchNumber: "B2", quantityReceived: 10 }] },
+        { purchaseItemId: 3, variantId: 3, unitCost: 100, discount: 0, batches: [{ batchId: 3, batchNumber: "B3", quantityReceived: 10 }] },
+      ],
+    });
+    // 400 / 3 = 133.333… → 133.34 / 133.33 / 133.33, exact sum.
+    const amounts = result.lines.map((line) => line.lineAllocatedAmount);
+    assert.equal(amounts.reduce((sum, value) => sum + value, 0), 400);
+    assert.equal(result.allocatedTotal, 400);
+    assert.equal(result.pendingTotal, 0);
+  });
+
+  it("scales the received share by quantity and holds the rest pending", () => {
+    const result = calculateAllocation({
+      method: "equal",
+      total: 300,
+      lines: [
+        { purchaseItemId: 1, variantId: 1, unitCost: 100, discount: 0, quantityOrdered: 10, batches: [{ batchId: 1, batchNumber: "B1", quantityReceived: 5 }] },
+        { purchaseItemId: 2, variantId: 2, unitCost: 100, discount: 0, quantityOrdered: 10, batches: [{ batchId: 2, batchNumber: "B2", quantityReceived: 5 }] },
+      ],
+    });
+    // Equal per-line target 150 each; received 5/10 → 75 capitalized, 75 pending.
+    assert.equal(result.allocatedTotal, 150);
+    assert.equal(result.pendingTotal, 150);
+  });
+
+  it("gives unreceived lines zero allocation with the full pending reserve", () => {
+    const result = calculateAllocation({
+      method: "equal",
+      total: 200,
+      lines: [
+        { purchaseItemId: 1, variantId: 1, unitCost: 100, discount: 0, quantityOrdered: 10, batches: [{ batchId: 1, batchNumber: "B1", quantityReceived: 10 }] },
+        { purchaseItemId: 2, variantId: 2, unitCost: 100, discount: 0, quantityOrdered: 10, batches: [] },
+      ],
+    });
+    // Line 2 is unreceived: line 1 takes its equal share as pending too.
+    assert.equal(result.lines[1]!.lineAllocatedAmount, 0);
+    assert.equal(result.allocatedTotal, 100);
+    assert.equal(result.pendingTotal, 100);
   });
 });
 

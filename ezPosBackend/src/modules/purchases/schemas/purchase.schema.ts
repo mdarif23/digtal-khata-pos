@@ -14,6 +14,9 @@ export const createPurchaseSchema = z.object({
   supplierId: z.number().int().positive().nullable(),
   purchaseDate: z.coerce.date(),
   discount: z.number().nonnegative().default(0),
+  /** Percentage discounts resolve to the fixed amount at creation; the
+   *  stored discount is always the resolved payable amount. */
+  discountBasis: z.enum(["fixed", "percentage"]).default("fixed"),
   tax: z.number().nonnegative().default(0),
   shippingCost: z.number().nonnegative().default(0),
   notes: z

@@ -177,6 +177,30 @@ describe("purchase shortage resolution integration", { skip: !runIntegration }, 
     assert.equal(Number(res.body?.data?.dueAmount), 800);
     assert.equal(res.body?.data?.status, "received"); // nothing outstanding
 
+    // Phase 3: this PO accepted 8 goods, so it is NOT fullyCancelled...
+    const list = (await getJson(baseUrl, owner, "/api/purchases")).body as any;
+    const listed = list.allPurchases.find((p: any) => p.id === purchaseId);
+    assert.equal(listed.fullyCancelled, false);
+
+    // ...but a purchase cancelled with ZERO accepted goods is: workflow-
+    // complete (status "received") without anything physically arriving.
+    const emptyPo = await createPurchase(owner, supplierId, variantId, 10, 100);
+    const emptyItemId = await purchaseItemId(emptyPo);
+    const emptyCancel = await resolveOutstanding(
+      owner,
+      emptyPo,
+      emptyItemId,
+      10,
+      "cancel",
+      "order cancelled before shipment",
+    );
+    assert.equal(emptyCancel.status, 200, JSON.stringify(emptyCancel.body));
+    const listAfter = (await getJson(baseUrl, owner, "/api/purchases")).body as any;
+    const emptyListed = listAfter.allPurchases.find((p: any) => p.id === emptyPo);
+    assert.equal(emptyListed.fullyCancelled, true);
+    assert.equal(emptyListed.status, "received"); // workflow state (unchanged enum)
+    assert.equal(Number(emptyListed.dueAmount), 0); // payable fully written off
+
     const line = (await dbRows(
       `SELECT quantity, received_quantity, cancelled_quantity, delivered_quantity
        FROM purchase_items WHERE id = $1`,
@@ -203,8 +227,9 @@ describe("purchase shortage resolution integration", { skip: !runIntegration }, 
     // Payable trail: ledger credit + due-management consistency.
     const ledger = await dbRows(
       `SELECT transaction_type, credit FROM supplier_ledger
-       WHERE business_id = $1 AND supplier_id = $2 ORDER BY id`,
-      [owner.businessId, supplierId],
+       WHERE business_id = $1 AND supplier_id = $2 AND reference_id = $3
+       ORDER BY id`,
+      [owner.businessId, supplierId, purchaseId],
     );
     assert.deepEqual(
       ledger.map((row) => [row.transaction_type, Number(row.credit)]),

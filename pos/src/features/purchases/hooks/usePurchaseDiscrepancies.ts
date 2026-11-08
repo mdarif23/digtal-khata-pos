@@ -54,6 +54,9 @@ export function useResolveOutstanding(purchaseId: number) {
       });
       await queryClient.invalidateQueries({ queryKey: ["due-management"] });
       await queryClient.invalidateQueries({ queryKey: landedCostKeys.all });
+      await queryClient.invalidateQueries({
+        queryKey: ["purchases", "list"],
+      });
     },
   });
 }
@@ -82,6 +85,9 @@ export function useResolveDiscrepancy(purchaseId: number) {
         queryKey: discrepancyKeys.purchase(purchaseId),
       });
       await queryClient.invalidateQueries({ queryKey: ["due-management"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["purchases", "list"],
+      });
     },
   });
 }

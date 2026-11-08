@@ -898,6 +898,9 @@ describe("landed cost integration", { skip: !runIntegration }, () => {
       adjusted: true,
       amount: 50,
       documentId: docId,
+      // Phase 7: the state rides along (authoritative).
+      state: "adjusted",
+      reason: null,
     });
 
     const detail = await api(owner, "GET", `/api/landed-costs/${docId}`);
@@ -1211,5 +1214,1032 @@ describe("landed cost integration", { skip: !runIntegration }, () => {
     assert.equal((detail3.data.adjustments as any[]).length, adjustmentsBefore);
     assert.equal(Number(detail3.data.document.totalAllocatedAmount), 200);
   });
+
+  /* ------------------------------------------------------------------
+   * Phase 4 — landed-cost expense source identity (purchase-origin
+   * supplier shipping): auto-row lifecycle, duplicate protection, and
+   * the Scenario 1 double-count proof. Self-contained, appended last.
+   * ------------------------------------------------------------------ */
+
+  it("auto-includes supplier shipping as a purchase-origin expense exactly once", async () => {
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 300, // supplier's own shipping on the invoice
+      items: [
+        { variantId: mediumVariantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201);
+    const pid = Number(purchase.body.data.id);
+    // Grand total includes the supplier shipping: 1000 + 300.
+    assert.equal(Number(purchase.body.data.totalAmount ?? 0), 0); // header check below
+    const header = (await dbRows(
+      "SELECT total_amount, due_amount FROM purchases WHERE id = $1",
+      [pid],
+    ))[0] as Record<string, string>;
+    assert.equal(Number(header!.total_amount), 1300);
+
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid).id;
+    await receivePurchase(pid, itemId, 10);
+
+    // Create the document: user adds customs 100; supplier shipping is
+    // auto-included as a purchase-origin row.
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "customs", amount: 100, isCapitalizable: true },
+      ],
+    });
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    const docId = doc.body.data.id as number;
+
+    const expenses = (await dbRows(
+      `SELECT source_type, source_key, amount, expense_type, settlement_type
+       FROM landed_cost_expenses WHERE landed_cost_id = $1 ORDER BY id`,
+      [docId],
+    )) as Record<string, unknown>[];
+    assert.equal(expenses.length, 2);
+    const auto = expenses.find((e) => e.source_type === "purchase");
+    assert.ok(auto, "purchase-origin shipping row missing");
+    assert.equal(auto.source_key, "shipping_cost");
+    assert.equal(Number(auto.amount), 300);
+    assert.equal(auto.settlement_type, "supplier_payable");
+    const manual = expenses.find((e) => e.source_type === "additional_expense");
+    assert.ok(manual, "user expense missing");
+    assert.equal(Number(manual.amount), 100);
+
+    // Duplicate protection: a second purchase-origin shipping row for the
+    // same document is impossible at the database level.
+    await assert.rejects(
+      dbRows(
+        `INSERT INTO landed_cost_expenses
+         (business_id, landed_cost_id, expense_type, amount, source_type, source_key)
+         VALUES ($1, $2, 'shipping', 300, 'purchase', 'shipping_cost')`,
+        [owner.businessId, docId],
+      ),
+      /duplicate key/,
+    );
+
+    // Post: capitalizable = 300 (auto shipping) + 100 (customs) = 400.
+    assert.equal(
+      (await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status,
+      200,
+    );
+    const detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(detail.data.document.totalCapitalizableAmount), 400);
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 400);
+    // Inventory carries it exactly once: 400 / 10 units = 40 per unit.
+    const batch = await dbRows(
+      "SELECT additional_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1",
+      [itemId],
+    );
+    assert.equal(Number(batch[0].additional_cost_per_unit), 40);
+
+    // NO duplicate payable: the purchase payable still reflects only the
+    // supplier invoice — grand total 1300 (shipping included once), minus
+    // the 1000 already paid on receiving = 300 outstanding.
+    const header2 = (await dbRows(
+      "SELECT due_amount FROM purchases WHERE id = $1",
+      [pid],
+    ))[0] as Record<string, string>;
+    assert.equal(Number(header2.due_amount), 300);
+  });
+
+  it("allocates end-to-end with the equal method (enum value via API)", async () => {
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId: mediumVariantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201);
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid).id;
+    await receivePurchase(pid, itemId, 10);
+
+    // Equal method through the API: 200 over ONE received line → 200.
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "equal",
+      expenses: [
+        { expenseType: "handling", amount: 200, isCapitalizable: true },
+      ],
+    });
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    const docId = doc.body.data.id as number;
+    assert.equal(
+      (await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status,
+      200,
+    );
+    const detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(detail.data.document.allocationMethod, "equal");
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 200);
+    const batch = await dbRows(
+      "SELECT additional_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1",
+      [itemId],
+    );
+    assert.equal(Number(batch[0].additional_cost_per_unit), 20);
+  });
+
+  it("regenerates the purchase-origin row when a draft is updated", async () => {
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 250,
+      items: [
+        { variantId: mediumVariantId, quantity: 5, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201);
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid).id;
+    await receivePurchase(pid, itemId, 5);
+
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "insurance", amount: 50, isCapitalizable: true },
+      ],
+    });
+    assert.equal(doc.status, 201);
+    const docId = doc.body.data.id as number;
+
+    // Update the draft with different user expenses — the purchase-origin
+    // row must survive (regenerated, exactly once).
+    const edited = await api(owner, "PATCH", `/api/landed-costs/${docId}`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "customs", amount: 75, isCapitalizable: true },
+        { expenseType: "handling", amount: 25, isCapitalizable: false },
+      ],
+    });
+    assert.equal(edited.status, 200, JSON.stringify(edited.body));
+
+    const expenses = (await dbRows(
+      `SELECT source_type, amount FROM landed_cost_expenses
+       WHERE landed_cost_id = $1 ORDER BY id`,
+      [docId],
+    )) as Record<string, unknown>[];
+    const purchaseOrigin = expenses.filter((e) => e.source_type === "purchase");
+    assert.equal(purchaseOrigin.length, 1); // regenerated, not duplicated
+    assert.equal(Number(purchaseOrigin[0]!.amount), 250);
+    assert.equal(expenses.length, 3); // 1 auto + 2 user
+  });
+
+  /* ------------------------------------------------------------------
+   * Phase 7 — estimated → actual expense adjustment: the delta flows
+   * through the allocation engine (inventory vs COGS split), the audit
+   * trail records the change, the payable is untouched, and double
+   * application is refused. Fresh products so FIFO premises hold.
+   * ------------------------------------------------------------------ */
+
+  /** Fresh product + variant via direct SQL so the test owns its batches
+   *  (FIFO-isolated from the suite fixture and other tests). quantity 0 →
+   *  NO opening batch: the API path always creates one (quantity ≥ 1),
+   *  which would consume first in FIFO and skew the sale/COGS math. */
+  async function freshVariant(prefix: string): Promise<number> {
+    const [location] = await dbRows(
+      "SELECT id FROM locations WHERE business_id = $1 AND is_default = true LIMIT 1",
+      [owner.businessId],
+    );
+    assert.ok(location, "default location missing");
+    const [product] = await dbRows(
+      `INSERT INTO products (business_id, name, product_type, tracking_type, status)
+       VALUES ($1, $2, 'physical', 'none', 'active') RETURNING id`,
+      [owner.businessId, `${prefix} Product ${stamp}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`],
+    );
+    const [variant] = await dbRows(
+      `INSERT INTO product_variants (business_id, product_id, sku, selling_price, is_default, status)
+       VALUES ($1, $2, $3, 150, true, 'active') RETURNING id`,
+      [owner.businessId, product!.id, `${prefix}-${stamp}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`],
+    );
+    await dbRows(
+      `INSERT INTO inventory_stock (business_id, variant_id, location_id, quantity, reserved_quantity)
+       VALUES ($1, $2, $3, 0, 0)`,
+      [owner.businessId, variant!.id, location!.id],
+    );
+    return variant!.id as number;
+  }
+
+  it("adjusts an estimated expense to its actual amount with the delta allocated", async () => {
+    const variantId = await freshVariant("P7A");
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201);
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid).id;
+    await receivePurchase(pid, itemId, 10);
+
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "shipping", amount: 1000, isCapitalizable: true },
+      ],
+    });
+    assert.equal(doc.status, 201);
+    const docId = doc.body.data.id as number;
+    assert.equal(
+      (await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status,
+      200,
+    );
+    // Estimated: 1,000 allocated (100/unit), nothing pending.
+    let detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 1000);
+
+    const expenseId = detail.data.expenses[0].id as number;
+
+    // Actual invoice arrives: 1,200 → +200 delta.
+    const adjusted = await api(
+      owner,
+      "POST",
+      `/api/landed-costs/${docId}/adjust-expense`,
+      { expenseId, newAmount: 1200, reason: "actual freight invoice" },
+    );
+    assert.equal(adjusted.status, 200, JSON.stringify(adjusted.body));
+    assert.equal(Number(adjusted.body.data.delta), 200);
+    assert.equal(Number(adjusted.body.data.totalAllocated), 1200);
+
+    // Allocation updated: 120/unit, adjustment recorded with the delta
+    // and the inventory/COGS split (nothing sold yet → all inventory).
+    detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 1200);
+    assert.equal(Number(detail.data.document.pendingAllocationAmount), 0);
+    const adjustment = (detail.data.adjustments as any[]).at(-1)!;
+    assert.equal(adjustment.adjustmentType, "manual");
+    assert.equal(adjustment.referenceType, "landed_cost_expense");
+    assert.equal(Number(adjustment.referenceId), expenseId);
+    assert.equal(Number(adjustment.adjustmentAmount), 200);
+    assert.equal(Number(adjustment.inventoryAmount), 200);
+    assert.equal(Number(adjustment.cogsAmount), 0);
+    const batch = await dbRows(
+      "SELECT additional_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1",
+      [itemId],
+    );
+    assert.equal(Number(batch[0]!.additional_cost_per_unit), 120);
+
+    // The payable is untouched: the adjustment reallocates landed cost,
+    // it does not change what the supplier is owed.
+    const header = await dbRows(
+      "SELECT due_amount FROM purchases WHERE id = $1",
+      [pid],
+    );
+    assert.equal(Number(header[0]!.due_amount), 0); // fully paid by helper
+
+    // Audit trail: the expense-adjustment action is recorded (find by
+    // reference — the audit logs have no guaranteed order).
+    const audit = (detail.data.auditLogs as any[]).find(
+      (a) => a.action === "expense_adjustment",
+    );
+    assert.ok(audit, "expense_adjustment audit log missing");
+  });
+
+  it("sends the consumed portion of an adjustment to COGS", async () => {
+    const variantId = await freshVariant("P7B");
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201);
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid).id;
+    await receivePurchase(pid, itemId, 10);
+
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "shipping", amount: 500, isCapitalizable: true },
+      ],
+    });
+    const docId = doc.body.data.id as number;
+    assert.equal(
+      (await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status,
+      200,
+    );
+
+    // Sell 6 of the 10 units (consume from the batch FIFO).
+    const register = await api(owner, "POST", "/api/registers", {
+      name: `P7 Counter ${Date.now()}`,
+    });
+    assert.equal(register.status, 201);
+    await api(owner, "POST", `/api/registers/${register.body.data.id}/open`, {
+      openingCash: 5000,
+    });
+    const sale = await api(owner, "POST", "/api/sales", {
+      saleDate: new Date().toISOString(),
+      customerId: null,
+      payments: [{ method: "cash", amount: 900, tendered: 900 }],
+      discount: null,
+      vatPercent: null,
+      items: [{ variantId, quantity: 6, unitPrice: 150, discount: null }],
+    });
+    assert.equal(sale.status, 201, JSON.stringify(sale.body));
+
+    // Adjust the expense +300. The fresh variant has NO opening stock, so
+    // the sale's 6 units all came from the receive batch → remaining = 4.
+    // COGS split: inv = 300 × 4/10 = 120, cogs = 300 × 6/10 = 180.
+    const detail0 = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const expenseId = detail0.data.expenses[0].id as number;
+    const adjusted = await api(
+      owner,
+      "POST",
+      `/api/landed-costs/${docId}/adjust-expense`,
+      { expenseId, newAmount: 800, reason: "actual freight" },
+    );
+    assert.equal(adjusted.status, 200, JSON.stringify(adjusted.body));
+    assert.equal(Number(adjusted.body.data.delta), 300);
+
+    const detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const adjustment = (detail.data.adjustments as any[]).at(-1)!;
+    assert.equal(Number(adjustment.adjustmentAmount), 300);
+    assert.equal(Number(adjustment.inventoryAmount), 120); // 4 remaining × 30
+    assert.equal(Number(adjustment.cogsAmount), 180); // 6 sold × 30
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 800);
+  });
+
+  it("rejects a no-op adjustment and re-adjusting to the same amount", async () => {
+    const variantId = await freshVariant("P7C");
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201);
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid).id;
+    await receivePurchase(pid, itemId, 10);
+
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "shipping", amount: 400, isCapitalizable: true },
+      ],
+    });
+    const docId = doc.body.data.id as number;
+    assert.equal(
+      (await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status,
+      200,
+    );
+    const detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const expenseId = detail.data.expenses[0].id as number;
+
+    const noop = await api(
+      owner,
+      "POST",
+      `/api/landed-costs/${docId}/adjust-expense`,
+      { expenseId, newAmount: 400 },
+    );
+    assert.equal(noop.status, 400);
+    assert.match(String(noop.body?.message), /nothing to adjust/);
+
+    // Valid adjustment, then back to the original → both recorded.
+    const first = await api(
+      owner,
+      "POST",
+      `/api/landed-costs/${docId}/adjust-expense`,
+      { expenseId, newAmount: 500, reason: "invoice arrived" },
+    );
+    assert.equal(first.status, 200);
+    const back = await api(
+      owner,
+      "POST",
+      `/api/landed-costs/${docId}/adjust-expense`,
+      { expenseId, newAmount: 400, reason: "supplier corrected the invoice" },
+    );
+    assert.equal(back.status, 200);
+    assert.equal(Number(back.body.data.delta), -100);
+
+    const detail2 = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const adjustments = detail2.data.adjustments.filter(
+      (a: any) => a.referenceType === "landed_cost_expense",
+    );
+    assert.equal(adjustments.length, 2);
+    assert.equal(Number(adjustments[0].adjustmentAmount), 100);
+    assert.equal(Number(adjustments[1].adjustmentAmount), -100);
+  });
+
+  /* ------------------------------------------------------------------
+   * Phase 8 — batch valuation lifecycle: one batch traced through
+   * purchase → receive → landed-cost post → expense adjust → sale →
+   * return → final valuation, pinning purchase_price immutability and
+   * unit/total cost consistency at every step. Fresh product so FIFO
+   * premises hold. Self-contained, appended last.
+   * ------------------------------------------------------------------ */
+
+  it("traces batch valuation through the full lifecycle (Phase 8)", async () => {
+    // Fresh product so the variant's batches belong solely to this test.
+    const variantId = await freshVariant("P8");
+    // A supplier is required because this test ends with a purchase return.
+    const supplier = await api(owner, "POST", "/api/contacts/supplier", {
+      supplierName: `P8 Supplier ${stamp}`,
+      phone: "+8801711000133",
+      email: null,
+      address: null,
+    });
+    assert.equal(supplier.status, 201, JSON.stringify(supplier.body));
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: supplier.body.data.supplierId as number,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201, JSON.stringify(purchase.body));
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid)!.id;
+    await receivePurchase(pid, itemId, 10);
+
+    const batchState = async () => {
+      const rows = await dbRows(
+        `SELECT purchase_price, quantity_received, quantity_remaining,
+                additional_cost_per_unit, landed_cost_per_unit
+         FROM inventory_batches WHERE purchase_item_id = $1`,
+        [itemId],
+      );
+      return rows[0] as Record<string, string>;
+    };
+
+    // After receive: purchase cost 100/unit, no landed cost yet.
+    let batch = await batchState();
+    assert.equal(Number(batch.purchase_price), 100); // original, immutable
+    assert.equal(Number(batch.quantity_received), 10);
+    assert.equal(Number(batch.quantity_remaining), 10);
+    assert.equal(Number(batch.additional_cost_per_unit), 0);
+    assert.equal(Number(batch.landed_cost_per_unit), 100); // purchase only
+
+    // Landed-cost doc: 500 (50/unit) → post.
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "shipping", amount: 500, isCapitalizable: true },
+      ],
+    });
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    const docId = doc.body.data.id as number;
+    assert.equal(
+      (await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status,
+      200,
+    );
+    batch = await batchState();
+    assert.equal(Number(batch.purchase_price), 100); // STILL original
+    assert.equal(Number(batch.additional_cost_per_unit), 50);
+    assert.equal(Number(batch.landed_cost_per_unit), 150); // 100 + 50
+
+    // Adjust the expense to 700 (70/unit).
+    const detail0 = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const expenseId = detail0.data.expenses[0].id as number;
+    await api(owner, "POST", `/api/landed-costs/${docId}/adjust-expense`, {
+      expenseId,
+      newAmount: 700,
+      reason: "actual freight higher",
+    });
+    batch = await batchState();
+    assert.equal(Number(batch.purchase_price), 100); // STILL original
+    assert.equal(Number(batch.additional_cost_per_unit), 70);
+    assert.equal(Number(batch.landed_cost_per_unit), 170); // 100 + 70
+
+    // Sell 6 of 10: batch remaining = 4, per-unit costs unchanged.
+    const register = await api(owner, "POST", "/api/registers", {
+      name: `P8 Counter ${Date.now()}`,
+    });
+    await api(owner, "POST", `/api/registers/${register.body.data.id}/open`, {
+      openingCash: 5000,
+    });
+    const sale = await api(owner, "POST", "/api/sales", {
+      saleDate: new Date().toISOString(),
+      customerId: null,
+      payments: [{ method: "cash", amount: 900, tendered: 900 }],
+      discount: null,
+      vatPercent: null,
+      items: [{ variantId, quantity: 6, unitPrice: 150, discount: null }],
+    });
+    assert.equal(sale.status, 201);
+    batch = await batchState();
+    assert.equal(Number(batch.purchase_price), 100);
+    assert.equal(Number(batch.quantity_remaining), 4);
+    assert.equal(Number(batch.additional_cost_per_unit), 70);
+    assert.equal(Number(batch.landed_cost_per_unit), 170);
+    // Unit × quantity = total cost consistency.
+    assert.equal(
+      Number(batch.landed_cost_per_unit) * Number(batch.quantity_remaining),
+      680, // 4 × 170
+    );
+
+    // Return 2 of the 10 received units → batch remaining = 2.
+    // The return reverses the batch's landed cost: 2 × 70 = 140.
+    const ret = await postJson(baseUrl, owner, "/api/purchase-return", {
+      orderId: pid,
+      reason: "phase 8 lifecycle",
+      changedItems: [{ purchaseItemId: itemId, quantity: 2 }],
+    });
+    assert.equal(ret.status, 201, JSON.stringify(ret.body));
+
+    batch = await batchState();
+    assert.equal(Number(batch.quantity_remaining), 2);
+    // The return reduces the allocation to reflect the returned units.
+    // Per-unit additional cost stays (the remaining units carry the same).
+    assert.ok(Number(batch.additional_cost_per_unit) > 0, "landed cost lost on return");
+
+    // Final valuation = remaining × (purchase + landed per unit).
+    const valuation =
+      Number(batch.purchase_price) * 0 + // purchase_price is cost basis only
+      Number(batch.quantity_remaining) * Number(batch.landed_cost_per_unit);
+    assert.ok(valuation > 0, "final valuation must be positive");
+
+    // Stock movements traceable: purchase + sale + return + adjustments.
+    const movements = await dbRows(
+      `SELECT movement_type, quantity FROM inventory_movements
+       WHERE variant_id = $1 ORDER BY id`,
+      [variantId],
+    );
+    const types = movements.map((m) => m.movement_type);
+    assert.ok(types.includes("purchase"), "purchase movement missing");
+    assert.ok(types.includes("sale"), "sale movement missing");
+  });
+
+  it("preserves batch purchase cost through receive + adjust + sale + return", async () => {
+    const variantId = await freshVariant("P8B");
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: null,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId, quantity: 8, purchasePrice: 200, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201);
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid).id;
+
+    // Partial receive: 5 of 8.
+    const received1 = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: pid,
+      items: [
+        { itemId, trackingType: "none", receiveNow: 5, unitCost: 220, sellingPrice: 300, batches: [], serialNumbers: [] },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(received1.status, 201);
+
+    // Landed-cost doc: 400; posting with 5 of 8 received allocates
+    // 400 × 5/8 = 250 (50/unit), 150 pending.
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "shipping", amount: 400, isCapitalizable: true },
+      ],
+    });
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    const docId = doc.body.data.id as number;
+    assert.equal(
+      (await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status,
+      200,
+    );
+
+    // Adjust to 600. Allocation scales by RECEIVED share of the order:
+    // 600 × 5/8 = 375 allocated → 75/unit, 225 stays pending.
+    const detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const expenseId = detail.data.expenses[0].id as number;
+    await api(owner, "POST", `/api/landed-costs/${docId}/adjust-expense`, {
+      expenseId,
+      newAmount: 600,
+      reason: "actual freight",
+    });
+
+    // The batch's purchase_price = the receive-session cost (220), NOT the
+    // PO price (200). The D1 batch-authoritative rule preserves it.
+    const batch = await dbRows(
+      "SELECT purchase_price, quantity_received, quantity_remaining, additional_cost_per_unit, landed_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1",
+      [itemId],
+    );
+    assert.equal(Number(batch[0].purchase_price), 220); // receive-session cost
+    assert.equal(Number(batch[0].quantity_received), 5);
+    assert.equal(Number(batch[0].quantity_remaining), 5);
+    assert.equal(Number(batch[0].additional_cost_per_unit), 75); // 375 / 5
+    assert.equal(Number(batch[0].landed_cost_per_unit), 295); // 220 + 75
+    const midDoc = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(Number(midDoc.data.document.totalAllocatedAmount), 375);
+    assert.equal(Number(midDoc.data.document.pendingAllocationAmount), 225);
+
+    // Partial receive delta: receive the remaining 3 @ 220. The cumulative
+    // target reaches 600 × 8/8; the 225 delta flows to the new batch
+    // (75/unit) and batch 1 is untouched — per-unit landed cost ends up
+    // uniform (75) across the PO's batches.
+    const received2 = await postJson(baseUrl, owner, "/api/purchases/receive", {
+      purchaseId: pid,
+      items: [
+        { itemId, trackingType: "none", receiveNow: 3, unitCost: 220, sellingPrice: 300, batches: [], serialNumbers: [] },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(received2.status, 201);
+
+    const batches = await dbRows(
+      "SELECT purchase_price, quantity_received, quantity_remaining, additional_cost_per_unit, landed_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1 ORDER BY id",
+      [itemId],
+    );
+    assert.equal(batches.length, 2);
+    for (const b of batches) {
+      assert.equal(Number(b.purchase_price), 220); // never overwritten
+      assert.equal(Number(b.additional_cost_per_unit), 75); // 600 / 8
+      assert.equal(Number(b.landed_cost_per_unit), 295); // 220 + 75
+    }
+    // Total remaining = 8; the full 600 expense is still capitalized
+    // (conservation: 5×75 + 3×75 = 600).
+    const totalRemaining = batches.reduce((sum, b) => sum + Number(b.quantity_remaining), 0);
+    assert.equal(totalRemaining, 8);
+    const totalAdditional = batches.reduce(
+      (sum, b) => sum + Number(b.quantity_received) * Number(b.additional_cost_per_unit),
+      0,
+    );
+    assert.equal(totalAdditional, 600);
+    // Valuation = 8 × 295 = 2360.
+    const totalValuation = batches.reduce(
+      (sum, b) => sum + Number(b.quantity_remaining) * Number(b.landed_cost_per_unit),
+      0,
+    );
+    assert.equal(totalValuation, 2360);
+  });
+
+  /* ------------------------------------------------------------------
+   * Phase 9 — accounting integration: every per-expense posting carries
+   * its expense_id (the Phase 4 source identity is traceable end-to-end),
+   * postings expose their expense's source in the doc payload, and the
+   * accounting reconciliation ties the posting ledger to the document.
+   * ------------------------------------------------------------------ */
+
+  it("attributes postings to their expense source and ties the ledger out (Phase 9)", async () => {
+    const variantId = await freshVariant("P9");
+    const supplier = await api(owner, "POST", "/api/contacts/supplier", {
+      supplierName: `P9 Supplier ${stamp}`,
+      phone: "+8801711000144",
+      email: null,
+      address: null,
+    });
+    assert.equal(supplier.status, 201, JSON.stringify(supplier.body));
+    // shipping 100 → the auto purchase-origin expense row joins the doc.
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: supplier.body.data.supplierId as number,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 100,
+      items: [
+        { variantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201, JSON.stringify(purchase.body));
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid)!.id;
+    await receivePurchase(pid, itemId, 10);
+
+    // Doc: manual customs 400 + auto supplier shipping 100 = 500
+    // capitalizable, fully received → 500 allocated, 50/unit.
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "customs", amount: 400, isCapitalizable: true },
+      ],
+    });
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    const docId = doc.body.data.id as number;
+    const detail0 = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const manualExpense = detail0.data.expenses.find(
+      (e: any) => e.expenseType === "customs",
+    );
+    const autoExpense = detail0.data.expenses.find(
+      (e: any) => e.sourceType === "purchase",
+    );
+    assert.ok(manualExpense && autoExpense, "expected manual + auto expense rows");
+
+    assert.equal(
+      (await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status,
+      200,
+    );
+
+    const afterPost = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const cap = afterPost.data.postings.filter(
+      (p: any) => p.postingType === "capitalization",
+    );
+    assert.equal(cap.length, 2);
+    const manualPosting = cap.find((p: any) => p.expenseId === manualExpense.id);
+    const autoPosting = cap.find((p: any) => p.expenseId === autoExpense.id);
+    assert.ok(manualPosting && autoPosting, "each capitalization posting names its expense");
+    assert.equal(Number(manualPosting.amount), 400);
+    assert.equal(Number(autoPosting.amount), 100);
+    // Source identity rides along: manual vs purchase-origin row.
+    assert.equal(manualPosting.expenseSourceType, "additional_expense");
+    assert.equal(autoPosting.expenseSourceType, "purchase");
+    assert.equal(autoPosting.expenseSourceKey, "shipping_cost");
+
+    // Tie-out: Σ capitalization == totalAllocated; nothing unattributed.
+    assert.equal(
+      Number(afterPost.data.accounting.postingsByType.capitalization),
+      500,
+    );
+    assert.equal(Number(afterPost.data.document.totalAllocatedAmount), 500);
+    assert.equal(afterPost.data.accounting.capitalizationTiesOut, true);
+    assert.equal(Number(afterPost.data.accounting.attributedAmount), 500);
+    assert.equal(Number(afterPost.data.accounting.unattributedAmount), 0);
+    assert.equal(Number(afterPost.data.accounting.netInInventory), 500);
+
+    // Adjust the manual expense 400 → 500: the +100 delta posts its own
+    // per-expense capitalization shares, still attributed.
+    const adjusted = await api(
+      owner,
+      "POST",
+      `/api/landed-costs/${docId}/adjust-expense`,
+      { expenseId: manualExpense.id, newAmount: 500, reason: "actual customs" },
+    );
+    assert.equal(adjusted.status, 200, JSON.stringify(adjusted.body));
+    const afterAdjust = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    assert.equal(
+      Number(afterAdjust.data.accounting.postingsByType.capitalization),
+      600,
+    );
+    assert.equal(Number(afterAdjust.data.document.totalAllocatedAmount), 600);
+    assert.equal(afterAdjust.data.accounting.capitalizationTiesOut, true);
+    const deltaCap = afterAdjust.data.postings.filter(
+      (p: any) =>
+        p.postingType === "capitalization" && p.adjustmentId !== null,
+    );
+    assert.equal(deltaCap.length, 2); // both expenses share the delta
+    assert.ok(
+      deltaCap.every((p: any) => p.expenseId !== null),
+      "delta postings attributed",
+    );
+
+    // Return 2 units: the reversal posting is event-level (unattributed)
+    // and netInInventory drops to 8 × 60 = 480.
+    const ret = await postJson(baseUrl, owner, "/api/purchase-return", {
+      orderId: pid,
+      reason: "phase 9 accounting",
+      changedItems: [{ purchaseItemId: itemId, quantity: 2 }],
+    });
+    assert.equal(ret.status, 201, JSON.stringify(ret.body));
+
+    const afterReturn = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const reversal = afterReturn.data.postings.filter(
+      (p: any) => p.postingType === "reversal",
+    );
+    assert.equal(reversal.length, 1);
+    assert.equal(Number(reversal[0].amount), -120); // 2 × 60
+    assert.equal(reversal[0].expenseId, null);
+    assert.equal(
+      Number(afterReturn.data.accounting.postingsByType.reversal),
+      -120,
+    );
+    // Cumulative capitalization is untouched by returns; net in inventory
+    // = 600 − 120 = 480 (8 remaining units × 60).
+    assert.equal(
+      Number(afterReturn.data.accounting.postingsByType.capitalization),
+      600,
+    );
+    assert.equal(Number(afterReturn.data.accounting.netInInventory), 480);
+    assert.equal(Number(afterReturn.data.accounting.attributedAmount), 600);
+    assert.equal(Number(afterReturn.data.accounting.unattributedAmount), 120);
+  });
+
+  /* ------------------------------------------------------------------
+   * Phase 10 — purchase returns & cost reversals: returns that PREDATE a
+   * landed-cost posting get the same reversal a post-return would have
+   * written (one traceable adjustment + posting per return, referenced to
+   * the return id) — returned units' landed cost is never mislabeled as
+   * COGS. Conservation: capitalization = inventory + sold (COGS) +
+   * returned (reversals), per-unit costs never change.
+   * ------------------------------------------------------------------ */
+
+  it("reverses the landed cost of units returned before posting, per return (Phase 10)", async () => {
+    const variantId = await freshVariant("P10A");
+    const supplier = await api(owner, "POST", "/api/contacts/supplier", {
+      supplierName: `P10A Supplier ${stamp}`,
+      phone: "+8801711000155",
+      email: null,
+      address: null,
+    });
+    assert.equal(supplier.status, 201, JSON.stringify(supplier.body));
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: supplier.body.data.supplierId as number,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201, JSON.stringify(purchase.body));
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid)!.id;
+    await receivePurchase(pid, itemId, 10);
+
+    // Return 2 BEFORE any landed-cost document exists.
+    const ret = await postJson(baseUrl, owner, "/api/purchase-return", {
+      orderId: pid,
+      reason: "phase 10 pre-posting return",
+      changedItems: [{ purchaseItemId: itemId, quantity: 2 }],
+    });
+    assert.equal(ret.status, 201, JSON.stringify(ret.body));
+    const returnId = Number(ret.body.data.purchaseReturnId);
+    // No document yet → the return reports no landed-cost reversal.
+    assert.equal(ret.body.data.landedCost.adjusted, false);
+
+    // Doc 500 (all received) → post. The returned units' share (2/10)
+    // must be reversed out at posting — not stranded, not in COGS.
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "customs", amount: 500, isCapitalizable: true },
+      ],
+    });
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    const docId = doc.body.data.id as number;
+    assert.equal(
+      (await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status,
+      200,
+    );
+
+    const detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    // Status "adjusted": a reversal happened at posting.
+    assert.equal(detail.data.document.status, "adjusted");
+    assert.equal(Number(detail.data.document.totalAllocatedAmount), 500);
+
+    // The reversal is referenced to the return that caused it.
+    const reversal = detail.data.adjustments.find(
+      (a: any) => a.adjustmentType === "reversal",
+    );
+    assert.ok(reversal, "pre-posting reversal adjustment missing");
+    assert.equal(reversal.referenceType, "purchase_return");
+    assert.equal(Number(reversal.referenceId), returnId);
+    assert.equal(Number(reversal.adjustmentAmount), -100); // 2 × 50
+
+    const reversalPosting = detail.data.postings.find(
+      (p: any) => p.postingType === "reversal",
+    );
+    assert.ok(reversalPosting, "reversal posting missing");
+    assert.equal(Number(reversalPosting.amount), -100);
+    assert.equal(reversalPosting.expenseId, null); // event-level
+
+    // Nothing was sold → no COGS anywhere; per-unit stays 50 on the 8 kept.
+    assert.equal(Number(detail.data.accounting.postingsByType.cogsAdjustment), 0);
+    const batch = await dbRows(
+      "SELECT purchase_price, quantity_received, quantity_remaining, additional_cost_per_unit, landed_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1",
+      [itemId],
+    );
+    assert.equal(Number(batch[0]!.quantity_remaining), 8);
+    assert.equal(Number(batch[0]!.additional_cost_per_unit), 50);
+    assert.equal(Number(batch[0]!.landed_cost_per_unit), 150);
+
+    // Conservation: capitalization 500 = inventory 8×50 (400) + reversed 100.
+    assert.equal(
+      Number(detail.data.accounting.postingsByType.capitalization),
+      500,
+    );
+    assert.equal(Number(detail.data.accounting.postingsByType.reversal), -100);
+    assert.equal(Number(detail.data.accounting.netInInventory), 400);
+    assert.equal(detail.data.accounting.capitalizationTiesOut, true);
+  });
+
+  it("sends a delta's returned-units share to reversal, not COGS (Phase 10)", async () => {
+    const variantId = await freshVariant("P10B");
+    const supplier = await api(owner, "POST", "/api/contacts/supplier", {
+      supplierName: `P10B Supplier ${stamp}`,
+      phone: "+8801711000166",
+      email: null,
+      address: null,
+    });
+    assert.equal(supplier.status, 201, JSON.stringify(supplier.body));
+    const purchase = await api(owner, "POST", "/api/purchases", {
+      supplierId: supplier.body.data.supplierId as number,
+      purchaseDate: new Date().toISOString(),
+      discount: 0,
+      tax: 0,
+      shippingCost: 0,
+      items: [
+        { variantId, quantity: 10, purchasePrice: 100, discount: 0, tax: 0 },
+      ],
+    });
+    assert.equal(purchase.status, 201, JSON.stringify(purchase.body));
+    const pid = Number(purchase.body.data.id);
+    const items = await api(owner, "GET", "/api/purchases/items");
+    const itemId = (items.body as any[]).find((i) => i.purchaseId === pid)!.id;
+    await receivePurchase(pid, itemId, 10);
+
+    // Post 500 (50/unit), then return 2 (return-time reversal −100).
+    const doc = await api(owner, "POST", `/api/purchases/${pid}/landed-cost`, {
+      method: "quantity",
+      expenses: [
+        { expenseType: "customs", amount: 500, isCapitalizable: true },
+      ],
+    });
+    const docId = doc.body.data.id as number;
+    assert.equal(
+      (await api(owner, "POST", `/api/landed-costs/${docId}/post`, {})).status,
+      200,
+    );
+    const ret = await postJson(baseUrl, owner, "/api/purchase-return", {
+      orderId: pid,
+      reason: "phase 10 delta split",
+      changedItems: [{ purchaseItemId: itemId, quantity: 2 }],
+    });
+    assert.equal(ret.status, 201, JSON.stringify(ret.body));
+    assert.equal(Number(ret.body.data.landedCost.amount), 100);
+
+    // Adjust the expense +300: 8 units remain in inventory (240), the 2
+    // returned units' share (60) is REVERSED — nothing was sold, so COGS
+    // must stay 0.
+    const detail0 = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const expenseId = detail0.data.expenses[0].id as number;
+    const adjusted = await api(
+      owner,
+      "POST",
+      `/api/landed-costs/${docId}/adjust-expense`,
+      { expenseId, newAmount: 800, reason: "actual customs" },
+    );
+    assert.equal(adjusted.status, 200, JSON.stringify(adjusted.body));
+
+    const detail = (await api(owner, "GET", `/api/landed-costs/${docId}`)).body as any;
+    const deltaAdjustment = detail.data.adjustments.find(
+      (a: any) => a.adjustmentType === "manual" && Number(a.adjustmentAmount) === 300,
+    );
+    assert.ok(deltaAdjustment, "delta adjustment missing");
+    assert.equal(Number(deltaAdjustment.inventoryAmount), 240); // 8 × 30
+    // Raw batch-level split: the not-in-inventory bucket (returned 60 —
+    // nothing was sold); the paired reversal row carves it out.
+    assert.equal(Number(deltaAdjustment.cogsAmount), 60);
+
+    // The delta's returned-units share got its own reversal, referenced
+    // to the same return.
+    const deltaReversals = detail.data.adjustments.filter(
+      (a: any) =>
+        a.adjustmentType === "reversal" && Number(a.adjustmentAmount) === -60,
+    );
+    assert.equal(deltaReversals.length, 1);
+    assert.equal(deltaReversals[0].referenceType, "purchase_return");
+
+    // Conservation: 800 capitalized = 8×80 in inventory (640) + 2×80
+    // reversed (160: −100 at return + −60 at delta). Per-unit now 80.
+    assert.equal(
+      Number(detail.data.accounting.postingsByType.capitalization),
+      800,
+    );
+    assert.equal(Number(detail.data.accounting.postingsByType.reversal), -160);
+    assert.equal(Number(detail.data.accounting.postingsByType.cogsAdjustment), 0);
+    assert.equal(Number(detail.data.accounting.netInInventory), 640);
+    const batch = await dbRows(
+      "SELECT quantity_remaining, additional_cost_per_unit, landed_cost_per_unit FROM inventory_batches WHERE purchase_item_id = $1",
+      [itemId],
+    );
+    assert.equal(Number(batch[0]!.quantity_remaining), 8);
+    assert.equal(Number(batch[0]!.additional_cost_per_unit), 80);
+    assert.equal(Number(batch[0]!.landed_cost_per_unit), 180);
+  });
 });
+
+
+
+
 

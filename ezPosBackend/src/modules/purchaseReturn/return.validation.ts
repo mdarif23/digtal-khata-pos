@@ -73,8 +73,10 @@ export function aggregateRequestedByVariant(
  * Eligibility: never return more than was received (minus previous
  * returns), and never more than is on hand at the receiving location
  * (variant-scoped — lines sharing a variant draw from the same stock).
+ * Shared by the committing return (which throws) and the preview (which
+ * reports the issues) — ONE rule set.
  */
-export function assertReturnEligibility({
+export function evaluateReturnEligibility({
   items,
   requestedByItem,
   returnedByItem,
@@ -84,14 +86,15 @@ export function assertReturnEligibility({
   requestedByItem: Map<number, number>;
   returnedByItem: Map<number, number>;
   stockByVariant: Map<number, number>;
-}): Map<number, number> {
+}): { requestedByVariant: Map<number, number>; issues: string[] } {
+  const issues: string[] = [];
   for (const item of items) {
     const quantity = requestedByItem.get(item.id) ?? 0;
     const remainingReceived =
       Number(item.receivedQuantity) - (returnedByItem.get(item.id) ?? 0);
 
     if (quantity > remainingReceived) {
-      throw new BadRequestError(
+      issues.push(
         `Cannot return ${quantity} of item ${item.id}; only ${Math.max(remainingReceived, 0)} received units remain eligible.`,
       );
     }
@@ -104,10 +107,24 @@ export function assertReturnEligibility({
   for (const [variantId, quantity] of requestedByVariant) {
     const available = stockByVariant.get(variantId);
     if (available === undefined || quantity > available) {
-      throw new BadRequestError(
+      issues.push(
         `Insufficient on-hand stock to return ${quantity} unit(s) of variant ${variantId}.`,
       );
     }
+  }
+  return { requestedByVariant, issues };
+}
+
+/** Committing path: the same evaluation, surfaced as a hard error. */
+export function assertReturnEligibility(input: {
+  items: { id: number; variantId: number; receivedQuantity: number }[];
+  requestedByItem: Map<number, number>;
+  returnedByItem: Map<number, number>;
+  stockByVariant: Map<number, number>;
+}): Map<number, number> {
+  const { requestedByVariant, issues } = evaluateReturnEligibility(input);
+  if (issues.length > 0) {
+    throw new BadRequestError(issues.join(" "));
   }
   return requestedByVariant;
 }

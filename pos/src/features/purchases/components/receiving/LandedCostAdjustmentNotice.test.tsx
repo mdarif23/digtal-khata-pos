@@ -47,4 +47,64 @@ describe("LandedCostAdjustmentNotice", () => {
     expect(screen.getByRole("status").textContent).toContain("reversed");
     expect(screen.getByRole("status").textContent).toContain("50.00");
   });
+
+  // Phase 3 — supplier credit visibility on the return confirmation.
+  it("shows the supplier credit split with the outstanding reduction", () => {
+    renderNotice(LandedCostReversalNotice, {
+      purchaseId: 9,
+      landedCost: { adjusted: true, amount: 50, documentId: 42 },
+      supplierBalance: {
+        outstandingBefore: 600,
+        goodsCredit: 400,
+        outstandingAfter: 200,
+        supplierCreditCreated: 0,
+      },
+    });
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toContain("400.00 goods credit");
+    expect(text).toContain("200.00");
+    expect(text).toContain("Purchase outstanding reduced");
+  });
+
+  it("explains a missing reversal with the backend's own reason (Phase 7)", () => {
+    renderNotice(LandedCostReversalNotice, {
+      purchaseId: 9,
+      landedCost: {
+        adjusted: false,
+        amount: 0,
+        documentId: 42,
+        state: "draft",
+        reason: "The landed-cost document is a draft — nothing is capitalized yet.",
+      },
+      supplierBalance: {
+        outstandingBefore: 0,
+        goodsCredit: 400,
+        outstandingAfter: 0,
+        supplierCreditCreated: 400,
+      },
+    });
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toContain(
+      "no reversal — The landed-cost document is a draft — nothing is capitalized yet.",
+    );
+  });
+
+  it("surfaces a supplier credit balance when the purchase is fully settled", () => {
+    renderNotice(LandedCostReversalNotice, {
+      purchaseId: 9,
+      landedCost: { adjusted: false, amount: 0, documentId: null },
+      supplierBalance: {
+        outstandingBefore: 0,
+        goodsCredit: 400,
+        outstandingAfter: 0,
+        supplierCreditCreated: 400,
+      },
+    });
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toContain("400.00 goods credit");
+    // Without a server reason, the notice falls back to the generic text.
+    expect(text).toContain("no reversal — not applicable");
+    expect(text).toContain("400.00 becomes supplier credit balance");
+    expect(text).toContain("not a cash refund");
+  });
 });

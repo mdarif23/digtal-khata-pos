@@ -15,6 +15,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { AddressInfo } from "node:net";
+import { and, eq, sql } from "drizzle-orm";
 import { buildApp } from "../app.js";
 import { ensureRbacSeed } from "../rbac/seed.js";
 
@@ -243,11 +244,29 @@ describe("finance tools integration", { skip: !runIntegration }, () => {
     const { runBudgetAlertSweeps } = await import(
       "../modules/expenses/expenses.budgets.alerts.js"
     );
-    const result = await runBudgetAlertSweeps();
-    assert.ok(result.alertsRaised >= 1, "the 90% monthly budget should alert");
-    // Re-running the same day is deduplicated.
-    const again = await runBudgetAlertSweeps();
-    assert.equal(again.alertsRaised, 0);
+    const alertsForBusiness = async (): Promise<number> => {
+      const { db } = await import("../db/schema/index.js");
+      const { notifications } = await import("../db/schema/notifications.js");
+      const [row] = await db
+        .select({ value: sql<string>`count(*)` })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.businessId, owner.businessId),
+            eq(notifications.kind, "budget_alert"),
+          ),
+        );
+      return Number(row?.value ?? 0);
+    };
+
+    await runBudgetAlertSweeps();
+    // The 90% monthly budget raises exactly one deduplicated alert for this
+    // business. (The global counter spans all businesses — parallel test
+    // processes mutate it, so assertions are scoped to this business.)
+    assert.equal(await alertsForBusiness(), 1);
+    // Re-running the same day is deduplicated — still exactly one.
+    await runBudgetAlertSweeps();
+    assert.equal(await alertsForBusiness(), 1);
   });
 
   it("records a loan (DR cash / CR 2080) and split repayments (2080 + 5090)", async () => {
