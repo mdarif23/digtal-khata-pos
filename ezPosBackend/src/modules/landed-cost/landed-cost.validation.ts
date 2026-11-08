@@ -28,7 +28,7 @@ export const landedCostExpenseSchema = z.object({
 });
 
 export const landedCostPreviewSchema = z.object({
-  method: z.enum(["quantity", "value", "weight", "manual"]),
+  method: z.enum(["quantity", "value", "weight", "manual", "equal"]),
   expenses: z.array(landedCostExpenseSchema).min(1).max(100),
   manualAllocations: z
     .array(

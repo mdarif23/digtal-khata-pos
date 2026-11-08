@@ -370,6 +370,27 @@
 			"when": 1794500001000,
 			"tag": "0052_purchase_discrepancies",
 			"breakpoints": true
+		},
+		{
+			"idx": 53,
+			"version": "7",
+			"when": 1794500002000,
+			"tag": "0053_landed_cost_expense_sources",
+			"breakpoints": true
+		},
+		{
+			"idx": 54,
+			"version": "7",
+			"when": 1794500003000,
+			"tag": "0054_landed_cost_equal_method",
+			"breakpoints": true
+		},
+		{
+			"idx": 55,
+			"version": "7",
+			"when": 1794500004000,
+			"tag": "0055_landed_cost_posting_sources",
+			"breakpoints": true
 		}
 	]
 }

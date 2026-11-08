@@ -300,6 +300,37 @@ export function calculateAllocation(options: {
         },
       ];
     });
+  } else if (method === "equal") {
+    // "Equal across eligible lines": every received line shares the total
+    // equally (line count = basis), then the received portion scales by
+    // quantity like every other method. No weights needed — a line with
+    // no received batches simply holds its share as pending.
+    lineTargets = lines.map((line) => {
+      const totalTargetQuads = totalQuads / BigInt(lines.length);
+      const orderedMillis = orderedMillisOf(line);
+      const receivedMillis = receivedMillisOf(line);
+      return {
+        line,
+        totalTargetQuads,
+        receivedTargetQuads: clampReceivedTarget(
+          orderedMillis > 0n
+            ? (totalTargetQuads * receivedMillis) / orderedMillis
+            : totalTargetQuads,
+          totalTargetQuads,
+        ),
+      };
+    });
+    // The equal split loses at most (n−1) quads of the total; hand the
+    // remainder to the FIRST line so Σ targets === total exactly.
+    const distributed = lineTargets.reduce(
+      (sum, target) => sum + target.totalTargetQuads,
+      0n,
+    );
+    const residual = totalQuads - distributed;
+    if (residual !== 0n && lineTargets.length > 0) {
+      lineTargets[0]!.totalTargetQuads += residual;
+      lineTargets[0]!.receivedTargetQuads += residual;
+    }
   } else {
     // Basis scale is per-method (only relative size matters within one
     // call): quantity millis, line net value micros, kg quads × qty.

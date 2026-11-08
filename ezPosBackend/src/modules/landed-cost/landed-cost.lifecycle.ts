@@ -2,6 +2,9 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
 import { landedCosts } from "../../db/schema/landedCosts.js";
+import { purchases } from "../../db/schema/purchases.js";
+import { purchaseReturns } from "../../db/schema/purchaseReturns.js";
+import { purchaseReturnItems } from "../../db/schema/purchaseReturnItems.js";
 import {
   landedCostAdjustments,
   landedCostAllocations,
@@ -12,7 +15,15 @@ import {
 import { NotFoundError, ConflictError, BadRequestError } from "../../utils/handleError.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 import { allocateByBasis } from "./landed-cost.money.js";
-import { getLandedCostContext, computeLandedCostPreview, type LandedCostContext } from "./landed-cost.service.js";
+import {
+  getLandedCostContext,
+  computeLandedCostPreview,
+  purchaseOriginExpenses,
+  type LandedCostContext,
+} from "./landed-cost.service.js";
+import {
+  classifyLandedCostComponents,
+} from "./landed-cost.components.service.js";
 import type { LandedCostPreviewInput } from "./landed-cost.validation.js";
 import type { DbTransaction } from "../purchases/purchase.types.js";
 
@@ -153,6 +164,38 @@ async function insertExpenses(
   );
 }
 
+/**
+ * Server-generated purchase-origin expense rows (Phase 4): today the
+ * supplier's own shipping charge. Written ONCE per document (the partial
+ * unique index makes a second write impossible), mirrored from
+ * `purchases.shipping_cost` — the payable already includes it, so these
+ * rows bring no new money, only capitalization eligibility.
+ */
+async function insertPurchaseOriginRows(
+  tx: DbTransaction,
+  documentId: number,
+  businessId: number,
+  purchase: { supplierId: number | null; shippingCost: string | number | null },
+) {
+  const rows = purchaseOriginExpenses(purchase).map((expense) => ({
+    businessId,
+    landedCostId: documentId,
+    expenseType: expense.expenseType,
+    description: expense.description ?? null,
+    amount: expense.amount,
+    taxAmount: expense.taxAmount ?? 0,
+    taxTreatment: expense.taxTreatment ?? "none",
+    isCapitalizable: expense.isCapitalizable ?? true,
+    vendorId: purchase.supplierId,
+    settlementType: expense.settlementType ?? "supplier_payable",
+    sourceType: "purchase" as const,
+    sourceKey: "shipping_cost" as const,
+  }));
+  if (rows.length > 0) {
+    await tx.insert(landedCostExpenses).values(rows);
+  }
+}
+
 /** Create the (single) draft document for a purchase. */
 export async function createLandedCostDocument(
   businessId: number,
@@ -166,10 +209,16 @@ export async function createLandedCostDocument(
       "This purchase already has a landed-cost document.",
     );
   }
+  // Purchase-origin components (supplier shipping) are part of the real
+  // allocation set — validation and preview must include them.
+  const effectiveExpenses = [
+    ...input.expenses,
+    ...purchaseOriginExpenses(context.purchase),
+  ];
   // Validate the calculation up front (weights, manual sums, bases).
   computeLandedCostPreview(context.lines, {
     method: input.method,
-    expenses: input.expenses,
+    expenses: effectiveExpenses,
     ...(input.manualAllocations ? { manualAllocations: input.manualAllocations } : {}),
   });
   await assertSettlements(businessId, input.expenses);
@@ -188,6 +237,7 @@ export async function createLandedCostDocument(
       .returning();
     if (!doc) throw new Error("Failed to create landed-cost document.");
     await insertExpenses(tx, doc.id, businessId, input.expenses);
+    await insertPurchaseOriginRows(tx, doc.id, businessId, context.purchase);
     await tx.insert(landedCostAuditLogs).values({
       businessId,
       landedCostId: doc.id,
@@ -214,9 +264,13 @@ export async function updateLandedCostDocument(
       );
     }
     const context = await getLandedCostContext(businessId, doc.purchaseId);
+    const effectiveExpenses = [
+      ...input.expenses,
+      ...purchaseOriginExpenses(context.purchase),
+    ];
     computeLandedCostPreview(context.lines, {
       method: input.method,
-      expenses: input.expenses,
+      expenses: effectiveExpenses,
       ...(input.manualAllocations ? { manualAllocations: input.manualAllocations } : {}),
     });
     await assertSettlements(businessId, input.expenses);
@@ -232,6 +286,7 @@ export async function updateLandedCostDocument(
       ),
     );
     await insertExpenses(tx, documentId, businessId, input.expenses);
+    await insertPurchaseOriginRows(tx, documentId, businessId, context.purchase);
     await tx.insert(landedCostAuditLogs).values({
       businessId,
       landedCostId: documentId,
@@ -253,7 +308,7 @@ export async function getLandedCostDocument(businessId: number, documentId: numb
     )
     .limit(1);
   if (!doc) throw new NotFoundError("Landed-cost document not found.");
-  const [expenses, allocations, adjustments, auditLogs, postings] = await Promise.all([
+  const [expenses, allocations, adjustments, auditLogs, postingRows] = await Promise.all([
     db
       .select()
       .from(landedCostExpenses)
@@ -291,8 +346,21 @@ export async function getLandedCostDocument(businessId: number, documentId: numb
         ),
       ),
     db
-      .select()
+      .select({
+        posting: landedCostPostings,
+        expenseType: landedCostExpenses.expenseType,
+        expenseSourceType: landedCostExpenses.sourceType,
+        expenseSourceKey: landedCostExpenses.sourceKey,
+        expenseDescription: landedCostExpenses.description,
+      })
       .from(landedCostPostings)
+      .leftJoin(
+        landedCostExpenses,
+        and(
+          eq(landedCostPostings.expenseId, landedCostExpenses.id),
+          eq(landedCostPostings.businessId, landedCostExpenses.businessId),
+        ),
+      )
       .where(
         and(
           eq(landedCostPostings.landedCostId, documentId),
@@ -300,7 +368,131 @@ export async function getLandedCostDocument(businessId: number, documentId: numb
         ),
       ),
   ]);
-  return { document: doc, expenses, allocations, adjustments, auditLogs, postings };
+
+  // Authoritative per-component classification (Phase 5): the purchase
+  // header carries discount/tax/shipping — the expense rows carry their
+  // own treatments. One source for the UI, allocation, and postings.
+  const [purchase] = await db
+    .select({
+      discount: purchases.discount,
+      tax: purchases.tax,
+      shippingCost: purchases.shippingCost,
+    })
+    .from(purchases)
+    .where(
+      and(eq(purchases.id, doc.purchaseId), eq(purchases.businessId, businessId)),
+    )
+    .limit(1);
+
+  // Phase 9 accounting view: each posting carries its expense's source
+  // identity (auto supplier shipping vs manual entries); event-level
+  // postings (cogs_adjustment / reversal) and legacy rows have none.
+  const postings = postingRows.map((row) => ({
+    ...row.posting,
+    expenseType: row.expenseType,
+    expenseSourceType: row.expenseSourceType,
+    expenseSourceKey: row.expenseSourceKey,
+    expenseDescription: row.expenseDescription,
+  }));
+
+  const sumType = (type: string) =>
+    roundMoney(
+      postings
+        .filter((p) => p.postingType === type)
+        .reduce((sum, p) => sum + Number(p.amount), 0),
+    );
+  const capitalization = sumType("capitalization");
+  const expensePosted = sumType("expense");
+  const cogsAdjustment = sumType("cogs_adjustment");
+  const reversal = sumType("reversal");
+  const attributedAmount = roundMoney(
+    postings
+      .filter((p) => p.expenseId !== null)
+      .reduce((sum, p) => sum + Math.abs(Number(p.amount)), 0),
+  );
+  const unattributedAmount = roundMoney(
+    postings
+      .filter((p) => p.expenseId === null)
+      .reduce((sum, p) => sum + Math.abs(Number(p.amount)), 0),
+  );
+
+  // Phase 12 reconciliation fix: net-in-inventory is BATCH-authoritative —
+  // Σ (quantity_remaining × additional_cost_per_unit) over the doc's
+  // batches. The postings alone cannot express it once units were SOLD:
+  // sale consumption carries the original landed share out of inventory
+  // without writing a landed posting (deltas post cogs_adjustment, the
+  // original share does not). Conservation:
+  // capitalization = netInInventory + soldUnitsLanded + |reversal|.
+  const batchIds = [
+    ...new Set(allocations.map((a) => a.inventoryBatchId as number)),
+  ];
+  const batchValuationRows = batchIds.length
+    ? await db
+        .select({
+          remaining: inventoryBatches.quantityRemaining,
+          additional: inventoryBatches.additionalCostPerUnit,
+        })
+        .from(inventoryBatches)
+        .where(
+          and(
+            inArray(inventoryBatches.id, batchIds),
+            eq(inventoryBatches.businessId, businessId),
+          ),
+        )
+    : [];
+  const netInInventory = roundMoney(
+    batchValuationRows.reduce(
+      (sum, b) =>
+        sum + Number(b.remaining) * Number(b.additional ?? 0),
+      0,
+    ),
+  );
+  const soldUnitsLanded = roundMoney(capitalization + reversal - netInInventory);
+
+  return {
+    document: doc,
+    expenses,
+    allocations,
+    adjustments,
+    auditLogs,
+    postings,
+    // Phase 9 accounting reconciliation: the posting ledger tied out
+    // against the document. The invariant (Part G): Σ capitalization
+    // postings == totalAllocatedAmount. cogs_adjustment postings mark the
+    // sold-units portion of posting-time deltas; `expense` postings are
+    // period expenses outside the allocation. Phase 12: netInInventory is
+    // the batch valuation and soldUnitsLanded is derived so the four money
+    // figures always conserve.
+    accounting: {
+      postingsByType: {
+        capitalization,
+        expense: expensePosted,
+        cogsAdjustment,
+        reversal,
+      },
+      netInInventory,
+      soldUnitsLanded,
+      periodExpensed: expensePosted,
+      attributedAmount,
+      unattributedAmount,
+      capitalizationTiesOut:
+        Math.abs(capitalization - Number(doc.totalAllocatedAmount)) <= 0.005,
+    },
+    components: classifyLandedCostComponents(
+      purchase ?? { discount: 0, tax: 0, shippingCost: 0 },
+      expenses.map((expense) => ({
+        id: expense.id,
+        expenseType: expense.expenseType,
+        description: expense.description,
+        amount: expense.amount,
+        taxAmount: expense.taxAmount,
+        taxTreatment: expense.taxTreatment,
+        isCapitalizable: expense.isCapitalizable,
+        sourceType: expense.sourceType,
+        sourceKey: expense.sourceKey,
+      })),
+    ),
+  };
 }
 
 /**
@@ -316,6 +508,7 @@ async function computeDocumentTargets(
   context: LandedCostContext;
   preview: ReturnType<typeof computeLandedCostPreview>;
   expenseRows: {
+    id: number;
     amount: number;
     taxAmount: number;
     taxTreatment: string;
@@ -328,6 +521,7 @@ async function computeDocumentTargets(
 }> {
   const expenseRows = await tx
     .select({
+      id: landedCostExpenses.id,
       amount: landedCostExpenses.amount,
       taxAmount: landedCostExpenses.taxAmount,
       taxTreatment: landedCostExpenses.taxTreatment,
@@ -394,6 +588,7 @@ async function recomputeBatchCosts(
 }
 
 type PostingExpense = {
+  id: number;
   amount: number;
   taxAmount: number;
   taxTreatment: string;
@@ -411,6 +606,9 @@ type PostingExpense = {
  * expense. Settlement references ride along so already-recorded payments are
  * never double-counted — the authoritative settlement rows stay in
  * expense_payments / purchase payables; this table is the landed-cost view.
+ * Phase 9: every per-expense posting carries expense_id, so the posting
+ * ledger traces back to the expense's source identity (auto supplier
+ * shipping vs manual entries).
  */
 async function writeAllocationPostings(
   tx: DbTransaction,
@@ -441,6 +639,7 @@ async function writeAllocationPostings(
         businessId: doc.businessId,
         landedCostId: doc.id,
         adjustmentId,
+        expenseId: expense.id,
         postingType: "capitalization",
         amount: Number(shareQuads) / 10_000,
         paymentSource: doc.allocationMethod ? paymentSourceOf(expense) : "unpaid",
@@ -465,6 +664,7 @@ async function writeAllocationPostings(
       businessId: doc.businessId,
       landedCostId: doc.id,
       adjustmentId,
+      expenseId: expense.id,
       postingType: "expense",
       amount: expense.amount,
       paymentSource: paymentSourceOf(expense),
@@ -493,6 +693,105 @@ function paymentSourceOf(expense: PostingExpense) {
   return (allowed.includes(expense.settlementType)
     ? expense.settlementType
     : "unpaid") as "expense_payment" | "supplier_payable" | "cash" | "unpaid";
+}
+
+/**
+ * Phase 10: returns that PREDATE a landed-cost posting (or a posting
+ * delta) — the returned units are not in inventory, so their share of the
+ * newly posted money cannot stay there. Item-level math: per-unit landed
+ * cost is uniform across an item's batches and returns record item-level
+ * quantities only, so the reversal amount is attribution-independent.
+ * Returns { returnId → reversal quads } for COMPLETED returns only.
+ */
+async function computeReturnReversalQuadsInTx(
+  tx: DbTransaction,
+  businessId: number,
+  purchaseId: number,
+  itemMoneyQuads: Map<number, bigint>,
+  itemReceivedMillis: Map<number, bigint>,
+): Promise<Map<number, bigint>> {
+  const byReturn = new Map<number, bigint>();
+  if (itemMoneyQuads.size === 0) return byReturn;
+  const rows = await tx
+    .select({
+      purchaseReturnId: purchaseReturns.id,
+      purchaseItemId: purchaseReturnItems.purchaseItemId,
+      quantity: purchaseReturnItems.quantity,
+    })
+    .from(purchaseReturnItems)
+    .innerJoin(
+      purchaseReturns,
+      and(
+        eq(purchaseReturnItems.purchaseReturnId, purchaseReturns.id),
+        eq(purchaseReturnItems.businessId, purchaseReturns.businessId),
+      ),
+    )
+    .where(
+      and(
+        eq(purchaseReturns.purchaseId, purchaseId),
+        eq(purchaseReturns.businessId, businessId),
+        eq(purchaseReturns.status, "completed"),
+      ),
+    );
+  for (const row of rows) {
+    const moneyQuads = itemMoneyQuads.get(row.purchaseItemId);
+    const receivedMillis = itemReceivedMillis.get(row.purchaseItemId);
+    if (moneyQuads === undefined || receivedMillis === undefined) continue;
+    if (receivedMillis <= 0n || moneyQuads <= 0n) continue;
+    const returnedMillis = BigInt(Math.round(Number(row.quantity) * 1000));
+    if (returnedMillis <= 0n) continue;
+    const quads = (moneyQuads * returnedMillis) / receivedMillis;
+    byReturn.set(
+      row.purchaseReturnId,
+      (byReturn.get(row.purchaseReturnId) ?? 0n) + quads,
+    );
+  }
+  return byReturn;
+}
+
+/**
+ * Writes one pre-posting return reversal: a `reversal` adjustment
+ * referenced to the purchase return plus its reversal posting (negative,
+ * event-level — unattributed, like every return-time reversal). The
+ * document's cumulative totalAllocatedAmount stays gross; the reversal
+ * exits through the postings ledger (netInInventory).
+ */
+async function writeReturnReversalInTx(
+  tx: DbTransaction,
+  doc: typeof landedCosts.$inferSelect,
+  returnId: number,
+  quads: bigint,
+  grossAllocatedQuads: bigint,
+  actorUserId: number,
+) {
+  const amount = -roundMoney(Number(quads) / 10_000);
+  const [row] = await tx
+    .insert(landedCostAdjustments)
+    .values({
+      businessId: doc.businessId,
+      landedCostId: doc.id,
+      adjustmentType: "reversal",
+      previousAllocatedAmount: roundMoney(Number(grossAllocatedQuads) / 10_000),
+      newAllocatedAmount: roundMoney(Number(grossAllocatedQuads - quads) / 10_000),
+      adjustmentAmount: amount,
+      inventoryAmount: amount,
+      cogsAmount: 0,
+      reason: "Units returned before posting — landed cost reversed at posting",
+      referenceType: "purchase_return",
+      referenceId: returnId,
+      createdBy: actorUserId,
+    })
+    .returning({ id: landedCostAdjustments.id });
+  await tx.insert(landedCostPostings).values({
+    businessId: doc.businessId,
+    landedCostId: doc.id,
+    adjustmentId: row!.id,
+    postingType: "reversal",
+    amount,
+    paymentSource: "unpaid",
+    description: "Landed cost of units returned before posting",
+  });
+  return row!.id;
 }
 
 /**
@@ -593,9 +892,44 @@ export async function postLandedCostDocument(
       inventoryQuads += inv;
       cogsQuads += deltaQuads - inv;
     }
+
+    // Phase 10: returns that PREDATE this posting — their units are not in
+    // inventory either, but they were never SOLD: their share of the posted
+    // money is REVERSED out (one traceable adjustment + posting per
+    // return), not sent to COGS. Each return gets exactly the reversal its
+    // return-time flow would have written had the document existed.
+    const itemAllocatedQuads = new Map<number, bigint>();
+    for (const row of allocationRows) {
+      const itemId = row.purchaseItemId as number;
+      itemAllocatedQuads.set(
+        itemId,
+        (itemAllocatedQuads.get(itemId) ?? 0n) +
+          BigInt(Math.round(Number(row.allocatedAmount) * 10_000)),
+      );
+    }
+    const itemReceivedMillis = new Map<number, bigint>();
+    for (const line of context.lines) {
+      let millis = itemReceivedMillis.get(line.purchaseItemId) ?? 0n;
+      for (const batch of line.batches) {
+        millis += BigInt(Math.round(Number(batch.quantityReceived) * 1000));
+      }
+      itemReceivedMillis.set(line.purchaseItemId, millis);
+    }
+    const reversalQuadsByReturn = await computeReturnReversalQuadsInTx(
+      tx,
+      businessId,
+      doc.purchaseId,
+      itemAllocatedQuads,
+      itemReceivedMillis,
+    );
+    let prePostingReversalQuads = 0n;
+    for (const quads of reversalQuadsByReturn.values()) {
+      prePostingReversalQuads += quads;
+    }
+
+    const round2q = (q: bigint) => roundMoney(Number(q) / 10_000);
     let splitAdjustmentId: number | null = null;
     if (cogsQuads !== 0n) {
-      const round2q = (q: bigint) => roundMoney(Number(q) / 10_000);
       const [splitRow] = await tx
         .insert(landedCostAdjustments)
         .values({
@@ -607,7 +941,7 @@ export async function postLandedCostDocument(
           adjustmentAmount: round2q(totalAllocatedQuads),
           inventoryAmount: round2q(inventoryQuads),
           cogsAmount: round2q(cogsQuads),
-          reason: "Initial posting — units already sold carry their landed cost into COGS",
+          reason: "Initial posting — units no longer in inventory split out (the returned share is carved out by the paired reversal)",
           referenceType: "landed_cost_post",
           referenceId: documentId,
           createdBy: actorUserId,
@@ -615,13 +949,26 @@ export async function postLandedCostDocument(
         .returning({ id: landedCostAdjustments.id });
       splitAdjustmentId = splitRow?.id ?? null;
     }
+    for (const [returnId, quads] of reversalQuadsByReturn) {
+      if (quads === 0n) continue;
+      await writeReturnReversalInTx(
+        tx,
+        doc,
+        returnId,
+        quads,
+        totalAllocatedQuads,
+        actorUserId,
+      );
+    }
 
     const totalCapitalizable = Math.round(preview.totalCapitalizableAmount * 100);
     const totalAllocated = Number(preview.allocation.allocatedTotal.toFixed(4));
     await tx
       .update(landedCosts)
       .set({
-        status: "posted",
+        // A pre-posting reversal marks the document "adjusted" — the same
+        // status a return after posting produces.
+        status: prePostingReversalQuads > 0n ? "adjusted" : "posted",
         postedBy: actorUserId,
         postedAt: new Date(),
         totalExpenseAmount: roundMoney(preview.totalExpenseAmount),
@@ -677,11 +1024,21 @@ export interface ReceiveLandedCostDelta {
   documentId: number | null;
 }
 
+export interface ReceiveDeltaMetadata {
+  /** Adjustment-row type. Defaults to 'receive_delta'. */
+  adjustmentType?: "receive_delta" | "manual";
+  /** What triggered the delta — defaults to the receiving purchase. */
+  referenceType?: string;
+  referenceId?: number;
+  reason?: string;
+}
+
 export async function applyReceiveDeltaInTx(
   tx: DbTransaction,
   businessId: number,
   purchaseId: number,
   actorUserId: number,
+  metadata: ReceiveDeltaMetadata = {},
 ): Promise<ReceiveLandedCostDelta> {
   const [doc] = await tx
     .select()
@@ -780,7 +1137,9 @@ export async function applyReceiveDeltaInTx(
 
   // Split each batch's delta between remaining inventory and units already
   // sold out of the batch (sold = received − remaining; consumption rows
-  // carry the per-unit sale detail for reports).
+  // carry the per-unit sale detail for reports). Phase 10: units RETURNED
+  // before this delta are not sold — their share of the delta is reversed
+  // out (one traceable entry per return), not sent to COGS.
   let inventoryQuads = 0n;
   let cogsQuads = 0n;
   for (const t of touchedBatches) {
@@ -789,6 +1148,32 @@ export async function applyReceiveDeltaInTx(
     inventoryQuads += inv;
     cogsQuads += t.deltaQuads - inv;
   }
+
+  const itemDeltaQuads = new Map<number, bigint>();
+  for (const t of touchedBatches) {
+    const itemId = batchIdToLine.get(t.batchId)!.line.purchaseItemId;
+    itemDeltaQuads.set(itemId, (itemDeltaQuads.get(itemId) ?? 0n) + t.deltaQuads);
+  }
+  const itemReceivedMillis = new Map<number, bigint>();
+  for (const line of context.lines) {
+    let millis = itemReceivedMillis.get(line.purchaseItemId) ?? 0n;
+    for (const batch of line.batches) {
+      millis += BigInt(Math.round(Number(batch.quantityReceived) * 1000));
+    }
+    itemReceivedMillis.set(line.purchaseItemId, millis);
+  }
+  const reversalQuadsByReturn = await computeReturnReversalQuadsInTx(
+    tx,
+    businessId,
+    purchaseId,
+    itemDeltaQuads,
+    itemReceivedMillis,
+  );
+  let prePostingReversalQuads = 0n;
+  for (const quads of reversalQuadsByReturn.values()) {
+    prePostingReversalQuads += quads;
+  }
+
   const round2q = (q: bigint) => roundMoney(Number(q) / 10_000);
 
   const newAllocated = round2q(newAllocatedQuads);
@@ -797,15 +1182,15 @@ export async function applyReceiveDeltaInTx(
     .values({
       businessId,
       landedCostId: doc.id,
-      adjustmentType: "receive_delta",
+      adjustmentType: metadata.adjustmentType ?? "receive_delta",
       previousAllocatedAmount: round2q(previousAllocated),
       newAllocatedAmount: newAllocated,
       adjustmentAmount: roundMoney(newAllocated - round2q(previousAllocated)),
       inventoryAmount: round2q(inventoryQuads),
       cogsAmount: round2q(cogsQuads),
-      reason: "Subsequent receive — cumulative target delta",
-      referenceType: "purchase_receive",
-      referenceId: purchaseId,
+      reason: metadata.reason ?? "Subsequent receive — cumulative target delta",
+      referenceType: metadata.referenceType ?? "purchase_receive",
+      referenceId: metadata.referenceId ?? purchaseId,
       createdBy: actorUserId,
     })
     .returning({ id: landedCostAdjustments.id });
@@ -818,25 +1203,44 @@ export async function applyReceiveDeltaInTx(
   if (deltaQuads > 0n) {
     await writeAllocationPostings(tx, doc, expenseRows, deltaQuads, adjustment!.id);
   }
-  if (cogsQuads !== 0n) {
+  // The cogs POSTING carries the SOLD share only (raw batch-level bucket
+  // minus the returned share carved out by the reversal postings below) —
+  // the ledger shows net truth; the adjustment row keeps the raw split.
+  const netCogsQuads = cogsQuads - prePostingReversalQuads;
+  if (netCogsQuads !== 0n) {
     await tx.insert(landedCostPostings).values({
       businessId,
       landedCostId: doc.id,
       adjustmentId: adjustment!.id,
       postingType: "cogs_adjustment",
-      amount: round2q(cogsQuads),
+      amount: round2q(netCogsQuads),
       paymentSource: "unpaid",
       description: "Landed-cost delta attributable to sold units",
     });
+  }
+  for (const [returnId, quads] of reversalQuadsByReturn) {
+    if (quads === 0n) continue;
+    await writeReturnReversalInTx(
+      tx,
+      doc,
+      returnId,
+      quads,
+      newAllocatedQuads,
+      actorUserId,
+    );
   }
 
   await tx
     .update(landedCosts)
     .set({
       status: "adjusted",
+      // The capitalizable total comes from the CURRENT expenses — when an
+      // expense is adjusted (Phase 7), the stale doc value would make the
+      // pending go negative.
+      totalCapitalizableAmount: roundMoney(preview.totalCapitalizableAmount),
       totalAllocatedAmount: preview.allocation.allocatedTotal,
       pendingAllocationAmount: roundMoney(
-        Number(doc.totalCapitalizableAmount) - preview.allocation.allocatedTotal,
+        Number(preview.totalCapitalizableAmount) - preview.allocation.allocatedTotal,
       ),
       updatedAt: new Date(),
     })
@@ -845,12 +1249,17 @@ export async function applyReceiveDeltaInTx(
   await tx.insert(landedCostAuditLogs).values({
     businessId,
     landedCostId: doc.id,
-    action: "receive_adjustment",
+    action:
+      (metadata.adjustmentType ?? "receive_delta") === "receive_delta"
+        ? "receive_adjustment"
+        : "expense_adjustment",
     actorUserId,
     details: {
       allocationRows: allocationRows.length,
       inventoryAmount: round2q(inventoryQuads),
       cogsAmount: round2q(cogsQuads),
+      referenceType: metadata.referenceType ?? "purchase_receive",
+      referenceId: metadata.referenceId ?? purchaseId,
     },
   });
 

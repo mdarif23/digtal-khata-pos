@@ -10,6 +10,7 @@ import { sendSafeError } from "../../utils/safeError.js";
 import {
   getLandedCostContext,
   computeLandedCostPreview,
+  purchaseOriginExpenses,
   type LandedCostContext,
   type LandedCostPreview,
 } from "./landed-cost.service.js";
@@ -17,6 +18,12 @@ import {
   landedCostPreviewSchema,
   type LandedCostPreviewInput,
 } from "./landed-cost.validation.js";
+import {
+  adjustExpenseSchema,
+} from "./landed-cost.adjustment.schema.js";
+import {
+  adjustLandedCostExpense,
+} from "./landed-cost.adjustment.service.js";
 import { LandedCostValidationError } from "./landed-cost.calculator.js";
 
 function parsePreviewInput(req: Request): LandedCostPreviewInput {
@@ -168,7 +175,15 @@ export async function previewLandedCost(req: Request, res: Response) {
     );
     const preview: LandedCostPreview = computeLandedCostPreview(
       context.lines,
-      input,
+      {
+        ...input,
+        // Purchase-origin components (supplier shipping) are part of the
+        // real allocation set — the preview must show what posting does.
+        expenses: [
+          ...input.expenses,
+          ...purchaseOriginExpenses(context.purchase),
+        ],
+      },
     );
     res.status(200).json({ success: true, data: preview });
   } catch (err) {
@@ -181,5 +196,40 @@ export async function previewLandedCost(req: Request, res: Response) {
       return;
     }
     sendSafeError(res, err, "Landed-cost request failed.");
+  }
+}
+
+export async function adjustExpense(req: Request, res: Response) {
+  try {
+    const documentId = Number(req.params.id);
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid landed-cost document id." });
+    }
+    const result = adjustExpenseSchema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense adjustment.",
+        errors: result.error.flatten(),
+      });
+    }
+    const adjusted = await adjustLandedCostExpense(
+      getBusinessId(req),
+      documentId,
+      req.user?.id ?? 0,
+      result.data,
+    );
+    res.status(200).json(adjusted);
+  } catch (err) {
+    if (err instanceof LandedCostValidationError) {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+        issues: err.issues,
+      });
+    }
+    sendSafeError(res, err, "Unable to adjust the expense.");
   }
 }

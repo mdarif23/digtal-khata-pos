@@ -7,6 +7,8 @@ import {
 import { variantOptions } from "../../db/schema/variantOptions.js";
 import { variantValues } from "../../db/schema/variantValues.js";
 import { purchaseItems } from "../../db/schema/purchaseItems.js";
+import { purchaseReturns } from "../../db/schema/purchaseReturns.js";
+import { purchaseReturnItems } from "../../db/schema/purchaseReturnItems.js";
 import { purchases } from "../../db/schema/purchases.js";
 import { landedCosts } from "../../db/schema/landedCosts.js";
 import { and, asc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
@@ -16,6 +18,9 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import type { CreatePurchaseInput } from "./schemas/purchase.schema.js";
+import {
+  calculatePurchaseFinancials,
+} from "./purchaseFinancials.service.js";
 import { suppliers } from "../../db/schema/suppliers.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { units } from "../../db/schema/units.js";
@@ -77,6 +82,7 @@ export async function createPurchase(
       purchaseDate,
       notes,
       discount,
+      discountBasis,
       tax,
       shippingCost,
     } = data;
@@ -124,26 +130,22 @@ export async function createPurchase(
       }
     }
 
-    // 3. Calculate totals
-    const subtotal = Number(
-      items
-        .reduce(
-          (sum, item) =>
-            sum +
-            Number(
-              (
-                item.purchasePrice * item.quantity -
-                item.discount +
-                item.tax
-              ).toFixed(2),
-            ),
-          0,
-        )
-        .toFixed(2),
-    );
-    const totalAmount = Number(
-      (subtotal - discount + tax + shippingCost).toFixed(2),
-    );
+    // 3. Calculate totals — the authoritative financial service (Phase 2).
+    // Same per-line-round-then-sum formula as before, now single-sourced.
+    const financials = calculatePurchaseFinancials({
+      lines: items.map((item) => ({
+        quantity: item.quantity,
+        unitPrice: item.purchasePrice,
+        discount: item.discount,
+        tax: item.tax,
+      })),
+      orderDiscount: discount,
+      orderDiscountBasis: discountBasis,
+      orderTax: tax,
+      supplierShipping: shippingCost,
+    });
+    const subtotal = financials.itemsSubtotal;
+    const totalAmount = financials.grandTotal;
 
     // 4. Per-business PO number. The number comes from the business's own
     // document_sequences counter inside this transaction (rollback-safe);
@@ -164,7 +166,11 @@ export async function createPurchase(
         purchaseDate,
         notes,
         subtotal,
-        discount: String(discount),
+        // The RESOLVED invoice discount (Phase 12 fix): a percentage
+        // discount is stored as the money it resolves to, so the stored
+        // header always reconciles with totalAmount and the acquisition
+        // classification reads the real discount, not the raw percent.
+        discount: String(financials.orderDiscount),
         tax: String(tax),
         shippingCost: String(shippingCost),
         totalAmount,
@@ -433,11 +439,44 @@ export async function getPurchaseDetail(businessId: number, purchaseId: number) 
     variantName: variantNameFromMap(optionsByVariant, row.variantId, row.productName),
   }));
 
+  // Return status (Phase 11) mirrors the list's derivation: returned
+  // quantities vs accepted received quantities, two-status independent.
+  const [returnAgg] = await db
+    .select({
+      returned: sql<string>`COALESCE(SUM(${purchaseReturnItems.quantity}), 0)`,
+    })
+    .from(purchaseReturnItems)
+    .innerJoin(
+      purchaseReturns,
+      and(
+        eq(purchaseReturnItems.purchaseReturnId, purchaseReturns.id),
+        eq(purchaseReturnItems.businessId, purchaseReturns.businessId),
+      ),
+    )
+    .where(
+      and(
+        eq(purchaseReturns.purchaseId, purchaseId),
+        eq(purchaseReturns.businessId, businessId),
+      ),
+    );
+  const returnedQuantity = Number(returnAgg?.returned ?? 0);
+  const receivedQuantity = items.reduce(
+    (sum, item) => sum + Number(item.receivedQuantity),
+    0,
+  );
+  const returnStatus: "Returned" | "Partially returned" | null =
+    returnedQuantity === 0
+      ? null
+      : returnedQuantity >= receivedQuantity
+        ? "Returned"
+        : "Partially returned";
+
   const { landedCostDocStatus, landedCostPending, ...purchaseHeader } = purchase;
   return {
     purchase: {
       ...purchaseHeader,
       landedCostStatus: deriveLandedCostStatus({ landedCostDocStatus, landedCostPending }),
+      returnStatus,
     },
     items,
   };
