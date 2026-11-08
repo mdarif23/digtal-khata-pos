@@ -47,6 +47,17 @@ import { ImportHistoryPage } from "@/features/products/import/ImportHistoryPage"
 import { RegisterPage } from "@/features/cashRegisters/RegisterPage";
 import { HardwareSettingsPage } from "@/features/hardware/pages/HardwareSettingsPage";
 import { BarcodeGeneratorPage } from "@/features/barcodes/pages/BarcodeGeneratorPage";
+import { FinanceOverviewPage } from "@/features/finance/pages/FinanceOverviewPage";
+import { FinanceReportsPage } from "@/features/finance/pages/FinanceReportsPage";
+import { OwnersPage } from "@/features/finance/pages/OwnersPage";
+import { ProfitAllocationPage } from "@/features/finance/pages/ProfitAllocationPage";
+import { PayrollPage } from "@/features/finance/pages/PayrollPage";
+import { CashFlowPage } from "@/features/finance/pages/CashFlowPage";
+import { BalanceSheetPage } from "@/features/finance/pages/BalanceSheetPage";
+import { GrowthPage } from "@/features/finance/pages/GrowthPage";
+import { LoansPage } from "@/features/finance/pages/LoansPage";
+import { AssetsPage } from "@/features/finance/pages/AssetsPage";
+import { JournalPage } from "@/features/finance/pages/JournalPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -57,6 +68,9 @@ const REPORTS_PERMISSIONS = [
   "reports.financial.view",
   "reports.online_profitability.view",
 ];
+
+const FINANCE_OVERVIEW_PERMISSIONS = ["finance.overview.view", "finance.profit.view"];
+const FINANCE_OWNER_PERMISSIONS = ["finance.investment.view", "finance.withdrawal.view"];
 
 const router = createBrowserRouter([
   {
@@ -187,6 +201,94 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="expenses.view">
             <Expense />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/finance",
+        element: (
+          <RequirePermission anyPermission={FINANCE_OVERVIEW_PERMISSIONS}>
+            <FinanceOverviewPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/finance/reports",
+        element: (
+          <RequirePermission permission="finance.profit.view">
+            <FinanceReportsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/finance/owners",
+        element: (
+          <RequirePermission anyPermission={FINANCE_OWNER_PERMISSIONS}>
+            <OwnersPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/finance/profit-allocations",
+        element: (
+          <RequirePermission permission="finance.profit.view">
+            <ProfitAllocationPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/payroll",
+        element: (
+          <RequirePermission permission="payroll.view">
+            <PayrollPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/finance/cash-flow",
+        element: (
+          <RequirePermission permission="finance.overview.view">
+            <CashFlowPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/finance/balance-sheet",
+        element: (
+          <RequirePermission permission="finance.overview.view">
+            <BalanceSheetPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/finance/growth",
+        element: (
+          <RequirePermission permission="finance.profit.view">
+            <GrowthPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/finance/loans",
+        element: (
+          <RequirePermission permission="loans.view">
+            <LoansPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/finance/assets",
+        element: (
+          <RequirePermission permission="finance.assets.view">
+            <AssetsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/finance/journal",
+        element: (
+          <RequirePermission permission="finance.journal.view">
+            <JournalPage />
           </RequirePermission>
         ),
       },
