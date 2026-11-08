@@ -138,6 +138,12 @@ export async function listRules(businessId: number) {
       categoryName: categories.name,
       productName: products.name,
       sku: productVariants.sku,
+      optionLabel: sql<
+        string | null
+      >`(SELECT string_agg(vo.value, ', ' ORDER BY vv.option_id)
+         FROM variant_values vv
+         INNER JOIN variant_options vo ON vo.id = vv.option_id
+         WHERE vv.variant_id = ${productVariants.id})`,
     })
     .from(pricingRules)
     .leftJoin(
@@ -163,11 +169,13 @@ export async function listRules(businessId: number) {
     )
     .where(eq(pricingRules.businessId, businessId))
     .orderBy(desc(pricingRules.isActive), asc(pricingRules.id));
-  return rows.map(({ rule, categoryName, productName, sku }) => {
+  return rows.map(({ rule, categoryName, productName, sku, optionLabel }) => {
+    const variantLabelText =
+      optionLabel && optionLabel.trim() !== "" ? `${productName} (${optionLabel.trim()})` : null;
     const scopeParts = [
       rule.categoryId != null ? categoryName : null,
       rule.productId != null ? productName : null,
-      rule.variantId != null ? sku : null,
+      rule.variantId != null ? (variantLabelText ?? sku) : null,
     ].filter(Boolean);
     return {
       ...rule,

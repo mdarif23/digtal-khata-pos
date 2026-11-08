@@ -1,4 +1,5 @@
 import {
+  BadgePercent,
   ContactRound,
   CreditCard,
   Landmark,
@@ -189,6 +190,16 @@ export const navigation = [
     url: "/gift-cards",
     icon: CreditCard,
     permission: "pos.view",
+  },
+  {
+    title: "Pricing",
+    icon: BadgePercent,
+    permission: "pricing.view",
+    items: [
+      { title: "Product Pricing", url: "/pricing/products", permission: "pricing.view" },
+      { title: "Pricing Rules", url: "/pricing/rules", permission: "pricing.view" },
+      { title: "Pricing Settings", url: "/pricing/settings", permission: "pricing.view" },
+    ],
   },
   {
     title: "Locations",
