@@ -5,12 +5,17 @@ import { products } from "../../db/schema/products.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { BadRequestError, NotFoundError } from "../../utils/handleError.js";
 import {
-  computeRecommendedPrice,
   evaluateMinimumPrice,
   finalizeRecommendedPrice,
+  computeRecommendedPrice,
   type PricingConfiguration,
 } from "./pricing.engine.js";
 import { resolveVariantCost } from "./pricing.costProvider.js";
+import {
+  loadResolutionContext,
+  resolveFromContext,
+  type ResolvedPricingSource,
+} from "./pricing.resolution.js";
 import {
   pricingSettingsStrictSchema,
   type PricingSettingsUpdate,
@@ -152,8 +157,8 @@ export async function upsertPricingSettings(
   };
 }
 
-/** The settings row as the engine configuration (Phase 1: the default rule). */
-function settingsToConfiguration(view: PricingSettingsView): PricingConfiguration {
+/** The settings row as the engine configuration (fallback layer). */
+function settingsViewToConfiguration(view: PricingSettingsView): PricingConfiguration {
   return {
     method: view.defaultMethod,
     percentage: view.defaultPercentage,
@@ -163,8 +168,12 @@ function settingsToConfiguration(view: PricingSettingsView): PricingConfiguratio
 
 // ---------------------------------------------------------------------------
 // Preview — never persists; the effective price stays product_variants.
-// selling_price until a later-phase materialization endpoint is called.
+// selling_price until the materialization endpoint is called (Phase 2).
 // ---------------------------------------------------------------------------
+
+export type PreviewSource =
+  | ResolvedPricingSource
+  | { kind: "request_override"; ruleId: null; label: string };
 
 export interface PricingPreviewRow {
   variantId: number;
@@ -175,8 +184,8 @@ export interface PricingPreviewRow {
   currentSellingPrice: number;
   /** Explicit per-variant floor (null = none). */
   minSellingPrice: number | null;
-  /** "settings_default" (Phase 1) | "request_override". Rules add sources in Phase 2. */
-  source: "settings_default" | "request_override";
+  /** Where the configuration came from (rule precedence → settings default → what-if). */
+  source: PreviewSource;
   method: "fixed" | "markup" | "margin";
   percentage: number | null;
   fixedPrice: number | null;
@@ -191,7 +200,6 @@ export interface PricingPreviewRow {
 
 export async function previewVariantPricing(
   businessId: number,
-  locationId: number | null,
   input: {
     variantIds: number[];
     method?: "fixed" | "markup" | "margin" | undefined;
@@ -200,21 +208,28 @@ export async function previewVariantPricing(
   },
 ): Promise<PricingPreviewRow[]> {
   const settings = await getPricingSettingsView(businessId);
+  const context = await loadResolutionContext(db, businessId);
   const overrideProvided = input.method !== undefined;
-  const config: PricingConfiguration = overrideProvided
+  const overrideConfig: PricingConfiguration | null = overrideProvided
     ? {
         method: input.method!,
-        percentage:
-          input.method === "fixed" ? null : (input.percentage ?? null),
-        fixedPrice: input.method === "fixed" ? (input.fixedPrice ?? null) : null,
+        percentage: input.method === "fixed" ? null : (input.percentage ?? null),
+        fixedPrice:
+          input.method === "fixed" ? (input.fixedPrice ?? null) : null,
       }
-    : settingsToConfiguration(settings);
+    : null;
+  const OVERRIDE_SOURCE: PreviewSource = {
+    kind: "request_override",
+    ruleId: null,
+    label: "Request override",
+  };
 
   const variantIds = [...new Set(input.variantIds)];
   const variantRows = await db
     .select({
       id: productVariants.id,
       productId: productVariants.productId,
+      categoryId: products.categoryId,
       sku: productVariants.sku,
       sellingPrice: productVariants.sellingPrice,
       minSellingPrice: productVariants.minSellingPrice,
@@ -237,6 +252,15 @@ export async function previewVariantPricing(
       throw new NotFoundError(`Variant ${variantId} not found.`);
     }
 
+    const resolved = overrideConfig
+      ? { config: overrideConfig, source: OVERRIDE_SOURCE }
+      : resolveFromContext(context, {
+          id: variant.id,
+          productId: variant.productId,
+          categoryId: variant.categoryId,
+        });
+    const config = resolved.config;
+
     const needsCost = config.method !== "fixed";
     let costMicros: bigint | null = null;
     let cost: number | null = null;
@@ -244,12 +268,9 @@ export async function previewVariantPricing(
     let unavailableReason: string | null = null;
 
     if (needsCost) {
-      const resolution = await resolveVariantCost(
-        db,
-        businessId,
-        variantId,
-        locationId,
-      );
+      // The selling price is business-global — cost basis is the global
+      // weighted average (no location narrowing), same as materialization.
+      const resolution = await resolveVariantCost(db, businessId, variantId, null);
       if (resolution.status === "available") {
         costMicros = resolution.costMicros;
         cost = resolution.cost;
@@ -295,7 +316,7 @@ export async function previewVariantPricing(
         variant.minSellingPrice == null
           ? null
           : Number(variant.minSellingPrice),
-      source: overrideProvided ? "request_override" : "settings_default",
+      source: resolved.source,
       method: config.method,
       percentage: config.percentage,
       fixedPrice: config.fixedPrice,

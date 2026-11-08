@@ -39,4 +39,54 @@ router.post(
   pricingController.postPreview,
 );
 
+// --- Rules (Phase 2) --------------------------------------------------------
+router.get(
+  "/api/pricing/rules",
+  ...read,
+  requirePermission("pricing.view"),
+  pricingController.listRules,
+);
+router.post(
+  "/api/pricing/rules",
+  ...write,
+  requirePermission("pricing.manage"),
+  pricingController.createRule,
+);
+router.patch(
+  "/api/pricing/rules/:id",
+  ...write,
+  requirePermission("pricing.manage"),
+  pricingController.patchRule,
+);
+router.delete(
+  "/api/pricing/rules/:id",
+  ...write,
+  requirePermission("pricing.manage"),
+  pricingController.deleteRule,
+);
+
+// --- Effective pricing + materialization (Phase 2) --------------------------
+router.get(
+  "/api/pricing/products/:variantId/price",
+  ...read,
+  requirePermission("pricing.view"),
+  pricingController.getVariantPricing,
+);
+// THE pricing-module write path for the effective selling price (rule_apply
+// + history + audit). Manual price edits stay on the product module.
+router.put(
+  "/api/pricing/products/:variantId/price",
+  ...write,
+  requirePermission("pricing.product.manage"),
+  pricingController.applyVariantPrice,
+);
+
+// --- Price history (Phase 2) -------------------------------------------------
+router.get(
+  "/api/pricing/history",
+  ...read,
+  requirePermission("pricing.history.view"),
+  pricingController.listPriceHistory,
+);
+
 export default router;

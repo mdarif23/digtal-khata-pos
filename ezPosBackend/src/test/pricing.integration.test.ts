@@ -280,7 +280,7 @@ describe("pricing integration", { skip: !runIntegration }, () => {
     assert.equal(res.status, 200);
     const row = res.json.data[0];
     assert.equal(row.variantId, variantId);
-    assert.equal(row.source, "settings_default");
+    assert.equal(row.source.kind, "settings_default");
     assert.equal(row.method, "markup");
     assert.equal(row.percentage, 30);
     assert.equal(row.costStatus, "available");
@@ -309,7 +309,7 @@ describe("pricing integration", { skip: !runIntegration }, () => {
     });
     assert.equal(marginRes.status, 200);
     const marginRow = marginRes.json.data[0];
-    assert.equal(marginRow.source, "request_override");
+    assert.equal(marginRow.source.kind, "request_override");
     assert.equal(marginRow.recommendedPrice, 62.5);
 
     const fixedRes = await api("POST", "/api/pricing/preview", {
@@ -447,7 +447,7 @@ describe("pricing integration", { skip: !runIntegration }, () => {
     });
     assert.equal(res.status, 200);
     const row = ((await res.json()) as { data: { cost: number | null }[] })
-      .data[0];
+      .data[0]!;
     assert.equal(row.cost, null); // stripped
 
     // Same caller without pricing.view on a guarded route → 403.
