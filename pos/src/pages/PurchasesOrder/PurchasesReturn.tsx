@@ -13,6 +13,12 @@ import {
   estimateReturnUnitPrice,
   maxReturnableForItem,
 } from "@/features/purchases/utils/returnCalculations";
+import {
+  enteredToBaseQuantity,
+  isWholeBaseQuantity,
+  roundQuantity,
+  scanStepInLineUnit,
+} from "@/features/purchases/utils/uom";
 import type {
   PaymentsInfoCard,
   PurchaseDetailItem,
@@ -22,6 +28,10 @@ import {
   purchaseDetailKeys,
   usePurchaseDetail,
 } from "@/features/purchases/hooks/usePurchaseDetail";
+import {
+  usePurchaseUnitsForVariants,
+  type PurchaseUnitOption,
+} from "@/features/purchases/hooks/usePurchaseUnits";
 import { usePurchaseReturn } from "@/features/purchases/hooks/usePurchaseReturn";
 import { usePurchaseReturnPreview } from "@/features/purchases/hooks/usePurchaseReturnPreview";
 import { useReturnableSerials } from "@/features/purchases/hooks/useReturnableSerials";
@@ -74,6 +84,87 @@ export const PurchaseViewItems = () => {
     () => detail.data?.items ?? [],
     [detail.data],
   );
+
+  // UOM (migration 0062): unit options are fetched only for the variants
+  // whose PO lines were ordered in a packaging unit — legacy orders fire
+  // no purchase-units request at all.
+  const uomVariantIds = useMemo(
+    () =>
+      [
+        ...new Set(
+          orderItems
+            .filter((item) => item.uomConversionId != null)
+            .map((item) => item.variantId),
+        ),
+      ].sort((a, b) => a - b),
+    [orderItems],
+  );
+  const { byVariant: unitsByVariant } = usePurchaseUnitsForVariants(
+    uomVariantIds,
+  );
+
+  /**
+   * The packaging unit each line's return quantity is entered in (conversion
+   * id → line; null = base). Defaults to the line's own PO unit; serial
+   * lines are forced to the base unit (serials are per piece), and a
+   * packaging unit that has since been deactivated falls back to base.
+   */
+  const [selectedUnits, setSelectedUnits] = useState<
+    Record<number, number | null>
+  >({});
+  const resolveLineUnit = (
+    item: PurchaseDetailItem,
+  ): { conversionId: number | null; unit: PurchaseUnitOption | null } => {
+    if (selectedUnits[item.id] !== undefined) {
+      const conversionId = selectedUnits[item.id] ?? null;
+      const units = unitsByVariant.get(item.variantId);
+      return {
+        conversionId,
+        unit:
+          conversionId === null
+            ? (units?.[0] ?? null)
+            : (units?.find((unit) => unit.uomConversionId === conversionId) ??
+              null),
+      };
+    }
+    // Default: the PO line's entered unit when still available.
+    const units = unitsByVariant.get(item.variantId);
+    if (
+      item.trackingType === "serial" ||
+      item.uomConversionId == null ||
+      !units
+    ) {
+      return { conversionId: null, unit: units?.[0] ?? null };
+    }
+    const ordered = units.find(
+      (unit) => unit.uomConversionId === item.uomConversionId,
+    );
+    return ordered
+      ? { conversionId: ordered.uomConversionId, unit: ordered }
+      : { conversionId: null, unit: units[0] ?? null };
+  };
+  const lineFactor = (item: PurchaseDetailItem): number =>
+    resolveLineUnit(item).unit?.conversionFactor ?? 1;
+
+  const handleLineUnitChange = (item: PurchaseDetailItem, unit: PurchaseUnitOption) => {
+    const previousFactor = resolveLineUnit(item).unit?.conversionFactor ?? 1;
+    setSelectedUnits((current) => ({
+      ...current,
+      [item.id]: unit.uomConversionId,
+    }));
+    // Re-express the typed quantity in the new unit (floored on the base
+    // amount it represents), so the selection can never silently exceed
+    // the returnable amount.
+    setReturnQuantities((current) => {
+      const previous = current[item.id];
+      if (!previous) return current;
+      const base = enteredToBaseQuantity(previous, previousFactor);
+      return {
+        ...current,
+        [item.id]: Math.floor(roundQuantity(base / unit.conversionFactor)),
+      };
+    });
+  };
 
   // Availability from the return context: previously-returned quantities
   // and on-hand stock at the RECEIVING location (per line's variant).
@@ -157,15 +248,26 @@ export const PurchaseViewItems = () => {
         .map((item) => {
           const quantity = returnQuantities[item.id] ?? 0;
           const eligible = serialsByItem.get(item.id);
+          const unit = resolveLineUnit(item);
+          const factor = unit.unit?.conversionFactor ?? 1;
           // Serial lines with an eligible list submit their EXACT
           // selection; lines without one use the auto-pick fallback.
           const serialSelection =
             item.trackingType === "serial" && eligible
               ? (serialSelections[item.id] ?? [])
               : undefined;
+          // The server converts entered → base authoritatively; a quantity
+          // that lands off the integer-stock grid is always rejected, so
+          // the page blocks it before any preview/submit round-trip.
+          const baseQuantity = enteredToBaseQuantity(quantity, factor);
           return {
             purchaseItemId: item.id,
+            /** In the line's SELECTED unit. */
             quantity,
+            conversionId: unit.conversionId,
+            factor,
+            baseQuantity,
+            wholeBase: isWholeBaseQuantity(baseQuantity),
             ...(serialSelection !== undefined && eligible
               ? { serialIds: serialSelection }
               : {}),
@@ -175,24 +277,40 @@ export const PurchaseViewItems = () => {
           };
         })
         .filter((item) => item.quantity > 0),
-    [orderItems, returnQuantities, serialSelections, serialsByItem],
+    // resolveLineUnit reads selectedUnits + unitsByVariant.
+    [orderItems, returnQuantities, serialSelections, serialsByItem, selectedUnits, unitsByVariant],
   );
-  // Serial lines: the selected count must match the quantity before submit.
+  // Serial lines: the selected count must match the quantity before submit;
+  // package quantities must convert to whole base units.
   const serialCountsMatch = requestedItems.every(
     (item) => item.serialCountMatches,
   );
-  // The wire shape for preview + submit: only {purchaseItemId, quantity,
-  // serialIds?} — the internal count-match flag never leaves the page.
-  const wireItems = useMemo(
+  const quantitiesConvert = requestedItems.every((item) => item.wholeBase);
+  // Preview wire shape: the preview endpoint evaluates eligibility in BASE
+  // units (its schema has no uom field), so the page converts entered
+  // quantities with the same factor the submission will use.
+  const previewItems = useMemo(
     () =>
-      requestedItems.map(({ purchaseItemId, quantity, serialIds }) => ({
+      requestedItems.map(({ purchaseItemId, baseQuantity, serialIds }) => ({
         purchaseItemId,
-        quantity,
+        quantity: Math.round(baseQuantity),
         ...(serialIds !== undefined ? { serialIds } : {}),
       })),
     [requestedItems],
   );
-  const previewSelection = useDebouncedValue(wireItems, 300);
+  // Submission wire shape: quantities stay in the ENTERED unit with the
+  // packaging unit named — the server converts authoritatively.
+  const submitItems = useMemo(
+    () =>
+      requestedItems.map(({ purchaseItemId, quantity, conversionId, serialIds }) => ({
+        purchaseItemId,
+        quantity,
+        ...(serialIds !== undefined ? { serialIds } : {}),
+        ...(conversionId != null ? { uomConversionId: conversionId } : {}),
+      })),
+    [requestedItems],
+  );
+  const previewSelection = useDebouncedValue(previewItems, 300);
   // Phase 2: the summary shows the SERVER's authoritative preview, not a
   // client estimate. keepPreviousData holds the previous numbers while a
   // new selection loads.
@@ -319,12 +437,17 @@ export const PurchaseViewItems = () => {
             : []),
         ];
 
-  const maxReturnFor = (item: PurchaseDetailItem) => {
-    // Units already typed for sibling lines sharing this variant.
+  /** Returnable maximum in BASE units (sibling selections are converted
+   *  from their own units before the variant-wide stock cap). */
+  const maxReturnBaseFor = (item: PurchaseDetailItem) => {
     const selectedForVariant = orderItems.reduce(
       (sum, otherItem) =>
         otherItem.variantId === item.variantId && otherItem.id !== item.id
-          ? sum + (returnQuantities[otherItem.id] ?? 0)
+          ? sum +
+            enteredToBaseQuantity(
+              returnQuantities[otherItem.id] ?? 0,
+              lineFactor(otherItem),
+            )
           : sum,
       0,
     );
@@ -334,6 +457,9 @@ export const PurchaseViewItems = () => {
       selectedForVariant,
     );
   };
+  /** The same maximum expressed in the line's SELECTED unit (floored). */
+  const maxReturnFor = (item: PurchaseDetailItem) =>
+    Math.floor(roundQuantity(maxReturnBaseFor(item) / lineFactor(item)));
 
   const updateQuantity = (item: PurchaseDetailItem, value: number) => {
     const maxReturn = maxReturnFor(item);
@@ -349,7 +475,9 @@ export const PurchaseViewItems = () => {
         data: {
           orderId: purchaseId,
           ...(reason.trim() ? { reason: reason.trim() } : {}),
-          changedItems: wireItems,
+          // Quantities stay in each line's selected packaging unit; the
+          // server converts them to base authoritatively.
+          changedItems: submitItems,
         },
         apiCall: (values) => returnMutation.mutateAsync(values),
         entityName: "Purchase return",
@@ -404,11 +532,19 @@ export const PurchaseViewItems = () => {
     ) {
       throw new Error("This item is not on this purchase order.");
     }
+    // UOM (migration 0062): a package-alias scan counts one PACKAGE — the
+    // first eligible line whose unit can express it takes it (1 box scan
+    // on a box line = +1; on a piece line it is skipped rather than
+    // mis-counted).
     const updated = allocateScannedUnit({
       lines: orderItemsRef.current,
       variantId: match.variantId,
       returnedByItem: returnedByItemRef.current,
       returnQuantities: returnQuantitiesRef.current,
+      factorByLine: new Map(
+        orderItemsRef.current.map((line) => [line.id, lineFactor(line)]),
+      ),
+      scanFactor: match.unit?.conversionFactor ?? 1,
     });
     if (!updated) {
       throw new Error(
@@ -549,12 +685,24 @@ export const PurchaseViewItems = () => {
               line before submitting.
             </p>
           )}
+          {!quantitiesConvert && (
+            <p
+              role="alert"
+              className="border-b bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              One or more packaging quantities do not convert to whole base
+              units — adjust the quantity or the line&apos;s unit.
+            </p>
+          )}
           <ReturnItemsTable
             orderItems={returnableItems}
             returnedByItem={returnedByItem}
             returnQuantities={returnQuantities}
             lineCredits={previewLineCredits}
             serialsByItem={serialsByItem}
+            unitsByVariant={unitsByVariant}
+            resolveLineUnit={resolveLineUnit}
+            onUnitChange={handleLineUnitChange}
             selectedSerials={new Map(
               Object.entries(serialSelections).map(([id, ids]) => [
                 Number(id),
@@ -622,6 +770,7 @@ export const PurchaseViewItems = () => {
                 returnMutation.isPending ||
                 requestedItems.length === 0 ||
                 !serialCountsMatch ||
+                !quantitiesConvert ||
                 // A required preview that is loading, failed, or reported
                 // issues always blocks submission (Phase 2).
                 (requestedItems.length > 0 &&

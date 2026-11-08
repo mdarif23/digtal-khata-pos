@@ -24,10 +24,19 @@ export interface SaleReceiptItem {
   barcode: string | null;
   /** Unit abbreviation of the product (e.g. "Pcs"), when the product has one. */
   unitName?: string | null;
+  /** Base-unit quantity (packages already converted by the server). */
   quantity: number;
+  /** Base-unit price. */
   unitPrice: number;
   discount: number;
   lineTotal: number;
+  // Packaging-unit selling: what the cashier ENTERED, when the line was
+  // sold in a package unit (e.g. 1 Box @ 120 = 12 pcs @ 10). Null/absent
+  // for base-unit lines.
+  enteredQuantity?: number | null;
+  enteredUnitPrice?: number | null;
+  conversionFactor?: number | null;
+  enteredUnitAbbreviation?: string | null;
   /** Historical tax snapshot (Module 4): tax content of this line. */
   taxAmount: number;
   taxDetail: SaleReceiptTaxDetail[];

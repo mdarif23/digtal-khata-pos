@@ -1208,7 +1208,7 @@ export default function DashboardComponent() {
                     <span className="flex shrink-0 items-baseline gap-2">
                       {item.currentQuantity ? (
                         <span className="text-xs text-slate-400">
-                          {item.currentQuantity.toLocaleString("en-BD")} pcs
+                          {item.currentQuantity.toLocaleString("en-BD")}
                         </span>
                       ) : null}
                       <span className="text-sm font-semibold text-slate-900">

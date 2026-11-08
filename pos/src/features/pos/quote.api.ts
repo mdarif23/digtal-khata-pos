@@ -36,7 +36,14 @@ export interface QuoteTotals {
 }
 
 export async function quoteSaleApi(payload: {
-  items: { variantId: number; quantity: number; discount: DiscountInput }[];
+  items: {
+    variantId: number;
+    /** Quantity in the selected sell unit. */
+    quantity: number;
+    discount: DiscountInput;
+    /** Packaging-unit selling: null/undefined = base unit. */
+    uomConversionId?: number | null;
+  }[];
   cartDiscount: DiscountInput;
   vatPercent: number | null;
   couponCode?: string | null;

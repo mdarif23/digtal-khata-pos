@@ -29,6 +29,7 @@ import purchasesRouter from "./modules/purchases/purchases.routes.js";
 import purchasesReturnRouter from "./modules/purchaseReturn/purchaseReturn.routes.js";
 import procurementRouter from "./modules/procurement/procurement.routes.js";
 import addProductRouter from "./modules/addProduct/product.routes.js";
+import uomRouter from "./modules/uom/uom.routes.js";
 import contactRouter from "./modules/contact/contact.routes.js";
 import dueManagementRouter from "./modules/dueManagement/dueManagement.routes.js";
 import documentSettingsRouter from "./modules/documentSettings/documentSettings.routes.js";
@@ -125,6 +126,7 @@ export function buildApp() {
   });
 
   app.use("/", productRouter);
+  app.use("/", uomRouter);
   app.use("/", salesRouter);
   // Payment-intent IPN is public and must match before generic sale routes.
   app.use("/", saleIntentsRouter);

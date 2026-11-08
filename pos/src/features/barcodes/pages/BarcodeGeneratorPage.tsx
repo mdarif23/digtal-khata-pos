@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,9 @@ import { useReceiptSettingsStore } from "@/features/pos/stores/useReceiptSetting
 import {
   assignBarcodeApi,
   generateBarcodesApi,
+  getProductUomApi,
   type BarcodeVariantView,
+  type ProductUomConfigRow,
 } from "../barcode.api.js";
 import { useBarcodeSearch, usePrintHistory } from "../hooks/useBarcodes.js";
 import {
@@ -67,6 +69,23 @@ export function BarcodeGeneratorPage() {
   const [manualTarget, setManualTarget] = useState<"primary" | "alias">("alias");
   const [printOpen, setPrintOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  /**
+   * UOM (migration 0062): the packaging unit an ALIAS assignment stands
+   * for (a box-of-12 code). Null = a plain base-unit alias.
+   */
+  const [manualUomConversionId, setManualUomConversionId] = useState<
+    number | null
+  >(null);
+  /**
+   * Per-variant packaging label line ("Box of 12") recorded when a package
+   * alias is assigned here — labels of those variants print the line under
+   * the code. Session-scoped: the search payload does not expose an alias's
+   * conversion row, so previously assigned package aliases cannot be
+   * re-derived after a reload.
+   */
+  const [packageUnitByVariant, setPackageUnitByVariant] = useState<
+    Map<number, string>
+  >(new Map());
 
   const size = labelSizeById(sizeId);
   const config: LabelConfig = useMemo(
@@ -123,6 +142,37 @@ export function BarcodeGeneratorPage() {
       })
       .filter((item): item is SelectedItem => item !== null);
   }, [rows, selectedIds]);
+
+  // UOM config of the single selected item's product — feeds the optional
+  // "Packaging unit" select of the alias-assign flow.
+  const singleSelected = selectedItems.length === 1 ? selectedItems[0]! : null;
+  const uomQuery = useQuery({
+    queryKey: ["product", "uom", singleSelected?.productId ?? 0],
+    queryFn: () => getProductUomApi(singleSelected!.productId),
+    enabled: singleSelected !== null,
+    staleTime: 60_000,
+  });
+  const packagingUnitOptions = useMemo(() => {
+    if (!singleSelected || !uomQuery.data) return [];
+    // Applicable rows: product-level or this variant's own, ACTIVE only.
+    return uomQuery.data.units.filter(
+      (row: ProductUomConfigRow) =>
+        row.status === "active" &&
+        (row.variantId === null || row.variantId === singleSelected.variantId),
+    );
+  }, [singleSelected, uomQuery.data]);
+  // A target switch or selection change invalidates the chosen unit.
+  useEffect(() => {
+    setManualUomConversionId(null);
+  }, [singleSelected?.variantId, manualTarget]);
+  useEffect(() => {
+    setManualUomConversionId((current) =>
+      current !== null &&
+      !packagingUnitOptions.some((row) => row.id === current)
+        ? null
+        : current,
+    );
+  }, [packagingUnitOptions]);
 
   // Labels need a barcode to render — selected-but-unbarcoded rows are
   // excluded from printing (generate first, then print).
@@ -201,7 +251,7 @@ export function BarcodeGeneratorPage() {
     }
     const variantId = Array.from(selectedIds)[0]!;
     try {
-      await assignBarcodeSafe(variantId, code, manualTarget);
+      await assignBarcodeSafe(variantId, code, manualTarget, manualUomConversionId);
       setManualBarcode("");
     } catch (error) {
       toast.add({
@@ -212,8 +262,37 @@ export function BarcodeGeneratorPage() {
     }
   }
 
-  async function assignBarcodeSafe(variantId: number, code: string, target: "primary" | "alias") {
-    await assignBarcodeApi({ variantId, barcode: code, target });
+  async function assignBarcodeSafe(
+    variantId: number,
+    code: string,
+    target: "primary" | "alias",
+    uomConversionId: number | null,
+  ) {
+    // The packaging qualifier applies to ALIASES only — primary barcodes
+    // always mean one base unit.
+    const unit =
+      target === "alias" && uomConversionId != null
+        ? packagingUnitOptions.find((row) => row.id === uomConversionId)
+        : undefined;
+    await assignBarcodeApi({
+      variantId,
+      barcode: code,
+      target,
+      ...(target === "alias" && uomConversionId != null
+        ? { uomConversionId }
+        : {}),
+    });
+    if (unit) {
+      // Record the package line for this variant's labels ("Box of 12").
+      setPackageUnitByVariant((previous) => {
+        const next = new Map(previous);
+        next.set(
+          variantId,
+          `${unit.unitName} of ${unit.conversionFactor}`,
+        );
+        return next;
+      });
+    }
     toast.add({ title: "Barcode assigned.", type: "success" });
     void searchQuery.refetch();
   }
@@ -227,6 +306,7 @@ export function BarcodeGeneratorPage() {
     barcode: item.barcode,
     barcodeFormat: item.barcodeFormat,
     sellingPrice: item.sellingPrice,
+    packageUnitLine: packageUnitByVariant.get(item.variantId) ?? null,
   }));
 
   return (
@@ -478,6 +558,50 @@ export function BarcodeGeneratorPage() {
                   Assign
                 </PermissionButton>
               </div>
+              {manualTarget === "alias" && packagingUnitOptions.length > 0 && (
+                <div className="mt-2">
+                  <Label className="text-xs">Packaging unit (optional)</Label>
+                  <Select
+                    items={[
+                      { value: "none", label: "None — one piece (base unit)" },
+                      ...packagingUnitOptions.map((row) => ({
+                        value: String(row.id),
+                        label: `${row.unitName} (1 ${row.unitName} = ${row.conversionFactor} ${uomQuery.data?.baseUnit?.name ?? "base"})`,
+                      })),
+                    ]}
+                    value={
+                      manualUomConversionId === null
+                        ? "none"
+                        : String(manualUomConversionId)
+                    }
+                    onValueChange={(value) =>
+                      setManualUomConversionId(
+                        value === "none" ? null : Number(value),
+                      )
+                    }
+                  >
+                    <SelectTrigger className="mt-1 w-full">
+                      <SelectValue placeholder="Packaging unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">
+                        None — one piece (base unit)
+                      </SelectItem>
+                      {packagingUnitOptions.map((row) => (
+                        <SelectItem key={row.id} value={String(row.id)}>
+                          {row.unitName} (1 {row.unitName} ={" "}
+                          {row.conversionFactor}{" "}
+                          {uomQuery.data?.baseUnit?.name ?? "base"})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    A package barcode means ONE of the chosen unit — scanning
+                    it counts a whole package (e.g. 12 pieces).
+                  </p>
+                </div>
+              )}
               <p className="mt-1 text-xs text-slate-500">
                 Retail codes are validated (GS1 check digit); duplicates are
                 refused. Select exactly one item.

@@ -23,7 +23,13 @@ import {
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
 import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
-import { createCatalogLookup } from "@/features/barcodes/scanning/catalogLookup";
+import {
+  createCatalogLookup,
+  getScannedUnit,
+} from "@/features/barcodes/scanning/catalogLookup";
+import {
+  resolveDefaultSaleUnit,
+} from "@/features/pos/hooks/useSellUnits";
 
 type ActiveSerialProduct = {
   product: ProductType;
@@ -71,6 +77,26 @@ export function ProductList({
   );
 
   /**
+   * Grid click → default sale unit. A plain click adds the server's
+   * default sale unit (often the base unit — identical to the old
+   * behavior); sell-units are fetched lazily here and cached. When they
+   * cannot be fetched (offline), the base-unit line is added exactly as
+   * before packaging-unit selling existed.
+   */
+  const handleAdd = useCallback(
+    async (product: ProductType) => {
+      const variant = product.variants[0];
+      if (!variant || variant.id === undefined) {
+        addToCart(product);
+        return;
+      }
+      const unit = await resolveDefaultSaleUnit(variant.id);
+      addToCart(product, unit ?? undefined);
+    },
+    [addToCart],
+  );
+
+  /**
    * Module scan handler — the scanner service only IDENTIFIES a barcode;
    * every sales business rule (catalog row, stock gate, serial tracking)
    * lives here. Throwing surfaces the failure as an error scan.
@@ -96,7 +122,11 @@ export function ProductList({
       }
 
       const { product, variant } = row;
-      if (variant.quantity <= 0) {
+      // A match with a sell unit means ONE PACKAGE of that unit (1 Box);
+      // its barcode is not the piece barcode.
+      const scannedUnit = getScannedUnit(match);
+      const baseUnitsPerScan = scannedUnit?.conversionFactor ?? 1;
+      if (variant.quantity < baseUnitsPerScan) {
         throw new Error(`${product.name} is out of stock.`);
       }
 
@@ -111,13 +141,24 @@ export function ProductList({
       // what THIS terminal was granted; blocked products never sell offline.
       // The server re-checks and flags overages at sync time regardless.
       if (!navigator.onLine) {
-        const check = await checkAllowance(variant.id, 1);
+        const check = await checkAllowance(variant.id, baseUnitsPerScan);
         if (!check?.allowed) {
           toast.add({ type: "error", description: check.reason, priority: "high" });
           return;
         }
       }
-      addToCart({ ...product, name: variantName, variants: [variant] });
+      addToCart(
+        { ...product, name: variantName, variants: [variant] },
+        scannedUnit
+          ? {
+              uomConversionId: scannedUnit.conversionId,
+              unitName: scannedUnit.unitName,
+              unitAbbreviation: scannedUnit.unitAbbreviation,
+              conversionFactor: scannedUnit.conversionFactor,
+              salePrice: scannedUnit.salePrice,
+            }
+          : undefined,
+      );
       setSearchProducts("");
       toast.add({ description: `${variantName} added to cart.` });
     },
@@ -284,7 +325,7 @@ export function ProductList({
                   type="sale"
                   key={product.id}
                   product={product}
-                  handleAdd={addToCart}
+                  handleAdd={handleAdd}
                   defaultVariant={defaultVariant}
                 />
               ) : (
@@ -292,7 +333,7 @@ export function ProductList({
                   type="sale"
                   key={product.id}
                   product={product}
-                  handleAdd={addToCart}
+                  handleAdd={handleAdd}
                   defaultVariant={defaultVariant}
                   onSerialClick={(selectedProduct) =>
                     openSerialPicker(selectedProduct, defaultVariant)

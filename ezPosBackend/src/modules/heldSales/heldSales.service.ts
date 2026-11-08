@@ -17,10 +17,15 @@ import type { DbTransaction } from "../purchases/purchase.types.js";
 
 export interface HeldSaleItem {
   variantId: number;
+  /** ENTERED quantity — in the line's selling unit (base when no UOM). */
   quantity: number;
   discount?: { type: "percentage" | "fixed"; value: number } | null;
   serialNumbers?: string[];
   productName: string;
+  /** UOM (migration 0062): packaging unit + entered qty; re-resolved at
+   * resume (factor/price are never trusted from the hold). */
+  uomConversionId?: number | null;
+  enteredQuantity?: number | null;
 }
 
 function ttlMs(): number | null {

@@ -1,9 +1,38 @@
 import axios from "../../../api/axios.js";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { CartStore, CartType } from "../types/cart.types.js";
+import {
+  lineMatchesUnit,
+  lineUnitId,
+  type CartStore,
+  type CartType,
+  type SellUnitRef,
+  type SwitchUnitResult,
+} from "../types/cart.types.js";
 import { HoldCartItems } from "@/features/pos/types/cart.types.js";
 import useProductStore from "@/features/products/useProductStore.js";
+import { fetchSellUnits } from "../hooks/useSellUnits.js";
+import { useSessionStore } from "@/auth/sessionStore.js";
+
+/** Unit fields stamped onto every line so persisted carts are self-describing. */
+function unitFieldsFor(unit: SellUnitRef | undefined, fallbackPrice: number) {
+  if (unit && unit.uomConversionId != null) {
+    return {
+      uomConversionId: unit.uomConversionId,
+      unitName: unit.unitName,
+      unitAbbreviation: unit.unitAbbreviation,
+      conversionFactor: unit.conversionFactor,
+      unitPrice: unit.salePrice,
+    };
+  }
+  return {
+    uomConversionId: null,
+    unitName: null,
+    unitAbbreviation: null,
+    conversionFactor: 1,
+    unitPrice: unit ? unit.salePrice : fallbackPrice,
+  };
+}
 
 // export const useCartStore = create(
 //   persist(
@@ -95,22 +124,31 @@ export const useCartStore = create<CartStore>((set, get) => ({
     return key;
   },
   clearCheckoutIdempotency: () => set({ checkoutIdempotencyKey: null }),
-  addToCart: (product) =>
+  addToCart: (product, unit) =>
     set((state) => {
       const variant = product.variants[0];
       if (!variant) {
         return state;
       }
 
-      const exists = state.cart.find((p) =>
-        p.variants.some((v) => v.id === variant.id),
+      const unitId = unit?.uomConversionId ?? null;
+      // Lines are keyed by (variant, unit): a Box line and a Pcs line of the
+      // same variant coexist; re-adding the same unit increments ITS line.
+      const exists = state.cart.find(
+        (p) =>
+          p.variants.some((v) => v.id === variant.id) &&
+          lineUnitId(p) === unitId,
       );
 
       if (exists) {
         return {
           cart: state.cart.map((item) =>
-            item.variants.some((v) => v.id === variant.id)
-              ? { ...item, quantity: item.quantity + 1 }
+            item === exists
+              ? {
+                  ...item,
+                  quantity: item.quantity + 1,
+                  enteredQuantity: item.quantity + 1,
+                }
               : item,
           ),
         };
@@ -123,46 +161,127 @@ export const useCartStore = create<CartStore>((set, get) => ({
             ...product,
             variants: [variant],
             quantity: 1,
+            enteredQuantity: 1,
+            ...unitFieldsFor(unit, Number(variant.sellingPrice)),
           },
         ],
       };
     }),
-  removeCartItem: (id) =>
+  removeCartItem: (id, uomConversionId) =>
     set((state) => ({
-      cart: state.cart.filter((p) => p.variants.some((v) => v.id !== id)),
+      cart: state.cart.filter(
+        (p) =>
+          !(
+            p.variants.some((v) => v.id === id) &&
+            lineMatchesUnit(p, uomConversionId)
+          ),
+      ),
     })),
-  addCartQuantity: (id) =>
+  addCartQuantity: (id, uomConversionId) =>
     set((state) => ({
       cart: state.cart.map((p) => {
-        if (p.variants.some((v) => v.id === id)) {
+        if (
+          p.variants.some((v) => v.id === id) &&
+          lineMatchesUnit(p, uomConversionId)
+        ) {
           return {
             ...p,
             quantity: p.quantity + 1,
+            enteredQuantity: p.quantity + 1,
           };
         }
         return p;
       }),
     })),
-  removeCartQuantity: (id) =>
+  removeCartQuantity: (id, uomConversionId) =>
     set((state) => {
       return {
         cart: state.cart
           .map((p) =>
-            p.variants.some((v) => v.id === id)
-              ? { ...p, quantity: p.quantity - 1 }
+            p.variants.some((v) => v.id === id) &&
+            lineMatchesUnit(p, uomConversionId)
+              ? {
+                  ...p,
+                  quantity: p.quantity - 1,
+                  enteredQuantity: p.quantity - 1,
+                }
               : p,
           )
           .filter((p) => p.quantity > 0),
       };
     }),
-  addCustomCartQuantity: (id, customCartQuantity) =>
+  addCustomCartQuantity: (id, customCartQuantity, uomConversionId) =>
     set((state) => ({
       cart: state.cart.map((p) =>
-        p.variants.some((v) => v.id === id)
-          ? { ...p, quantity: customCartQuantity }
+        p.variants.some((v) => v.id === id) &&
+        lineMatchesUnit(p, uomConversionId)
+          ? { ...p, quantity: customCartQuantity, enteredQuantity: customCartQuantity }
           : p,
       ),
     })),
+  switchLineUnit: (variantId, fromUomConversionId, unit) => {
+    const state = get();
+    const sourceIndex = state.cart.findIndex(
+      (p) =>
+        p.variants.some((v) => v.id === variantId) &&
+        lineUnitId(p) === (fromUomConversionId ?? null),
+    );
+    if (sourceIndex === -1) {
+      return { ok: false, reason: "line-not-found" } as const;
+    }
+    const source = state.cart[sourceIndex];
+    if (!source) return { ok: false, reason: "line-not-found" } as const;
+    const baseQuantity = Number(source.quantity) * (source.conversionFactor ?? 1);
+    const factor = unit.conversionFactor > 0 ? unit.conversionFactor : 1;
+    // Keep the BASE amount constant where whole packages allow; the floor
+    // remainder (e.g. the odd piece) is returned to stock by the caller.
+    const convertedQuantity = Math.floor(baseQuantity / factor);
+    if (!Number.isFinite(convertedQuantity) || convertedQuantity < 1) {
+      return { ok: false, reason: "below-one-package" } as const;
+    }
+
+    // Merge into an existing target-unit line instead of leaving two.
+    const targetIndex = state.cart.findIndex(
+      (p, index) =>
+        index !== sourceIndex &&
+        p.variants.some((v) => v.id === variantId) &&
+        lineUnitId(p) === (unit.uomConversionId ?? null),
+    );
+
+    let cart: CartType[];
+    let merged: boolean;
+    if (targetIndex !== -1) {
+      merged = true;
+      const target = state.cart[targetIndex];
+      if (!target) return { ok: false, reason: "line-not-found" } as const;
+      const nextQuantity = target.quantity + convertedQuantity;
+      cart = state.cart
+        .map((p, index) =>
+          index === targetIndex
+            ? { ...p, quantity: nextQuantity, enteredQuantity: nextQuantity }
+            : p,
+        )
+        .filter((_, index) => index !== sourceIndex);
+    } else {
+      merged = false;
+      cart = state.cart.map((p, index) =>
+        index === sourceIndex
+          ? {
+              ...p,
+              quantity: convertedQuantity,
+              enteredQuantity: convertedQuantity,
+              uomConversionId: unit.uomConversionId,
+              unitName: unit.unitName,
+              unitAbbreviation: unit.unitAbbreviation,
+              conversionFactor: unit.conversionFactor,
+              unitPrice: unit.salePrice,
+            }
+          : p,
+      );
+    }
+    set({ cart });
+    return { ok: true, convertedQuantity, merged } as const;
+  },
   resetCart: () =>
     set((state) => ({
       cart: [],
@@ -243,10 +362,15 @@ interface HoldCartStore {
 /** Slim, serializable hold snapshot sent to the server. */
 interface HeldItemPayload {
   variantId: number;
+  /** Quantity in the SELECTED unit (see enteredQuantity). */
   quantity: number;
   discount?: { type: "percentage" | "fixed"; value: number } | null;
   serialNumbers?: string[];
   productName: string;
+  /** Packaging-unit selling: null = base unit. */
+  uomConversionId?: number | null;
+  /** Quantity in the selected unit (mirrors quantity). */
+  enteredQuantity?: number;
 }
 
 interface HeldSaleRow {
@@ -306,6 +430,8 @@ export const useHoldCartStore = create<HoldCartStore>()((set, get) => ({
         discount: item.discount ?? null,
         serialNumbers: item.serialNumbers ?? undefined,
         productName: item.name,
+        uomConversionId: item.uomConversionId ?? null,
+        enteredQuantity: item.enteredQuantity ?? item.quantity,
       })),
     };
     try {
@@ -340,19 +466,49 @@ export const useHoldCartStore = create<HoldCartStore>()((set, get) => ({
  * product data. Returns the lines plus any product names that could not be
  * resolved (deleted/unavailable) — the caller reports them instead of
  * silently dropping money.
+ *
+ * Packaging-unit lines (uomConversionId) are re-derived from the LIVE
+ * sell-units of each variant (price/factor refresh; holds re-price on
+ * resume). If a conversion no longer exists — or sell-units cannot be
+ * fetched (offline) — the item falls back to the BASE unit line with its
+ * entered quantity: resume never breaks, the server re-validates stock and
+ * prices at sale time.
  */
-export function resumeHeldItems(
+export async function resumeHeldItems(
   slimItems: {
     variantId: number;
     quantity: number;
     discount?: { type: "percentage" | "fixed"; value: number } | null;
     serialNumbers?: string[];
     productName: string;
+    uomConversionId?: number | null;
+    enteredQuantity?: number;
   }[],
-): { lines: CartType[]; missing: string[] } {
+): Promise<{ lines: CartType[]; missing: string[] }> {
   const products = useProductStore.getState().products;
   const lines: CartType[] = [];
   const missing: string[] = [];
+
+  // One sell-units lookup per distinct variant, in parallel; failures fall
+  // back to base lines below rather than failing the resume.
+  const unitsByVariant = new Map<
+    number,
+    Awaited<ReturnType<typeof fetchSellUnits>>["units"]
+  >();
+  const locationId = useSessionStore.getState().activeLocationId;
+  await Promise.all(
+    [...new Set(slimItems.map((item) => item.variantId))].map(
+      async (variantId) => {
+        try {
+          const data = await fetchSellUnits(variantId, locationId);
+          unitsByVariant.set(variantId, data.units);
+        } catch {
+          // Offline / conversion table unavailable — base-unit fallback.
+        }
+      },
+    ),
+  );
+
   for (const item of slimItems) {
     const product = products.find((p) =>
       p.variants.some((v) => v.id === item.variantId),
@@ -362,13 +518,44 @@ export function resumeHeldItems(
       continue;
     }
     const variant = product.variants.find((v) => v.id === item.variantId)!;
-    lines.push({
-      ...product,
-      variants: [variant],
-      quantity: item.quantity,
-      discount: item.discount ?? null,
-      serialNumbers: item.serialNumbers ?? [],
-    });
+    // Held quantity is in ENTERED units (2 = two boxes on a Box hold).
+    const enteredQuantity = item.enteredQuantity ?? item.quantity;
+    const heldUnit =
+      item.uomConversionId != null
+        ? unitsByVariant
+            .get(item.variantId)
+            ?.find((unit) => unit.uomConversionId === item.uomConversionId)
+        : undefined;
+
+    if (heldUnit) {
+      lines.push({
+        ...product,
+        variants: [variant],
+        quantity: enteredQuantity,
+        enteredQuantity,
+        discount: item.discount ?? null,
+        serialNumbers: item.serialNumbers ?? [],
+        uomConversionId: heldUnit.uomConversionId,
+        unitName: heldUnit.unitName,
+        unitAbbreviation: heldUnit.unitAbbreviation,
+        conversionFactor: heldUnit.conversionFactor,
+        unitPrice: heldUnit.salePrice,
+      });
+    } else {
+      lines.push({
+        ...product,
+        variants: [variant],
+        quantity: enteredQuantity,
+        enteredQuantity,
+        discount: item.discount ?? null,
+        serialNumbers: item.serialNumbers ?? [],
+        uomConversionId: null,
+        unitName: null,
+        unitAbbreviation: null,
+        conversionFactor: 1,
+        unitPrice: Number(variant.sellingPrice),
+      });
+    }
   }
   return { lines, missing };
 }

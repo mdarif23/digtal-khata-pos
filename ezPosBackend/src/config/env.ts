@@ -44,9 +44,22 @@ export const env = {
   trialPlanSlug: process.env.TRIAL_PLAN_SLUG?.trim() || "free-trial",
   accessTokenTtlMinutes: optionalInt("ACCESS_TOKEN_TTL_MINUTES", 15),
   refreshTokenTtlDays: optionalInt("REFRESH_TOKEN_TTL_DAYS", 7),
-  /** Ops-tunable rate-limit ceilings (requests per 15-minute window). */
-  authRateLimitMax: optionalInt("AUTH_RATE_LIMIT_MAX", 20),
-  refreshRateLimitMax: optionalInt("REFRESH_RATE_LIMIT_MAX", 60),
+  /**
+   * Ops-tunable rate-limit ceilings (requests per 15-minute window).
+   * The limiters are process-global singletons; the integration suite
+   * boots every suite's app in ONE process and registers many users from
+   * 127.0.0.1, so under INTEGRATION_TESTS=1 the credential ceilings open
+   * up (unless set explicitly) — otherwise suite order decides which
+   * tests eat a 429. Production defaults are unchanged.
+   */
+  authRateLimitMax: optionalInt(
+    "AUTH_RATE_LIMIT_MAX",
+    process.env.INTEGRATION_TESTS === "1" ? 1_000_000 : 20,
+  ),
+  refreshRateLimitMax: optionalInt(
+    "REFRESH_RATE_LIMIT_MAX",
+    process.env.INTEGRATION_TESTS === "1" ? 1_000_000 : 60,
+  ),
   /**
    * Email delivery. "console" (default) logs messages instead of pretending
    * to send; "resend" posts to the Resend HTTP API; "none" discards.

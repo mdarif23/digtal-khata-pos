@@ -333,6 +333,7 @@ export async function getProductSalesReport(businessId: number, params: DateRang
       COALESCE(cat.name, 'Uncategorized') AS "categoryName",
       COALESCE(b.name, '-') AS "brandName",
       pv.sku,
+      COALESCE(u.abbreviation, u.name) AS "unitLabel",
       SUM(si.quantity)::int AS "qtySold",
       COALESCE(SUM(si.selling_price * si.quantity), 0)::numeric AS "grossSales",
       COALESCE(SUM(si.discount * si.quantity), 0)::numeric AS "totalDiscount",
@@ -348,6 +349,7 @@ export async function getProductSalesReport(businessId: number, params: DateRang
     INNER JOIN sales s ON s.id = si.sale_id
     INNER JOIN product_variants pv ON pv.id = si.variant_id
     INNER JOIN products p ON p.id = pv.product_id
+    LEFT JOIN units u ON u.id = p.unit_id
     LEFT JOIN categories cat ON cat.id = p.category_id
     LEFT JOIN brands b ON b.id = p.brand_id
     ${variantOptionsJoinSql("pv", "vol")}
@@ -358,7 +360,7 @@ export async function getProductSalesReport(businessId: number, params: DateRang
       ${params.categoryId ? sql`AND p.category_id = ${params.categoryId}` : sql``}
       ${params.brandId ? sql`AND p.brand_id = ${params.brandId}` : sql``}
       ${searchFilter ? sql`AND (p.name ILIKE ${searchFilter} OR pv.sku ILIKE ${searchFilter})` : sql``}
-    GROUP BY p.id, p.name, pv.id, pv.sku, cat.name, b.name, vol.option_label
+    GROUP BY p.id, p.name, pv.id, pv.sku, u.abbreviation, u.name, cat.name, b.name, vol.option_label
     ORDER BY "qtySold" DESC
     LIMIT ${limit} OFFSET ${offset}
   `);

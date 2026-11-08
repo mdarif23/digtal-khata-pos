@@ -65,7 +65,11 @@ export type PaymentSchemaType = z.infer<typeof paymentSchema>;
 // 1. Define what a single cart item should look like when sent to the DB
 const cartItemPayloadSchema = z.object({
   variantId: z.number().int().positive("Variant ID is required"),
+  // Quantity in the SELECTED sell unit (2 = two boxes). Integer whole
+  // packages in v1; the server allows fractional UOM quantities when the
+  // base amount is whole.
   quantity: z.number().int().positive("Quantity must be at least 1"),
+  // Advisory per-selected-unit price — the server re-resolves trusted prices.
   unitPrice: z.number().nonnegative("Unit price cannot be negative"),
   discount: z
     .object({
@@ -74,6 +78,8 @@ const cartItemPayloadSchema = z.object({
     })
     .nullable(),
   serialNumbers: z.array(z.string().trim().min(1)).optional(),
+  // Packaging-unit selling: null = base unit line.
+  uomConversionId: z.number().int().positive().nullable().optional(),
 });
 
 // 2. Define the full Payload schema

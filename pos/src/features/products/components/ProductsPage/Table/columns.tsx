@@ -13,6 +13,7 @@ import { getProductStockState } from "../../../utils/getProductStockState";
 import axios from "../../../../../api/axios";
 import { ViewSerialsDialog } from "./data-table";
 import { hasPermission } from "@/auth/sessionStore";
+import useProductStore from "@/features/products/useProductStore";
 
 const columnHelper = createColumnHelper<DataTableFeatures, ProductType>();
 const currencyFormatter = new Intl.NumberFormat("en-BD", {
@@ -104,6 +105,14 @@ export const columns = columnHelper.columns([
         (total, variant) => total + variant.quantity,
         0,
       );
+      // The raw quantity IS base units. /api/products only carries unitId,
+      // so the abbreviation is resolved from the unit options when available;
+      // otherwise the neutral "base units" label keeps the number honest.
+      const unitAbbreviation = useProductStore((state) =>
+        state.productSelectOptions.units.find(
+          (unit) => unit.value === product.unitId,
+        )?.abbreviation,
+      );
       const stockState = getProductStockState(product);
       const stockLabel = {
         "in-stock": "In stock",
@@ -122,7 +131,7 @@ export const columns = columnHelper.columns([
             {stockLabel}
           </Badge>
           <span className="text-xs text-muted-foreground">
-            {totalQuantity.toLocaleString()} units
+            {totalQuantity.toLocaleString()} {unitAbbreviation ?? "base units"}
             {!product.hasVariants &&
             product.trackingType === "serial" &&
             variantId !== undefined ? (

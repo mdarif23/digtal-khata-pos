@@ -18,12 +18,17 @@ import { HoldDropdownMenu } from "./HoldDropdownMenu.js";
 import { Card, CardContent } from "@/components/ui/card.js";
 import { Input } from "@/components/ui/input.js";
 import { Switch } from "@/components/ui/switch.js";
-import { getCartTotals, getLinePricing } from "../../cartPricing.js";
+import { getCartTotals, getLinePricing, money } from "../../cartPricing.js";
 import { quoteSaleApi, type QuoteTotals } from "../../quote.api.js";
 import { SerialPickerDialog } from "./SerialPickerDialog.js";
 import { toast } from "@/components/ui/toast.js";
 import { Button } from "@/components/ui/button.js";
 import { ShoppingCart } from "lucide-react";
+import {
+  useSellUnits,
+  type SellUnitOption,
+} from "../../hooks/useSellUnits.js";
+import { UnitSwitcher } from "./UnitSwitcher.js";
 
 const FALLBACK_IMAGE =
   "https://www.startech.com.bd/image/cache/catalog/ceiling-fan/qulik/windora/windora-01-500x500.webp";
@@ -86,6 +91,7 @@ function useCartTotals(form: ShowCustomerInfoProps["form"]): CartTotalsView {
           variantId: item.variants[0]?.id ?? 0,
           quantity: item.quantity,
           discount: item.discount ?? null,
+          uomConversionId: item.uomConversionId ?? null,
         })),
         cartDiscount: discount,
         vatPercent: vatPercent === null ? null : Number(vatPercent),
@@ -224,7 +230,12 @@ export default function CartItems() {
       ) : (
         <div className="flex flex-col gap-3">
           {cart.map((item) => (
-            <CartItemRow key={item.variants[0]?.id ?? item.id} item={item} />
+            <CartItemRow
+              // Lines are keyed by (variant, unit): a Box line and a Pcs line
+              // of the same variant must not share a React key.
+              key={`${item.variants[0]?.id ?? item.id}:${item.uomConversionId ?? "base"}`}
+              item={item}
+            />
           ))}
         </div>
       )}
@@ -236,12 +247,15 @@ export default function CartItems() {
 function CartItemRow({ item }: { item: CartItem }) {
   // P2: stock returns/units now adjust the CANONICAL catalog's variant
   // quantity — the same store the POS grid reads (fixes the store-drift bug).
+  // Packaging lines convert entered units to BASE deltas with the line's
+  // conversionFactor (adding 1 Box takes 12 pcs from the pool).
   const returnVariantStock = useProductStore((s) => s.returnVariantStock);
   const takeVariantStock = useProductStore((s) => s.takeVariantStock);
   const addCartQuantity = useCartStore((s) => s.addCartQuantity);
   const removeCartQuantity = useCartStore((s) => s.removeCartQuantity);
   const removeCartItem = useCartStore((s) => s.removeCartItem);
   const addCustomCartQuantity = useCartStore((s) => s.addCustomCartQuantity);
+  const switchLineUnit = useCartStore((s) => s.switchLineUnit);
   const addDiscount = useCartStore((s) => s.addDiscount);
   const { addSerialItem } = useCartStore();
 
@@ -251,15 +265,57 @@ function CartItemRow({ item }: { item: CartItem }) {
   const cartSerials =
     useCartStore(
       (state) =>
-        state.cart.find((p) => p.variants.some((v) => v.id === variantId))
+        state.cart
+          .find(
+            (p) =>
+              p.variants.some((v) => v.id === variantId) &&
+              (p.uomConversionId ?? null) === (item.uomConversionId ?? null),
+          )
           ?.serialNumbers,
     ) ?? [];
 
   const quantity = Number(item.quantity);
-  const unitPrice = Number(variant.sellingPrice);
+  const lineUnit = item.uomConversionId ?? null;
+  // Base unit when the field is absent (legacy/persisted lines, serials).
+  const conversionFactor =
+    item.conversionFactor && item.conversionFactor > 0
+      ? item.conversionFactor
+      : 1;
+  const isUomLine = lineUnit !== null;
+  const unitPrice = item.unitPrice ?? Number(variant.sellingPrice);
   const line = getLinePricing(unitPrice, quantity, item.discount);
   const isSerial = item.trackingType === "serial";
   const [isSerialOpen, setIsSerialOpen] = useState(false);
+
+  // Sell units for the switcher chip — lazily fetched per cart line and
+  // cached; single-unit products never render any of this UI.
+  const { data: sellUnits } = useSellUnits(variantId, !isSerial);
+  const units = sellUnits?.units ?? [];
+  const hasPackagingUnits = units.length > 1;
+  const baseUnitLabel =
+    sellUnits?.baseUnit?.abbreviation ?? sellUnits?.baseUnit?.name ?? null;
+  const chipLabel =
+    (isUomLine ? item.unitAbbreviation ?? item.unitName : null) ??
+    (hasPackagingUnits ? baseUnitLabel : null);
+
+  const handleSwitchUnit = (unit: SellUnitOption) => {
+    const result = switchLineUnit(variantId, lineUnit, unit);
+    if (!result.ok) {
+      toast.add({
+        type: "error",
+        description:
+          result.reason === "below-one-package"
+            ? `That is less than 1 ${unit.unitName} — line left unchanged.`
+            : "Could not switch the unit.",
+      });
+      return;
+    }
+    // Keep the stock pool consistent: release the old base amount, reserve
+    // the converted one (the floored remainder stays sellable).
+    returnVariantStock(variantId, quantity * conversionFactor);
+    takeVariantStock(variantId, result.convertedQuantity * unit.conversionFactor);
+  };
+
   return (
     <Card className="overflow-hidden shadow-none">
       <CardContent className="p-3 sm:p-4">
@@ -273,11 +329,28 @@ function CartItemRow({ item }: { item: CartItem }) {
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="truncate font-medium">{item.name}</span>
             <span className="text-sm text-muted-foreground">
-              {unitPrice.toFixed(2)} × {quantity} ={" "}
+              {unitPrice.toFixed(2)} × {quantity}
+              {isUomLine && item.unitAbbreviation ? ` ${item.unitAbbreviation}` : ""}{" "}
+              ={" "}
               <span className="font-semibold text-foreground">
                 {line.base.toFixed(2)}
               </span>
+              {isUomLine && (
+                <span className="ml-1.5 text-xs">
+                  = {money(quantity * conversionFactor)}
+                  {baseUnitLabel ? ` ${baseUnitLabel}` : ""}
+                </span>
+              )}
             </span>
+
+            {(isUomLine || hasPackagingUnits) && !isSerial && sellUnits && (
+              <UnitSwitcher
+                units={units}
+                currentUomConversionId={lineUnit}
+                currentLabel={chipLabel}
+                onSwitch={handleSwitchUnit}
+              />
+            )}
 
             <CartItemDiscount
               variantId={variantId}
@@ -321,8 +394,8 @@ function CartItemRow({ item }: { item: CartItem }) {
                   type="button"
                   aria-label="Remove item"
                   onClick={() => {
-                    returnVariantStock(variantId, item.quantity);
-                    removeCartItem(variantId);
+                    returnVariantStock(variantId, quantity * conversionFactor);
+                    removeCartItem(variantId, lineUnit);
                   }}
                   className="cursor-pointer rounded-full text-muted-foreground transition hover:text-destructive"
                 >
@@ -337,8 +410,9 @@ function CartItemRow({ item }: { item: CartItem }) {
                 aria-label="Decrease quantity"
                 disabled={quantity <= 1}
                 onClick={() => {
-                  returnVariantStock(variantId, 1);
-                  removeCartQuantity(variantId);
+                  // Steps in ENTERED units (±1 box); the pool moves in base.
+                  returnVariantStock(variantId, conversionFactor);
+                  removeCartQuantity(variantId, lineUnit);
                 }}
                 className="cursor-pointer rounded-full transition hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -348,15 +422,23 @@ function CartItemRow({ item }: { item: CartItem }) {
               <CartQuantityInput
                 itemId={variantId}
                 quantity={quantity}
-                addCustomCartQuantity={addCustomCartQuantity}
+                addCustomCartQuantity={(id, newQty) => {
+                  const deltaBase = (newQty - quantity) * conversionFactor;
+                  if (deltaBase > 0) {
+                    takeVariantStock(variantId, deltaBase);
+                  } else if (deltaBase < 0) {
+                    returnVariantStock(variantId, -deltaBase);
+                  }
+                  addCustomCartQuantity(id, newQty, lineUnit);
+                }}
               />
 
               <button
                 type="button"
                 aria-label="Increase quantity"
                 onClick={() => {
-                  takeVariantStock(variantId, 1);
-                  addCartQuantity(variantId);
+                  takeVariantStock(variantId, conversionFactor);
+                  addCartQuantity(variantId, lineUnit);
                 }}
                 className="cursor-pointer rounded-full transition hover:text-primary"
               >
@@ -367,8 +449,8 @@ function CartItemRow({ item }: { item: CartItem }) {
                 type="button"
                 aria-label="Remove item"
                 onClick={() => {
-                  returnVariantStock(variantId, item.quantity);
-                  removeCartItem(variantId);
+                  returnVariantStock(variantId, quantity * conversionFactor);
+                  removeCartItem(variantId, lineUnit);
                 }}
                 className="cursor-pointer rounded-full text-muted-foreground transition hover:text-destructive"
               >
@@ -438,7 +520,8 @@ function CartTextModal({
         <span>
           {totalItemsCount} {totalItemsCount === 1 ? "line item" : "line items"}
         </span>
-        <span>{totalQuantityCount} units</span>
+        {/* Neutral label: mixed Box/Pcs lines make "units" ambiguous. */}
+        <span>Qty: {totalQuantityCount}</span>
       </div>
       <div className="flex justify-between py-1.5 text-sm">
         <span>Subtotal</span>

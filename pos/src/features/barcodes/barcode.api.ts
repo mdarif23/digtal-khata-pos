@@ -10,6 +10,12 @@ export interface BarcodeAlias {
   barcode: string;
   barcodeFormat: string | null;
   source: string;
+  /**
+   * UOM (migration 0062): set on package aliases — scanning this code
+   * means ONE of the conversion unit (a box-of-12 code). Null/absent = the
+   * base unit.
+   */
+  uomConversionId?: number | null;
 }
 
 export interface BarcodeVariantView {
@@ -50,6 +56,19 @@ export interface LookupMatch {
   trackingType: string | null;
   /** On-hand quantity at the active location (0 when unknown). */
   stockAtLocation: number;
+  /**
+   * UOM (migration 0062): set on package-alias matches — scanning this
+   * code means ONE of this conversion unit (a box-of-12 code), with its
+   * server-resolved per-unit price. Null/absent = base unit.
+   */
+  unit?: {
+    conversionId: number;
+    unitId: number;
+    unitName: string;
+    unitAbbreviation: string | null;
+    conversionFactor: number;
+    salePrice: number;
+  } | null;
   /** Only present for purchase-cost authorized roles; null otherwise. */
   purchaseCost: number | null;
 }
@@ -133,6 +152,12 @@ export async function assignBarcodeApi(input: {
   format?: BarcodeFormat;
   target: "primary" | "alias";
   replace?: boolean;
+  /**
+   * UOM (migration 0062): the packaging unit this alias stands for (a
+   * box-of-12 code). Alias-target only — primary barcodes are always
+   * base-unit. The server validates product ownership + active status.
+   */
+  uomConversionId?: number | null;
 }): Promise<BarcodeVariantView> {
   try {
     const res = await axios.post<{ success: boolean; data: BarcodeVariantView }>(
@@ -179,6 +204,47 @@ export async function getPrintHistoryApi(
   const res = await axios.get<{ success: boolean; data: PrintHistoryEntry[] }>(
     "/barcodes/print-history",
     { params: { limit } },
+  );
+  return res.data.data;
+}
+
+/** One row of GET /product/:productId/uom (the product's Units & Packaging
+ *  configuration). Read-only use here: the alias-assign packaging picker. */
+export interface ProductUomConfigRow {
+  id: number;
+  /** Null = the conversion applies to every variant of the product. */
+  variantId: number | null;
+  unitId: number;
+  unitName: string;
+  unitAbbreviation: string | null;
+  /** Base units per package. */
+  conversionFactor: number;
+  isPurchaseEnabled: boolean;
+  isSaleEnabled: boolean;
+  isDefaultPurchase: boolean;
+  isDefaultSale: boolean;
+  salePrice: number | null;
+  purchasePrice: number | null;
+  status: string;
+  isLocked: boolean;
+  derivedSalePrice: number | null;
+}
+
+export interface ProductUomConfig {
+  baseUnit: { id: number; name: string; abbreviation: string | null } | null;
+  units: ProductUomConfigRow[];
+}
+
+/**
+ * The product's UOM configuration (GET /api/product/:productId/uom) —
+ * drives the optional "Packaging unit" select when assigning an ALIAS
+ * barcode (a package barcode qualifies the alias with a conversion row).
+ */
+export async function getProductUomApi(
+  productId: number,
+): Promise<ProductUomConfig> {
+  const res = await axios.get<{ success: boolean; data: ProductUomConfig }>(
+    `/product/${productId}/uom`,
   );
   return res.data.data;
 }

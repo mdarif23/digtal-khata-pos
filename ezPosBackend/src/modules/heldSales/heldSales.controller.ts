@@ -7,7 +7,8 @@ import { sendSafeError } from "../../utils/safeError.js";
 
 const heldItemSchema = z.object({
   variantId: z.number().int().positive(),
-  quantity: z.number().int().positive(),
+  // ENTERED quantity — fractional allowed only with a packaging unit.
+  quantity: z.number().positive(),
   discount: z
     .object({
       type: z.enum(["percentage", "fixed"]),
@@ -17,6 +18,17 @@ const heldItemSchema = z.object({
     .optional(),
   serialNumbers: z.array(z.string().trim().min(1)).max(200).optional(),
   productName: z.string().trim().min(1).max(255),
+  // UOM (migration 0062): the hold stores the entered unit; resume
+  // re-resolves the factor from the live packaging row.
+  uomConversionId: z.number().int().positive().nullish(),
+}).superRefine((data, ctx) => {
+  if (data.uomConversionId == null && !Number.isInteger(data.quantity)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["quantity"],
+      message: "Quantity must be a whole number.",
+    });
+  }
 });
 
 const createSchema = z.object({
@@ -48,6 +60,8 @@ export async function createHeld(req: Request, res: Response) {
         discount: item.discount ?? null,
         ...(item.serialNumbers ? { serialNumbers: item.serialNumbers } : {}),
         productName: item.productName,
+        uomConversionId: item.uomConversionId ?? null,
+        enteredQuantity: item.uomConversionId != null ? item.quantity : null,
       })),
       note: parsed.data.note ?? null,
     });

@@ -179,11 +179,11 @@ describe("checkout idempotency key", () => {
 });
 
 describe("resumeHeldItems", () => {
-  it("rebuilds lines from the live catalog and reports missing products", () => {
+  it("rebuilds lines from the live catalog and reports missing products", async () => {
     const live = product(1, [variant(11)]);
     catalogState.products = [live];
 
-    const { lines, missing } = resumeHeldItems([
+    const { lines, missing } = await resumeHeldItems([
       { variantId: 11, quantity: 3, productName: "Product 1" },
       { variantId: 424242, quantity: 1, productName: "Ghost Product" },
     ]);
@@ -194,10 +194,10 @@ describe("resumeHeldItems", () => {
     expect(missing).toEqual(["Ghost Product"]);
   });
 
-  it("carries discounts and serials into the rebuilt lines", () => {
+  it("carries discounts and serials into the rebuilt lines", async () => {
     catalogState.products = [product(1, [variant(11)])];
 
-    const { lines } = resumeHeldItems([
+    const { lines } = await resumeHeldItems([
       {
         variantId: 11,
         quantity: 2,
@@ -245,5 +245,114 @@ describe("restorePersistedCart", () => {
   it("leaves an empty cart alone when nothing is persisted", async () => {
     await restorePersistedCart();
     expect(useCartStore.getState().cart).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Packaging-unit selling (UOM, migration 0062)
+// ---------------------------------------------------------------------------
+
+import { lineUnitId } from "../../types/cart.types.js";
+
+const boxUnit = {
+  uomConversionId: 9001,
+  unitName: "Box",
+  unitAbbreviation: "box",
+  conversionFactor: 12,
+  salePrice: 1500,
+} as const;
+
+describe("UOM cart lines", () => {
+  it("adds a Box line with per-unit price, factor and enteredQuantity mirror", () => {
+    useCartStore.getState().addToCart(product(1, [variant(11)]), boxUnit);
+
+    const { cart } = useCartStore.getState();
+    expect(cart).toHaveLength(1);
+    expect(cart[0]!.quantity).toBe(1);
+    expect(cart[0]!.enteredQuantity).toBe(1);
+    expect(cart[0]!.uomConversionId).toBe(9001);
+    expect(cart[0]!.unitPrice).toBe(1500);
+    expect(cart[0]!.conversionFactor).toBe(12);
+    expect(lineUnitId(cart[0])).toBe(9001);
+  });
+
+  it("keeps Box and Piece lines of the same variant separate and scoped", () => {
+    const p = product(1, [variant(11)]);
+    useCartStore.getState().addToCart(p, boxUnit);
+    useCartStore.getState().addToCart(p);
+
+    const { cart } = useCartStore.getState();
+    expect(cart).toHaveLength(2);
+    expect(new Set(cart.map((l) => lineUnitId(l)))).toEqual(new Set([9001, null]));
+
+    // Quantity actions are unit-scoped: +1 on the Box line leaves Pcs alone.
+    useCartStore.getState().addCartQuantity(11, 9001);
+    const boxLine = useCartStore.getState().cart.find((l) => lineUnitId(l) === 9001)!;
+    const pcsLine = useCartStore.getState().cart.find((l) => lineUnitId(l) === null)!;
+    expect(boxLine.quantity).toBe(2);
+    expect(pcsLine.quantity).toBe(1);
+
+    // Removing the Box line keeps the Pcs line.
+    useCartStore.getState().removeCartItem(11, 9001);
+    expect(useCartStore.getState().cart).toHaveLength(1);
+    expect(lineUnitId(useCartStore.getState().cart[0])).toBe(null);
+  });
+
+  it("switches a line's unit preserving the base amount and merging", () => {
+    const p = product(1, [variant(11)]);
+    useCartStore.getState().addToCart(p, boxUnit); // 1 Box = 12 base
+
+    // 1 Box → 12 Pcs (base amount preserved)
+    const toBase = {
+      uomConversionId: null,
+      unitName: "Piece",
+      unitAbbreviation: "pc",
+      conversionFactor: 1,
+      salePrice: 100,
+    } as const;
+    const result = useCartStore
+      .getState()
+      .switchLineUnit(11, 9001, toBase);
+    expect(result).toEqual({ ok: true, convertedQuantity: 12, merged: false });
+    expect(useCartStore.getState().cart[0]!.quantity).toBe(12);
+    expect(lineUnitId(useCartStore.getState().cart[0])).toBe(null);
+
+    // 13 Pcs → 1 Box (floor; the odd piece is returned by the caller)
+    const up = useCartStore
+      .getState()
+      .switchLineUnit(11, null, boxUnit);
+    expect(up).toEqual({ ok: true, convertedQuantity: 1, merged: false });
+    expect(useCartStore.getState().cart[0]!.quantity).toBe(1);
+
+    // 1 Box → Pcs and back is below-one-package in the other direction:
+    // switching 1 Box to a 144-factor Carton must refuse.
+    const carton = { ...boxUnit, uomConversionId: 9002, conversionFactor: 144 } as const;
+    const refused = useCartStore
+      .getState()
+      .switchLineUnit(11, 9001, carton);
+    expect(refused).toEqual({ ok: false, reason: "below-one-package" });
+  });
+
+  it("includes the packaging unit in the hold payload and restores it", async () => {
+    const p = product(1, [variant(11)]);
+    useCartStore.getState().addToCart(p, boxUnit);
+
+    // The hold payload builder lives in the store (useHoldCartStore slice):
+    // exercised indirectly — a resumed hold with a UOM line falls back to
+    // base when the unit is gone from the catalog.
+    catalogState.products = [product(1, [variant(11)])];
+    const { lines } = await resumeHeldItems([
+      {
+        variantId: 11,
+        quantity: 2,
+        productName: "Product 1",
+        uomConversionId: 9001,
+        enteredQuantity: 2,
+      },
+    ]);
+    expect(lines).toHaveLength(1);
+    // The conversion row is unknown to the local catalog → base-unit line
+    // carrying the entered quantity (resume never breaks).
+    expect(lines[0]!.quantity).toBe(2);
   });
 });

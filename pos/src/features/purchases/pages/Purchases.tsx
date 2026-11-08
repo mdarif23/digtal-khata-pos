@@ -29,6 +29,11 @@ import { PurchaseTable } from "../components/purchases/PurchaseTable";
 import { usePurchasesStore } from "../usePurchaseStore";
 import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
 import {
+  fetchPurchaseUnits,
+  pickDefaultPurchaseUnit,
+} from "../hooks/usePurchaseUnits";
+import { scanStepInLineUnit, unitCostFromBase } from "../utils/uom";
+import {
   type LookupMatch,
 } from "@/features/barcodes/barcode.api";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
@@ -125,12 +130,47 @@ export function PurchasesOrder() {
     0,
   );
 
+  /**
+   * UOM (migration 0062): a freshly added line starts in the BASE unit and
+   * is then moved to the configured default purchase unit once the (lazy)
+   * purchase-units fetch resolves — unless the operator already touched the
+   * line. The server stays authoritative: only uomConversionId is submitted.
+   */
+  const applyDefaultPurchaseUnit = useCallback(
+    async (variantId: number, baseUnitPrice: number) => {
+      const unitsResponse = await fetchPurchaseUnits(queryClient, variantId);
+      const unit = pickDefaultPurchaseUnit(unitsResponse?.units);
+      if (!unit) return;
+      setPurchasesCart((current) =>
+        current.map((item) => {
+          if (item.variants[0]?.id !== variantId || item.unitTouched) {
+            return item;
+          }
+          return {
+            ...item,
+            uomConversionId: unit.uomConversionId,
+            unitName: unit.unitName,
+            conversionFactor: unit.conversionFactor,
+            purchasePrice:
+              unit.defaultPurchasePrice != null
+                ? roundCurrency(unit.defaultPurchasePrice)
+                : roundCurrency(
+                    unitCostFromBase(baseUnitPrice, unit.conversionFactor),
+                  ),
+          };
+        }),
+      );
+    },
+    [queryClient],
+  );
+
   const handleAddPurchase = (product: ProductType) => {
     const variant = product.variants[0];
     const productId = product.id;
     const variantId = variant?.id;
     if (productId === undefined || variantId === undefined || !variant) return;
 
+    const baseUnitPrice = roundCurrency(getVariantPurchaseCost(variant));
     setPurchasesCart((current) => {
       const existing = current.find(
         (item) => item.variants[0]?.id === variantId,
@@ -150,12 +190,53 @@ export function PurchasesOrder() {
           id: productId,
           variants: [{ ...variant, id: variantId }],
           purchaseQty: 1,
-          purchasePrice: roundCurrency(getVariantPurchaseCost(variant)),
+          purchasePrice: baseUnitPrice,
           purchaseDiscount: 0,
           purchaseTax: 0,
+          // Base unit until the default-purchase-unit resolution lands.
+          uomConversionId: null,
+          unitName: "units",
+          conversionFactor: 1,
+          unitTouched: false,
         },
       ];
     });
+    void applyDefaultPurchaseUnit(variantId, baseUnitPrice);
+  };
+
+  /**
+   * UOM: switching the line's packaging unit keeps the ENTERED quantity
+   * number (the operator is re-expressing the same order in another unit
+   * and can adjust it; the live hint shows the base equivalent) and
+   * reprices the cost from the unit's configured default, falling back to
+   * the converted current per-base price.
+   */
+  const handleUnitChange = (
+    variantId: number,
+    unit: {
+      uomConversionId: number | null;
+      unitName: string;
+      conversionFactor: number;
+      defaultPurchasePrice: number | null;
+    },
+  ) => {
+    setPurchasesCart((current) =>
+      current.map((item) => {
+        if (item.variants[0]?.id !== variantId) return item;
+        const basePrice = item.purchasePrice * item.conversionFactor;
+        return {
+          ...item,
+          uomConversionId: unit.uomConversionId,
+          unitName: unit.unitName,
+          conversionFactor: unit.conversionFactor,
+          purchasePrice:
+            unit.defaultPurchasePrice != null
+              ? roundCurrency(unit.defaultPurchasePrice)
+              : roundCurrency(unitCostFromBase(basePrice, unit.conversionFactor)),
+          unitTouched: true,
+        };
+      }),
+    );
   };
 
   const handleUpdatePurchase = (
@@ -182,6 +263,9 @@ export function PurchasesOrder() {
         );
         return {
           ...item,
+          // Any manual edit stops the pending default-unit resolution from
+          // overwriting the operator's figures.
+          unitTouched: true,
           [field]:
             field === "purchaseQty"
               ? quantity
@@ -199,6 +283,11 @@ export function PurchasesOrder() {
    * Module scan handler — the scanner service only IDENTIFIES a barcode;
    * the purchase rules (active status, catalog row, cost default, add or
    * increment) live here. Throwing surfaces the failure as an error scan.
+   *
+   * UOM (migration 0062): a package-alias scan (match.unit) counts ONE
+   * package — the line is added in that unit, or an existing line takes the
+   * scanned package converted into its own unit. Any other scan adds one of
+   * the DEFAULT purchase unit.
    */
   const handleResolved = useCallback(
     async (match: LookupMatch) => {
@@ -226,11 +315,65 @@ export function PurchasesOrder() {
         throw new Error(`${match.productName} is not in the loaded catalog.`);
       }
 
+      if (match.unit) {
+        const scannedUnit = match.unit;
+        const existing = purchasesCart.find(
+          (item) => item.variants[0]?.id === match.variantId,
+        );
+        if (existing) {
+          const step = scanStepInLineUnit(
+            existing.conversionFactor,
+            scannedUnit.conversionFactor,
+          );
+          if (step === null) {
+            throw new Error(
+              `Scanned ${scannedUnit.unitName} does not match the line's ${existing.unitName} unit — adjust the unit on the line.`,
+            );
+          }
+          setPurchasesCart((current) =>
+            current.map((item) =>
+              item.variants[0]?.id === match.variantId
+                ? { ...item, purchaseQty: item.purchaseQty + step }
+                : item,
+            ),
+          );
+          setSearchProducts("");
+          return;
+        }
+        // New line: add it directly in the scanned package unit (one scan =
+        // one package), priced per package from the variant's base cost.
+        const variant = row.variant;
+        const variantId = variant.id;
+        if (variantId === undefined) return;
+        const baseUnitPrice = roundCurrency(getVariantPurchaseCost(variant));
+        setPurchasesCart((current) => [
+          ...current,
+          {
+            ...row.product,
+            id: row.product.id,
+            variants: [{ ...variant, id: variantId }],
+            purchaseQty: 1,
+            purchasePrice: roundCurrency(
+              unitCostFromBase(baseUnitPrice, scannedUnit.conversionFactor),
+            ),
+            purchaseDiscount: 0,
+            purchaseTax: 0,
+            uomConversionId: scannedUnit.conversionId,
+            unitName: scannedUnit.unitName,
+            conversionFactor: scannedUnit.conversionFactor,
+            unitTouched: true,
+          },
+        ]);
+        setSearchProducts("");
+        return;
+      }
+
       handleAddPurchase({ ...row.product, variants: [row.variant] });
       setSearchProducts("");
     },
     // handleAddPurchase only touches setPurchasesCart and cost helpers.
-    [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [purchasesCart],
   );
 
   // Local-first identification over the purchasable catalog; everything
@@ -278,10 +421,17 @@ export function PurchasesOrder() {
         data: {
           items: purchasesCart.map((item) => ({
             variantId: item.variants[0].id,
+            // quantity/purchasePrice are in the SELECTED packaging unit
+            // (uomConversionId null = base); the server converts them to
+            // base authoritatively and computes the financials from the
+            // entered figures.
             quantity: item.purchaseQty,
             purchasePrice: item.purchasePrice,
             discount: item.purchaseDiscount,
             tax: item.purchaseTax,
+            ...(item.uomConversionId != null
+              ? { uomConversionId: item.uomConversionId }
+              : {}),
           })),
           supplierId: purchaseSource === "supplier" ? supplierId : null,
           purchaseDate,
@@ -506,6 +656,7 @@ export function PurchasesOrder() {
                   <PurchaseTable
                     purchasesCart={purchasesCart}
                     onUpdateItem={handleUpdatePurchase}
+                    onUnitChange={handleUnitChange}
                     onRemoveItem={(variantId) =>
                       setPurchasesCart((current) =>
                         current.filter(

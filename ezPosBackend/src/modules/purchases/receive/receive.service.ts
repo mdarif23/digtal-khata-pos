@@ -184,6 +184,11 @@ export interface ReceivingRecordInput {
   approvalReason?: string | undefined;
   receivedByUserId: number;
   approvedByUserId?: number | undefined;
+  /** UOM snapshot (migration 0062): entered unit context, all null = base. */
+  uomConversionId?: number | null | undefined;
+  enteredQuantity?: number | null | undefined;
+  enteredUnitPrice?: number | null | undefined;
+  conversionFactor?: number | null | undefined;
 }
 
 /**
@@ -215,6 +220,10 @@ export async function insertReceivingRecords(
         approvalReason: record.approvalReason ?? null,
         receivedByUserId: record.receivedByUserId,
         approvedByUserId: record.approvedByUserId ?? null,
+        uomConversionId: record.uomConversionId ?? null,
+        enteredQuantity: record.enteredQuantity ?? null,
+        enteredUnitPrice: record.enteredUnitPrice ?? null,
+        conversionFactor: record.conversionFactor ?? null,
       })),
     )
     .returning({ id: purchaseReceivingRecords.id, purchaseItemId: purchaseReceivingRecords.purchaseItemId });

@@ -6,6 +6,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
+import { resolveUomContext } from "../uom/uom.service.js";
 import { postPurchaseReturnLedgerEntry } from "../purchases/purchases.ledger.js";
 import {
   foldVariantOptionRows,
@@ -112,6 +113,49 @@ export async function createPurchaseReturn(
 
     assertItemsBelongToPurchase(items, purchaseItemIds);
 
+    // UOM (migration 0062): convert entered return units to BASE before the
+    // eligibility checks — received/returned/stock all speak base units.
+    // Eligibility math below is untouched.
+    const itemById = new Map(items.map((item) => [item.id, item]));
+    const enteredSnapshotByItem = new Map<
+      number,
+      { conversionId: number; enteredQuantity: number; conversionFactor: number }
+    >();
+    const baseRequestedByItem = new Map<number, number>();
+    for (const changed of changedItems) {
+      const purchaseItem = itemById.get(changed.purchaseItemId);
+      if (!purchaseItem) continue; // ownership reported by the assert above
+      if (changed.uomConversionId != null) {
+        const ctx = await resolveUomContext(
+          tx,
+          businessId,
+          purchaseItem.productId,
+          purchaseItem.variantId,
+          changed.uomConversionId,
+        );
+        const micros =
+          (BigInt(Math.round(changed.quantity * 1000)) * ctx.factorMicros) / 1000n;
+        if (micros % 1_000_000n !== 0n) {
+          throw new BadRequestError(
+            `The return quantity for item ${purchaseItem.id} does not convert to a whole base quantity.`,
+          );
+        }
+        baseRequestedByItem.set(
+          changed.purchaseItemId,
+          Number(micros) / 1_000_000,
+        );
+        enteredSnapshotByItem.set(changed.purchaseItemId, {
+          conversionId: ctx.conversion!.id,
+          enteredQuantity: changed.quantity,
+          conversionFactor: ctx.factor,
+        });
+      } else {
+        // Base-unit return (against UOM or legacy lines): base is always
+        // returnable — legacy behavior untouched.
+        baseRequestedByItem.set(changed.purchaseItemId, changed.quantity);
+      }
+    }
+
     const alreadyReturned = await tx
       .select({
         purchaseItemId: purchaseReturnItems.purchaseItemId,
@@ -131,9 +175,7 @@ export async function createPurchaseReturn(
         Number(item.quantity),
       ]),
     );
-    const requestedByItem = new Map(
-      changedItems.map((item) => [item.purchaseItemId, item.quantity]),
-    );
+    const requestedByItem = baseRequestedByItem;
     // Phase 5: explicit serial selections per line (absent = auto-pick).
     const serialIdsByItem = new Map(
       changedItems
@@ -409,13 +451,18 @@ export async function createPurchaseReturn(
         // from (the return's total_amount is the authoritative figure).
         const lineCredit = creditByItemId.get(item.id) ?? 0;
         const unitPrice = quantity > 0 ? lineCredit / quantity : 0;
+        const entered = enteredSnapshotByItem.get(item.id);
         return {
           businessId,
           purchaseReturnId: purchaseReturn.id,
           purchaseItemId: item.id,
           productId: item.productId,
           quantity,
-          unitPrice: Math.max(0, Number(unitPrice.toFixed(2))),
+          unitPrice: Math.max(0, Number(unitPrice.toFixed(6))),
+          uomConversionId: entered?.conversionId ?? null,
+          enteredQuantity: entered?.enteredQuantity ?? null,
+          enteredUnitPrice: null,
+          conversionFactor: entered?.conversionFactor ?? null,
         };
       }),
     );

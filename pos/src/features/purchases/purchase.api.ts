@@ -40,7 +40,12 @@ export async function getPurchasesReturnItemsApi(): Promise<
 export async function purchaseReturnApi(data: {
   orderId: number;
   reason?: string;
-  changedItems: { purchaseItemId: number; quantity: number }[];
+  changedItems: {
+    purchaseItemId: number;
+    /** Base units, or the packaging unit named by uomConversionId. */
+    quantity: number;
+    uomConversionId?: number | null;
+  }[];
 }) {
   const response = await axios.post("/purchase-return", data);
   return response.data;

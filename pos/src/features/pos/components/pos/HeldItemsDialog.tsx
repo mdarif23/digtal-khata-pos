@@ -51,21 +51,26 @@ export function HeldItemsDialog({
                 onClick={() => {
                   // Rebuild cart lines from LIVE catalog data (prices/stock
                   // re-validated at sale time); report unresolvable items.
-                  const { lines, missing } = resumeHeldItems(
-                    cart.items as never,
-                  );
-                  if (missing.length > 0) {
-                    toast.add({
-                      type: "error",
-                      description: `Not in the current catalog: ${missing.join(", ")}`,
-                      priority: "high",
-                    });
-                  }
-                  if (lines.length > 0) {
-                    addHoldItemsToCart(lines);
-                    void removeHoldCart(cart.id);
-                    handleOpenChange(false);
-                  }
+                  // Packaging-unit holds re-derive their unit/price from the
+                  // live sell-units; a missing conversion falls back to the
+                  // base unit so resume never breaks.
+                  void (async () => {
+                    const { lines, missing } = await resumeHeldItems(
+                      cart.items as never,
+                    );
+                    if (missing.length > 0) {
+                      toast.add({
+                        type: "error",
+                        description: `Not in the current catalog: ${missing.join(", ")}`,
+                        priority: "high",
+                      });
+                    }
+                    if (lines.length > 0) {
+                      addHoldItemsToCart(lines);
+                      void removeHoldCart(cart.id);
+                      handleOpenChange(false);
+                    }
+                  })();
                 }}
                 className="w-full flex flex-col items-center cursor-pointer mb-2 p-2 rounded"
                 key={cart.id}

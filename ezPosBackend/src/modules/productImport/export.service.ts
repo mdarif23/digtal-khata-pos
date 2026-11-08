@@ -27,6 +27,7 @@ const EXPORT_COLUMNS = [
   "category",
   "brand",
   "unit",
+  "package_units",
   "description",
   "sku",
   "has_variants",
@@ -75,6 +76,17 @@ export async function buildProductExport(
       categoryName: categoriesTable.name,
       brandName: brandsTable.name,
       unitName: unitsTable.name,
+      packaging: sql`(
+        SELECT string_agg(puc.unit_name || ':' || puc.conversion_factor, '; ' ORDER BY puc.conversion_factor)
+        FROM (
+          SELECT u2.name AS unit_name, puc2.conversion_factor
+          FROM product_unit_conversions puc2
+          JOIN units u2 ON u2.id = puc2.unit_id
+          WHERE puc2.product_id = ${productsTable.id}
+            AND puc2.business_id = ${productsTable.businessId}
+            AND puc2.status = 'active'
+        ) puc
+      )`,
       imageUrl: sql`(
         SELECT pi.image_url FROM product_images pi
         WHERE pi.product_id = ${productsTable.id}
@@ -182,6 +194,7 @@ export async function buildProductExport(
       category: row.categoryName ?? null,
       brand: row.brandName ?? null,
       unit: row.unitName ?? null,
+      package_units: (row.packaging as string | null) ?? null,
       description: row.description ?? null,
       sku: row.sku,
       has_variants: row.hasVariants ? "true" : "false",

@@ -30,6 +30,7 @@ function downloadProductsCsv(
   products: ProductType[],
   categories: { value: number; label: string }[],
   brands: { value: number; label: string }[],
+  unitAbbreviationById: Map<number, string>,
 ) {
   const rows: (string | number | null | undefined)[][] = [
     [
@@ -44,6 +45,8 @@ function downloadProductsCsv(
       "Alert quantity",
       "Purchase cost",
       "Selling price",
+      // Stock quantities are base units; the unit label names them when known.
+      "Stock unit",
     ],
   ];
 
@@ -52,6 +55,10 @@ function downloadProductsCsv(
       categories.find((item) => item.value === product.categoryId)?.label ?? "";
     const brand =
       brands.find((item) => item.value === product.brandId)?.label ?? "";
+    const stockUnit =
+      (product.unitId !== null
+        ? unitAbbreviationById.get(product.unitId)
+        : undefined) ?? "";
 
     if (product.variants.length === 0) {
       rows.push([
@@ -66,6 +73,7 @@ function downloadProductsCsv(
         "",
         "",
         "",
+        stockUnit,
       ]);
       continue;
     }
@@ -83,6 +91,7 @@ function downloadProductsCsv(
         variant.alertQuantity,
         variant.purchaseCost ?? variant.purchasePrice,
         variant.sellingPrice,
+        stockUnit,
       ]);
     }
   }
@@ -257,11 +266,20 @@ export function Products() {
     setBrandFilter("all");
   };
 
+  const unitAbbreviationById = useMemo(
+    () =>
+      new Map(
+        productSelectOptions.units.map((unit) => [unit.value, unit.abbreviation]),
+      ),
+    [productSelectOptions.units],
+  );
+
   const exportProducts = (rows: ProductType[]) =>
     downloadProductsCsv(
       rows,
       productSelectOptions.categories,
       productSelectOptions.brands,
+      unitAbbreviationById,
     );
 
   return (

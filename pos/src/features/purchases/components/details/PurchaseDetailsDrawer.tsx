@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -16,6 +17,30 @@ import {
   usePurchaseDetail,
   usePurchaseLandedCostContext,
 } from "../../hooks/usePurchaseDetail";
+import {
+  usePurchaseUnitsForVariants,
+  type PurchaseUnitOption,
+} from "../../hooks/usePurchaseUnits";
+import type { PurchaseDetailItem } from "../../purchase.types";
+
+/**
+ * The order line's entered-unit label, e.g. "5 Box @ ৳1,200/Box" with the
+ * base figures secondary ("= 60 pc @ ৳100/pc"). Legacy base-ordered lines
+ * render exactly as before.
+ */
+function formatEnteredLine(
+  item: PurchaseDetailItem,
+  unit: PurchaseUnitOption | null,
+): string | null {
+  if (
+    item.enteredQuantity == null ||
+    item.enteredUnitPrice == null ||
+    !unit
+  ) {
+    return null;
+  }
+  return `${item.enteredQuantity} ${unit.unitName} @ ৳${formatCurrency(item.enteredUnitPrice)}/${unit.unitName}`;
+}
 
 /**
  * Purchase details drawer (Phase 11): the authoritative financial picture
@@ -68,6 +93,32 @@ export function PurchaseDetailsDrawer({
   const items = detail.data?.items ?? [];
   const accounting = landedDoc.data?.accounting;
   const doc = landedDoc.data?.document;
+
+  // UOM (migration 0062): unit names for the entered-figure lines. Only
+  // the variants of lines actually ordered in a packaging unit are fetched
+  // — a drawer over legacy purchases fires no purchase-units request.
+  const uomVariantIds = useMemo(
+    () =>
+      [
+        ...new Set(
+          items
+            .filter((item) => item.enteredQuantity != null)
+            .map((item) => item.variantId),
+        ),
+      ].sort((a, b) => a - b),
+    [items],
+  );
+  const { byVariant: unitsByVariant } = usePurchaseUnitsForVariants(
+    uomVariantIds,
+  );
+  const unitFor = (item: PurchaseDetailItem): PurchaseUnitOption | null => {
+    const units = unitsByVariant.get(item.variantId);
+    if (!units) return null;
+    return (
+      units.find((unit) => unit.uomConversionId === item.uomConversionId) ??
+      null
+    );
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -189,34 +240,65 @@ export function PurchaseDetailsDrawer({
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((item) => (
-                      <tr key={item.id} className="border-t">
-                        <td className="px-3 py-2">
-                          <p className="font-medium">{item.productName}</p>
-                          {item.variantSku && (
-                            <p className="text-xs text-muted-foreground">
-                              {item.variantSku}
-                            </p>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          {item.quantity}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          {item.receivedQuantity}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          {formatCurrency(item.unitCost)}
-                        </td>
-                        <td className="px-3 py-2 text-right font-medium">
-                          {formatCurrency(
-                            item.quantity * item.unitCost -
-                              item.discount +
-                              item.tax,
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {items.map((item) => {
+                      const unit = unitFor(item);
+                      const enteredLine = formatEnteredLine(item, unit);
+                      const baseUnitName = item.productUnit ?? "units";
+                      return (
+                        <tr key={item.id} className="border-t">
+                          <td className="px-3 py-2">
+                            <p className="font-medium">{item.productName}</p>
+                            {item.variantSku && (
+                              <p className="text-xs text-muted-foreground">
+                                {item.variantSku}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {enteredLine ? (
+                              <>
+                                <span data-testid="entered-order">
+                                  {item.enteredQuantity} {unit!.unitName}
+                                </span>
+                                <span className="block text-xs text-muted-foreground">
+                                  = {item.quantity} {baseUnitName}
+                                </span>
+                              </>
+                            ) : (
+                              item.quantity
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {item.receivedQuantity}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {enteredLine ? (
+                              <>
+                                <span data-testid="entered-unit-price">
+                                  ৳{formatCurrency(item.enteredUnitPrice!)}/{
+                                    unit!.unitName
+                                  }
+                                </span>
+                                <span className="block text-xs text-muted-foreground">
+                                  ৳{formatCurrency(item.unitCost)}/{
+                                    baseUnitName
+                                  }
+                                </span>
+                              </>
+                            ) : (
+                              formatCurrency(item.unitCost)
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right font-medium">
+                            {formatCurrency(
+                              item.quantity * item.unitCost -
+                                item.discount +
+                                item.tax,
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

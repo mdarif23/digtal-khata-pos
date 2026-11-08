@@ -20,8 +20,17 @@ import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
 import { useReceivePurchase } from "../hooks/useReceivePurchase";
 import {
   outstandingOf,
-  overReceiveOf,
+  overReceiveInUnitOf,
+  outstandingInUnitOf,
 } from "../utils/receiveQuantities";
+import {
+  scanStepInLineUnit,
+  unitCostFromBase,
+} from "../utils/uom";
+import {
+  usePurchaseUnitsForVariants,
+  type PurchaseUnitOption,
+} from "../hooks/usePurchaseUnits";
 import { useScanFailureToast } from "@/features/barcodes/scanning/useScanFailureToast";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
@@ -58,6 +67,93 @@ export const ReceiveItems = () => {
     [purchaseId, purchasesItems],
   );
 
+  // UOM (migration 0062): only the variants whose PO lines were ordered in
+  // a packaging unit need unit options — legacy documents fetch nothing.
+  const uomVariantIds = useMemo(
+    () =>
+      [
+        ...new Set(
+          receiveItems
+            .filter((item) => item.uomConversionId != null)
+            .map((item) => item.variantId),
+        ),
+      ].sort((a, b) => a - b),
+    [receiveItems],
+  );
+  const { byVariant: unitsByVariant, loading: unitsLoading } =
+    usePurchaseUnitsForVariants(uomVariantIds);
+
+  /**
+   * The unit each line's quantities are entered in. The PO line's own unit
+   * is the default; a packaging unit that has since been deactivated falls
+   * back to the BASE unit (the line stays receivable — its stored figures
+   * are base). Serial-tracked lines always receive per piece in the base
+   * unit, since serials are per-piece.
+   */
+  const lineUnitDefaults = useMemo(() => {
+    const map = new Map<
+      number,
+      { conversionId: number | null; factor: number; unitName: string; orderedUnitUnavailable: boolean }
+    >();
+    for (const item of receiveItems) {
+      const units = unitsByVariant.get(item.variantId);
+      const baseUnitName = item.productUnit || "units";
+      if (item.trackingType === "serial") {
+        map.set(item.id, {
+          conversionId: null,
+          factor: 1,
+          unitName: baseUnitName,
+          orderedUnitUnavailable: item.uomConversionId != null,
+        });
+        continue;
+      }
+      if (item.uomConversionId == null) {
+        map.set(item.id, {
+          conversionId: null,
+          factor: 1,
+          unitName: baseUnitName,
+          orderedUnitUnavailable: false,
+        });
+        continue;
+      }
+      const ordered = units?.find(
+        (unit) => unit.uomConversionId === item.uomConversionId,
+      );
+      map.set(
+        item.id,
+        ordered
+          ? {
+              conversionId: ordered.uomConversionId,
+              factor: ordered.conversionFactor,
+              unitName: ordered.unitName,
+              orderedUnitUnavailable: false,
+            }
+          : {
+              conversionId: null,
+              factor: 1,
+              unitName: baseUnitName,
+              orderedUnitUnavailable: true,
+            },
+      );
+    }
+    return map;
+  }, [receiveItems, unitsByVariant]);
+
+  // Stable signature of the per-line unit defaults: the form prefill only
+  // (re)runs when a real unit/factor resolves, never on unrelated refetches.
+  const unitDefaultsSignature = useMemo(
+    () =>
+      receiveItems
+        .map((item) => {
+          const unit = lineUnitDefaults.get(item.id);
+          return unit
+            ? `${item.id}:${unit.conversionId ?? "base"}:${unit.factor}`
+            : `${item.id}:?`;
+        })
+        .join("|"),
+    [receiveItems, lineUnitDefaults],
+  );
+
   const form = useForm<ReceiveItemsFormValues>({
     resolver: zodResolver(receiveItemsFormSchema),
     defaultValues: {
@@ -75,31 +171,90 @@ export const ReceiveItems = () => {
   const dueAmount = Number(purchaseOrder?.dueAmount ?? 0);
   useEffect(() => {
     if (!purchaseOrder || receiveItems.length === 0) return;
+    // UOM lines wait for their unit options so the prefill can be expressed
+    // in the ordered unit; base-only orders reset immediately.
+    if (uomVariantIds.length > 0 && unitsLoading) return;
     form.reset({
       purchaseId,
-      items: receiveItems.map((item) => ({
-        itemId: item.id,
-        trackingType:
-          item.trackingType === "batch" || item.trackingType === "serial"
-            ? item.trackingType
-            : "none",
-        receiveNow: Math.max(
-          0,
-          Number(item.quantity) -
-            Number(item.receivedQuantity) -
-            Number(item.cancelledQuantity || 0),
-        ),
-        rejectedQuantity: 0,
-        unitCost: Number(item.unitCost) || 0,
-        sellingPrice: Number(item.sellingPrice) || 0,
-        batches: [],
-        serialNumbers: [],
-      })),
+      items: receiveItems.map((item) => {
+        const unit = lineUnitDefaults.get(item.id);
+        const factor = unit?.factor ?? 1;
+        const outstanding = outstandingOf(item);
+        return {
+          itemId: item.id,
+          trackingType:
+            item.trackingType === "batch" || item.trackingType === "serial"
+              ? item.trackingType
+              : "none",
+          // Received in the SELECTED unit when a package unit applies.
+          receiveNow: unit?.conversionId
+            ? outstandingInUnitOf(item, factor)
+            : Math.max(0, outstanding),
+          rejectedQuantity: 0,
+          // Per selected unit: the PO's entered price for its own unit,
+          // otherwise the base cost scaled by the factor.
+          unitCost:
+            unit?.conversionId && item.enteredUnitPrice != null
+              ? Number(item.enteredUnitPrice) || 0
+              : unitCostFromBase(Number(item.unitCost) || 0, factor),
+          sellingPrice: Number(item.sellingPrice) || 0,
+          batches: [],
+          serialNumbers: [],
+          ...(unit?.conversionId
+            ? { uomConversionId: unit.conversionId }
+            : { uomConversionId: null }),
+        };
+      }),
       paymentAmount: 0,
       paymentMethod: "cash",
       paymentNotes: "",
     });
-  }, [form.reset, purchaseId, purchaseOrder, receiveItems]);
+  }, [
+    form.reset,
+    purchaseId,
+    purchaseOrder,
+    receiveItems,
+    unitDefaultsSignature,
+    unitsLoading,
+    uomVariantIds,
+  ]);
+
+  /**
+   * UOM: switch a line's entering unit. The quantities are re-expressed in
+   * the new unit (receiveNow from the outstanding remainder, cost scaled to
+   * the factor); batch rows are cleared because their quantities were
+   * entered in the previous unit.
+   */
+  const handleLineUnitChange = (
+    index: number,
+    item: (typeof receiveItems)[number],
+    unit: PurchaseUnitOption,
+  ) => {
+    form.setValue(`items.${index}.uomConversionId`, unit.uomConversionId, {
+      shouldDirty: true,
+    });
+    form.setValue(
+      `items.${index}.receiveNow`,
+      unit.uomConversionId === null
+        ? outstandingOf(item)
+        : outstandingInUnitOf(item, unit.conversionFactor),
+      { shouldDirty: true, shouldValidate: true },
+    );
+    form.setValue(
+      `items.${index}.unitCost`,
+      unit.uomConversionId != null &&
+        unit.uomConversionId === item.uomConversionId &&
+        item.enteredUnitPrice != null
+        ? Number(item.enteredUnitPrice) || 0
+        : unitCostFromBase(Number(item.unitCost) || 0, unit.conversionFactor),
+      { shouldDirty: true },
+    );
+    form.setValue(`items.${index}.rejectedQuantity`, 0, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    form.setValue(`items.${index}.batches`, [], { shouldDirty: true });
+  };
 
   const receivingTotal = watchedItems.reduce(
     (sum, item) =>
@@ -163,10 +318,12 @@ export const ReceiveItems = () => {
    * receiving rules (on-this-PO check, remaining cap, batch/serial routing)
    * live here. Throwing surfaces the failure as an error scan.
    *
-   * Each scan counts one physical unit: from the untouched "receive the
-   * full remainder" prefill, the first scan resumes at previously received
-   * + 1 (Ordered 20 · received 5 · scan ×3 → receiving 8). Manual edits
-   * increment as typed.
+   * Each scan counts one physical unit in the line's SELECTED unit: a box
+   * scan adds one box, a piece scan one piece (UOM migration 0062). From
+   * the untouched "receive the full remainder" prefill, the first scan
+   * resumes at previously received + the scanned amount; manual edits
+   * increment as typed. Scans never exceed the outstanding remainder —
+   * over-receiving is approved in the discrepancy dialog.
    */
   const handleResolved = (match: LookupMatch) => {
     const lineIndex = receiveItems.findIndex(
@@ -178,9 +335,16 @@ export const ReceiveItems = () => {
     }
     const lineName =
       line.variantName ?? line.variantSku ?? `line ${lineIndex + 1}`;
-    // Scans fill the outstanding remainder (cancelled excluded); further
-    // scans are over-receiving and must be approved in the dialog.
-    const remaining = outstandingOf(line);
+
+    const units = unitsByVariant.get(line.variantId);
+    const selectedConversionId =
+      Number(form.getValues(`items.${lineIndex}.uomConversionId`)) || null;
+    const selectedUnit = selectedConversionId
+      ? units?.find((unit) => unit.uomConversionId === selectedConversionId)
+      : (units?.[0] ?? null);
+    const lineFactor = selectedUnit?.conversionFactor ?? 1;
+    const lineUnitName = selectedUnit?.unitName ?? line.productUnit ?? "units";
+    const remaining = outstandingInUnitOf(line, lineFactor);
     if (remaining <= 0) {
       throw new Error(`${lineName} is already fully received.`);
     }
@@ -198,11 +362,28 @@ export const ReceiveItems = () => {
       return;
     }
 
+    // A package-alias scan counts one PACKAGE; the scanned unit must be an
+    // exact multiple of the line's entering unit to be countable.
+    const step =
+      scanStepInLineUnit(lineFactor, match.unit?.conversionFactor ?? 1) ?? 0;
+    if (step <= 0) {
+      throw new Error(
+        `Scanned ${match.unit?.unitName ?? "barcode"} does not match the line's ${lineUnitName} unit — switch the line's unit to receive it.`,
+      );
+    }
+
     const current = Number(form.getValues(`items.${lineIndex}.receiveNow`)) || 0;
+    const prefill = lineUnitDefaults.get(line.id);
+    const untouchedPrefill = prefill
+      ? outstandingInUnitOf(line, prefill.factor)
+      : remaining;
     const next =
-      current === remaining
-        ? Math.min(remaining, Number(line.receivedQuantity || 0) + 1)
-        : Math.min(remaining, current + 1);
+      current === untouchedPrefill
+        ? Math.min(
+            remaining,
+            Math.floor(Number(line.receivedQuantity || 0) / lineFactor) + step,
+          )
+        : Math.min(remaining, current + step);
     form.setValue(`items.${lineIndex}.receiveNow`, next, {
       shouldValidate: true,
       shouldDirty: true,
@@ -210,7 +391,7 @@ export const ReceiveItems = () => {
     form.setFocus(`items.${lineIndex}.receiveNow`);
     toast.add({
       type: "success",
-      description: `${lineName} — receiving ${next} of ${line.quantity}`,
+      description: `${lineName} — receiving ${next} ${lineUnitName} of ${remaining}`,
     });
   };
 
@@ -224,18 +405,25 @@ export const ReceiveItems = () => {
   const onSubmit = async (data: ReceiveItemsFormValues) => {
     // Over-receiving requires a per-line reason — catch it before the
     // round-trip so the offending line can be corrected in its dialog.
-    const missingReason = data.items.find(
-      (item) =>
-        overReceiveOf(
-          receiveItems.find((line) => line.id === item.itemId) ??
-            ({
-              quantity: 0,
-              receivedQuantity: 0,
-              cancelledQuantity: 0,
-            } as (typeof receiveItems)[number]),
-          item.receiveNow,
-        ) && !item.overReceiveReason?.trim(),
-    );
+    // Quantities are in each line's selected unit, so the check converts
+    // both sides to base units first.
+    const missingReason = data.items.find((item) => {
+      const line = receiveItems.find((entry) => entry.id === item.itemId);
+      if (!line) return false;
+      const unit = lineUnitDefaults.get(line.id);
+      const selectedConversionId = item.uomConversionId ?? null;
+      const factor =
+        selectedConversionId && selectedConversionId !== unit?.conversionId
+          ? (unitsByVariant
+              .get(line.variantId)
+              ?.find((entry) => entry.uomConversionId === selectedConversionId)
+              ?.conversionFactor ?? 1)
+          : (unit?.factor ?? 1);
+      return (
+        overReceiveInUnitOf(line, item.receiveNow, factor) &&
+        !item.overReceiveReason?.trim()
+      );
+    });
     if (missingReason) {
       toast.add({
         type: "error",
@@ -382,6 +570,8 @@ export const ReceiveItems = () => {
               <ItemsReceiveTable
                 receivePurchasesItems={receiveItems}
                 form={form}
+                unitsByVariant={unitsByVariant}
+                onUnitChange={handleLineUnitChange}
               />
               </>
             ) : (
