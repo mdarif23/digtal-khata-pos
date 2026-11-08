@@ -8,6 +8,7 @@ import { variantOptions } from "../../db/schema/variantOptions.js";
 import { variantValues } from "../../db/schema/variantValues.js";
 import { purchaseItems } from "../../db/schema/purchaseItems.js";
 import { purchaseReturns } from "../../db/schema/purchaseReturns.js";
+import { supplierLedger } from "../../db/schema/supplierLedger.js";
 import { purchaseReturnItems } from "../../db/schema/purchaseReturnItems.js";
 import { purchases } from "../../db/schema/purchases.js";
 import { landedCosts } from "../../db/schema/landedCosts.js";
@@ -28,6 +29,7 @@ import type { ReceiveItemsFormValues } from "./schemas/receiveItem.schema.js";
 import { checkPriceIncreasesInTx } from "../procurement/priceAlerts.service.js";
 import { applyReceiveDeltaInTx, lockDocumentForPurchaseInTx } from "../landed-cost/landed-cost.lifecycle.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
+import { locations } from "../../db/schema/locations.js";
 import {
   basicRequestValidation,
   batchValidation,
@@ -441,8 +443,11 @@ export async function getPurchaseDetail(businessId: number, purchaseId: number) 
 
   // Return status (Phase 11) mirrors the list's derivation: returned
   // quantities vs accepted received quantities, two-status independent.
-  const [returnAgg] = await db
+  // Phase 1 (return module): the same query now groups PER ITEM so the
+  // return context can carry previously-returned quantities per line.
+  const returnRows = await db
     .select({
+      purchaseItemId: purchaseReturnItems.purchaseItemId,
       returned: sql<string>`COALESCE(SUM(${purchaseReturnItems.quantity}), 0)`,
     })
     .from(purchaseReturnItems)
@@ -458,8 +463,15 @@ export async function getPurchaseDetail(businessId: number, purchaseId: number) 
         eq(purchaseReturns.purchaseId, purchaseId),
         eq(purchaseReturns.businessId, businessId),
       ),
-    );
-  const returnedQuantity = Number(returnAgg?.returned ?? 0);
+    )
+    .groupBy(purchaseReturnItems.purchaseItemId);
+  const returnedByItem = new Map(
+    returnRows.map((row) => [row.purchaseItemId, Number(row.returned)]),
+  );
+  const returnedQuantity = returnRows.reduce(
+    (sum, row) => sum + Number(row.returned),
+    0,
+  );
   const receivedQuantity = items.reduce(
     (sum, item) => sum + Number(item.receivedQuantity),
     0,
@@ -471,14 +483,93 @@ export async function getPurchaseDetail(businessId: number, purchaseId: number) 
         ? "Returned"
         : "Partially returned";
 
+  // Phase 1 (return module): the return context evaluates eligibility at
+  // the purchase's RECEIVING location — never the caller's active
+  // location. The return service deducts stock there, so the page's
+  // availability and clamps must be computed against the same place.
+  const receivingLocationId = purchase.locationId;
+  const [receivingLocation] = receivingLocationId
+    ? await db
+        .select({ name: locations.name })
+        .from(locations)
+        .where(
+          and(
+            eq(locations.id, receivingLocationId),
+            eq(locations.businessId, businessId),
+          ),
+        )
+        .limit(1)
+    : [];
+  const stockRows =
+    receivingLocationId && variantIds.length
+      ? await db
+          .select({
+            variantId: inventoryStock.variantId,
+            quantity: inventoryStock.quantity,
+          })
+          .from(inventoryStock)
+          .where(
+            and(
+              eq(inventoryStock.businessId, businessId),
+              eq(inventoryStock.locationId, receivingLocationId),
+              inArray(inventoryStock.variantId, variantIds),
+            ),
+          )
+      : [];
+  const stockByVariant = new Map(
+    stockRows.map((row) => [row.variantId, Number(row.quantity ?? 0)]),
+  );
+  // Phase 3 - supplier credit visibility: the supplier's recorded credit
+  // balance (returns + cancellations). supplier_ledger is CREDIT-ONLY in
+  // this system (payments never write it, nothing consumes credits), so
+  // the sum IS the unapplied credit balance. It is not a cash refund.
+  let supplierCreditBalance = 0;
+  if (purchase.supplierId !== null) {
+    const [ledgerAgg] = await db
+      .select({
+        credits: sql<string>`COALESCE(SUM(${supplierLedger.credit}), 0)`,
+      })
+      .from(supplierLedger)
+      .where(
+        and(
+          eq(supplierLedger.supplierId, purchase.supplierId),
+          eq(supplierLedger.businessId, businessId),
+        ),
+      );
+    supplierCreditBalance = Math.max(0, Number(ledgerAgg?.credits ?? 0));
+  }
+
+  const canReturn = purchase.supplierId !== null && receivingLocationId !== null;
+  const returnContext = {
+    locationId: receivingLocationId,
+    locationName: receivingLocation?.name ?? null,
+    canReturn,
+    reason: canReturn
+      ? null
+      : purchase.supplierId === null
+        ? ("no_supplier" as const)
+        : ("not_received" as const),
+    items: items.map((item) => ({
+      purchaseItemId: item.id,
+      orderedQuantity: Number(item.quantity),
+      receivedQuantity: Number(item.receivedQuantity),
+      returnedQuantity: returnedByItem.get(item.id) ?? 0,
+      // Stock of the line's VARIANT at the receiving location — returns
+      // draw from a variant-wide batch pool (shared across sibling lines).
+      availableStock: stockByVariant.get(item.variantId) ?? 0,
+    })),
+  };
+
   const { landedCostDocStatus, landedCostPending, ...purchaseHeader } = purchase;
   return {
     purchase: {
       ...purchaseHeader,
       landedCostStatus: deriveLandedCostStatus({ landedCostDocStatus, landedCostPending }),
       returnStatus,
+      supplierCreditBalance,
     },
     items,
+    returnContext,
   };
 }
 

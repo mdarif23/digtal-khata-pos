@@ -1282,6 +1282,15 @@ export interface ReturnLandedCostReversal {
   adjusted: boolean;
   amount: number;
   documentId: number | null;
+  /**
+   * Phase 7: WHY the reversal is (or is not) applicable — the landed-cost
+   * document's state, authoritatively reported so the frontend never has
+   * to infer it: the document is posted/adjusted (reversal applied or
+   * nothing to reverse), a draft (nothing capitalized yet), already
+   * reversed, or no document exists.
+   */
+  state: "posted" | "adjusted" | "draft" | "reversed" | "no_document";
+  reason: string | null;
 }
 
 export async function reverseForPurchaseReturnInTx(
@@ -1292,9 +1301,9 @@ export async function reverseForPurchaseReturnInTx(
   consumed: { batchId: number; quantity: number }[],
   actorUserId: number,
 ): Promise<ReturnLandedCostReversal> {
-  if (consumed.length === 0) {
-    return { adjusted: false, amount: 0, documentId: null };
-  }
+  // The document is loaded first so EVERY exit path reports its actual
+  // state (a return with nothing consumed still names the document's
+  // state rather than a generic "no document").
   const [doc] = await tx
     .select()
     .from(landedCosts)
@@ -1303,8 +1312,44 @@ export async function reverseForPurchaseReturnInTx(
     )
     .for("update")
     .limit(1);
-  if (!doc || doc.status === "draft" || doc.status === "reversed") {
-    return { adjusted: false, amount: 0, documentId: doc?.id ?? null };
+  if (consumed.length === 0) {
+    return {
+      adjusted: false,
+      amount: 0,
+      documentId: doc?.id ?? null,
+      state: doc ? (doc.status as "posted" | "adjusted" | "draft" | "reversed") : "no_document",
+      reason: doc
+        ? "No returned units carried an inventory batch to reverse."
+        : "No landed-cost document exists for this purchase.",
+    };
+  }
+  if (!doc) {
+    return {
+      adjusted: false,
+      amount: 0,
+      documentId: null,
+      state: "no_document",
+      reason: "No landed-cost document exists for this purchase.",
+    };
+  }
+  if (doc.status === "draft") {
+    return {
+      adjusted: false,
+      amount: 0,
+      documentId: doc.id,
+      state: "draft",
+      reason:
+        "The landed-cost document is a draft — nothing is capitalized yet; if the goods are gone at posting time, the posting itself reverses the returned units' share.",
+    };
+  }
+  if (doc.status === "reversed") {
+    return {
+      adjusted: false,
+      amount: 0,
+      documentId: doc.id,
+      state: "reversed",
+      reason: "The landed-cost document is already fully reversed.",
+    };
   }
 
   const batchIds = consumed.map((c) => c.batchId);
@@ -1329,7 +1374,13 @@ export async function reverseForPurchaseReturnInTx(
     reversalQuads += BigInt(Math.round(perUnit * c.quantity * 10_000));
   }
   if (reversalQuads === 0n) {
-    return { adjusted: false, amount: 0, documentId: doc.id };
+    return {
+      adjusted: false,
+      amount: 0,
+      documentId: doc.id,
+      state: doc.status as "posted" | "adjusted",
+      reason: "The returned batches carry no allocated landed cost.",
+    };
   }
   const reversalAmount = roundMoney(Number(reversalQuads) / 10_000);
 
@@ -1383,5 +1434,11 @@ export async function reverseForPurchaseReturnInTx(
     details: { purchaseReturnId, reversalAmount, batches: consumed.length },
   });
 
-  return { adjusted: true, amount: reversalAmount, documentId: doc.id };
+  return {
+    adjusted: true,
+    amount: reversalAmount,
+    documentId: doc.id,
+    state: "adjusted",
+    reason: null,
+  };
 }

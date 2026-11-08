@@ -41,6 +41,7 @@ import {
   assertReturnablePurchase,
   validateReturnRequest,
 } from "./return.validation.js";
+import { computeReturnCredits } from "./return.valuation.js";
 
 // Takes the caller's server-verified businessId (from requireBusinessContext)
 // and scopes all reads and writes to it.
@@ -132,6 +133,12 @@ export async function createPurchaseReturn(
     const requestedByItem = new Map(
       changedItems.map((item) => [item.purchaseItemId, item.quantity]),
     );
+    // Phase 5: explicit serial selections per line (absent = auto-pick).
+    const serialIdsByItem = new Map(
+      changedItems
+        .filter((item) => item.serialIds !== undefined)
+        .map((item) => [item.purchaseItemId, item.serialIds!]),
+    );
     // Purchase returns deduct stock at the RETURN's location (the location
     // the purchase was received into).
     const stockRows = await tx
@@ -189,6 +196,8 @@ export async function createPurchaseReturn(
     // Landed-cost reversal tracking (Part F): every unit taken from a batch
     // carries its per-unit landed cost out of inventory.
     const landedConsumed: { batchId: number; quantity: number }[] = [];
+    // Phase 5 traceability: the serial numbers this return actually marks.
+    const returnedSerials: string[] = [];
     // Line credit (money) by purchase item id — the purchaseReturnItems row
     // stores the average per-unit credit; total_amount governs the money.
     const creditByItemId = new Map<number, number>();
@@ -228,98 +237,132 @@ export async function createPurchaseReturn(
           .orderBy(inventoryBatches.id)
           .for("update")
       : [];
-    const batchPoolByVariant = new Map<
-      number,
-      { id: number; quantityRemaining: number; purchasePrice: number | string }[]
-    >();
-    for (const row of poolRows) {
-      if (row.variantId === null) continue;
-      const pool = batchPoolByVariant.get(row.variantId) ?? [];
-      pool.push({
-        id: row.id,
+    // Phase 2: the credit math lives in return.valuation.ts — ONE pure
+    // implementation shared with the return-preview endpoint, so a preview
+    // can never disagree with what the return actually pays. This
+    // transaction owns the locked reads (poolRows) and applies the
+    // returned consumption as the real decrements.
+    const valuation = computeReturnCredits(
+      items.map((item) => ({
+        purchaseItemId: item.id,
+        variantId: item.variantId,
+        lineAdjustment: lineAdjustment(item),
+        fallbackUnitPrice: getReturnUnitPrice(item),
+      })),
+      requestedByItem,
+      poolRows.map((row) => ({
+        batchId: row.id,
+        variantId: row.variantId as number,
         quantityRemaining: Number(row.quantityRemaining),
-        purchasePrice: row.purchasePrice,
+        purchasePrice: Number(row.purchasePrice),
+      })),
+    );
+
+    // Every returned unit must trace to a batch row (its cost basis). A
+    // shortfall means the on-hand units came from another purchase's
+    // batches (mixed sales) — refuse rather than mis-credit.
+    if (valuation.shortfall) {
+      throw new BadRequestError(
+        `Insufficient available batch quantity for purchase item ${valuation.shortfall.purchaseItemId}.`,
+      );
+    }
+    for (const [batchId, quantity] of valuation.consumedByBatch) {
+      await tx
+        .update(inventoryBatches)
+        .set({
+          quantityRemaining: sql`${inventoryBatches.quantityRemaining} - ${quantity}`,
+        })
+        .where(
+          and(
+            eq(inventoryBatches.id, batchId),
+            eq(inventoryBatches.businessId, businessId),
+          ),
+        );
+    }
+    for (const entry of valuation.consumption) {
+      landedConsumed.push({
+        batchId: entry.batchId,
+        quantity: entry.quantity,
       });
-      batchPoolByVariant.set(row.variantId, pool);
+    }
+    for (const [itemId, credit] of valuation.creditByItemId) {
+      creditByItemId.set(itemId, credit);
     }
 
     for (const item of items) {
-      const quantity = requestedByItem.get(item.id) ?? 0;
       const trackingType = item.trackingType;
-      const pool = batchPoolByVariant.get(item.variantId) ?? [];
-
-      if (pool.length === 0) {
-        // Legacy fallback: received before batch rows were written — fall
-        // back to the line-based per-unit price (mirrors the received-value
-        // fallback in the receive flow).
-        creditByItemId.set(item.id, quantity * getReturnUnitPrice(item));
-      } else {
-        let remainingToRemove = quantity;
-        let lineCredit = 0;
-        for (const batch of pool) {
-          if (remainingToRemove <= 0) break;
-          if (batch.quantityRemaining <= 0) continue;
-          const removed = Math.min(batch.quantityRemaining, remainingToRemove);
-          await tx
-            .update(inventoryBatches)
-            .set({
-              quantityRemaining: sql`${inventoryBatches.quantityRemaining} - ${removed}`,
-            })
-            .where(
-              and(
-                eq(inventoryBatches.id, batch.id),
-                eq(inventoryBatches.businessId, businessId),
-              ),
-            );
-          batch.quantityRemaining -= removed;
-          remainingToRemove -= removed;
-          landedConsumed.push({ batchId: batch.id, quantity: removed });
-          const unitPrice = Math.max(
-            0,
-            Number(
-              (Number(batch.purchasePrice) + lineAdjustment(item)).toFixed(2),
-            ),
-          );
-          lineCredit += removed * unitPrice;
-        }
-
-        // Every returned unit must trace to a batch row (its cost basis).
-        // The pool spans this purchase's batches for the variant; a
-        // shortfall means the on-hand units came from another purchase's
-        // batches (mixed sales) — refuse rather than mis-credit.
-        if (remainingToRemove > 0) {
-          throw new BadRequestError(
-            `Insufficient available batch quantity for purchase item ${item.id}.`,
-          );
-        }
-        creditByItemId.set(item.id, lineCredit);
-      }
+      const quantity = requestedByItem.get(item.id) ?? 0;
 
       if (trackingType === "serial") {
-        const availableSerials = await tx
-          .select({ id: serialNumbers.id })
-          .from(serialNumbers)
-          .where(
-            and(
-              eq(serialNumbers.purchaseItemId, item.id),
-              eq(serialNumbers.businessId, businessId),
-              eq(serialNumbers.status, "in_stock"),
-            ),
-          )
-          .limit(quantity)
-          .for("update");
+        // Phase 5: explicit selection when the caller provides serialIds —
+        // every id is re-validated against THIS line, business, receiving
+        // location and in-stock state; the frontend is never trusted.
+        // Absent → the documented auto-pick fallback (first in-stock
+        // serials by id), preserved for compatibility.
+        const requestedSerialIds = serialIdsByItem.get(item.id);
+        let serialsToMark: { id: number; serialNumber: string }[];
+        if (requestedSerialIds) {
+          if (new Set(requestedSerialIds).size !== requestedSerialIds.length) {
+            throw new BadRequestError(
+              `Duplicate serial numbers selected for purchase item ${item.id}.`,
+            );
+          }
+          if (requestedSerialIds.length !== quantity) {
+            throw new BadRequestError(
+              `The selected serial count (${requestedSerialIds.length}) must match the return quantity (${quantity}) for purchase item ${item.id}.`,
+            );
+          }
+          const eligible = await tx
+            .select({ id: serialNumbers.id, serialNumber: serialNumbers.serialNumber })
+            .from(serialNumbers)
+            .where(
+              and(
+                eq(serialNumbers.businessId, businessId),
+                eq(serialNumbers.purchaseItemId, item.id),
+                eq(serialNumbers.status, "in_stock"),
+                ...(locationId !== null
+                  ? [eq(serialNumbers.locationId, locationId)]
+                  : []),
+                inArray(serialNumbers.id, requestedSerialIds),
+              ),
+            )
+            .for("update");
+          if (eligible.length !== requestedSerialIds.length) {
+            throw new BadRequestError(
+              `One or more selected serial numbers are not eligible for return on purchase item ${item.id}.`,
+            );
+          }
+          serialsToMark = eligible;
+        } else {
+          serialsToMark = await tx
+            .select({ id: serialNumbers.id, serialNumber: serialNumbers.serialNumber })
+            .from(serialNumbers)
+            .where(
+              and(
+                eq(serialNumbers.purchaseItemId, item.id),
+                eq(serialNumbers.businessId, businessId),
+                eq(serialNumbers.status, "in_stock"),
+              ),
+            )
+            .orderBy(serialNumbers.id)
+            .limit(quantity)
+            .for("update");
 
-        if (availableSerials.length < quantity) {
-          throw new BadRequestError(
-            `Insufficient in-stock serial numbers for purchase item ${item.id}.`,
-          );
+          if (serialsToMark.length < quantity) {
+            throw new BadRequestError(
+              `Insufficient in-stock serial numbers for purchase item ${item.id}.`,
+            );
+          }
         }
 
-        if (availableSerials.length > 0) {
+        if (serialsToMark.length > 0) {
           await markSerialsReturned(tx, {
             businessId,
-            serialIds: availableSerials.map((serial) => serial.id),
+            serialIds: serialsToMark.map((serial) => serial.id),
           });
+          for (const serial of serialsToMark) {
+            returnedSerials.push(serial.serialNumber);
+          }
         }
       }
     }
@@ -424,6 +467,12 @@ export async function createPurchaseReturn(
         and(eq(purchases.id, orderId), eq(purchases.businessId, businessId)),
       );
 
+    // Phase 3 — supplier credit visibility: the credit split, computed from
+    // the same figures that wrote the ledger and the payable. A credit
+    // beyond the outstanding due is a SUPPLIER CREDIT BALANCE (the supplier
+    // owes the business), never a cash refund — the system does not record
+    // cash refunds; application to future purchases is not supported yet.
+    const outstandingBefore = Math.max(0, Number(purchase.dueAmount));
     return {
       success: true,
       message: "Purchase return processed successfully.",
@@ -432,9 +481,97 @@ export async function createPurchaseReturn(
         totalAmount,
         // Authoritative landed-cost reversal feedback for the frontend.
         landedCost,
+        supplierBalance: {
+          outstandingBefore,
+          goodsCredit: totalAmount,
+          outstandingAfter: updatedDueAmount,
+          supplierCreditCreated: Math.max(
+            0,
+            totalAmount - outstandingBefore,
+          ),
+        },
+        returnedSerials,
       },
     };
   });
+}
+
+/**
+ * Phase 5: the in-stock serial numbers eligible for return, per
+ * serial-tracked line of ONE purchase. The committing return re-validates
+ * every selection transactionally (line ownership, business, receiving
+ * location, in-stock state) — this listing is for the picker UI.
+ */
+export async function getReturnableSerials(businessId: number, purchaseId: number) {
+  const [purchase] = await db
+    .select({ id: purchases.id, locationId: purchases.locationId })
+    .from(purchases)
+    .where(and(eq(purchases.id, purchaseId), eq(purchases.businessId, businessId)))
+    .limit(1);
+  if (!purchase) {
+    throw new NotFoundError("Purchase order not found.");
+  }
+
+  const itemRows = await db
+    .select({
+      id: purchaseItems.id,
+      trackingType: products.trackingType,
+    })
+    .from(purchaseItems)
+    .innerJoin(productVariants, eq(purchaseItems.variantId, productVariants.id))
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .where(
+      and(
+        eq(purchaseItems.purchaseId, purchaseId),
+        eq(purchaseItems.businessId, businessId),
+      ),
+    );
+  const serialItemRows = itemRows.filter(
+    (item) => item.trackingType === "serial",
+  );
+  const serialItemIds = serialItemRows.map((item) => item.id);
+
+  const serialRows = serialItemIds.length
+    ? await db
+        .select({
+          purchaseItemId: serialNumbers.purchaseItemId,
+          id: serialNumbers.id,
+          serialNumber: serialNumbers.serialNumber,
+        })
+        .from(serialNumbers)
+        .where(
+          and(
+            eq(serialNumbers.businessId, businessId),
+            inArray(serialNumbers.purchaseItemId, serialItemIds),
+            eq(serialNumbers.status, "in_stock"),
+            // Serials were created at the receiving location — belt and
+            // braces against legacy rows from another outlet.
+            ...(purchase.locationId !== null
+              ? [eq(serialNumbers.locationId, purchase.locationId)]
+              : []),
+          ),
+        )
+        .orderBy(serialNumbers.purchaseItemId, serialNumbers.id)
+    : [];
+
+  const byItem = new Map<number, { id: number; serialNumber: string }[]>();
+  for (const row of serialRows) {
+    const itemId = row.purchaseItemId as number;
+    const list = byItem.get(itemId) ?? [];
+    list.push({ id: row.id, serialNumber: row.serialNumber });
+    byItem.set(itemId, list);
+  }
+
+  return {
+    success: true,
+    data: {
+      purchaseId,
+      items: serialItemRows.map((item) => ({
+        purchaseItemId: item.id,
+        serials: byItem.get(item.id) ?? [],
+      })),
+    },
+  };
 }
 
 export async function getPurchaseReturnItems(businessId: number) {
