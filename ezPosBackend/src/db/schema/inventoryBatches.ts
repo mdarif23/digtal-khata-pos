@@ -28,9 +28,11 @@ export const inventoryBatches = pgTable(
     batchNumber: varchar("batch_number", { length: 100 }).notNull(),
 
     // Original purchase cost — NEVER modified by the landed-cost module.
+    // Widened to 6dp by migration 0062 so a per-base cost derived from a
+    // package-priced UOM receipt never drifts the valuation math.
     purchasePrice: numeric("purchase_price", {
-      precision: 10,
-      scale: 2,
+      precision: 14,
+      scale: 6,
       mode: "number",
     }).notNull(),
 

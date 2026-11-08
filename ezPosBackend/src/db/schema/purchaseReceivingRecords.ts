@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import { purchases } from "./purchases.js";
 import { purchaseItems } from "./purchaseItems.js";
 import { productVariants } from "./productVariants.js";
+import { productUnitConversions } from "./productUnitConversions.js";
 import { locations } from "./locations.js";
 import { users } from "./users.js";
 
@@ -53,7 +54,28 @@ export const purchaseReceivingRecords = pgTable(
     })
       .notNull()
       .default(0),
-    unitCost: numeric("unit_cost", { precision: 14, scale: 4, mode: "number" }).notNull(),
+    unitCost: numeric("unit_cost", { precision: 14, scale: 6, mode: "number" }).notNull(),
+    /**
+     * UOM snapshot (migration 0062): what the operator typed at this
+     * receiving session (e.g. 6 Box @ ৳1,200/box, factor 12). Stored
+     * delivered/accepted/rejected quantities and unitCost stay BASE-unit.
+     */
+    uomConversionId: integer("uom_conversion_id"),
+    enteredQuantity: numeric("entered_quantity", {
+      precision: 12,
+      scale: 3,
+      mode: "number",
+    }),
+    enteredUnitPrice: numeric("entered_unit_price", {
+      precision: 14,
+      scale: 6,
+      mode: "number",
+    }),
+    conversionFactor: numeric("conversion_factor", {
+      precision: 14,
+      scale: 6,
+      mode: "number",
+    }),
     rejectionCategory: varchar("rejection_category", { length: 30 }),
     rejectionReason: text("rejection_reason"),
     overReceived: boolean("over_received").notNull().default(false),
@@ -89,6 +111,11 @@ export const purchaseReceivingRecords = pgTable(
       columns: [table.variantId, table.businessId],
       foreignColumns: [productVariants.id, productVariants.businessId],
       name: "purchase_receiving_records_variant_business_fkey",
+    }),
+    foreignKey({
+      columns: [table.uomConversionId, table.businessId],
+      foreignColumns: [productUnitConversions.id, productUnitConversions.businessId],
+      name: "prr_uom_business_fkey",
     }),
     foreignKey({
       columns: [table.locationId, table.businessId],

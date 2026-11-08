@@ -10,6 +10,7 @@ import {
 import { sql } from "drizzle-orm";
 import { purchases } from "./purchases.js";
 import { productVariants } from "./productVariants.js";
+import { productUnitConversions } from "./productUnitConversions.js";
 import { businesses } from "./businesses.js";
 
 export const purchaseItems = pgTable(
@@ -64,8 +65,8 @@ export const purchaseItems = pgTable(
       .notNull()
       .default(0),
     unitCost: numeric("unit_cost", {
-      precision: 12,
-      scale: 2,
+      precision: 14,
+      scale: 6,
       mode: "number",
     }).notNull(),
     discount: numeric("discount", { precision: 12, scale: 2, mode: "number" })
@@ -77,6 +78,29 @@ export const purchaseItems = pgTable(
     total: numeric("total", { precision: 12, scale: 2, mode: "number" })
       .notNull()
       .generatedAlwaysAs(sql`( (quantity * unit_cost) - discount + tax )`),
+    /**
+     * UOM snapshot (migration 0062): the packaging unit the operator typed,
+     * its price per entered unit, and the factor AT TRANSACTION TIME. Stored
+     * quantity/unitCost stay BASE-unit (see productUnitConversions.ts) so the
+     * generated total and every per-unit derivation keep their meaning.
+     * NULL = entered in the product's base unit (all legacy rows).
+     */
+    uomConversionId: integer("uom_conversion_id"),
+    enteredQuantity: numeric("entered_quantity", {
+      precision: 12,
+      scale: 3,
+      mode: "number",
+    }),
+    enteredUnitPrice: numeric("entered_unit_price", {
+      precision: 14,
+      scale: 6,
+      mode: "number",
+    }),
+    conversionFactor: numeric("conversion_factor", {
+      precision: 14,
+      scale: 6,
+      mode: "number",
+    }),
   },
   (table) => [
     index("purchase_items_business_id_idx").on(table.businessId),
@@ -90,6 +114,11 @@ export const purchaseItems = pgTable(
       columns: [table.variantId, table.businessId],
       foreignColumns: [productVariants.id, productVariants.businessId],
       name: "purchase_items_variant_business_fkey",
+    }),
+    foreignKey({
+      columns: [table.uomConversionId, table.businessId],
+      foreignColumns: [productUnitConversions.id, productUnitConversions.businessId],
+      name: "purchase_items_uom_business_fkey",
     }),
   ],
 );

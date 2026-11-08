@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { businesses } from "./businesses.js";
 import { productVariants } from "./productVariants.js";
+import { productUnitConversions } from "./productUnitConversions.js";
 import { users } from "./users.js";
 
 /**
@@ -35,6 +36,12 @@ export const variantBarcodeAliases = pgTable(
     variantId: integer("variant_id").notNull(),
     barcode: varchar("barcode", { length: 100 }).notNull(),
     barcodeFormat: varchar("barcode_format", { length: 20 }),
+    /**
+     * UOM (migration 0062): when set, this alias is a PACKAGING barcode —
+     * scanning it means "one of this conversion unit" (e.g. a box-of-12
+     * code), not one base unit. NULL = base unit (all legacy rows).
+     */
+    uomConversionId: integer("uom_conversion_id"),
     /** external = merchant/manufacturer-supplied; internal = generated. */
     source: varchar("source", { length: 20 }).notNull().default("external"),
     createdBy: integer("created_by").references(() => users.id, {
@@ -61,6 +68,11 @@ export const variantBarcodeAliases = pgTable(
       columns: [table.variantId, table.businessId],
       foreignColumns: [productVariants.id, productVariants.businessId],
       name: "variant_barcode_aliases_variant_business_fkey",
+    }),
+    foreignKey({
+      columns: [table.uomConversionId, table.businessId],
+      foreignColumns: [productUnitConversions.id, productUnitConversions.businessId],
+      name: "vba_uom_business_fkey",
     }),
   ],
 );

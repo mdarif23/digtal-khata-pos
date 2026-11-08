@@ -1,4 +1,5 @@
 import { publishRealtime } from "../realtime/realtime.service.js";
+import { assertUnitNotUsedByConversions } from "../uom/uom.admin.service.js";
 import {
   and,
   eq,
@@ -1235,6 +1236,9 @@ export async function deleteUnit(businessId: number, id: number) {
   if (product) {
     throw new ConflictError("Move or update products using this unit first");
   }
+  // UOM (migration 0061): a unit cannot be deleted while any packaging
+  // configuration still references it.
+  await assertUnitNotUsedByConversions(businessId, id);
   const [unit] = await db
     .delete(units)
     .where(and(eq(units.id, id), eq(units.businessId, businessId)))
