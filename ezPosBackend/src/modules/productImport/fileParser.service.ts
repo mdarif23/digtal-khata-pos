@@ -299,6 +299,10 @@ export const TEMPLATE_COLUMNS: TemplateColumn[] = [
   { header: "category", description: "Category name. Matched case-insensitively; created when allowed.", required: false, example: "Sports" },
   { header: "brand", description: "Brand name. Matched case-insensitively; created when allowed.", required: false, example: "Adidas" },
   { header: "unit", description: "Unit name (required). Matched case-insensitively; created when allowed.", required: true, example: "Piece" },
+  { header: "package_unit", description: "Optional packaging unit (e.g. Box). Needs package_factor; both are required together.", required: false, example: "Box" },
+  { header: "package_factor", description: "Units per package (e.g. 12 for a Box of 12 pieces). Must be positive; needs package_unit.", required: false, example: "12" },
+  { header: "package_sale_price", description: "Optional default sale price per package. Empty = derived from the base price x factor.", required: false, example: "1500" },
+  { header: "package_barcode", description: "Optional barcode printed on the package — scanning it adds ONE package. Must be unique in the business and differ from the piece barcode.", required: false, example: "8801234567891" },
   { header: "description", description: "Product description (max 120 chars).", required: false, example: "Size 5 football" },
   { header: "sku", description: "SKU — the per-variant SKU (for simple products this is the product SKU). Unique per business. Leave empty to auto-generate.", required: false, example: "FOOT-S" },
   { header: "has_variants", description: "true | false. Auto-detected when several rows share the same product.", required: false, example: "true" },
@@ -320,10 +324,10 @@ export const TEMPLATE_COLUMNS: TemplateColumn[] = [
 ];
 
 const SAMPLE_ROWS: string[][] = [
-  ["Football", "physical", "Sports", "Adidas", "Piece", "Size 5 football", "FOOT-S", "true", "Size: Small", "8801234567890", "500", "350", "5", "none", "10", "Main Store", "", "", "", "https://example.com/ball.png", "active"],
-  ["Football", "physical", "Sports", "Adidas", "Piece", "Size 5 football", "FOOT-M", "true", "Size: Medium", "", "550", "350", "5", "none", "10", "Main Store", "", "", "", "", "active"],
-  ["Football", "physical", "Sports", "Adidas", "Piece", "Size 5 football", "FOOT-L", "true", "Size: Large", "", "600", "350", "5", "none", "0", "Main Store", "", "", "", "", "active"],
-  ["Water Bottle", "physical", "Accessories", " ", "Piece", "1L bottle", "BTL-1", "false", "", "8809876543210", "120", "70", "10", "batch", "50", "Main Store", "BATCH-2026", "2027-12-31", "", "", "active"],
+  ["Football", "physical", "Sports", "Adidas", "Piece", "", "", "", "", "Size 5 football", "FOOT-S", "true", "Size: Small", "8801234567890", "500", "350", "5", "none", "10", "Main Store", "", "", "", "https://example.com/ball.png", "active"],
+  ["Football", "physical", "Sports", "Adidas", "Piece", "", "", "", "", "Size 5 football", "FOOT-M", "true", "Size: Medium", "", "550", "350", "5", "none", "10", "Main Store", "", "", "", "", "active"],
+  ["Football", "physical", "Sports", "Adidas", "Piece", "", "", "", "", "Size 5 football", "FOOT-L", "true", "Size: Large", "", "600", "350", "5", "none", "0", "Main Store", "", "", "", "", "active"],
+  ["Water Bottle", "physical", "Accessories", " ", "Piece", "Box", "12", "1350", "8809876543211", "1L bottle", "BTL-1", "false", "", "8809876543210", "120", "70", "10", "batch", "50", "Main Store", "BATCH-2026", "2027-12-31", "", "", "active"],
 ];
 
 export async function generateTemplate(

@@ -25,6 +25,10 @@ const FIELD_LABELS: Record<string, string> = {
   category: "Category",
   brand: "Brand",
   unit: "Unit *",
+  package_unit: "Package unit (e.g. Box)",
+  package_factor: "Units per package",
+  package_sale_price: "Package sale price",
+  package_barcode: "Package barcode",
   description: "Description",
   sku: "SKU",
   has_variants: "Has variants",
@@ -46,6 +50,7 @@ const FIELD_LABELS: Record<string, string> = {
 const UPDATE_FIELDS = [
   "product_name", "product_type", "category", "brand", "unit", "description",
   "sku", "barcode", "selling_price", "alert_quantity", "status",
+  "package_unit", "package_factor", "package_sale_price", "package_barcode",
 ];
 
 function EmptyState({ children }: { children: React.ReactNode }) {
