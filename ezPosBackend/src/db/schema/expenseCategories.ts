@@ -1,4 +1,5 @@
 import {
+  foreignKey,
   index,
   integer,
   pgTable,
@@ -10,6 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { businesses } from "./businesses.js";
+import { chartOfAccounts } from "./chartOfAccounts.js";
 
 export const expenseCategories = pgTable(
   "expense_categories",
@@ -28,6 +30,12 @@ export const expenseCategories = pgTable(
      * per-business uniqueness so a fresh active category may reuse the name.
      */
     archivedAt: timestamp("archived_at", { mode: "string" }),
+    /**
+     * Finance & Growth: the expense account (chart_of_accounts) this
+     * category posts to. Nullable — unmapped categories post to the
+     * business's "Other Expenses" system account.
+     */
+    glAccountId: integer("gl_account_id"),
   },
   (table) => [
     index("expense_categories_business_id_idx").on(table.businessId),
@@ -38,6 +46,12 @@ export const expenseCategories = pgTable(
       .on(table.businessId, table.categoryName)
       .where(sql`archived_at is null`),
     unique("expense_categories_id_business_uq").on(table.id, table.businessId),
+    // The mapped expense account must belong to the same business.
+    foreignKey({
+      columns: [table.glAccountId, table.businessId],
+      foreignColumns: [chartOfAccounts.id, chartOfAccounts.businessId],
+      name: "expense_categories_gl_account_business_fkey",
+    }),
   ],
 );
 

@@ -139,6 +139,7 @@ export async function recordSupplierPayment(
     const result = await dueManagementService.recordSupplierPayment(
       getBusinessId(req),
       payload,
+      req.user?.id ?? null,
     );
     res.status(201).json({ success: true, data: result });
   } catch (err) {

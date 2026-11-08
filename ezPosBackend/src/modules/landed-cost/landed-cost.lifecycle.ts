@@ -15,6 +15,7 @@ import { allocateByBasis } from "./landed-cost.money.js";
 import { getLandedCostContext, computeLandedCostPreview, type LandedCostContext } from "./landed-cost.service.js";
 import type { LandedCostPreviewInput } from "./landed-cost.validation.js";
 import type { DbTransaction } from "../purchases/purchase.types.js";
+import { postLandedCostPostLedgerEntry } from "./landed-cost.ledger.js";
 
 /**
  * Landed-cost document lifecycle (Part F).
@@ -647,6 +648,27 @@ export async function postLandedCostDocument(
       BigInt(Math.round(totalAllocated * 10_000)),
       splitAdjustmentId,
     );
+
+    // Finance & Growth: post the initial capitalization to the double-entry
+    // ledger (DR 1050/5010 weighted against the settlement credits; no-op
+    // before Finance activation; idempotent per document).
+    await postLandedCostPostLedgerEntry(tx, {
+      businessId,
+      documentId,
+      inventoryAmount: Number(inventoryQuads) / 10_000,
+      totalAllocated,
+      expenses: expenseRows
+        .filter((e) => e.isCapitalizable)
+        .map((e) => ({
+          capitalizable:
+            Number(e.amount) +
+            (e.taxTreatment === "non_recoverable" ? Number(e.taxAmount) : 0),
+          settlementType: e.settlementType,
+          settlementReferenceId: e.settlementReferenceId,
+        })),
+      locationId: doc.locationId,
+      actorUserId,
+    });
 
     await tx.insert(landedCostAuditLogs).values({
       businessId,

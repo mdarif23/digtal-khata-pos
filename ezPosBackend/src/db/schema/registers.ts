@@ -19,6 +19,7 @@ import { businesses } from "./businesses.js";
 import { locations } from "./locations.js";
 import { users } from "./users.js";
 import { posTerminals } from "./posTerminals.js";
+import { paymentAccounts } from "./paymentAccounts.js";
 
 export const registerStatusEnum = pgEnum("register_status", [
   "active",
@@ -64,6 +65,12 @@ export const registers = pgTable(
     locationId: integer("location_id").notNull(),
     name: varchar("name", { length: 100 }).notNull(),
     status: registerStatusEnum("status").default("active").notNull(),
+    /**
+     * Finance & Growth: the cash payment account (payment_accounts) this
+     * drawer's balance posts to. Nullable — unassigned drawers post to the
+     * business's default cash account.
+     */
+    paymentAccountId: integer("payment_account_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
@@ -81,6 +88,11 @@ export const registers = pgTable(
       columns: [table.locationId, table.businessId],
       foreignColumns: [locations.id, locations.businessId],
       name: "registers_location_business_fkey",
+    }),
+    foreignKey({
+      columns: [table.paymentAccountId, table.businessId],
+      foreignColumns: [paymentAccounts.id, paymentAccounts.businessId],
+      name: "registers_payment_account_business_fkey",
     }),
   ],
 );

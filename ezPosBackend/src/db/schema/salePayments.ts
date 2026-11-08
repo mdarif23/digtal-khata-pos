@@ -15,6 +15,7 @@ import {
 import { sales } from "./sales.js";
 import { customers } from "./customers.js";
 import { businesses } from "./businesses.js";
+import { paymentAccounts } from "./paymentAccounts.js";
 
 export const salePayments = pgTable(
   "sale_payments",
@@ -33,6 +34,12 @@ export const salePayments = pgTable(
     gatewayFee: numeric("gateway_fee", { precision: 12, scale: 2, mode: "number" }).default(0),
     paymentDate: timestamp("payment_date", { mode: "string" }).defaultNow().notNull(),
     notes: text(),
+    /**
+     * Finance & Growth: the cash/bank/MFS account this capture moved
+     * (payment_accounts). Nullable — rows from before Finance activation
+     * have none. Composite FK keeps the account in the same business.
+     */
+    paymentAccountId: integer("payment_account_id"),
   },
   (t) => [
     index("sale_payments_business_id_idx").on(t.businessId),
@@ -60,5 +67,10 @@ export const salePayments = pgTable(
       t.paymentMethod,
       t.reference,
     ),
+    foreignKey({
+      columns: [t.paymentAccountId, t.businessId],
+      foreignColumns: [paymentAccounts.id, paymentAccounts.businessId],
+      name: "sale_payments_payment_account_business_fkey",
+    }),
   ],
 );

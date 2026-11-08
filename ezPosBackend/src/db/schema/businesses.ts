@@ -38,6 +38,12 @@ export const businesses = pgTable("businesses", {
   onboardingStep: integer("onboarding_step").default(0).notNull(),
   timezone: varchar("timezone", { length: 64 }).default("Asia/Dhaka").notNull(),
   status: businessStatusEnum("status").default("active").notNull(),
+  /**
+   * Finance & Growth: when the double-entry ledger was activated for this
+   * business (opening-balance wizard). NULL = ledger not activated; no
+   * journal posting may happen before activation.
+   */
+  ledgerActivatedAt: timestamp("ledger_activated_at", { withTimezone: true }),
   createdByUserId: integer("created_by_user_id")
     .notNull()
     .references(() => users.id, { onDelete: "restrict" }),

@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { purchases } from "./purchases.js";
 import { businesses } from "./businesses.js";
+import { paymentAccounts } from "./paymentAccounts.js";
 
 // 1. Enum for Payment Method
 export const paymentMethodEnum = pgEnum("payment_method", [
@@ -45,6 +46,11 @@ export const purchasePayments = pgTable(
     notes: text("notes"),
 
     paymentDate: timestamp("payment_date").defaultNow().notNull(),
+    /**
+     * Finance & Growth: cash/bank account this payment moved
+     * (payment_accounts). Nullable — legacy rows predate Finance.
+     */
+    paymentAccountId: integer("payment_account_id"),
   },
   (table) => [
     index("purchase_payments_business_id_idx").on(table.businessId),
@@ -53,5 +59,10 @@ export const purchasePayments = pgTable(
       foreignColumns: [purchases.id, purchases.businessId],
       name: "purchase_payments_purchase_business_fkey",
     }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.paymentAccountId, table.businessId],
+      foreignColumns: [paymentAccounts.id, paymentAccounts.businessId],
+      name: "purchase_payments_payment_account_business_fkey",
+    }),
   ],
 );

@@ -25,6 +25,7 @@ export type NotificationKind =
   | "register_discrepancy"
   | "integration_failure"
   | "price_increase"
+  | "budget_alert"
   | "system"
   | "backup"
   | "restore";

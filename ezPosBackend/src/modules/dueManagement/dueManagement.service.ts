@@ -17,6 +17,8 @@ import {
 } from "../../utils/handleError.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 import { recordDueCollectionInTx } from "../cashRegisters/cashRegisters.service.js";
+import { postDueCollectionLedgerEntry } from "../sales/sales.ledger.js";
+import { postPurchasePaymentLedgerEntry } from "../purchases/purchases.ledger.js";
 import {
   calculatePaymentStatus,
   calculatePayments,
@@ -630,6 +632,19 @@ export async function recordCustomerPayment(
       );
     }
 
+    // Finance & Growth: post the collection to the double-entry ledger
+    // (DR cash/bank/instrument, CR receivable; no-op before activation).
+    if (inserted) {
+      await postDueCollectionLedgerEntry(tx, {
+        businessId,
+        paymentId: inserted.id,
+        amount: roundMoney(amount),
+        method: paymentMethod,
+        locationId: sale.locationId,
+        actorUserId,
+      });
+    }
+
     return {
       saleId,
       invoiceNumber: sale.invoiceNumber,
@@ -644,6 +659,7 @@ export async function recordCustomerPayment(
 export async function recordSupplierPayment(
   businessId: number,
   payload: SupplierPaymentInput,
+  actorUserId: number | null = null,
 ) {
   const { purchaseId, amount, method } = payload;
 
@@ -734,6 +750,20 @@ export async function recordSupplierPayment(
       .where(
         and(eq(purchases.id, purchaseId), eq(purchases.businessId, businessId)),
       );
+
+    // Finance & Growth: post the supplier payment to the ledger (DR
+    // payable / CR cash-bank; no-op before activation; idempotent).
+    if (inserted) {
+      await postPurchasePaymentLedgerEntry(tx, {
+        businessId,
+        paymentId: inserted.id,
+        purchaseId,
+        amount: roundMoney(amount),
+        method,
+        locationId: null,
+        actorUserId,
+      });
+    }
 
     return {
       purchaseId,
