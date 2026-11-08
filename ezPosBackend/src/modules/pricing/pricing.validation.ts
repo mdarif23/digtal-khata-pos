@@ -244,3 +244,39 @@ export const priceHistoryQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
+
+// ---------------------------------------------------------------------------
+// Bulk update + proposals + auto-update (Phase 8)
+// ---------------------------------------------------------------------------
+
+export const bulkUpdateSchema = z
+  .object({
+    dryRun: z.boolean().default(true),
+    variantIds: z.array(z.coerce.number().int().positive()).max(500).optional(),
+    categoryIds: z.array(z.coerce.number().int().positive()).max(100).optional(),
+    productIds: z.array(z.coerce.number().int().positive()).max(500).optional(),
+    search: z.string().trim().max(120).optional(),
+    reason: z.string().trim().max(300).optional(),
+  })
+  .refine(
+    (value) =>
+      Boolean(
+        value.variantIds?.length ||
+          value.categoryIds?.length ||
+          value.productIds?.length ||
+          value.search,
+      ),
+    "Provide at least one filter (variantIds, categoryIds, productIds or search).",
+  );
+
+export type BulkUpdateInput = z.infer<typeof bulkUpdateSchema>;
+
+export const proposalsQuerySchema = z.object({
+  status: z.enum(["pending", "approved", "rejected", "applied", "stale"]).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+export const bulkApproveSchema = z.object({
+  ids: z.array(z.coerce.number().int().positive()).min(1).max(200),
+});

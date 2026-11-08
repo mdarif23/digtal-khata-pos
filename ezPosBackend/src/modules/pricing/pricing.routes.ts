@@ -89,4 +89,48 @@ router.get(
   pricingController.listPriceHistory,
 );
 
+// --- Bulk update (Phase 8) ----------------------------------------------------
+router.post(
+  "/api/pricing/bulk",
+  ...write,
+  requirePermission("pricing.bulk_update"),
+  pricingController.postBulkUpdate,
+);
+
+// --- Mode A proposals (Phase 8) ------------------------------------------------
+router.get(
+  "/api/pricing/proposals",
+  ...read,
+  requirePermission("pricing.history.view"),
+  pricingController.listProposalsHandler,
+);
+// Generation is a configuration read/write sweep; decisions materialize
+// prices, so they require the product-pricing permission.
+router.post(
+  "/api/pricing/proposals/generate",
+  ...write,
+  requirePermission("pricing.manage"),
+  pricingController.postGenerateProposals,
+);
+router.post(
+  "/api/pricing/proposals/bulk-approve",
+  ...write,
+  requirePermission("pricing.product.manage"),
+  pricingController.postBulkApproveProposals,
+);
+router.post(
+  "/api/pricing/proposals/:id/:decision",
+  ...write,
+  requirePermission("pricing.product.manage"),
+  pricingController.postProposalDecision,
+);
+
+// --- Mode B auto-update sweep (Phase 8) ----------------------------------------
+router.post(
+  "/api/pricing/auto-update/run",
+  ...write,
+  requirePermission("pricing.manage"),
+  pricingController.postAutoUpdateRun,
+);
+
 export default router;

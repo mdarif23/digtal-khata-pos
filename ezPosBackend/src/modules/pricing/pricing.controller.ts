@@ -5,12 +5,23 @@ import { sendSafeError } from "../../utils/safeError.js";
 import * as pricingService from "./pricing.service.js";
 import * as pricingRulesService from "./pricing.rules.service.js";
 import {
+  bulkApproveProposals,
+  bulkUpdatePrices,
+  decideProposal,
+  generateProposals,
+  listProposals,
+  runAutoUpdateSweep,
+} from "./pricing.apply.service.js";
+import {
   applyPriceSchema,
+  bulkApproveSchema,
+  bulkUpdateSchema,
   priceHistoryQuerySchema,
   pricingPreviewSchema,
   pricingRuleCreateSchema,
   pricingRuleUpdateSchema,
   pricingSettingsUpdateSchema,
+  proposalsQuerySchema,
 } from "./pricing.validation.js";
 
 /**
@@ -232,5 +243,120 @@ export async function listPriceHistory(req: Request, res: Response) {
     return res.status(200).json({ success: true, rows: data, meta });
   } catch (err) {
     return sendSafeError(res, err, "Unable to load the price history.");
+  }
+}
+
+// --- Phase 8: bulk, proposals, auto-update -----------------------------------
+
+export async function postBulkUpdate(req: Request, res: Response) {
+  try {
+    const parsed = bulkUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid bulk update.",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const { dryRun, variantIds, categoryIds, productIds, search, reason } =
+      parsed.data;
+    const result = await bulkUpdatePrices(
+      getBusinessId(req),
+      req.user!.id,
+      { variantIds, categoryIds, productIds, search },
+      dryRun ? "preview" : "apply",
+      reason ?? null,
+    );
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to run the bulk update.");
+  }
+}
+
+export async function listProposalsHandler(req: Request, res: Response) {
+  try {
+    const parsed = proposalsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid proposal query.",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const data = await listProposals(
+      getBusinessId(req),
+      parsed.data.status,
+      parsed.data.page,
+      parsed.data.pageSize,
+    );
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to list proposals.");
+  }
+}
+
+export async function postGenerateProposals(req: Request, res: Response) {
+  try {
+    const data = await generateProposals(getBusinessId(req), req.user!.id);
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to generate proposals.");
+  }
+}
+
+export async function postProposalDecision(req: Request, res: Response) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid ID." });
+    }
+    const decision = req.params.decision === "approve" ? "approve" : "reject";
+    if (req.params.decision !== "approve" && req.params.decision !== "reject") {
+      return res
+        .status(404)
+        .json({ success: false, message: "Unknown proposal action." });
+    }
+    const reason =
+      typeof req.body?.reason === "string" ? req.body.reason : null;
+    const data = await decideProposal(
+      getBusinessId(req),
+      req.user!.id,
+      id,
+      decision,
+      reason,
+    );
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to decide the proposal.");
+  }
+}
+
+export async function postBulkApproveProposals(req: Request, res: Response) {
+  try {
+    const parsed = bulkApproveSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid bulk approval.",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const data = await bulkApproveProposals(
+      getBusinessId(req),
+      req.user!.id,
+      parsed.data.ids,
+    );
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to approve the proposals.");
+  }
+}
+
+export async function postAutoUpdateRun(req: Request, res: Response) {
+  try {
+    const data = await runAutoUpdateSweep(getBusinessId(req), req.user!.id);
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to run the auto-update sweep.");
   }
 }
