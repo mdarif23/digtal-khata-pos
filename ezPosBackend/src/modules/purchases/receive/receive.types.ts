@@ -20,6 +20,20 @@ export interface Items {
     expiryDate: Date;
   }[];
   serialNumbers: string[];
+  /**
+   * UOM (migration 0062): the packaging unit the operator entered
+   * receiveNow/rejectedQuantity/batches in. NULL/absent = the product's
+   * base unit. After normalization (see normalizeReceiveItemsToBase) every
+   * quantity on this object is BASE-unit and `uomSnapshot` preserves what
+   * was typed for the receiving record.
+   */
+  uomConversionId?: number | null | undefined;
+  uomSnapshot?: {
+    conversionId: number;
+    enteredQuantity: number;
+    enteredUnitPrice: number;
+    conversionFactor: number;
+  } | undefined;
 }
 
 export interface PurchaseItem {
@@ -35,4 +49,9 @@ export interface PurchaseItem {
   discount: number;
   tax: number;
   total: number;
+  /** UOM snapshot on the ORDER line (null = ordered in base units). */
+  uomConversionId: number | null;
+  conversionFactor: number | null;
+  enteredQuantity: number | null;
+  enteredUnitPrice: number | null;
 }

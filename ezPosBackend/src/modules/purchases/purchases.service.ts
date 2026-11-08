@@ -20,6 +20,7 @@ import {
 } from "./purchases.ledger.js";
 import { products } from "../../db/schema/products.js";
 import {
+  BadRequestError,
   ConflictError,
   NotFoundError,
 } from "../../utils/handleError.js";
@@ -31,6 +32,8 @@ import { suppliers } from "../../db/schema/suppliers.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { units } from "../../db/schema/units.js";
 import type { ReceiveItemsFormValues } from "./schemas/receiveItem.schema.js";
+import { normalizeReceiveItemsToBase } from "./receive/receive.uom.js";
+import { resolveUomContext, convertEnteredLine } from "../uom/uom.service.js";
 import { checkPriceIncreasesInTx } from "../procurement/priceAlerts.service.js";
 import { applyReceiveDeltaInTx, lockDocumentForPurchaseInTx } from "../landed-cost/landed-cost.lifecycle.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
@@ -189,17 +192,74 @@ export async function createPurchase(
       throw new Error("Failed to create purchase record");
     }
 
-    // 6. Create Purchase Items (BULK INSERT)
-    const itemsToInsert = items.map((item) => ({
-      businessId,
-      purchaseId: newPurchase.id,
-      variantId: item.variantId,
-      quantity: item.quantity,
-      receivedQuantity: 0,
-      unitCost: item.purchasePrice,
-      discount: item.discount,
-      tax: item.tax,
-    }));
+    // 6. Create Purchase Items (BULK INSERT).
+    // UOM (migration 0062): the payload's quantity/purchasePrice are in the
+    // ENTERED unit (uomConversionId, null = base). Stored quantity/unitCost
+    // stay BASE-unit so the generated total and every per-unit derivation
+    // keep their meaning; the entered figures become immutable snapshots.
+    // Financials above were computed from the ENTERED values (exact line
+    // money); base figures below carry no extra discount/tax arithmetic.
+    const productsByVariantId = new Map<number, number>();
+    if (items.some((item) => item.uomConversionId != null)) {
+      const variantRows = await tx
+        .select({ id: productVariants.id, productId: productVariants.productId })
+        .from(productVariants)
+        .where(
+          and(
+            eq(productVariants.businessId, businessId),
+            inArray(productVariants.id, variantIds),
+          ),
+        );
+      for (const row of variantRows) productsByVariantId.set(row.id, row.productId);
+    }
+
+    const itemsToInsert = [] as (typeof purchaseItems.$inferInsert)[];
+    for (const item of items) {
+      const line: typeof purchaseItems.$inferInsert = {
+        businessId,
+        purchaseId: newPurchase.id,
+        variantId: item.variantId,
+        quantity: item.quantity,
+        receivedQuantity: 0,
+        unitCost: item.purchasePrice,
+        discount: item.discount,
+        tax: item.tax,
+      };
+      if (item.uomConversionId != null) {
+        const productId = productsByVariantId.get(item.variantId);
+        if (productId == null) {
+          throw new NotFoundError(`Variant ${item.variantId} not found.`);
+        }
+        const ctx = await resolveUomContext(
+          tx,
+          businessId,
+          productId,
+          item.variantId,
+          item.uomConversionId,
+        );
+        // Ordered base quantities live on a numeric(12,3) column: the
+        // converted amount must sit on that grid or every outstanding/
+        // tolerance ratio downstream would drift.
+        const converted = convertEnteredLine(ctx, item.quantity, null);
+        if (converted.baseMicros % 1000n !== 0n) {
+          throw new BadRequestError(
+            `The ordered quantity for this packaging unit does not convert to a valid base quantity.`,
+          );
+        }
+        const priced = convertEnteredLine(
+          ctx,
+          item.quantity,
+          item.purchasePrice,
+        );
+        line.quantity = converted.baseQuantity;
+        line.unitCost = priced.baseUnitPrice;
+        line.uomConversionId = ctx.conversion!.id;
+        line.enteredQuantity = item.quantity;
+        line.enteredUnitPrice = item.purchasePrice;
+        line.conversionFactor = ctx.factor;
+      }
+      itemsToInsert.push(line);
+    }
 
     // Insert them all in ONE single database query!
     await tx.insert(purchaseItems).values(itemsToInsert);
@@ -625,7 +685,17 @@ export async function createReceivePurchase(
       itemIds,
     );
 
-    const receiveItemMap = new Map(items.map((item) => [item.itemId, item]));
+    // UOM boundary (migration 0062): convert entered packaging quantities
+    // to BASE units once, up front, so every downstream rule keeps its
+    // base-unit invariant. Identity lines pass through unchanged.
+    const normalizedByItemId = await normalizeReceiveItemsToBase(
+      tx,
+      businessId,
+      existingItems,
+      items,
+    );
+
+    const receiveItemMap = normalizedByItemId;
 
     // Per-line decisions, kept for the receiving records + discrepancies.
     const overReceiveDecisions = new Map<
@@ -660,7 +730,9 @@ export async function createReceivePurchase(
 
     // Serials are unique per business — reject duplicates before any write
     // so the client gets a clear 400 instead of a raw constraint error.
-    await serialAvailabilityValidation(tx, businessId, items);
+    await serialAvailabilityValidation(tx, businessId, [
+      ...normalizedByItemId.values(),
+    ]);
 
     // Per-delivery audit rows (one per item with any delivered quantity).
     // Rejected goods exist ONLY here — they never reach batches, stock,
@@ -710,6 +782,12 @@ export async function createReceivePurchase(
           approvalReason: receiveItem.overReceiveReason,
           receivedByUserId: actorUserId ?? 0,
           approvedByUserId: overDecision ? actorUserId : undefined,
+          // UOM snapshot: what the operator typed at this session (base
+          // figures stay in accepted/rejected/unitCost).
+          uomConversionId: receiveItem.uomSnapshot?.conversionId ?? null,
+          enteredQuantity: receiveItem.uomSnapshot?.enteredQuantity ?? null,
+          enteredUnitPrice: receiveItem.uomSnapshot?.enteredUnitPrice ?? null,
+          conversionFactor: receiveItem.uomSnapshot?.conversionFactor ?? null,
         });
       }
 

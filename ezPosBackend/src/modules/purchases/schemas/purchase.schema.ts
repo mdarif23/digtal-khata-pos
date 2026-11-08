@@ -4,10 +4,14 @@ export const createPurchaseSchema = z.object({
     .array(
       z.object({
         variantId: z.number().int().positive(),
+        // Quantity + purchasePrice are in the ENTERED unit (uomConversionId,
+        // null = the product's base unit). The server converts to base
+        // authoritatively; client factors are never trusted.
         quantity: z.number().positive(),
         purchasePrice: z.number().nonnegative(),
         discount: z.number().nonnegative().default(0),
         tax: z.number().nonnegative().default(0),
+        uomConversionId: z.number().int().positive().nullish(),
       }),
     )
     .min(1, "At least one purchase item is required"),

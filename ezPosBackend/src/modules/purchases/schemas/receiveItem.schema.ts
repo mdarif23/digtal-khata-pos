@@ -16,6 +16,8 @@ export const receiveItemsFormSchema = z.object({
         itemId: z.number(),
         trackingType: z.enum(["none", "batch", "serial"]),
         // ACCEPTED quantity — the only quantity that enters inventory.
+        // When uomConversionId is set this is in the ENTERED packaging unit;
+        // the service converts it to base units authoritatively.
         receiveNow: z.number().min(0),
         // Delivered but refused — recorded, never stocked or valued.
         rejectedQuantity: z.number().min(0).default(0),
@@ -39,9 +41,17 @@ export const receiveItemsFormSchema = z.object({
         serialNumbers: z.array(
           z.string().min(1, "Serial number cannot be empty"),
         ),
+        // UOM (migration 0062): the packaging unit the quantities below are
+        // entered in. NULL = the product's base unit (all legacy clients).
+        uomConversionId: z.number().int().positive().nullish(),
       })
       .superRefine((data, ctx) => {
+        // Cross-field quantity checks run at the schema ONLY for the identity
+        // (base-unit) path — a UOM line needs the server-resolved factor
+        // first, so createReceivePurchase re-validates post-conversion.
+        const identity = data.uomConversionId == null;
         if (
+          identity &&
           data.trackingType === "serial" &&
           !Number.isInteger(data.receiveNow)
         ) {
@@ -51,7 +61,11 @@ export const receiveItemsFormSchema = z.object({
             message: "Serial-tracked quantities must be whole numbers.",
           });
         }
-        if (data.trackingType === "serial" && data.receiveNow > 0) {
+        if (
+          identity &&
+          data.trackingType === "serial" &&
+          data.receiveNow > 0
+        ) {
           if (data.serialNumbers.length !== data.receiveNow) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
@@ -60,7 +74,7 @@ export const receiveItemsFormSchema = z.object({
             });
           }
         }
-        if (data.trackingType === "batch" && data.receiveNow > 0) {
+        if (identity && data.trackingType === "batch" && data.receiveNow > 0) {
           const totalBatchQty = data.batches.reduce(
             (sum, b) => sum + b.quantity,
             0,
