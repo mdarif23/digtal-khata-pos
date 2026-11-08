@@ -150,7 +150,18 @@ export function PurchaseDetailsDrawer({
                   label="Due to supplier"
                   value={formatCurrency(purchase.dueAmount)}
                 />
+                <DetailRow
+                  label="Supplier credit balance"
+                  value={formatCurrency(purchase.supplierCreditBalance)}
+                />
               </dl>
+              {purchase.supplierCreditBalance > 0 && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Recorded supplier credits (returns and cancellations) —
+                  owed by the supplier, not a cash refund. Applying credits
+                  to future purchases is not supported yet.
+                </p>
+              )}
             </section>
 
             {/* ---- Item lines ---- */}

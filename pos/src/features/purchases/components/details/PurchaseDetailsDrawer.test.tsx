@@ -36,6 +36,22 @@ const purchaseDetail = {
     dueAmount: 680,
     paymentStatus: "partial" as const,
     notes: null,
+    supplierCreditBalance: 1200,
+  },
+  returnContext: {
+    locationId: 1,
+    locationName: "Main Store",
+    canReturn: true,
+    reason: null,
+    items: [
+      {
+        purchaseItemId: 21,
+        orderedQuantity: 10,
+        receivedQuantity: 10,
+        returnedQuantity: 0,
+        availableStock: 8,
+      },
+    ],
   },
   items: [
     {
@@ -46,6 +62,8 @@ const purchaseDetail = {
       productName: "Steel Bolt",
       variantSku: "BOLT-1",
       variantName: "Steel Bolt",
+      variantOptions: undefined,
+      trackingType: "none",
       productUnit: "Pcs",
       quantity: 10,
       receivedQuantity: 10,
@@ -190,6 +208,13 @@ describe("PurchaseDetailsDrawer", () => {
     expect(screen.getByText("Purchase grand total")).toBeInTheDocument();
     expect(screen.getByText("1,080.00")).toBeInTheDocument(); // cost summary (plain format)
     expect(screen.getByText(/680\.00/)).toBeInTheDocument();
+    // Phase 3: the supplier credit balance is visible on the detail even
+    // while the purchase still has an outstanding due.
+    expect(screen.getByText("Supplier credit balance")).toBeInTheDocument();
+    expect(screen.getByText(/1,200\.00/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/not a cash refund/),
+    ).toBeInTheDocument();
     // Item line with its unit cost (scoped to the row).
     expect(screen.getByText("Steel Bolt")).toBeInTheDocument();
     expect(screen.getByText("BOLT-1")).toBeInTheDocument();

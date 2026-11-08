@@ -175,7 +175,9 @@ export interface PurchaseDetailItem {
   productName: string;
   variantSku: string | null;
   variantName: string;
+  variantOptions: string | undefined;
   productUnit: string | null;
+  trackingType: string;
   quantity: number;
   receivedQuantity: number;
   rejectedQuantity: number;
@@ -185,6 +187,38 @@ export interface PurchaseDetailItem {
   tax: number;
   sellingPrice: number;
   availableStock: number | null;
+}
+
+/**
+ * Return-module context (Phase 1): return eligibility is evaluated at the
+ * purchase's RECEIVING location — never the caller's active location. The
+ * return service deducts stock there, so availability, previously-returned
+ * quantities and clamps must come from this context.
+ */
+export interface PurchaseReturnContextItem {
+  purchaseItemId: number;
+  orderedQuantity: number;
+  receivedQuantity: number;
+  returnedQuantity: number;
+  /** Stock of the line's VARIANT at the receiving location. */
+  availableStock: number;
+}
+
+export interface PurchaseReturnContext {
+  locationId: number | null;
+  locationName: string | null;
+  canReturn: boolean;
+  reason: "no_supplier" | "not_received" | null;
+  items: PurchaseReturnContextItem[];
+}
+
+/** Phase 5: in-stock serials eligible for return, per serial-tracked line. */
+export interface ReturnableSerials {
+  purchaseId: number;
+  items: {
+    purchaseItemId: number;
+    serials: { id: number; serialNumber: string }[];
+  }[];
 }
 
 /** GET /purchases/:id — the drawer's payload (header mirrors the list row
@@ -209,8 +243,64 @@ export interface PurchaseDetail {
     dueAmount: number;
     paymentStatus: "paid" | "unpaid" | "partial";
     notes: string | null;
+    /** Phase 3: the supplier's recorded credit balance (returns +
+     *  cancellations). Credit-only ledger, nothing consumes credits —
+     *  presentation only, never treated as cash. */
+    supplierCreditBalance: number;
   };
   items: PurchaseDetailItem[];
+  returnContext: PurchaseReturnContext;
+}
+
+/**
+ * Server-authoritative return preview (Phase 2): what THIS return would
+ * pay, computed by the same pure valuation the committing return uses.
+ * Informational — the submission recalculates transactionally.
+ */
+export interface PurchaseReturnPreview {
+  purchaseId: number;
+  canSubmit: boolean;
+  issues: string[];
+  quantities: {
+    purchaseItemId: number;
+    orderedQuantity: number;
+    receivedQuantity: number;
+    previouslyReturned: number;
+    eligibleQuantity: number;
+    availableStock: number;
+    requestedQuantity: number;
+    remainingAfterReturn: number;
+  }[];
+  goodsCredit: {
+    total: number;
+    lineCredits: {
+      purchaseItemId: number;
+      quantity: number;
+      goodsCredit: number;
+    }[];
+  };
+  landedCost: {
+    applies: boolean;
+    state: "no_document" | "draft" | "posted" | "adjusted" | "reversed";
+    expectedReversal: number;
+    pendingAllocation: number | null;
+    reason: string | null;
+  };
+  inventory: {
+    valuationReduction: number;
+    batchBreakdown: {
+      batchId: number;
+      quantity: number;
+      unitCost: number;
+      unitAdditionalCost: number;
+    }[];
+  };
+  supplierBalance: {
+    outstandingBefore: number;
+    goodsCredit: number;
+    outstandingAfter: number;
+    supplierCreditCreated: number;
+  };
 }
 
 export interface PurchaseListParams {
@@ -277,7 +367,11 @@ export interface ChangedItems {
 export interface PurchaseReturnInput {
   orderId: number;
   reason?: string;
-  changedItems: ChangedItems[];
+  changedItems: (ChangedItems & {
+    /** Phase 5: explicit serial selection for serial-tracked lines.
+     *  Absent = the backend's documented auto-pick fallback. */
+    serialIds?: number[];
+  })[];
 }
 export interface PurchaseReturnResponse {
   success: boolean;
@@ -286,13 +380,27 @@ export interface PurchaseReturnResponse {
     purchaseReturnId: number;
     totalAmount: number;
     landedCost: LandedCostFeedback;
+    /** Phase 3: the credit split — a credit beyond the outstanding due is
+     *  a supplier credit balance, never a cash refund. */
+    supplierBalance: {
+      outstandingBefore: number;
+      goodsCredit: number;
+      outstandingAfter: number;
+      supplierCreditCreated: number;
+    };
+    /** Phase 5 traceability: the serial numbers actually marked returned. */
+    returnedSerials: string[];
   };
 }
-/** Landed-cost feedback returned by the receive backend (authoritative). */
+/** Landed-cost feedback returned by the receive/return backends
+ *  (authoritative). Phase 7: state + reason explain WHY a reversal is or
+ *  is not applicable — the frontend never infers the state itself. */
 export type LandedCostFeedback = {
   adjusted: boolean;
   amount: number;
   documentId: number | null;
+  state?: "posted" | "adjusted" | "draft" | "reversed" | "no_document";
+  reason?: string | null;
 };
 
 export type ReceivePurchaseResponse = {
@@ -329,9 +437,6 @@ export interface PurchasesStore {
   getPurchaseItems: () => Promise<void>;
   getPurchases: () => Promise<void>;
   getPurchasesReturnItems: () => Promise<void>;
-  purchaseReturn: (
-    data: PurchaseReturnInput,
-  ) => Promise<PurchaseReturnResponse>;
   createReceivePurchase: (
     data: ReceiveItemsFormValues,
   ) => Promise<ReceivePurchaseResponse>;

@@ -37,6 +37,13 @@ type PurchaseNoticeState = {
   returnNotice?: {
     purchaseId: number;
     landedCost: LandedCostFeedback;
+    supplierBalance?: {
+      outstandingBefore: number;
+      goodsCredit: number;
+      outstandingAfter: number;
+      supplierCreditCreated: number;
+    };
+    returnedSerials?: string[];
   };
 } | null;
 
@@ -245,6 +252,8 @@ export const PurchasesList = () => {
               <LandedCostReversalNotice
                 purchaseId={returnNotice.purchaseId}
                 landedCost={returnNotice.landedCost}
+                supplierBalance={returnNotice.supplierBalance ?? undefined}
+                returnedSerials={returnNotice.returnedSerials ?? undefined}
                 onDismiss={() =>
                   navigate(location.pathname, { replace: true, state: null })
                 }
