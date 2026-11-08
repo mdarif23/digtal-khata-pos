@@ -39,6 +39,9 @@ export interface SaleGroupPricing {
   lineAdjustments: (CartGroupAmount | null)[];
   /** Total group discount (roundMoney'd). */
   total: number;
+  /** Phase 5 stacking consent: true when EVERY applied group-pricing row
+   * allows promotions to stack (vacuously true when nothing applied). */
+  stacksWithPromotions: boolean;
 }
 
 const NONE: SaleGroupPricing = {
@@ -47,6 +50,7 @@ const NONE: SaleGroupPricing = {
   cartAmounts: [],
   lineAdjustments: [],
   total: 0,
+  stacksWithPromotions: true,
 };
 
 interface GroupPricingRow {
@@ -59,6 +63,7 @@ interface GroupPricingRow {
   minPurchaseAmount: number;
   minQuantity: number | null;
   maxDiscountAmount: number | null;
+  stacksWithPromotions: boolean;
 }
 
 interface EvalItem {
@@ -143,6 +148,7 @@ export async function evaluateSaleGroupPricing(
         row.maxDiscountAmount == null ? null : Number(row.maxDiscountAmount),
       validFrom: row.validFrom,
       validTo: row.validTo,
+      stacksWithPromotions: row.stacksWithPromotions,
     }))
     .filter((row) => {
       if (row.minPurchaseAmount > itemsTotal) return false;
@@ -174,6 +180,8 @@ export async function evaluateSaleGroupPricing(
   const cartAmounts: CartGroupAmount[] = [];
   const lineAdjustments: (CartGroupAmount | null)[] = items.map(() => null);
   let total = 0;
+  // Phase 5 consent: every APPLIED row must allow promotions to stack.
+  let appliedRowsAllowPromotions = true;
 
   const computeAmount = (
     row: { discountType: string; discountValue: number; maxDiscountAmount: number | null },
@@ -201,6 +209,8 @@ export async function evaluateSaleGroupPricing(
       if (amount > 0) {
         cartAmounts.push({ refId: row.id, amount });
         total = roundMoney(total + amount);
+        appliedRowsAllowPromotions =
+          appliedRowsAllowPromotions && row.stacksWithPromotions;
       }
       continue;
     }
@@ -247,6 +257,8 @@ export async function evaluateSaleGroupPricing(
         amount: roundMoney((existing?.amount ?? 0) + r.amount),
       };
       total = roundMoney(total + r.amount);
+      appliedRowsAllowPromotions =
+        appliedRowsAllowPromotions && row.stacksWithPromotions;
     }
   }
 
@@ -267,6 +279,7 @@ export async function evaluateSaleGroupPricing(
     cartAmounts,
     lineAdjustments,
     total,
+    stacksWithPromotions: appliedRowsAllowPromotions,
   };
 }
 

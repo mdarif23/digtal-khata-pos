@@ -43,8 +43,21 @@ export const EMPTY_GROUP_INPUT: CartGroupInput = {
   lineAdjustments: [],
 };
 
-/** Pro-rata allocation by line total; the last line absorbs the remainder. */
-function allocateProRata(lineTotals: number[], amount: number): number[] {
+// ---------------------------------------------------------------------------
+// Auto-applied promotions input (Phase 5). Same shape as the group layer —
+// whole-cart amounts + index-aligned line-scoped amounts — computed by
+// evaluateSalePromotions on the POST-GROUP bases (approved stacking order:
+// base price → group → promotions → manual → VAT). Empty input is a no-op.
+// ---------------------------------------------------------------------------
+export type CartPromotionInput = CartGroupInput;
+export const EMPTY_PROMOTION_INPUT: CartPromotionInput = EMPTY_GROUP_INPUT;
+
+/**
+ * Pro-rata allocation by line total; the last line absorbs the remainder.
+ * Exported for the sale-time pricing evaluators so a layer's whole-cart
+ * amounts allocate EXACTLY the way the engine will (quote == checkout).
+ */
+export function allocateProRata(lineTotals: number[], amount: number): number[] {
   const cartTotal = roundMoney(lineTotals.reduce((sum, l) => sum + l, 0));
   const allocated = lineTotals.map((l) =>
     cartTotal > 0 ? roundMoney((l / cartTotal) * amount) : 0,
@@ -76,12 +89,14 @@ export function getLinePricing(
 }
 
 // Order: item discounts -> group discounts (whole-cart + line-scoped) ->
-// cart discount (its percentage base is the post-group total) -> VAT.
+// promotions (whole-cart + line-scoped, on the POST-GROUP bases) ->
+// cart discount (its percentage base is the post-group+promotion total) -> VAT.
 export function getCartTotals(
   items: Items[],
   cartDiscount: DiscountInput,
   vatPercent: number,
   group: CartGroupInput = EMPTY_GROUP_INPUT,
+  promotions: CartPromotionInput = EMPTY_PROMOTION_INPUT,
 ) {
   let itemsBase = 0;
   let itemDiscount = 0;
@@ -119,11 +134,61 @@ export function getCartTotals(
     group.lineAdjustments.reduce((sum, a) => sum + (a ? roundMoney(a.amount) : 0), 0),
   );
 
-  // Manual cart discount bases on the POST-group total (stacking policy).
-  const manualBase = Math.max(0, roundMoney(itemsTotal - groupCartAmount));
+  // Promotion layer (Phase 5): whole-cart rows allocate pro-rata by the
+  // POST-GROUP line totals — the same base evaluateSalePromotions priced
+  // them on — and line-scoped amounts apply verbatim.
+  const postGroupTotals = lineTotalsList.map(
+    (total, idx) =>
+      Math.max(
+        0,
+        roundMoney(
+          total -
+            groupLineAdjustments[idx]!.reduce((sum, a) => sum + a.amount, 0),
+        ),
+      ),
+  );
+  const promoCartTotal = promotions.cartAmounts.reduce(
+    (sum, a) => sum + a.amount,
+    0,
+  );
+  const promoLineAdjustments: CartGroupAmount[][] = items.map(() => []);
+  postGroupTotals.forEach((_, idx) => {
+    for (const cartRow of promotions.cartAmounts) {
+      const alloc =
+        allocateProRata(postGroupTotals, roundMoney(cartRow.amount))[idx] ?? 0;
+      if (alloc > 0) {
+        promoLineAdjustments[idx]!.push({ refId: cartRow.refId, amount: alloc });
+      }
+    }
+    const adj = promotions.lineAdjustments[idx];
+    if (adj && adj.amount > 0) {
+      promoLineAdjustments[idx]!.push({ refId: adj.refId, amount: roundMoney(adj.amount) });
+    }
+  });
+  const promoLineTotal = roundMoney(
+    promotions.lineAdjustments.reduce(
+      (sum, a) => sum + (a ? roundMoney(a.amount) : 0),
+      0,
+    ),
+  );
+
+  // Manual cart discount bases on the POST-group+promotion total (stacking
+  // policy: base → group → promotions → manual → VAT).
+  const manualBase = Math.max(
+    0,
+    roundMoney(itemsTotal - groupCartAmount - promoCartTotal),
+  );
   const cartDiscountAmount = calcDiscountAmount(manualBase, cartDiscount);
   const afterDiscount = roundMoney(
-    Math.max(0, itemsTotal - groupCartAmount - cartDiscountAmount - lineGroupTotal),
+    Math.max(
+      0,
+      itemsTotal -
+        groupCartAmount -
+        cartDiscountAmount -
+        lineGroupTotal -
+        promoCartTotal -
+        promoLineTotal,
+    ),
   );
 
   const safeVatPercent = Math.min(Math.max(Number(vatPercent) || 0, 0), 100);
@@ -136,12 +201,61 @@ export function getCartTotals(
     groupCartAmount,
     lineGroupTotal,
     groupLineAdjustments,
+    promoCartAmount: roundMoney(promoCartTotal),
+    promoLineTotal,
+    promoLineAdjustments,
     cartDiscountAmount,
     afterDiscount,
     vatPercent: safeVatPercent,
     vat,
     finalTotal: roundMoney(afterDiscount + vat),
   };
+}
+
+/**
+ * Effective per-LINE charge after every discount layer (line discount, the
+ * pro-rata manual cart allocation, group and promotion amounts) — the base
+ * the minimum-price floors are measured on (Phase 6). Works for both the
+ * legacy and the rules-based totals shapes.
+ */
+export function lineChargeAfterAllocations(
+  items: Items[],
+  totals:
+    | ReturnType<typeof getCartTotals>
+    | TaxedTotals,
+): number[] {
+  const lineTotals = items.map((item) =>
+    item.unitPrice == null
+      ? 0
+      : getLinePricing(item.unitPrice, item.quantity, item.discount).total,
+  );
+  const manualAlloc = allocateProRata(lineTotals, totals.cartDiscountAmount);
+  return items.map((_, idx) => {
+    const groupAmt =
+      "perLine" in totals
+        ? (totals.perLine[idx]?.groupAdjustments ?? []).reduce(
+            (s, a) => s + a.amount,
+            0,
+          )
+        : (totals.groupLineAdjustments[idx] ?? []).reduce(
+            (s, a) => s + a.amount,
+            0,
+          );
+    const promoAmt =
+      "perLine" in totals
+        ? (totals.perLine[idx]?.promotionAdjustments ?? []).reduce(
+            (s, a) => s + a.amount,
+            0,
+          )
+        : (totals.promoLineAdjustments[idx] ?? []).reduce(
+            (s, a) => s + a.amount,
+            0,
+          );
+    return Math.max(
+      0,
+      roundMoney(lineTotals[idx]! - (manualAlloc[idx] ?? 0) - groupAmt - promoAmt),
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +278,8 @@ export interface LineTax {
   detail: (TaxRuleSnapshot & { amount: number })[];
   /** Group-discount attribution for this line (snapshot source). */
   groupAdjustments: CartGroupAmount[];
+  /** Promotion attribution for this line (snapshot source, Phase 5). */
+  promotionAdjustments: CartGroupAmount[];
 }
 
 export interface TaxedTotals {
@@ -174,6 +290,10 @@ export interface TaxedTotals {
   groupCartAmount: number;
   /** Sum of line-scoped group discounts. */
   lineGroupTotal: number;
+  /** Sum of whole-cart promotion discounts (post-group base). */
+  promoCartAmount: number;
+  /** Sum of line-scoped promotion discounts. */
+  promoLineTotal: number;
   cartDiscountAmount: number;
   afterDiscount: number;
   /** Tax added on top of the price (exclusive rules). */
@@ -207,6 +327,7 @@ export function getCartTotalsWithTaxRules(
   cartDiscount: DiscountInput,
   rulesByVariant: Map<number, TaxRuleSnapshot[]>,
   group: CartGroupInput = EMPTY_GROUP_INPUT,
+  promotions: CartPromotionInput = EMPTY_PROMOTION_INPUT,
 ): TaxedTotals {
   let itemsBase = 0;
   let itemDiscount = 0;
@@ -244,11 +365,11 @@ export function getCartTotalsWithTaxRules(
     group.lineAdjustments.reduce((sum, a) => sum + (a ? roundMoney(a.amount) : 0), 0),
   );
 
-  const perLine: LineTax[] = [];
-  let exclusiveTaxTotal = 0;
-  let inclusiveTaxTotal = 0;
-
-  lineTotals.forEach(({ item, total }, idx) => {
+  // First pass: per-line group amounts, so the promotion layer can price on
+  // the POST-GROUP line totals (approved stacking order).
+  const groupLineAmounts: number[] = [];
+  const groupAdjustmentsByLine: CartGroupAmount[][] = [];
+  lineTotals.forEach((_, idx) => {
     const groupAdjustments: CartGroupAmount[] = [];
     let groupLineAmount = 0;
     for (const row of groupRowAllocs) {
@@ -263,11 +384,60 @@ export function getCartTotalsWithTaxRules(
       groupAdjustments.push({ refId: lineAdj.refId, amount: roundMoney(lineAdj.amount) });
       groupLineAmount = roundMoney(groupLineAmount + roundMoney(lineAdj.amount));
     }
+    groupLineAmounts[idx] = groupLineAmount;
+    groupAdjustmentsByLine[idx] = groupAdjustments;
+  });
+
+  // Promotion layer (Phase 5): whole-cart rows allocate pro-rata by the
+  // POST-GROUP line totals — the base evaluateSalePromotions priced on.
+  const postGroupTotals = totalsList.map(
+    (total, idx) => Math.max(0, roundMoney(total - groupLineAmounts[idx]!)),
+  );
+  const promoRowAllocs = promotions.cartAmounts.map((row) => ({
+    refId: row.refId,
+    amounts: allocateProRata(postGroupTotals, roundMoney(row.amount)),
+  }));
+  const promoLineTotal = roundMoney(
+    promotions.lineAdjustments.reduce(
+      (sum, a) => sum + (a ? roundMoney(a.amount) : 0),
+      0,
+    ),
+  );
+  const promoCartAmount = roundMoney(
+    promotions.cartAmounts.reduce((sum, a) => sum + a.amount, 0),
+  );
+
+  const perLine: LineTax[] = [];
+  let exclusiveTaxTotal = 0;
+  let inclusiveTaxTotal = 0;
+
+  lineTotals.forEach(({ item, total }, idx) => {
+    const groupAdjustments = groupAdjustmentsByLine[idx]!;
+    const promotionAdjustments: CartGroupAmount[] = [];
+    let promoLineAmount = 0;
+    for (const row of promoRowAllocs) {
+      const alloc = row.amounts[idx] ?? 0;
+      if (alloc > 0) {
+        promotionAdjustments.push({ refId: row.refId, amount: alloc });
+        promoLineAmount = roundMoney(promoLineAmount + alloc);
+      }
+    }
+    const promoAdj = promotions.lineAdjustments[idx];
+    if (promoAdj && promoAdj.amount > 0) {
+      promotionAdjustments.push({
+        refId: promoAdj.refId,
+        amount: roundMoney(promoAdj.amount),
+      });
+      promoLineAmount = roundMoney(promoLineAmount + roundMoney(promoAdj.amount));
+    }
 
     const base = roundMoney(
       Math.max(
         0,
-        total - (manualAlloc[idx] ?? 0) - groupLineAmount,
+        total -
+          (manualAlloc[idx] ?? 0) -
+          groupLineAmounts[idx]! -
+          promoLineAmount,
       ),
     );
     const rules = rulesByVariant.get(item.variantId) ?? [];
@@ -312,6 +482,7 @@ export function getCartTotalsWithTaxRules(
       taxAmount: roundMoney(lineTax),
       detail,
       groupAdjustments,
+      promotionAdjustments,
     });
   });
 
@@ -320,7 +491,12 @@ export function getCartTotalsWithTaxRules(
   const afterDiscount = roundMoney(
     Math.max(
       0,
-      itemsTotal - cartDiscountAmount - groupCartAmount - lineGroupTotal,
+      itemsTotal -
+        cartDiscountAmount -
+        groupCartAmount -
+        lineGroupTotal -
+        promoCartAmount -
+        promoLineTotal,
     ),
   );
 
@@ -330,6 +506,8 @@ export function getCartTotalsWithTaxRules(
     itemsTotal,
     groupCartAmount,
     lineGroupTotal,
+    promoCartAmount,
+    promoLineTotal,
     cartDiscountAmount,
     afterDiscount,
     exclusiveTaxTotal,
