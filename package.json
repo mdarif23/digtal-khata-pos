@@ -5,6 +5,6 @@
     "dev": "concurrently -n BACKEND,FRONTEND,WEBSITE,STOREFRONT -c blue,green,magenta,yellow \"npm run dev --prefix ezPosBackend\" \"npm run dev --prefix pos\" \"npm run dev --prefix ezPosWebsite\" \"npm run dev --prefix ezPosStorefront\""
   },
   "devDependencies": {
-    "concurrently": "^10.0.6"
+    "concurrently": "^10.0.7"
   }
 }
