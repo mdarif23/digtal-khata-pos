@@ -198,6 +198,12 @@ export const navigation = [
     items: [
       { title: "Product Pricing", url: "/pricing/products", permission: "pricing.view" },
       { title: "Pricing Rules", url: "/pricing/rules", permission: "pricing.view" },
+      { title: "Customer Groups", url: "/pricing/customer-groups", permission: "pricing.view" },
+      { title: "Promotions", url: "/pricing/promotions", permission: "promotions.view" },
+      { title: "Price History", url: "/pricing/history", permission: "pricing.history.view" },
+      { title: "Proposals", url: "/pricing/proposals", permission: "pricing.history.view" },
+      { title: "Bulk Update", url: "/pricing/bulk", permission: "pricing.bulk_update" },
+      { title: "Pricing Reports", url: "/pricing/reports", permission: "pricing.view" },
       { title: "Pricing Settings", url: "/pricing/settings", permission: "pricing.view" },
     ],
   },

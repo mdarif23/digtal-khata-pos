@@ -38,7 +38,17 @@ describe("pricing frontend wiring", () => {
     const section = navigation.find((item) => item.title === "Pricing");
     expect(section).toBeDefined();
     const urls = new Set((section!.items ?? []).map((item) => item.url));
-    for (const url of ["/pricing/products", "/pricing/rules", "/pricing/settings"]) {
+    for (const url of [
+      "/pricing/products",
+      "/pricing/rules",
+      "/pricing/customer-groups",
+      "/pricing/promotions",
+      "/pricing/history",
+      "/pricing/proposals",
+      "/pricing/bulk",
+      "/pricing/reports",
+      "/pricing/settings",
+    ]) {
       expect(urls.has(url), `nav missing route: ${url}`).toBe(true);
     }
     expect(section!.permission).toBe("pricing.view");
@@ -49,7 +59,9 @@ describe("pricing frontend wiring", () => {
     for (const item of section.items ?? []) {
       const gate = item.permission ?? item.anyPermission;
       expect(gate, `nav item ${item.title} has no permission gate`).toBeDefined();
-      expect(gate!.startsWith("pricing.") || gate === "pricing.view").toBe(true);
+      expect(
+        gate!.startsWith("pricing.") || gate === "promotions.view",
+      ).toBe(true);
     }
   });
 

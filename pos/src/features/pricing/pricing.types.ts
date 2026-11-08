@@ -130,3 +130,129 @@ export interface MatrixVariant {
   quantity: number | null;
   purchaseCost: number | null;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5-8: promotions, customer groups, bulk, proposals, reports
+// ---------------------------------------------------------------------------
+
+export interface Promotion {
+  id: number;
+  name: string;
+  categoryId: number | null;
+  productId: number | null;
+  variantId: number | null;
+  discountType: "percentage" | "fixed";
+  discountValue: number;
+  startsAt: string | null;
+  endsAt: string | null;
+  minQuantity: number | null;
+  minOrderValue: number;
+  maxDiscountAmount: number | null;
+  canStackWithGroupDiscount: boolean;
+  canStackWithCoupons: boolean;
+  isActive: boolean;
+  scopeLabel: string;
+  customerGroups: { id: number; name: string }[];
+}
+
+export interface PromotionInput {
+  name: string;
+  categoryId?: number | null;
+  productId?: number | null;
+  variantId?: number | null;
+  discountType: "percentage" | "fixed";
+  discountValue: number;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  minQuantity?: number | null;
+  minOrderValue?: number;
+  maxDiscountAmount?: number | null;
+  canStackWithGroupDiscount?: boolean;
+  canStackWithCoupons?: boolean;
+  isActive?: boolean;
+  groupIds?: number[];
+}
+
+export interface CustomerGroup {
+  id: number;
+  name: string;
+  description: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+  memberCount: number;
+  pricingCount: number;
+}
+
+export interface GroupPricingRow {
+  id: number;
+  groupId: number;
+  categoryId: number | null;
+  productId: number | null;
+  variantId: number | null;
+  discountType: "percentage" | "fixed";
+  discountValue: number;
+  minPurchaseAmount: number;
+  minQuantity: number | null;
+  maxDiscountAmount: number | null;
+  validFrom: string | null;
+  validTo: string | null;
+  stacksWithPromotions: boolean;
+  isActive: boolean;
+  scopeLabel: string;
+}
+
+export interface BulkRow {
+  variantId: number;
+  variantName: string;
+  sku: string | null;
+  currentPrice: number;
+  recommended: number | null;
+  changed: boolean;
+  cost: number | null;
+  method: string;
+  sourceLabel: string;
+  applied: boolean;
+  blockedReason: string | null;
+}
+
+export interface BulkResult {
+  rows: BulkRow[];
+  appliedCount: number;
+}
+
+export interface PriceProposal {
+  id: number;
+  variantId: number;
+  batchToken: string;
+  oldCost: number | null;
+  newCost: number | null;
+  oldPrice: number | null;
+  recommendedPrice: number;
+  percentChange: number | null;
+  status: "pending" | "approved" | "rejected" | "applied" | "stale";
+  decidedAt: string | null;
+  createdAt: string;
+  sku: string;
+  productName: string;
+}
+
+export interface GroupProfitabilityRow {
+  groupId: number | null;
+  groupName: string;
+  salesCount: number;
+  grossSales: number;
+  itemDiscounts: number;
+  groupDiscounts: number;
+  promotionDiscounts: number;
+  netRevenue: number;
+  totalCost: number;
+  netProfit: number;
+  marginPercent: number;
+}
+
+export interface PromotionPerformanceRow {
+  promotionId: number;
+  promotionName: string;
+  salesCount: number;
+  totalDiscount: number;
+}

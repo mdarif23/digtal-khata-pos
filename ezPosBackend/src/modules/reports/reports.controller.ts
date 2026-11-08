@@ -428,3 +428,35 @@ export async function getSalesForecast(req: Request, res: Response) {
     sendSafe(err, res);
   }
 }
+
+// --- Pricing attribution reports (Phase 7) ----------------------------------
+
+export async function getGroupProfitability(req: Request, res: Response) {
+  try {
+    const params = getValidatedParams(req);
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getGroupProfitabilityReport(
+      getBusinessId(req),
+      params,
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}
+
+export async function getPromotionPerformance(req: Request, res: Response) {
+  try {
+    const params = getValidatedParams(req);
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getPromotionPerformanceReport(
+      getBusinessId(req),
+      params,
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafe(err, res);
+  }
+}

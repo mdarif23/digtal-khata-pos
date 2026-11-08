@@ -232,3 +232,19 @@ router.get(
 );
 
 export default router;
+
+// Pricing attribution reports (Phase 7). Group profitability is profit data
+// → the advanced financial chain; promotion performance exposes discount
+// totals → promotions.view behind the same entitlement.
+router.get(
+  "/api/reports/pricing/group-profitability",
+  ...advanced,
+  reportsController.getGroupProfitability,
+);
+router.get(
+  "/api/reports/pricing/promotion-performance",
+  ...read,
+  requirePermission("promotions.view"),
+  requireFeature("advancedReports"),
+  reportsController.getPromotionPerformance,
+);

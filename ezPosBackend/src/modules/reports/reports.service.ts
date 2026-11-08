@@ -2183,3 +2183,163 @@ export async function getSalesForecastReport(
       "least-squares linear trend over the last 90 days of daily revenue — a statistical estimate, not a guarantee",
   };
 }
+
+// ---------------------------------------------------------------------------
+// Pricing attribution reports (Phase 7): group profitability reads the
+// sales.customer_group_id SNAPSHOT (no live membership joins); promotion
+// performance reads sale_items.price_adjustments. Both stay on historical
+// sale snapshots — materializing new prices never rewrites history.
+// ---------------------------------------------------------------------------
+
+export interface GroupProfitabilityRow {
+  groupId: number | null;
+  groupName: string;
+  salesCount: number;
+  grossSales: number;
+  itemDiscounts: number;
+  groupDiscounts: number;
+  promotionDiscounts: number;
+  netRevenue: number;
+  totalCost: number;
+  netProfit: number;
+  marginPercent: number;
+}
+
+export async function getGroupProfitabilityReport(
+  businessId: number,
+  params: DateRangeQuery,
+  locationId?: number,
+): Promise<{ rows: GroupProfitabilityRow[] }> {
+  const { start, end } = getDateBounds(params);
+
+  const result = await db.execute(sql`
+    WITH base AS (
+      SELECT
+        s.customer_group_id,
+        s.id AS sale_id,
+        SUM(si.selling_price * si.quantity) AS gross,
+        SUM(si.discount) AS item_disc,
+        SUM(si.cost_at_sale * si.quantity) AS cogs
+      FROM sales s
+      INNER JOIN sale_items si ON si.sale_id = s.id AND si.business_id = s.business_id
+      WHERE s.business_id = ${businessId}
+        AND s.created_at >= ${start}::timestamp
+        AND s.created_at <= ${end}::timestamp${locationFilter("s", locationId)}
+      GROUP BY s.customer_group_id, s.id
+    ),
+    adj AS (
+      SELECT
+        s.customer_group_id,
+        COALESCE(SUM((a.adj->>'amount')::numeric) FILTER (WHERE a.adj->>'kind' = 'group'), 0) AS group_disc,
+        COALESCE(SUM((a.adj->>'amount')::numeric) FILTER (WHERE a.adj->>'kind' = 'promotion'), 0) AS promo_disc
+      FROM sales s
+      INNER JOIN sale_items si ON si.sale_id = s.id AND si.business_id = s.business_id
+      CROSS JOIN LATERAL jsonb_array_elements(si.price_adjustments) a(adj)
+      WHERE s.business_id = ${businessId}
+        AND s.created_at >= ${start}::timestamp
+        AND s.created_at <= ${end}::timestamp${locationFilter("s", locationId)}
+      GROUP BY s.customer_group_id
+    )
+    SELECT
+      t.customer_group_id AS "groupId",
+      COALESCE(g.name,
+        CASE WHEN t.customer_group_id IS NULL THEN 'No group'
+             ELSE 'Removed group #' || t.customer_group_id END) AS "groupName",
+      t."salesCount",
+      t.gross AS "grossSales",
+      t.item_disc AS "itemDiscounts",
+      COALESCE(adj.group_disc, 0) AS "groupDiscounts",
+      COALESCE(adj.promo_disc, 0) AS "promotionDiscounts",
+      (t.gross - t.item_disc - COALESCE(adj.group_disc, 0) - COALESCE(adj.promo_disc, 0)) AS "netRevenue",
+      t.cogs AS "totalCost",
+      (t.gross - t.item_disc - COALESCE(adj.group_disc, 0) - COALESCE(adj.promo_disc, 0) - t.cogs) AS "netProfit"
+    FROM (
+      SELECT customer_group_id,
+        COUNT(DISTINCT sale_id)::int AS "salesCount",
+        COALESCE(SUM(gross), 0)::numeric AS gross,
+        COALESCE(SUM(item_disc), 0)::numeric AS item_disc,
+        COALESCE(SUM(cogs), 0)::numeric AS cogs
+      FROM base
+      GROUP BY customer_group_id
+    ) t
+    LEFT JOIN adj ON adj.customer_group_id IS NOT DISTINCT FROM t.customer_group_id
+    LEFT JOIN customer_groups g ON g.id = t.customer_group_id
+    ORDER BY "netProfit" DESC
+  `);
+
+  const rows = (result.rows as Record<string, unknown>[]).map((r) => {
+    const grossSales = Number(r.grossSales ?? 0);
+    const itemDiscounts = Number(r.itemDiscounts ?? 0);
+    const groupDiscounts = Number(r.groupDiscounts ?? 0);
+    const promotionDiscounts = Number(r.promotionDiscounts ?? 0);
+    const totalCost = Number(r.totalCost ?? 0);
+    const netRevenue = grossSales - itemDiscounts - groupDiscounts - promotionDiscounts;
+    const netProfit = netRevenue - totalCost;
+    return {
+      groupId: r.groupId == null ? null : Number(r.groupId),
+      groupName: String(r.groupName ?? "No group"),
+      salesCount: Number(r.salesCount ?? 0),
+      grossSales,
+      itemDiscounts,
+      groupDiscounts,
+      promotionDiscounts,
+      netRevenue,
+      totalCost,
+      netProfit,
+      marginPercent:
+        netRevenue > 0 ? Math.round((netProfit / netRevenue) * 10000) / 100 : 0,
+    };
+  });
+  return { rows };
+}
+
+export interface PromotionPerformanceRow {
+  promotionId: number;
+  promotionName: string;
+  salesCount: number;
+  totalDiscount: number;
+}
+
+export async function getPromotionPerformanceReport(
+  businessId: number,
+  params: DateRangeQuery,
+  locationId?: number,
+): Promise<{ rows: PromotionPerformanceRow[] }> {
+  const { start, end } = getDateBounds(params);
+
+  const result = await db.execute(sql`
+    WITH usage AS (
+      SELECT
+        (a.adj->>'refId')::int AS promotion_id,
+        COUNT(DISTINCT s.id)::int AS "salesCount",
+        COALESCE(SUM((a.adj->>'amount')::numeric), 0)::numeric AS total_disc
+      FROM sales s
+      INNER JOIN sale_items si ON si.sale_id = s.id AND si.business_id = s.business_id
+      CROSS JOIN LATERAL jsonb_array_elements(si.price_adjustments) a(adj)
+      WHERE s.business_id = ${businessId}
+        AND s.created_at >= ${start}::timestamp
+        AND s.created_at <= ${end}::timestamp${locationFilter("s", locationId)}
+        AND a.adj->>'kind' = 'promotion'
+        AND a.adj->>'refId' IS NOT NULL
+      GROUP BY 1
+    )
+    SELECT
+      u.promotion_id AS "promotionId",
+      COALESCE(pp.name, 'Removed promotion #' || u.promotion_id) AS "promotionName",
+      u."salesCount",
+      u.total_disc AS "totalDiscount"
+    FROM usage u
+    LEFT JOIN pricing_promotions pp
+      ON pp.id = u.promotion_id AND pp.business_id = ${businessId}
+    ORDER BY u.total_disc DESC
+  `);
+
+  return {
+    rows: (result.rows as Record<string, unknown>[]).map((r) => ({
+      promotionId: Number(r.promotionId),
+      promotionName: String(r.promotionName ?? ""),
+      salesCount: Number(r.salesCount ?? 0),
+      totalDiscount: Number(r.totalDiscount ?? 0),
+    })),
+  };
+}
