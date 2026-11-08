@@ -66,6 +66,71 @@ describe("purchase return integration", { skip: !runIntegration }, () => {
     return variant.rows[0]!.id as number;
   }
 
+  async function seedSerialVariant(businessId: number): Promise<number> {
+    const location = (await pg!.query(
+      "SELECT id FROM locations WHERE business_id = $1 AND is_default = true",
+      [businessId],
+    )).rows[0] as { id: number } | undefined;
+    assert.ok(location, "default location missing");
+    const product = await pg!.query(
+      `INSERT INTO products (business_id, name, product_type, tracking_type, status)
+       VALUES ($1, $2, 'physical', 'serial', 'active') RETURNING id`,
+      [businessId, `Serial Product ${Date.now()}-${(counter += 1)}`],
+    );
+    const variant = await pg!.query(
+      `INSERT INTO product_variants (business_id, product_id, sku, selling_price, is_default, status)
+       VALUES ($1, $2, $3, 100, true, 'active') RETURNING id`,
+      [businessId, product.rows[0]!.id, `SSKU-${Date.now()}-${(counter += 1)}`],
+    );
+    await pg!.query(
+      `INSERT INTO inventory_stock (business_id, variant_id, location_id, quantity, reserved_quantity)
+       VALUES ($1, $2, $3, 0, 0)`,
+      [businessId, variant.rows[0]!.id, location.id],
+    );
+    return variant.rows[0]!.id as number;
+  }
+
+  /** Receives a serial-tracked line: serialNumbers define the quantity. */
+  async function createReceivedSerialPurchase(
+    ctx: OwnerCtx,
+    variantId: number,
+    serialNumbersIn: string[],
+    opts: { supplierId: number },
+  ) {
+    const purchase = await postJson(baseUrl, ctx, "/api/purchases", {
+      items: [
+        { variantId, quantity: serialNumbersIn.length, purchasePrice: 100 },
+      ],
+      supplierId: opts.supplierId,
+      purchaseDate: new Date().toISOString(),
+    });
+    assert.equal(purchase.status, 201, JSON.stringify(purchase.body));
+    const purchaseId = Number(purchase.body.data.id);
+    const { rows } = await pg!.query(
+      "SELECT id FROM purchase_items WHERE purchase_id = $1",
+      [purchaseId],
+    );
+    const itemId = Number(rows[0]!.id);
+    const received = await postJson(baseUrl, ctx, "/api/purchases/receive", {
+      purchaseId,
+      items: [
+        {
+          itemId,
+          trackingType: "serial",
+          receiveNow: serialNumbersIn.length,
+          unitCost: 100,
+          sellingPrice: 100,
+          batches: [],
+          serialNumbers: serialNumbersIn,
+        },
+      ],
+      paymentAmount: 0,
+      paymentMethod: "cash",
+    });
+    assert.equal(received.status, 201, JSON.stringify(received.body));
+    return { purchaseId, itemId };
+  }
+
   async function stockRow(businessId: number, variantId: number) {
     const { rows } = await pg!.query(
       "SELECT quantity FROM inventory_stock WHERE business_id = $1 AND variant_id = $2",
@@ -207,11 +272,14 @@ describe("purchase return integration", { skip: !runIntegration }, () => {
     ]);
     assert.equal(first.status, 201, `return 1 failed: ${JSON.stringify(first.body)}`);
     assert.equal(Number(first.body?.data?.totalAmount), 200);
-    // Landed-cost feedback is always present (no document → not adjusted).
+    // Landed-cost feedback is always present (no document → not adjusted),
+    // with the authoritative state explanation (Phase 7).
     assert.deepEqual(first.body?.data?.landedCost, {
       adjusted: false,
       amount: 0,
       documentId: null,
+      state: "no_document",
+      reason: "No landed-cost document exists for this purchase.",
     });
 
     // Return 8 more (remaining 2 @ 100 + 6 @ 200): credit 1400.
@@ -619,5 +687,451 @@ describe("purchase return integration", { skip: !runIntegration }, () => {
     }
     const stock = await stockRow(owner.businessId, variantId);
     assert.equal(Number(stock?.quantity ?? 0), 10);
+  });
+
+  it("evaluates return eligibility at the RECEIVING location, not the active location (Phase 1)", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Return Cross-Loc Co");
+    // A second location for the business — the caller's ACTIVE location.
+    const second = await postJson(baseUrl, owner, "/api/locations", {
+      name: `Second Store ${Date.now()}`,
+    });
+    assert.equal(second.status, 201, JSON.stringify(second.body));
+    const activeLocationId = Number(second.body.data.id);
+
+    const defaultLocation = (await pg!.query(
+      "SELECT id, name FROM locations WHERE business_id = $1 AND is_default = true",
+      [owner.businessId],
+    )).rows[0] as { id: number; name: string };
+
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    const { purchaseId, items } = await createReceivedPurchase(
+      owner,
+      variantId,
+      10,
+      100,
+      { supplierId },
+    );
+    const itemId = Number(items[0]!.id);
+
+    // Sell 2 units → 8 remain at the RECEIVING location (the default).
+    await sellUnits(owner, variantId, 2);
+
+    // Detail read with the ACTIVE location pointing at the empty store:
+    // the return context must still evaluate the RECEIVING location.
+    const detail = await getJson(
+      baseUrl,
+      owner,
+      `/api/purchases/${purchaseId}`,
+      { "x-location-id": String(activeLocationId) },
+    );
+    assert.equal(detail.status, 200);
+    const context = (detail.body as any).returnContext;
+    assert.equal(context.locationId, defaultLocation.id);
+    assert.equal(context.locationName, defaultLocation.name);
+    assert.equal(context.canReturn, true);
+    assert.equal(context.reason, null);
+    assert.equal(context.items.length, 1);
+    assert.equal(context.items[0].purchaseItemId, itemId);
+    assert.equal(context.items[0].orderedQuantity, 10);
+    assert.equal(context.items[0].receivedQuantity, 10);
+    assert.equal(context.items[0].returnedQuantity, 0);
+    // The receiving location has 8 — NOT the active location's 0.
+    assert.equal(context.items[0].availableStock, 8);
+
+    // The old data source (business-wide items at the ACTIVE location)
+    // reports no stock there — exactly why the page must not use it.
+    const itemsResp = await getJson(baseUrl, owner, "/api/purchases/items", {
+      "x-location-id": String(activeLocationId),
+    });
+    assert.equal(itemsResp.status, 200);
+    const activeLocationStock = (itemsResp.body as any[]).find(
+      (row) => row.purchaseId === purchaseId,
+    ).availableStock;
+    assert.ok(!activeLocationStock, "active-location stock must not feed returns");
+
+    // A return processed while the ACTIVE location differs still deducts
+    // at the receiving location, and the context reflects the new state.
+    const ret = await postJson(
+      baseUrl,
+      owner,
+      "/api/purchase-return",
+      {
+        orderId: purchaseId,
+        reason: "phase 1 cross-location",
+        changedItems: [{ purchaseItemId: itemId, quantity: 3 }],
+      },
+      { "x-location-id": String(activeLocationId) },
+    );
+    assert.equal(ret.status, 201, JSON.stringify(ret.body));
+
+    const after = await getJson(
+      baseUrl,
+      owner,
+      `/api/purchases/${purchaseId}`,
+      { "x-location-id": String(activeLocationId) },
+    );
+    const contextAfter = (after.body as any).returnContext;
+    assert.equal(contextAfter.items[0].returnedQuantity, 3);
+    assert.equal(contextAfter.items[0].availableStock, 5);
+    assert.equal((after.body as any).purchase.returnStatus, "Partially returned");
+  });
+
+  /* ------------------------------------------------------------------
+   * Phase 2 — server-authoritative return preview: the preview computes
+   * the SAME batch-FIFO credit math the committing return uses (shared
+   * pure helpers), reports landed-cost state per the document, splits
+   * supplier balance vs credit, and REPORTS (not throws) eligibility
+   * issues. Preview totals equal the commit's actual totals.
+   * ------------------------------------------------------------------ */
+
+  it("previews the return at real batch costs with landed reversal and balance split (Phase 2)", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Return Preview Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+
+    // Line with a discount and tax: amortized adjustment = (tax − disc)/qty.
+    const purchase = await postJson(baseUrl, owner, "/api/purchases", {
+      items: [
+        {
+          variantId,
+          quantity: 10,
+          purchasePrice: 100,
+          discount: 20,
+          tax: 10,
+        },
+      ],
+      supplierId,
+      purchaseDate: new Date().toISOString(),
+    });
+    assert.equal(purchase.status, 201, JSON.stringify(purchase.body));
+    const purchaseId = Number(purchase.body.data.id);
+    const { rows: itemRows } = await pg!.query(
+      "SELECT id FROM purchase_items WHERE purchase_id = $1",
+      [purchaseId],
+    );
+    const itemId = Number(itemRows[0]!.id);
+
+    // Two receive sessions at different costs → two batches.
+    await receiveSession(owner, purchaseId, [{ itemId, receiveNow: 5, unitCost: 100 }]);
+    await receiveSession(owner, purchaseId, [{ itemId, receiveNow: 5, unitCost: 120 }]);
+    // Landed cost: 500 → 50/unit on both batches; posted so a reversal applies.
+    const doc = await postJson(
+      baseUrl,
+      owner,
+      `/api/purchases/${purchaseId}/landed-cost`,
+      {
+        method: "quantity",
+        expenses: [
+          { expenseType: "customs", amount: 500, isCapitalizable: true },
+        ],
+      },
+    );
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    const docId = Number(doc.body.data.id);
+    assert.equal(
+      (await postJson(baseUrl, owner, `/api/landed-costs/${docId}/post`, {}))
+        .status,
+      200,
+    );
+
+    // Preview a 7-unit return: FIFO → 5 @ 100 + 2 @ 120.
+    // Per-unit credit = batch price + (10 − 20)/10 = price − 1.
+    const preview = await postJson(
+      baseUrl,
+      owner,
+      `/api/purchases/${purchaseId}/return-preview`,
+      { changedItems: [{ purchaseItemId: itemId, quantity: 7 }] },
+    );
+    assert.equal(preview.status, 200, JSON.stringify(preview.body));
+    const data = (preview.body as any).data;
+    assert.equal(data.canSubmit, true);
+    assert.deepEqual(data.issues, []);
+    // Goods credit: 5 × 99 + 2 × 119 = 733.
+    assert.equal(data.goodsCredit.total, 733);
+    assert.equal(data.goodsCredit.lineCredits[0].goodsCredit, 733);
+    // Batch breakdown: two batches, FIFO quantities.
+    assert.equal(data.inventory.batchBreakdown.length, 2);
+    assert.equal(data.inventory.batchBreakdown[0].quantity, 5);
+    assert.equal(Number(data.inventory.batchBreakdown[0].unitCost), 100);
+    assert.equal(Number(data.inventory.batchBreakdown[1].unitCost), 120);
+    // Landed reversal applies (posted doc): 7 × 50 = 350.
+    assert.equal(data.landedCost.applies, true);
+    assert.equal(data.landedCost.state, "posted");
+    assert.equal(data.landedCost.expectedReversal, 350);
+    // Inventory valuation reduction = full landed cost: 5 × 150 + 2 × 170 = 1090.
+    assert.equal(data.inventory.valuationReduction, 1090);
+    // Supplier balance: due 0 (nothing paid, but due = grand 990? compute:
+    // grand = 10×100 − 20 + 10 = 990; payment 0 → due 990). Credit 733 < 990
+    // → outstanding drops, no credit balance created.
+    assert.equal(data.supplierBalance.outstandingBefore, 990);
+    assert.equal(data.supplierBalance.outstandingAfter, 257);
+    assert.equal(data.supplierBalance.supplierCreditCreated, 0);
+    // Quantities block.
+    assert.equal(data.quantities[0].eligibleQuantity, 10);
+    assert.equal(data.quantities[0].requestedQuantity, 7);
+    assert.equal(data.quantities[0].remainingAfterReturn, 3);
+    assert.equal(data.quantities[0].availableStock, 10);
+
+    // CONSISTENCY: committing the same return pays exactly the preview.
+    const commit = await returnItems(owner, purchaseId, [
+      { purchaseItemId: itemId, quantity: 7 },
+    ], "phase 2 preview consistency");
+    assert.equal(commit.status, 201, JSON.stringify(commit.body));
+    assert.equal(Number((commit.body as any).data.totalAmount), 733);
+    // The landed reversal also matches the preview.
+    assert.equal(Number((commit.body as any).data.landedCost.amount), 350);
+    // Phase 7: the response names the document state (authoritative).
+    assert.equal((commit.body as any).data.landedCost.state, "adjusted");
+    assert.equal((commit.body as any).data.landedCost.reason, null);
+    // Phase 3: the credit split rides the commit response.
+    const balance = (commit.body as any).data.supplierBalance;
+    assert.equal(balance.outstandingBefore, 990);
+    assert.equal(balance.goodsCredit, 733);
+    assert.equal(balance.outstandingAfter, 257);
+    assert.equal(balance.supplierCreditCreated, 0);
+  });
+
+  it("reports eligibility issues and landed states instead of throwing (Phase 2)", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Return Preview Issues Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedVariant(owner.businessId);
+    const { purchaseId, items } = await createReceivedPurchase(
+      owner,
+      variantId,
+      10,
+      100,
+      { supplierId, payFull: true },
+    );
+    const itemId = Number(items[0]!.id);
+
+    // Over-request: 12 of 10 → the preview REPORTS, canSubmit false.
+    const over = await postJson(
+      baseUrl,
+      owner,
+      `/api/purchases/${purchaseId}/return-preview`,
+      { changedItems: [{ purchaseItemId: itemId, quantity: 12 }] },
+    );
+    assert.equal(over.status, 200, JSON.stringify(over.body));
+    const overData = (over.body as any).data;
+    assert.equal(overData.canSubmit, false);
+    assert.ok(overData.issues.length > 0, "issues must be reported");
+    assert.equal(overData.quantities[0].eligibleQuantity, 10);
+    assert.equal(overData.quantities[0].requestedQuantity, 12);
+
+    // Fully paid purchase → the whole credit becomes supplier credit.
+    const ok = await postJson(
+      baseUrl,
+      owner,
+      `/api/purchases/${purchaseId}/return-preview`,
+      { changedItems: [{ purchaseItemId: itemId, quantity: 4 }] },
+    );
+    const okData = (ok.body as any).data;
+    assert.equal(okData.canSubmit, true);
+    assert.equal(okData.supplierBalance.outstandingBefore, 0);
+    assert.equal(okData.supplierBalance.outstandingAfter, 0);
+    assert.equal(okData.supplierBalance.supplierCreditCreated, 400);
+    // No landed-cost document → not applicable.
+    assert.equal(okData.landedCost.applies, false);
+    assert.equal(okData.landedCost.state, "no_document");
+
+    // DRAFT document → nothing capitalized to reverse.
+    const doc = await postJson(
+      baseUrl,
+      owner,
+      `/api/purchases/${purchaseId}/landed-cost`,
+      {
+        method: "quantity",
+        expenses: [
+          { expenseType: "customs", amount: 200, isCapitalizable: true },
+        ],
+      },
+    );
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    const draft = await postJson(
+      baseUrl,
+      owner,
+      `/api/purchases/${purchaseId}/return-preview`,
+      { changedItems: [{ purchaseItemId: itemId, quantity: 4 }] },
+    );
+    const draftData = (draft.body as any).data;
+    assert.equal(draftData.landedCost.applies, false);
+    assert.equal(draftData.landedCost.state, "draft");
+    assert.equal(draftData.landedCost.expectedReversal, 0);
+    assert.ok(draftData.landedCost.reason);
+
+    // Committing on the fully paid purchase: the whole credit becomes a
+    // SUPPLIER CREDIT BALANCE — the purchase stays settled, the money is
+    // never treated as a cash refund.
+    const commit = await returnItems(owner, purchaseId, [
+      { purchaseItemId: itemId, quantity: 4 },
+    ], "phase 3 credit balance");
+    assert.equal(commit.status, 201, JSON.stringify(commit.body));
+    const committed = (commit.body as any).data;
+    assert.equal(committed.supplierBalance.outstandingBefore, 0);
+    assert.equal(committed.supplierBalance.outstandingAfter, 0);
+    assert.equal(committed.supplierBalance.supplierCreditCreated, 400);
+    // Phase 7: the DRAFT document explains why nothing was reversed.
+    assert.equal(committed.landedCost.adjusted, false);
+    assert.equal(committed.landedCost.state, "draft");
+    assert.match(
+      String(committed.landedCost.reason),
+      /nothing is capitalized yet/,
+    );
+    const headerAfter = await pg!.query(
+      "SELECT due_amount, payment_status FROM purchases WHERE id = $1",
+      [purchaseId],
+    );
+    assert.equal(Number(headerAfter.rows[0]!.due_amount), 0);
+    assert.equal(headerAfter.rows[0]!.payment_status, "paid");
+
+    // The purchase detail surfaces the supplier's credit balance.
+    const detail = await getJson(baseUrl, owner, `/api/purchases/${purchaseId}`);
+    assert.equal(
+      Number((detail.body as any).purchase.supplierCreditBalance),
+      400,
+    );
+  });
+
+  /* ------------------------------------------------------------------
+   * Phase 5 - explicit serial selection: the picker endpoint lists
+   * in-stock serials per serial-tracked line; the commit accepts
+   * per-line serialIds, re-validates every id transactionally, and
+   * preserves the auto-pick fallback. The response reports the serial
+   * numbers actually marked returned.
+   * ------------------------------------------------------------------ */
+
+  it("lists returnable serials and returns explicitly selected serials (Phase 5)", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Return Serial Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedSerialVariant(owner.businessId);
+    const serialsIn = ["SN-A-1", "SN-A-2", "SN-A-3"];
+    const { purchaseId, itemId } = await createReceivedSerialPurchase(
+      owner,
+      variantId,
+      serialsIn,
+      { supplierId },
+    );
+
+    // The picker lists exactly the three in-stock serials for this line.
+    const listing = await getJson(
+      baseUrl,
+      owner,
+      `/api/purchases/${purchaseId}/return-serials`,
+    );
+    assert.equal(listing.status, 200, JSON.stringify(listing.body));
+    const listingData = (listing.body as any).data;
+    assert.equal(listingData.items.length, 1);
+    assert.equal(listingData.items[0].purchaseItemId, itemId);
+    assert.deepEqual(
+      listingData.items[0].serials.map((s: any) => s.serialNumber),
+      serialsIn,
+    );
+    const serialIds = listingData.items[0].serials.map((s: any) => s.id);
+
+    // Explicit selection: return SN-A-2 and SN-A-3 by id.
+    const ret = await postJson(baseUrl, owner, "/api/purchase-return", {
+      orderId: purchaseId,
+      reason: "phase 5 explicit serials",
+      changedItems: [
+        {
+          purchaseItemId: itemId,
+          quantity: 2,
+          serialIds: [serialIds[1], serialIds[2]],
+        },
+      ],
+    });
+    assert.equal(ret.status, 201, JSON.stringify(ret.body));
+    const committed = (ret.body as any).data;
+    // Response traceability: exactly the selected serial numbers.
+    assert.deepEqual(committed.returnedSerials, ["SN-A-2", "SN-A-3"]);
+
+    // The selected serials are 'returned'; the untouched one stays in stock.
+    const statuses = await pg!.query(
+      "SELECT serial_number, status FROM serial_numbers WHERE purchase_item_id = $1 ORDER BY id",
+      [itemId],
+    );
+    const bySerial = new Map(
+      (statuses.rows as any[]).map((r) => [r.serial_number, r.status]),
+    );
+    assert.equal(bySerial.get("SN-A-1"), "in_stock");
+    assert.equal(bySerial.get("SN-A-2"), "returned");
+    assert.equal(bySerial.get("SN-A-3"), "returned");
+  });
+
+  it("re-validates explicit serial selections and preserves the auto-pick fallback (Phase 5)", async () => {
+    const owner = await createOwnerCtx(baseUrl, "Return Serial Guard Co");
+    const supplierId = await createSupplier(owner);
+    const variantId = await seedSerialVariant(owner.businessId);
+    const { purchaseId, itemId } = await createReceivedSerialPurchase(
+      owner,
+      variantId,
+      ["SN-B-1", "SN-B-2"],
+      { supplierId },
+    );
+    const { rows: serialRows } = await pg!.query(
+      "SELECT id, serial_number FROM serial_numbers WHERE purchase_item_id = $1 ORDER BY id",
+      [itemId],
+    );
+    const serialId1 = Number(serialRows[0]!.id);
+    const serialId2 = Number(serialRows[1]!.id);
+
+    // Count mismatch: 2 serials for quantity 1.
+    const mismatch = await postJson(baseUrl, owner, "/api/purchase-return", {
+      orderId: purchaseId,
+      changedItems: [
+        { purchaseItemId: itemId, quantity: 1, serialIds: [serialId1, serialId2] },
+      ],
+    });
+    assert.equal(mismatch.status, 400, JSON.stringify(mismatch.body));
+    assert.match(
+      String((mismatch.body as any).message),
+      /must match the return quantity/,
+    );
+
+    // A serial from ANOTHER purchase line is not eligible.
+    const otherVariant = await seedSerialVariant(owner.businessId);
+    const other = await createReceivedSerialPurchase(
+      owner,
+      otherVariant,
+      ["SN-OTHER-1"],
+      { supplierId },
+    );
+    const { rows: otherSerialRows } = await pg!.query(
+      "SELECT id FROM serial_numbers WHERE purchase_item_id = $1",
+      [other.itemId],
+    );
+    const foreign = await postJson(baseUrl, owner, "/api/purchase-return", {
+      orderId: purchaseId,
+      changedItems: [
+        { purchaseItemId: itemId, quantity: 1, serialIds: [Number(otherSerialRows[0]!.id)] },
+      ],
+    });
+    assert.equal(foreign.status, 400, JSON.stringify(foreign.body));
+    assert.match(
+      String((foreign.body as any).message),
+      /not eligible for return/,
+    );
+
+    // Auto-pick fallback: no serialIds -> first in-stock serials by id.
+    const fallback = await postJson(baseUrl, owner, "/api/purchase-return", {
+      orderId: purchaseId,
+      changedItems: [{ purchaseItemId: itemId, quantity: 1 }],
+    });
+    assert.equal(fallback.status, 201, JSON.stringify(fallback.body));
+    assert.deepEqual((fallback.body as any).data.returnedSerials, ["SN-B-1"]);
+
+    // A serial already marked returned is not eligible afterwards.
+    const reuse = await postJson(baseUrl, owner, "/api/purchase-return", {
+      orderId: purchaseId,
+      changedItems: [
+        { purchaseItemId: itemId, quantity: 1, serialIds: [serialId1] },
+      ],
+    });
+    assert.equal(reuse.status, 400, JSON.stringify(reuse.body));
+    assert.match(
+      String((reuse.body as any).message),
+      /not eligible for return/,
+    );
   });
 });

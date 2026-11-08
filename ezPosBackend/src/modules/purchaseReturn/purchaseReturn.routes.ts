@@ -24,6 +24,24 @@ router.post(
   requirePermission("purchases.return"),
   purchaseReturnController.createPurchaseReturn,
 );
+// Return preview (Phase 2): server-calculated "what would this return
+// pay" — the same pure valuation the committing return uses. Informational
+// (no locks, no writes); submission re-locks and recalculates.
+router.post(
+  "/api/purchases/:purchaseId/return-preview",
+  ...read,
+  requirePermission("purchases.view"),
+  purchaseReturnController.previewPurchaseReturn,
+);
+// Returnable serial numbers per serial-tracked line (Phase 5): the
+// picker's data source. The committing return re-validates every
+// selection transactionally.
+router.get(
+  "/api/purchases/:purchaseId/return-serials",
+  ...read,
+  requirePermission("purchases.view"),
+  purchaseReturnController.getReturnableSerials,
+);
 router.get(
   "/api/purchases/return-items",
   ...read,

@@ -234,6 +234,32 @@ export async function getLandedCostContext(
   };
 }
 
+/**
+ * Purchase-origin expense components (Phase 4): the supplier's own
+ * shipping charge mirrors `purchases.shipping_cost` — server-generated,
+ * never user-entered, capitalized by default, settled through the
+ * purchase payable. It brings NO new payable and NO duplicate expense:
+ * the amount already sits in the purchase grand total. Empty when the
+ * purchase carries no supplier shipping.
+ */
+export function purchaseOriginExpenses(purchase: {
+  shippingCost: string | number | null;
+}): LandedCostPreviewInput["expenses"] {
+  const shipping = Number(purchase.shippingCost ?? 0);
+  if (!(shipping > 0)) return [];
+  return [
+    {
+      expenseType: "shipping" as const,
+      description: "Supplier shipping (purchase invoice)",
+      amount: shipping,
+      taxAmount: 0,
+      taxTreatment: "none" as const,
+      isCapitalizable: true,
+      settlementType: "supplier_payable" as const,
+    },
+  ];
+}
+
 // ----------------------------------------------------
 // Preview (the exact calculation posting will use)
 // ----------------------------------------------------

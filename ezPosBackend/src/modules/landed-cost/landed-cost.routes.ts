@@ -60,6 +60,16 @@ router.patch(
   landedCostController.updateLandedCost,
 );
 
+// Estimated → actual expense adjustment (Phase 7). Financial — the
+// landed-cost edit gate.
+router.post(
+  "/api/landed-costs/:id/adjust-expense",
+  requireAuth,
+  requireBusinessContext(),
+  requireFullAccess,
+  requirePermission("landed_cost.edit"),
+  landedCostController.adjustExpense,
+);
 router.post(
   "/api/landed-costs/:id/post",
   requireAuth,

@@ -19,6 +19,27 @@ import {
   getPurchaseDiscrepancyDetail,
 } from "./outstandingResolution.service.js";
 import {
+  listPurchases,
+} from "./purchasesList.service.js";
+import {
+  purchaseListQuerySchema,
+} from "./purchasesList.schema.js";
+import type { ZodType } from "zod";
+
+function parseListQuery<T>(schema: ZodType<T>, value: unknown): T {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    const first = result.error.issues[0];
+    const message = first
+      ? `${first.path.join(".") || "query"}: ${first.message}`
+      : "Invalid query parameters.";
+    const err = new Error(message) as Error & { statusCode?: number };
+    err.statusCode = 400;
+    throw err;
+  }
+  return result.data;
+}
+import {
   getReceivingSettings,
   updateReceivingSettings,
 } from "./receivingSettings.service.js";
@@ -221,5 +242,20 @@ export async function getDiscrepancies(req: Request, res: Response) {
     res.status(200).json(detail);
   } catch (err) {
     return sendSafeError(res, err, "Unable to load the discrepancy trail.");
+  }
+}
+
+export async function getPurchasesList(req: Request, res: Response) {
+  try {
+    const query = parseListQuery(purchaseListQuerySchema, req.query);
+    const page = await listPurchases(getBusinessId(req), query);
+    res.status(200).json(page);
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 400) {
+      return res
+        .status(400)
+        .json({ success: false, message: (err as Error).message });
+    }
+    return sendSafeError(res, err, "Unable to load the purchase list.");
   }
 }

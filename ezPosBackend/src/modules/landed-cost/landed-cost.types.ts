@@ -1,4 +1,9 @@
-export type LandedCostAllocationMethod = "quantity" | "value" | "weight" | "manual";
+export type LandedCostAllocationMethod =
+  | "quantity"
+  | "value"
+  | "weight"
+  | "manual"
+  | "equal";
 
 export type LandedCostStatus = "draft" | "posted" | "adjusted" | "reversed";
 
