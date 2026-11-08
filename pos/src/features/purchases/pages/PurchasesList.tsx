@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import {
   ArrowLeft,
@@ -25,6 +25,7 @@ import {
   type PurchaseFilter,
 } from "../utils/purchaseListFilters";
 import { usePurchaseList } from "../hooks/usePurchaseList";
+import { PurchaseDetailsDrawer } from "../components/details/PurchaseDetailsDrawer";
 import useProductStore from "@/features/products/useProductStore";
 import type { PurchaseListItem } from "../purchase.types";
 
@@ -110,6 +111,16 @@ export const PurchasesList = () => {
   const noticeState = (location.state as PurchaseNoticeState) ?? null;
   const receiveNotice = noticeState?.receiveNotice ?? null;
   const returnNotice = noticeState?.returnNotice ?? null;
+
+  // Details drawer (Phase 11): the PO-number cell opens the authoritative
+  // financial picture of the purchase.
+  const [detailsId, setDetailsId] = useState<number | null>(null);
+  const openDetails = useCallback((purchaseId: number) => {
+    setDetailsId(purchaseId);
+  }, []);
+  const closeDetails = useCallback(() => {
+    setDetailsId(null);
+  }, []);
 
   // Server-side list (Phase 6): one request carries filters + pagination;
   // the browser never loads item lines or return aggregates.
@@ -417,6 +428,7 @@ export const PurchasesList = () => {
                 purchases={rows}
                 sortBy={sortBy}
                 sortOrder={sortOrder}
+                onOpenDetails={openDetails}
                 onSort={(column) => {
                   if (column === sortBy) {
                     setSortOrder((current) =>
@@ -511,6 +523,13 @@ export const PurchasesList = () => {
 
         </section>
       </div>
+      <PurchaseDetailsDrawer
+        purchaseId={detailsId}
+        open={detailsId !== null}
+        onOpenChange={(next) => {
+          if (!next) closeDetails();
+        }}
+      />
     </div>
   );
 };
@@ -547,6 +566,7 @@ const PurchaseOrderTable = memo(function PurchaseOrderTable({
   sortBy,
   sortOrder,
   onSort,
+  onOpenDetails,
 }: {
   purchases: PurchaseListItem[];
   sortBy: "purchaseDate" | "totalAmount" | "dueAmount" | "purchaseOrderNumber";
@@ -554,6 +574,7 @@ const PurchaseOrderTable = memo(function PurchaseOrderTable({
   onSort: (
     column: "purchaseDate" | "totalAmount" | "dueAmount" | "purchaseOrderNumber",
   ) => void;
+  onOpenDetails: (purchaseId: number) => void;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -585,7 +606,11 @@ const PurchaseOrderTable = memo(function PurchaseOrderTable({
         </thead>
         <tbody className="divide-y">
           {purchases.map((purchase) => (
-            <PurchaseOrderRow key={purchase.id} purchase={purchase} />
+            <PurchaseOrderRow
+              key={purchase.id}
+              purchase={purchase}
+              onOpenDetails={onOpenDetails}
+            />
           ))}
         </tbody>
       </table>
@@ -632,8 +657,10 @@ function SortableHeader({
 
 const PurchaseOrderRow = memo(function PurchaseOrderRow({
   purchase,
+  onOpenDetails,
 }: {
   purchase: PurchaseListItem;
+  onOpenDetails: (purchaseId: number) => void;
 }) {
   const receivingStyles: Record<
     PurchaseListItem["receivingStatus"],
@@ -652,7 +679,15 @@ const PurchaseOrderRow = memo(function PurchaseOrderRow({
   return (
     <tr className="hover:bg-muted/30">
       <td className="px-5 py-4">
-        <p className="font-medium">{purchase.purchaseOrderNumber}</p>
+        <button
+          type="button"
+          data-testid={`purchase-details-${purchase.id}`}
+          onClick={() => onOpenDetails(purchase.id)}
+          className="text-left font-medium underline-offset-2 hover:underline"
+          title="View purchase details"
+        >
+          {purchase.purchaseOrderNumber}
+        </button>
         <p className="mt-0.5 text-xs text-muted-foreground">
           Updated {formatDate(purchase.updatedAt)}
         </p>

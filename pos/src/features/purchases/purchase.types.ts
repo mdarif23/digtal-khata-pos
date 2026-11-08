@@ -166,6 +166,53 @@ export interface PurchaseListItem {
   updatedAt: string;
 }
 
+/** Purchase details drawer (Phase 11): one item line of GET /purchases/:id. */
+export interface PurchaseDetailItem {
+  id: number;
+  purchaseId: number;
+  variantId: number;
+  productId: number;
+  productName: string;
+  variantSku: string | null;
+  variantName: string;
+  productUnit: string | null;
+  quantity: number;
+  receivedQuantity: number;
+  rejectedQuantity: number;
+  cancelledQuantity: number;
+  unitCost: number;
+  discount: number;
+  tax: number;
+  sellingPrice: number;
+  availableStock: number | null;
+}
+
+/** GET /purchases/:id — the drawer's payload (header mirrors the list row
+ *  plus the raw receiving `status`, so the two views can never disagree). */
+export interface PurchaseDetail {
+  purchase: {
+    id: number;
+    purchaseOrderNumber: string;
+    purchaseDate: string;
+    supplierId: number | null;
+    supplierName: string | null;
+    supplierPhone: string | null;
+    status: "ordered" | "partially_received" | "received";
+    returnStatus: "Returned" | "Partially returned" | null;
+    landedCostStatus: "pending" | "allocated" | null;
+    subtotal: number;
+    discount: number;
+    tax: number;
+    shippingCost: number;
+    totalAmount: number;
+    paidAmount: number;
+    dueAmount: number;
+    paymentStatus: "paid" | "unpaid" | "partial";
+    notes: string | null;
+  };
+  items: PurchaseDetailItem[];
+}
+
 export interface PurchaseListParams {
   page: number;
   pageSize: number;
@@ -336,6 +383,8 @@ export type CreatePurchaseInput = {
   purchaseDate: string;
   notes: string;
   discount: number;
+  /** Percentage discounts resolve to the fixed amount server-side. */
+  discountBasis?: "fixed" | "percentage" | undefined;
   tax: number;
   shippingCost: number;
 };

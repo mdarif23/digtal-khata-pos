@@ -134,6 +134,10 @@ export interface LandedCostDetail {
     id: number;
     settlementType: LandedCostSettlement;
     amount: number;
+    /** Phase 4 source identity: "purchase" = server-generated origin row
+     *  (supplier shipping); "additional_expense" = user-entered. */
+    sourceType?: "purchase" | "additional_expense";
+    sourceKey?: string | null;
   })[];
   allocations: {
     id: number;
@@ -154,6 +158,8 @@ export interface LandedCostDetail {
     inventoryAmount: string;
     cogsAmount: string;
     reason: string | null;
+    referenceType?: string | null;
+    referenceId?: number | null;
     createdAt: string;
   }[];
   auditLogs: {
@@ -170,7 +176,32 @@ export interface LandedCostDetail {
     paymentReferenceType: string | null;
     paymentReferenceId: number | null;
     description: string | null;
+    /** Phase 9 source attribution (null on event-level / legacy rows). */
+    expenseId?: number | null;
+    expenseType?: string | null;
+    expenseSourceType?: "purchase" | "additional_expense" | null;
+    expenseSourceKey?: string | null;
+    expenseDescription?: string | null;
   }[];
+  /** Phase 9/12 accounting reconciliation: the posting ledger tied out
+   *  against the document. netInInventory is BATCH-authoritative (Σ
+   *  remaining × additional cost); soldUnitsLanded is derived so the
+   *  four figures conserve:
+   *  capitalization = netInInventory + soldUnitsLanded + |reversal|. */
+  accounting?: {
+    postingsByType: {
+      capitalization: number;
+      expense: number;
+      cogsAdjustment: number;
+      reversal: number;
+    };
+    netInInventory: number;
+    soldUnitsLanded: number;
+    periodExpensed: number;
+    attributedAmount: number;
+    unattributedAmount: number;
+    capitalizationTiesOut: boolean;
+  };
 }
 
 const unwrap = <T>(res: { data: { data: T } }): T => res.data.data;

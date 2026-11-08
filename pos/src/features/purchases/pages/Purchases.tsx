@@ -16,6 +16,7 @@ import { ProductCard } from "@/components/common/ProductCard";
 import { ShowVariants } from "@/components/common/ShowVariants";
 import { useQueryClient } from "@tanstack/react-query";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
+import { PurchaseCostSummary } from "../components/purchases/PurchaseCostSummary";
 import { toast } from "@/components/ui/toast";
 import {
   ProductType,
@@ -105,7 +106,16 @@ export function PurchasesOrder() {
       ),
     0,
   );
-  const appliedDiscount = Math.min(discount, Math.max(itemSubtotal, 0));
+  const [discountBasis, setDiscountBasis] = useState<
+    "fixed" | "percentage"
+  >("fixed");
+  const appliedDiscount =
+    discountBasis === "percentage"
+      ? Math.min(
+          roundCurrency((itemSubtotal * discount) / 100),
+          Math.max(itemSubtotal, 0),
+        )
+      : Math.min(discount, Math.max(itemSubtotal, 0));
   const grandTotal = Math.max(
     0,
     itemSubtotal - appliedDiscount + tax + shippingCost,
@@ -276,7 +286,11 @@ export function PurchasesOrder() {
           supplierId: purchaseSource === "supplier" ? supplierId : null,
           purchaseDate,
           notes,
-          discount: appliedDiscount,
+          // Percentage basis sends the RAW percentage — the backend
+          // resolves it authoritatively (Phase 2 service).
+          discount:
+            discountBasis === "percentage" ? discount : appliedDiscount,
+          discountBasis,
           tax,
           shippingCost,
         },
@@ -527,23 +541,55 @@ export function PurchasesOrder() {
                 <p className="font-semibold">Cost summary</p>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <label className="space-y-1 text-xs text-muted-foreground">
-                    Discount
+                    Order discount{" "}
+                    <span className="inline-flex overflow-hidden rounded-md border border-input align-middle">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDiscountBasis("fixed");
+                          if (discount > 100) setDiscount(roundCurrency(itemSubtotal));
+                        }}
+                        className={`px-2 py-0.5 text-xs ${
+                          discountBasis === "fixed"
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-background text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        ৳
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDiscountBasis("percentage")}
+                        className={`px-2 py-0.5 text-xs ${
+                          discountBasis === "percentage"
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-background text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        %
+                      </button>
+                    </span>
                     <Input
                       min={0}
-                      max={Math.max(itemSubtotal, 0)}
+                      max={
+                        discountBasis === "percentage"
+                          ? 100
+                          : Math.max(itemSubtotal, 0)
+                      }
                       step="0.01"
                       type="number"
                       value={discount}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const raw = Math.max(0, Number(event.target.value) || 0);
                         setDiscount(
-                          Math.min(
-                            roundCurrency(
-                              Math.max(0, Number(event.target.value) || 0),
-                            ),
-                            Math.max(itemSubtotal, 0),
-                          ),
-                        )
-                      }
+                          discountBasis === "percentage"
+                            ? Math.min(raw, 100)
+                            : Math.min(
+                                roundCurrency(raw),
+                                Math.max(itemSubtotal, 0),
+                              ),
+                        );
+                      }}
                       className="mt-1 h-9 bg-background text-sm text-foreground"
                     />
                   </label>
@@ -565,7 +611,7 @@ export function PurchasesOrder() {
                     />
                   </label>
                   <label className="space-y-1 text-xs text-muted-foreground">
-                    Shipping
+                    Supplier shipping
                     <Input
                       min={0}
                       step="0.01"
@@ -582,24 +628,16 @@ export function PurchasesOrder() {
                     />
                   </label>
                 </div>
-                <div className="space-y-2 border-t pt-3 text-sm">
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>Items subtotal</span>
-                    <span>{formatCurrency(itemSubtotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>Order discount</span>
-                    <span>-{formatCurrency(appliedDiscount)}</span>
-                  </div>
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>Tax and shipping</span>
-                    <span>{formatCurrency(tax + shippingCost)}</span>
-                  </div>
-                  <div className="flex justify-between border-t pt-3 text-lg font-semibold">
-                    <span>Grand total</span>
-                    <span>{formatCurrency(grandTotal)}</span>
-                  </div>
-                </div>
+                <PurchaseCostSummary
+                  itemsSubtotal={itemSubtotal}
+                  orderDiscount={appliedDiscount}
+                  discountSuffix={
+                    discountBasis === "percentage" ? `(${discount}%)` : undefined
+                  }
+                  orderTax={tax}
+                  supplierShipping={shippingCost}
+                  grandTotal={grandTotal}
+                />
               </div>
 
               {purchaseSource === "supplier" && !supplierId && (
