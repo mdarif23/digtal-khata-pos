@@ -5,6 +5,7 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/forms/text-field";
 import {
+  adminGrantTrial,
   fetchBusinesses,
   setBusinessStatus,
   type AdminBusiness,
@@ -13,12 +14,18 @@ import {
 export function AdminBusinesses() {
   const [search, setSearch] = useState("");
   const [businesses, setBusinesses] = useState<AdminBusiness[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
 
   const reload = useCallback(async (term?: string) => {
     const result = await fetchBusinesses(term ? { search: term } : undefined);
-    setBusinesses(result.data ?? []);
+    if (result.ok && result.data) {
+      setBusinesses(result.data);
+      setLoadError(null);
+    } else if (result.data === undefined) {
+      setLoadError(result.message);
+    }
   }, []);
 
   useEffect(() => {
@@ -43,6 +50,25 @@ export function AdminBusinesses() {
     if (result.ok) await reload(search);
   }
 
+  async function grantTrial(business: AdminBusiness) {
+    const raw = window.prompt(
+      `Grant a free trial to "${business.name}" — how many days? (1-90)`,
+      "14",
+    );
+    if (raw === null) return;
+    const days = Number(raw);
+    if (!Number.isInteger(days) || days < 1 || days > 90) {
+      setMessage({ text: "Enter a whole number of days between 1 and 90.", ok: false });
+      return;
+    }
+    setBusyId(business.id);
+    setMessage(null);
+    const result = await adminGrantTrial(business.id, days);
+    setBusyId(null);
+    setMessage({ text: result.message, ok: result.ok });
+    if (result.ok) await reload(search);
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -58,6 +84,11 @@ export function AdminBusinesses() {
       {message ? (
         <Alert tone={message.ok ? "info" : "warning"} title={message.ok ? "Done" : "Action failed"}>
           {message.text}
+        </Alert>
+      ) : null}
+      {loadError ? (
+        <Alert tone="warning" title="Could not load businesses">
+          {loadError}
         </Alert>
       ) : null}
 
@@ -78,9 +109,9 @@ export function AdminBusinesses() {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        {businesses === null ? (
+        {businesses === null && !loadError ? (
           <p className="px-6 py-8 text-sm text-slate-500">Loading…</p>
-        ) : businesses.length === 0 ? (
+        ) : businesses !== null && businesses.length === 0 ? (
           <p className="px-6 py-8 text-sm text-slate-500">No businesses found.</p>
         ) : (
           <table className="w-full text-sm">
@@ -95,7 +126,7 @@ export function AdminBusinesses() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {businesses.map((business) => (
+              {(businesses ?? []).map((business) => (
                 <tr key={business.id}>
                   <td className="px-5 py-3">
                     <p className="font-medium text-slate-900">{business.name}</p>
@@ -128,14 +159,24 @@ export function AdminBusinesses() {
                     </span>
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <Button
-                      size="sm"
-                      variant={business.status === "suspended" ? "outline" : "outline"}
-                      disabled={busyId === business.id}
-                      onClick={() => toggleStatus(business)}
-                    >
-                      {business.status === "suspended" ? "Reactivate" : "Suspend"}
-                    </Button>
+                    <div className="flex justify-end gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === business.id}
+                        onClick={() => grantTrial(business)}
+                      >
+                        Grant trial
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={business.status === "suspended" ? "outline" : "outline"}
+                        disabled={busyId === business.id}
+                        onClick={() => toggleStatus(business)}
+                      >
+                        {business.status === "suspended" ? "Reactivate" : "Suspend"}
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -13,10 +13,16 @@ export function AdminSubscriptions() {
   const [plans, setPlans] = useState<{ id: number; name: string }[]>([]);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const reload = useCallback(async (status: string) => {
     const result = await fetchSubscriptions(status ? { status } : undefined);
-    setSubs(result.data ?? []);
+    if (result.ok && result.data) {
+      setSubs(result.data);
+      setLoadError(null);
+    } else if (result.data === undefined) {
+      setLoadError(result.message);
+    }
   }, []);
 
   useEffect(() => {
@@ -58,6 +64,11 @@ export function AdminSubscriptions() {
           {message.text}
         </Alert>
       ) : null}
+      {loadError ? (
+        <Alert tone="warning" title="Could not load subscriptions">
+          {loadError}
+        </Alert>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         {STATUS_FILTERS.map((status) => (
@@ -77,9 +88,9 @@ export function AdminSubscriptions() {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        {subs === null ? (
+        {subs === null && !loadError ? (
           <p className="px-6 py-8 text-sm text-slate-500">Loading…</p>
-        ) : subs.length === 0 ? (
+        ) : subs !== null && subs.length === 0 ? (
           <p className="px-6 py-8 text-sm text-slate-500">No subscriptions found.</p>
         ) : (
           <table className="w-full text-sm">
@@ -93,7 +104,7 @@ export function AdminSubscriptions() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {subs.map((sub) => (
+              {(subs ?? []).map((sub) => (
                 <tr key={sub.id}>
                   <td className="px-5 py-3 font-medium text-slate-900">
                     {sub.businessName}

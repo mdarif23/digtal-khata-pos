@@ -155,6 +155,25 @@ export async function fetchOverview(): Promise<ApiResult<SaasOverview>> {
   return request("/api/saas/overview", { method: "GET" });
 }
 
+export interface AdminAuditLog {
+  id: number;
+  action: string;
+  entityType: string;
+  entityId: number | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  adminUserId: number;
+  adminEmail: string;
+  adminName: string | null;
+}
+
+export async function fetchAuditLogs(params?: {
+  limit?: number;
+}): Promise<ApiResult<AdminAuditLog[]>> {
+  const qs = params?.limit ? `?limit=${params.limit}` : "";
+  return request(`/api/saas/audit-logs${qs}`, { method: "GET" });
+}
+
 export async function fetchBusinesses(params?: {
   search?: string;
 }): Promise<ApiResult<AdminBusiness[]>> {
@@ -296,13 +315,52 @@ export async function createPlan(input: {
 
 export async function updatePlan(
   planId: number,
-  input: { price?: number; isActive?: boolean; isPopular?: boolean; description?: string },
+  input: {
+    price?: number;
+    isActive?: boolean;
+    isPopular?: boolean;
+    description?: string;
+    limits?: Record<string, number>;
+    features?: Record<string, boolean>;
+  },
 ): Promise<ApiResult<AdminPlan>> {
   return request(`/api/saas/plans/${planId}`, {
     method: "PATCH",
     body: JSON.stringify(input),
   });
 }
+
+/**
+ * Feature flags and usage limits a plan can carry, in display order. The
+ * backend enforces every flag/limit server-side; this metadata drives the
+ * Plans-page editor.
+ */
+export const PLAN_FEATURE_FLAGS: { key: string; label: string }[] = [
+  { key: "multiLocation", label: "Multi-location stock & transfers" },
+  { key: "advancedReports", label: "Advanced reports (profit, tax)" },
+  { key: "exports", label: "Data exports" },
+  { key: "purchaseManagement", label: "Purchase management" },
+  { key: "storefrontApi", label: "Storefront API keys" },
+  { key: "woocommerceIntegration", label: "WooCommerce integration" },
+  { key: "customStorefront", label: "Custom storefront" },
+  { key: "multipleOnlineStores", label: "Multiple online stores" },
+  { key: "advancedWebhooks", label: "Advanced webhooks" },
+  { key: "hostedStorefront", label: "Hosted storefront" },
+  { key: "storefrontCustomDomains", label: "Storefront custom domains" },
+  { key: "premiumThemes", label: "Premium themes" },
+  { key: "storefrontAnalytics", label: "Storefront analytics" },
+];
+
+export const PLAN_LIMIT_FIELDS: { key: string; label: string }[] = [
+  { key: "maxUsers", label: "Max users" },
+  { key: "maxLocations", label: "Max locations" },
+  { key: "maxProducts", label: "Max products" },
+  { key: "maxConnectedStores", label: "Max connected stores" },
+  { key: "maxWebhookEndpoints", label: "Max webhook endpoints" },
+  { key: "maxStorefronts", label: "Max storefronts" },
+  { key: "maxCustomDomains", label: "Max custom domains" },
+  { key: "maxMediaStorageMb", label: "Media storage (MB)" },
+];
 
 // ---------------------------------------------------------------------------
 // Hosted storefronts (stage 6) — audited admin mutations live backend-side
