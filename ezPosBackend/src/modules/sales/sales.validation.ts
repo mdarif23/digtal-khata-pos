@@ -63,6 +63,7 @@ export async function validateVariants(
       id: productVariants.id,
       productId: productVariants.productId,
       sellingPrice: productVariants.sellingPrice,
+      minSellingPrice: productVariants.minSellingPrice,
       trackingType: products.trackingType,
     })
     .from(productVariants)

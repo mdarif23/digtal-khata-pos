@@ -94,9 +94,12 @@ function Pos() {
     // checkout (double-click, network failure, resubmit) reuses it, so the
     // backend replays the original sale instead of creating a duplicate.
     const idempotencyKey = useCartStore.getState().beginCheckout();
+    const cartState = useCartStore.getState();
     const rawPayload = {
       ...data,
       idempotencyKey,
+      // Phase 6: mandatory approval reason when a line lands below its floor.
+      belowMinimumReason: cartState.belowMinimumReason.trim() || undefined,
       items: cart.map((item) => ({
         variantId: item.variants[0]?.id ?? 0,
         // Quantity is in the SELECTED unit (2 = two boxes); unitPrice is per
@@ -107,6 +110,7 @@ function Pos() {
         serialNumbers:
           item.trackingType === "serial" ? item.serialNumbers : undefined,
         uomConversionId: item.uomConversionId ?? null,
+        priceOverride: item.priceOverride ?? null,
       })),
     };
 

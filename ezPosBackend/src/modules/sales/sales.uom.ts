@@ -39,6 +39,12 @@ export interface SaleUomSnapshot {
   conversionFactor: number;
 }
 
+export interface SaleOverrideSnapshot {
+  /** The cashier-typed price in the ENTERED selling unit. */
+  enteredUnitPrice: number;
+  reason: string | null;
+}
+
 export interface BaseSaleItem {
   variantId: number;
   /** BASE-unit quantity (integer for stock-tracked flows). */
@@ -49,6 +55,11 @@ export interface BaseSaleItem {
   serialNumbers?: string[] | undefined;
   uomConversionId?: number | null | undefined;
   uomSnapshot: SaleUomSnapshot | null;
+  /** Present when the line carried a permission-gated price override. */
+  overrideSnapshot: SaleOverrideSnapshot | null;
+  /** The per-base price the line WOULD have charged without the override
+   * (Phase 6 snapshot source for the price_adjustments entry). */
+  listUnitPrice?: number | null;
 }
 
 export interface VariantForSale {
@@ -92,6 +103,7 @@ export async function normalizeSaleItemsToBase(
     discount: { type: "fixed" | "percentage"; value: number } | null;
     serialNumbers?: string[] | undefined;
     uomConversionId?: number | null | undefined;
+    priceOverride?: { unitPrice: number; reason?: string | undefined } | null | undefined;
   }[],
 ): Promise<BaseSaleItem[]> {
   const variantById = new Map(variants.map((v) => [v.id, v]));
@@ -108,18 +120,33 @@ export async function normalizeSaleItemsToBase(
         serialNumbers: item.serialNumbers,
         uomConversionId: item.uomConversionId ?? null,
         uomSnapshot: null,
+        overrideSnapshot: null,
       });
       continue;
     }
     if (item.uomConversionId == null) {
+      const listPrice = Number(variant.sellingPrice);
       out.push({
         variantId: item.variantId,
         quantity: item.quantity,
-        unitPrice: Number(variant.sellingPrice),
+        // Permission-gated override (Phase 6): the cashier's price IS the
+        // charge for this line — the variant row stays untouched.
+        unitPrice:
+          item.priceOverride != null
+            ? item.priceOverride.unitPrice
+            : listPrice,
         discount: item.discount,
         serialNumbers: item.serialNumbers,
         uomConversionId: null,
         uomSnapshot: null,
+        overrideSnapshot:
+          item.priceOverride != null
+            ? {
+                enteredUnitPrice: item.priceOverride.unitPrice,
+                reason: item.priceOverride.reason?.trim() || null,
+              }
+            : null,
+        listUnitPrice: item.priceOverride != null ? listPrice : null,
       });
       continue;
     }
@@ -144,19 +171,33 @@ export async function normalizeSaleItemsToBase(
             perBasePriceMicros(ctx.conversion.salePrice, ctx.factorMicros),
           )
         : Number(variant.sellingPrice);
+    // Override (Phase 6): the cashier prices the ENTERED unit; the per-base
+    // snapshot divides by the conversion factor so every downstream system
+    // keeps speaking per-base.
+    const overridePerBase =
+      item.priceOverride != null ? item.priceOverride.unitPrice / ctx.factor : null;
     out.push({
       variantId: item.variantId,
       quantity: baseQuantity,
-      unitPrice: perBaseUnitPrice,
+      unitPrice: overridePerBase ?? perBaseUnitPrice,
       discount: item.discount,
       serialNumbers: item.serialNumbers,
       uomConversionId: ctx.conversion!.id,
       uomSnapshot: {
         conversionId: ctx.conversion!.id,
         enteredQuantity: item.quantity,
-        enteredUnitPrice,
+        enteredUnitPrice:
+          item.priceOverride != null ? item.priceOverride.unitPrice : enteredUnitPrice,
         conversionFactor: ctx.factor,
       },
+      overrideSnapshot:
+        item.priceOverride != null
+          ? {
+              enteredUnitPrice: item.priceOverride.unitPrice,
+              reason: item.priceOverride.reason?.trim() || null,
+            }
+          : null,
+      listUnitPrice: item.priceOverride != null ? perBaseUnitPrice : null,
     });
   }
   return out;

@@ -105,6 +105,17 @@ export async function renderReceiptHtml(input: ReceiptRenderInput): Promise<Rece
     if (v.sku && item.sku) parts.push(`SKU: ${esc(item.sku)}`);
     if (v.barcode && item.barcode) parts.push(`Code: ${esc(item.barcode)}`);
     if (v.lineDiscount && item.discount > 0) parts.push(`Disc: -${money(item.discount)}`);
+    // Discount attribution (Phases 4-6): group pricing, promotions and price
+    // overrides, in application order. Surcharges (overrides above list)
+    // render positive; empty snapshots render nothing.
+    for (const adj of item.priceAdjustments ?? []) {
+      if (adj.kind === "manual") {
+        if (adj.reason) parts.push(`${esc(adj.name ?? "Price override")}: ${esc(adj.reason)}`);
+        else if (adj.amount !== 0) parts.push(`${esc(adj.name ?? "Price override")}: ${adj.amount < 0 ? "+" : "-"}${money(Math.abs(adj.amount))}`);
+        continue;
+      }
+      if (adj.amount > 0) parts.push(`${esc(adj.name ?? adj.kind)}: -${money(adj.amount)}`);
+    }
     return parts.map((p) => `<div class="sub">${p}</div>`).join("");
   };
 

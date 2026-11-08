@@ -18,12 +18,23 @@ import { HoldDropdownMenu } from "./HoldDropdownMenu.js";
 import { Card, CardContent } from "@/components/ui/card.js";
 import { Input } from "@/components/ui/input.js";
 import { Switch } from "@/components/ui/switch.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog.js";
+import { Label } from "@/components/ui/label.js";
 import { getCartTotals, getLinePricing, money } from "../../cartPricing.js";
 import { quoteSaleApi, type QuoteTotals } from "../../quote.api.js";
 import { SerialPickerDialog } from "./SerialPickerDialog.js";
 import { toast } from "@/components/ui/toast.js";
 import { Button } from "@/components/ui/button.js";
 import { ShoppingCart } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions.js";
 import {
   useSellUnits,
   type SellUnitOption,
@@ -42,7 +53,7 @@ const tk = (n: number) => `৳${n.toFixed(2)}`;
 // charge, including product tax rules the client cannot know. Local math
 // fills the gap instantly and keeps working offline / on quote failure.
 
-/** View shape: local getCartTotals fields plus the quote-only coupon fields. */
+/** View shape: local getCartTotals fields plus the quote-only coupon/group fields. */
 interface CartTotalsView {
   itemsBase: number;
   itemDiscount: number;
@@ -55,6 +66,15 @@ interface CartTotalsView {
   usesTaxRules?: boolean;
   coupon?: { code: string; discountAmount: number; description: string | null } | null;
   couponError?: string | null;
+  group?: { id: number; name: string; discountAmount: number } | null;
+  promotions?: { applied: { id: number; name: string; amount: number }[]; total: number } | null;
+  warnings?: {
+    variantId: number;
+    code: string;
+    message: string;
+    effectiveUnitPrice: number;
+    minPrice: number | null;
+  }[] | null;
 }
 
 function useCartTotals(form: ShowCustomerInfoProps["form"]): CartTotalsView {
@@ -92,6 +112,7 @@ function useCartTotals(form: ShowCustomerInfoProps["form"]): CartTotalsView {
           quantity: item.quantity,
           discount: item.discount ?? null,
           uomConversionId: item.uomConversionId ?? null,
+          priceOverride: item.priceOverride ?? null,
         })),
         cartDiscount: discount,
         vatPercent: vatPercent === null ? null : Number(vatPercent),
@@ -125,6 +146,9 @@ function useCartTotals(form: ShowCustomerInfoProps["form"]): CartTotalsView {
     usesTaxRules: quoted.usesTaxRules,
     coupon: quoted.coupon ?? null,
     couponError: quoted.couponError ?? null,
+    group: quoted.group ?? null,
+    promotions: quoted.promotions ?? null,
+    warnings: quoted.warnings ?? null,
   };
 }
 
@@ -360,6 +384,8 @@ function CartItemRow({ item }: { item: CartItem }) {
               hasDiscount={line.discountAmount > 0}
               addDiscount={addDiscount}
             />
+
+            <PriceOverrideDialog item={item} variantId={variantId} lineUnit={lineUnit} />
           </div>
 
           {isSerial ? (
@@ -539,6 +565,22 @@ function CartTextModal({
           <span>-{tk(totals.cartDiscountAmount)}</span>
         </div>
       )}
+      {"group" in totals && totals.group && totals.group.discountAmount > 0 && (
+        <div className="flex justify-between py-1.5 text-sm text-emerald-700">
+          <span>{totals.group.name} pricing</span>
+          <span>-{tk(totals.group.discountAmount)}</span>
+        </div>
+      )}
+      {"promotions" in totals && totals.promotions && totals.promotions.total > 0 && (
+        <div className="flex justify-between py-1.5 text-sm text-emerald-700">
+          <span>
+            {totals.promotions.applied.length === 1
+              ? totals.promotions.applied[0]!.name
+              : `${totals.promotions.applied.length} promotions`}
+          </span>
+          <span>-{tk(totals.promotions.total)}</span>
+        </div>
+      )}
       {"coupon" in totals && totals.coupon && (
         <div className="flex justify-between py-1.5 text-sm text-emerald-700">
           <span>Coupon {totals.coupon.code}</span>
@@ -547,6 +589,14 @@ function CartTextModal({
       )}
       {"couponError" in totals && totals.couponError && (
         <div className="py-1 text-xs text-destructive">{totals.couponError}</div>
+      )}
+      {"warnings" in totals && totals.warnings && totals.warnings.length > 0 && (
+        <div className="space-y-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+          {totals.warnings.map((w, i) => (
+            <div key={`${w.variantId}-${i}`}>⚠ {w.message}</div>
+          ))}
+          <BelowMinimumReasonInput />
+        </div>
       )}
       {totals.vat > 0 && (
         <div className="flex justify-between py-1.5 text-sm">
@@ -563,6 +613,130 @@ function CartTextModal({
         <span className="text-lg tracking-tight">{tk(totals.finalTotal)}</span>
       </div>
     </>
+  );
+}
+
+// ---------- per-line price override (Phase 6) ----------
+function PriceOverrideDialog({
+  item,
+  variantId,
+  lineUnit,
+}: {
+  item: CartItem;
+  variantId: number;
+  lineUnit: number | null;
+}) {
+  const { hasPermission } = usePermissions();
+  const setOverride = useCartStore((s) => s.setLinePriceOverride);
+  const current = item.priceOverride ?? null;
+  const [open, setOpen] = useState(false);
+  const [price, setPrice] = useState(current ? String(current.unitPrice) : "");
+  const [reason, setReason] = useState(current?.reason ?? "");
+
+  useEffect(() => {
+    setPrice(current ? String(current.unitPrice) : "");
+    setReason(current?.reason ?? "");
+  }, [current?.unitPrice, current?.reason, open]);
+
+  if (!hasPermission("pricing.price_override")) return null;
+
+  const commit = () => {
+    const value = Number(price);
+    if (!Number.isFinite(value) || value < 0) {
+      toast.add({ type: "error", description: "Enter a valid unit price." });
+      return;
+    }
+    setOverride(variantId, lineUnit, {
+      unitPrice: Math.round(value * 100) / 100,
+      ...(reason.trim() ? { reason: reason.trim() } : {}),
+    });
+    setOpen(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" size="sm" className="h-7 w-fit px-2 text-xs">
+          {current
+            ? `Price set ৳${current.unitPrice.toFixed(2)}`
+            : "Override price"}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Override line price</DialogTitle>
+          <DialogDescription>
+            Charges this line at your price — the product's selling price is
+            not changed. The server re-checks your permission and the minimum
+            price floors.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor={`override-price-${variantId}`}>Unit price</Label>
+            <Input
+              id={`override-price-${variantId}`}
+              type="number"
+              min="0"
+              step="0.01"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`override-reason-${variantId}`}>
+              Reason (required when below the minimum)
+            </Label>
+            <Input
+              id={`override-reason-${variantId}`}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. damaged box, manager approved"
+            />
+          </div>
+        </div>
+        <DialogFooter className="gap-2">
+          {current && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setOverride(variantId, lineUnit, null);
+                setOpen(false);
+              }}
+            >
+              Reset to list price
+            </Button>
+          )}
+          <Button type="button" onClick={commit}>
+            Apply
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------- below-minimum approval reason (Phase 6) ----------
+function BelowMinimumReasonInput() {
+  const { hasPermission } = usePermissions();
+  const canApprove = hasPermission("pricing.below_minimum_override");
+  const reason = useCartStore((s) => s.belowMinimumReason);
+  const setReason = useCartStore((s) => s.setBelowMinimumReason);
+  if (!canApprove) {
+    return (
+      <p className="text-amber-900">
+        A sale below the minimum needs a manager with below-minimum approval.
+      </p>
+    );
+  }
+  return (
+    <Input
+      value={reason}
+      onChange={(e) => setReason(e.target.value)}
+      placeholder="Reason for selling below the minimum (required)"
+      className="h-8 text-xs"
+    />
   );
 }
 

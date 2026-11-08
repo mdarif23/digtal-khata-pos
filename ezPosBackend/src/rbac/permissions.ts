@@ -74,6 +74,16 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "inventory.view", module: "inventory", description: "View stock levels, batches and serials" },
   { key: "inventory.adjust", module: "inventory", description: "Adjust stock quantities" },
   { key: "inventory.transfer", module: "inventory", description: "Transfer stock between locations" },
+  // Pricing (percentage-based pricing management; migration 0063). Cost
+  // visibility reuses products.view_cost — no separate pricing.cost.view.
+  { key: "pricing.view", module: "pricing", description: "View pricing settings, rules and price previews" },
+  { key: "pricing.manage", module: "pricing", description: "Manage pricing settings and pricing rules" },
+  { key: "pricing.product.manage", module: "pricing", description: "Set product/variant pricing overrides and apply price changes" },
+  { key: "pricing.customer_groups.manage", module: "pricing", description: "Manage customer groups and group pricing" },
+  { key: "pricing.price_override", module: "pricing", description: "Override unit prices at the point of sale" },
+  { key: "pricing.below_minimum_override", module: "pricing", description: "Approve sales below the minimum price" },
+  { key: "pricing.history.view", module: "pricing", description: "View price change history and proposals" },
+  { key: "pricing.bulk_update", module: "pricing", description: "Perform bulk price updates" },
   { key: "taxes.view", module: "taxes", description: "View tax rates and product tax assignments" },
   { key: "taxes.manage", module: "taxes", description: "Manage tax rates and product tax assignments" },
   { key: "loyalty.view", module: "loyalty", description: "View customer loyalty balances and history" },
@@ -291,6 +301,15 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "backups.create",
     "backups.download",
     "backups.verify",
+    // Pricing: managers configure and operate the pricing system.
+    "pricing.view",
+    "pricing.manage",
+    "pricing.product.manage",
+    "pricing.customer_groups.manage",
+    "pricing.price_override",
+    "pricing.below_minimum_override",
+    "pricing.history.view",
+    "pricing.bulk_update",
     // Finance & Growth: managers see the overview and budgets only.
     "finance.view",
     "finance.overview.view",
@@ -361,6 +380,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "orders.view",
     "receipt_settings.view",
     "backups.view",
+    // Pricing: accountant sees settings/previews (cost still gated by
+    // products.view_cost) and price history; no pricing management.
+    "pricing.view",
+    "pricing.history.view",
   ],
 };
 

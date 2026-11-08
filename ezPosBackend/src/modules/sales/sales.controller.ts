@@ -63,12 +63,26 @@ export async function createSale(req: Request, res: Response) {
         message: "You do not have permission to apply discounts.",
       });
     }
+    // Price overrides (Phase 6) are their own permission: the cashier's
+    // typed price replaces the DB selling price for the line only.
+    const hasOverride = payload.items.some((item) => item.priceOverride != null);
+    if (hasOverride && !callerHasPermission(req, "pricing.price_override")) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to override prices.",
+      });
+    }
     const sale = await salesService.createSale(
       getBusinessId(req),
       getLocationId(req),
       req.user!.id,
       payload,
       getTerminalId(req),
+      {
+        // Below-minimum lines are blocked unless the caller holds the
+        // override permission (then a reason is mandatory and audited).
+        allowBelowMinimum: callerHasPermission(req, "pricing.below_minimum_override"),
+      },
     );
     return res
       .status(201)

@@ -35,6 +35,17 @@ const cartItemPayloadSchema = z
     // UOM (migration 0062): the selling unit for this line. The server
     // resolves the authoritative factor/price — client values advisory.
     uomConversionId: z.number().int().positive().nullish(),
+    // POS price override (Phase 6, migration 0063): replaces the DB selling
+    // price FOR THIS LINE ONLY (never the variant row). The unit price is in
+    // the ENTERED selling unit. Gated by pricing.price_override; the line is
+    // still checked against the minimum floors and needs a reason when it
+    // lands below one.
+    priceOverride: z
+      .object({
+        unitPrice: z.number().min(0),
+        reason: z.string().trim().max(300).optional(),
+      })
+      .nullish(),
   })
   .superRefine((data, ctx) => {
     // Identity lines stay integer (legacy contract); UOM lines convert to
@@ -68,6 +79,11 @@ export const createSalePayloadSchema = z.object({
   // resubmitting the same key returns the original sale instead of
   // creating a duplicate. Scoped per business at the database level.
   idempotencyKey: z.string().trim().min(8).max(120).optional(),
+
+  // Mandatory when a line lands below its minimum floor and the caller holds
+  // pricing.below_minimum_override (Phase 6): the approval reason recorded on
+  // the affected sale lines and in the audit log.
+  belowMinimumReason: z.string().trim().max(300).optional(),
 
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),

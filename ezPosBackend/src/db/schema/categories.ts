@@ -3,6 +3,7 @@ import {
   integer,
   pgTable,
   serial,
+  uniqueIndex,
   varchar,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
@@ -20,5 +21,11 @@ export const categories = pgTable(
     parentId: integer("parent_id").references((): AnyPgColumn => categories.id),
     status: varchar({ length: 30 }),
   },
-  (table) => [index("categories_business_id_idx").on(table.businessId)],
+  (table) => [
+    index("categories_business_id_idx").on(table.businessId),
+    // Candidate key for composite tenant FKs from the pricing tables
+    // (pricing_rules / customer_group_pricing / pricing_promotions,
+    // migration 0063) — same pattern as products_id_business_uq.
+    uniqueIndex("categories_id_business_uq").on(table.id, table.businessId),
+  ],
 );

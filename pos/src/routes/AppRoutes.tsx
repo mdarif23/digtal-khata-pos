@@ -27,6 +27,15 @@ import { StockTransfersPage } from "@/features/stockTransfers/pages/StockTransfe
 import { RolesPage } from "@/features/roles/pages/RolesPage";
 import { PaymentIntentReturn } from "@/features/pos/pages/PaymentIntentReturn";
 import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
+import { ProductPricingPage } from "@/features/pricing/pages/ProductPricingPage";
+import { PricingRulesPage } from "@/features/pricing/pages/PricingRulesPage";
+import { PricingSettingsPage } from "@/features/pricing/pages/PricingSettingsPage";
+import { CustomerGroupsPage } from "@/features/pricing/pages/CustomerGroupsPage";
+import { PromotionsPage } from "@/features/pricing/pages/PromotionsPage";
+import { PriceHistoryPage } from "@/features/pricing/pages/PriceHistoryPage";
+import { PriceProposalsPage } from "@/features/pricing/pages/PriceProposalsPage";
+import { BulkUpdatePage } from "@/features/pricing/pages/BulkUpdatePage";
+import { PricingReportsPage } from "@/features/pricing/pages/PricingReportsPage";
 import ReceiptSettingsPage from "@/features/receipt-settings/pages/ReceiptSettingsPage";
 import BackupSettingsPage from "../features/backups/pages/BackupSettingsPage";
 import { StockCountPage } from "@/features/products/pages/StockCountPage";
@@ -467,6 +476,78 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="taxes.view">
             <TaxRatesPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/pricing/products",
+        element: (
+          <RequirePermission permission="pricing.view">
+            <ProductPricingPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/pricing/rules",
+        element: (
+          <RequirePermission permission="pricing.view">
+            <PricingRulesPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/pricing/settings",
+        element: (
+          <RequirePermission permission="pricing.view">
+            <PricingSettingsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/pricing/customer-groups",
+        element: (
+          <RequirePermission permission="pricing.view">
+            <CustomerGroupsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/pricing/promotions",
+        element: (
+          <RequirePermission permission="promotions.view">
+            <PromotionsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/pricing/history",
+        element: (
+          <RequirePermission permission="pricing.history.view">
+            <PriceHistoryPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/pricing/proposals",
+        element: (
+          <RequirePermission permission="pricing.history.view">
+            <PriceProposalsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/pricing/bulk",
+        element: (
+          <RequirePermission permission="pricing.bulk_update">
+            <BulkUpdatePage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/pricing/reports",
+        element: (
+          <RequirePermission permission="pricing.view">
+            <PricingReportsPage />
           </RequirePermission>
         ),
       },

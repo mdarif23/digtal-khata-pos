@@ -110,9 +110,19 @@ import {
   getCartTotals,
   getCartTotalsWithTaxRules,
   getLinePricing,
+  lineChargeAfterAllocations,
   type DiscountInput,
   type TaxRuleSnapshot,
 } from "./utils/cartPricing.js";
+import {
+  evaluateSaleGroupPricing,
+  toCartGroupInput,
+} from "../pricing/pricing.salePricing.js";
+import {
+  evaluateSalePromotions,
+  toCartPromotionInput,
+} from "../pricing/pricing.salePromotions.js";
+import { evaluateMinimumFloors } from "../pricing/pricing.saleFloors.js";
 import { taxRates } from "../../db/schema/taxRates.js";
 import { productTaxes } from "../../db/schema/productTaxes.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
@@ -542,6 +552,9 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
       lineTotal: saleItems.lineTotal,
       taxAmount: saleItems.taxAmount,
       taxDetail: saleItems.taxDetail,
+      // Discount attribution snapshots (Phases 4-6): the receipt/invoice
+      // renders the automatic group + promotion lines and override notes.
+      priceAdjustments: saleItems.priceAdjustments,
       unitName: units.abbreviation,
       // UOM snapshot (migration 0062): receipts can show "1 Box" instead of
       // "12 pcs" when the line was sold in a packaging unit.
@@ -657,6 +670,8 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
         lineTotal: Number(item.lineTotal),
         taxAmount: Number(item.taxAmount),
         taxDetail: item.taxDetail,
+        // Attribution snapshots for the receipt breakdown (Phases 4-6).
+        priceAdjustments: item.priceAdjustments ?? [],
         // UOM snapshot (migration 0062): receipts can show "1 Box" instead
         // of "12 pcs" when the line was sold in a packaging unit.
         enteredQuantity: item.enteredQuantity == null ? null : Number(item.enteredQuantity),
@@ -816,6 +831,13 @@ export interface CreateSaleOptions {
    * allocation gates, not here.
    */
   allowNegativeStock?: boolean;
+  /**
+   * Phase 6: the controller passes callerHasPermission(req,
+   * 'pricing.below_minimum_override'). False (default) blocks sales whose
+   * lines land below the minimum floors; true allows them with a mandatory
+   * reason recorded on the line snapshots and the audit log.
+   */
+  allowBelowMinimum?: boolean;
 }
 
 export async function createSale(
@@ -906,14 +928,117 @@ export async function createSale(
     const usesTaxRules = [...taxRulesByVariant.values()].some(
       (rules) => rules.length > 0,
     );
+    // Customer-group layer (Phase 4): automatic, computed BEFORE the manual
+    // cart discount (stacking policy — approved report §6). Empty for
+    // walk-ins and customers without an active group → zero behavior change.
+    const groupPricing = await evaluateSaleGroupPricing(
+      tx,
+      businessId,
+      customerId,
+      trustedItems,
+    );
+    const groupInput = toCartGroupInput(groupPricing);
+    // Promotion layer (Phase 5): auto-applied, priced on the POST-GROUP
+    // bases; a coupon in the cart suppresses non-stacking promotions.
+    const promoEvaluation = await evaluateSalePromotions(
+      tx,
+      businessId,
+      trustedItems,
+      groupPricing,
+      Boolean(couponCode),
+    );
+    const promoInput = toCartPromotionInput(promoEvaluation);
     const totals = usesTaxRules
-      ? getCartTotalsWithTaxRules(trustedItems, discount, taxRulesByVariant)
-      : getCartTotals(trustedItems, discount, Number(vatPercent ?? 0));
+      ? getCartTotalsWithTaxRules(trustedItems, discount, taxRulesByVariant, groupInput, promoInput)
+      : getCartTotals(trustedItems, discount, Number(vatPercent ?? 0), groupInput, promoInput);
     const lineTaxes = "perLine" in totals ? totals.perLine : null;
+    // Self-describing snapshots: promotion names by id for price_adjustments.
+    const promoNameById = new Map(
+      promoEvaluation.applied.map((p) => [p.id, p.name] as const),
+    );
 
+    // Minimum-price protection (Phase 6): a line whose effective per-base
+    // charge (after line discount and the group/promotion/manual layers)
+    // lands below `product_variants.min_selling_price` or the business-wide
+    // `pricing_settings.min_margin_percent` floor is BLOCKED unless the
+    // caller holds pricing.below_minimum_override — then a reason is
+    // mandatory and recorded on the line snapshots + audit log.
+    const lineCharges = lineChargeAfterAllocations(trustedItems, totals);
+    const floorViolations = await evaluateMinimumFloors(
+      tx,
+      businessId,
+      trustedItems.map((item) => ({
+        variantId: item.variantId,
+        quantity: item.quantity,
+        minSellingPrice:
+          variantMap.get(item.variantId)?.minSellingPrice == null
+            ? null
+            : Number(variantMap.get(item.variantId)!.minSellingPrice),
+      })),
+      lineCharges,
+    );
+    const payloadBelowMinimumReason = data.belowMinimumReason?.trim() || null;
+    if (floorViolations.length > 0) {
+      if (!options.allowBelowMinimum) {
+        throw new BadRequestError(
+          `Sale blocked: ${floorViolations.length} line(s) priced below the minimum — ${floorViolations
+            .map((v) => `variant ${v.variantId}: ${v.message}`)
+            .join(" | ")}`,
+        );
+      }
+      const missingReason = floorViolations.some((v) => {
+        const overrideReason = trustedItems[v.index]?.overrideSnapshot?.reason ?? null;
+        return !overrideReason && !payloadBelowMinimumReason;
+      });
+      if (missingReason) {
+        throw new BadRequestError(
+          "A reason is required for a sale that prices below the minimum.",
+        );
+      }
+    }
+    // Snapshot entries for overridden lines + below-minimum approvals,
+    // appended AFTER the group/promotion entries (application order).
+    const manualAdjustmentsByLine = new Map<
+      number,
+      { kind: "manual"; refId: null; name: string; amount: number; reason: string | null }[]
+    >();
+    trustedItems.forEach((item, idx) => {
+      const entries: {
+        kind: "manual";
+        refId: null;
+        name: string;
+        amount: number;
+        reason: string | null;
+      }[] = [];
+      if (item.overrideSnapshot != null) {
+        const list = item.listUnitPrice;
+        entries.push({
+          kind: "manual",
+          refId: null,
+          name: "Price override",
+          amount: roundMoney(
+            ((list ?? item.unitPrice) - item.unitPrice) * item.quantity,
+          ),
+          reason: item.overrideSnapshot.reason,
+        });
+      }
+      const violation = floorViolations.find((v) => v.index === idx);
+      if (violation) {
+        entries.push({
+          kind: "manual",
+          refId: null,
+          name: "Below-minimum approval",
+          amount: 0,
+          reason:
+            item.overrideSnapshot?.reason ?? payloadBelowMinimumReason ?? null,
+        });
+      }
+      if (entries.length > 0) manualAdjustmentsByLine.set(idx, entries);
+    });
     // Coupons (Module 6): server-validated; v1 stacking rule — a coupon
-    // replaces the cart-level discount (both is rejected). The discount
-    // reduces the final charge; recorded on the sale via coupon_redemptions.
+    // replaces the MANUAL cart-level discount (both is rejected) but stacks
+    // with the automatic customer-group discount. The discount reduces the
+    // final charge; recorded on the sale via coupon_redemptions.
     let couponEvaluation: Awaited<
       ReturnType<typeof evaluateCouponInTx>
     > | null = null;
@@ -935,8 +1060,17 @@ export async function createSale(
       Math.max(0, totals.finalTotal - couponDiscount),
     );
 
+    // Header discount keeps its conflated meaning (line + manual cart) and
+    // now also carries the automatic group + promotion layers; per-line
+    // attribution lives in sale_items.price_adjustments (kind 'group' then
+    // kind 'promotion', in application order).
     const totalDiscount = roundMoney(
-      totals.itemDiscount + totals.cartDiscountAmount,
+      totals.itemDiscount +
+        totals.cartDiscountAmount +
+        totals.groupCartAmount +
+        totals.lineGroupTotal +
+        totals.promoCartAmount +
+        totals.promoLineTotal,
     );
 
     // 6. Validate payment amounts against the final total (coupon applied).
@@ -975,6 +1109,8 @@ export async function createSale(
         paymentStatus,
         status: "completed",
         channel: options.channel ?? undefined,
+        // Customer group AT SALE TIME (Phase 4 snapshot, no FK by design).
+        customerGroupId: groupPricing.groupId,
         idempotencyKey,
         idempotencyPayloadHash: payloadHash,
         terminalId,
@@ -1011,6 +1147,29 @@ export async function createSale(
     }
 
     const saleId = newSale.id;
+
+    // Phase 6 audit trail: permission-gated price overrides and approved
+    // below-minimum lines land in the audit log with the sale (in-tx, so it
+    // rolls back with the sale itself).
+    if (manualAdjustmentsByLine.size > 0) {
+      await recordAuditInTx(tx, {
+        businessId,
+        actorUserId: cashierUserId,
+        action: "pricing.price_override",
+        entityType: "sale",
+        entityId: saleId,
+        metadata: {
+          overrides: [...manualAdjustmentsByLine.entries()].map(([idx, entries]) => ({
+            variantId: trustedItems[idx]!.variantId,
+            entries,
+          })),
+          belowMinimum: floorViolations.map((v) => ({
+            variantId: v.variantId,
+            message: v.message,
+          })),
+        },
+      });
+    }
 
     // 9. Insert sale items with price, cost, and tax snapshots. perLine is
     // index-aligned with trustedItems (both derive from the same list; unit
@@ -1083,6 +1242,36 @@ export async function createSale(
           enteredQuantity: item.uomSnapshot?.enteredQuantity ?? null,
           enteredUnitPrice: item.uomSnapshot?.enteredUnitPrice ?? null,
           conversionFactor: item.uomSnapshot?.conversionFactor ?? null,
+          // Discount attribution (Phases 4-5): index-aligned with
+          // trustedItems via the totals pass; names added here so the
+          // snapshot is self-describing. Order = application order: group
+          // entries first, then promotions.
+          priceAdjustments: [
+            ...(
+              "perLine" in totals
+                ? (lineTaxes?.[itemIndex]?.groupAdjustments ?? [])
+                : (totals.groupLineAdjustments[itemIndex] ?? [])
+            ).map((a) => ({
+              kind: "group" as const,
+              refId: a.refId,
+              name: groupPricing.groupName,
+              amount: a.amount,
+            })),
+            ...(
+              "perLine" in totals
+                ? (lineTaxes?.[itemIndex]?.promotionAdjustments ?? [])
+                : (totals.promoLineAdjustments[itemIndex] ?? [])
+            ).map((a) => ({
+              kind: "promotion" as const,
+              refId: a.refId,
+              name:
+                (a.refId != null
+                  ? promoNameById.get(a.refId)
+                  : null) ?? null,
+              amount: a.amount,
+            })),
+            ...(manualAdjustmentsByLine.get(itemIndex) ?? []),
+          ],
         })
         .returning({ id: saleItems.id });
       if (!saleItem) throw new Error("Failed to create sale item.");
@@ -2830,6 +3019,7 @@ export interface SaleQuotePayload {
     quantity: number;
     discount?: DiscountInput | null | undefined;
     uomConversionId?: number | null | undefined;
+    priceOverride?: { unitPrice: number; reason?: string | undefined } | null | undefined;
   }[];
   cartDiscount?: DiscountInput | null | undefined;
   vatPercent?: number | null | undefined;
@@ -2852,6 +3042,7 @@ export async function quoteSaleTotals(
         id: productVariants.id,
         productId: productVariants.productId,
         sellingPrice: productVariants.sellingPrice,
+        minSellingPrice: productVariants.minSellingPrice,
       })
       .from(productVariants)
       .where(
@@ -2863,6 +3054,14 @@ export async function quoteSaleTotals(
     const priceById = new Map(
       variants.map((v) => [v.id, Number(v.sellingPrice)]),
     );
+    // Existence guard (same contract as createSale's validateVariants): a
+    // quote for a variant outside this business must 404, never price at 0.
+    const missingVariants = variantIds.filter((id) => !priceById.has(id));
+    if (missingVariants.length > 0) {
+      throw new NotFoundError(
+        `Variants not found in this business: ${missingVariants.join(", ")}.`,
+      );
+    }
     // UOM boundary: identical conversion to createSale, so a quoted total
     // always matches the checkout total for the same cart.
     const baseItems = await normalizeSaleItemsToBase(
@@ -2874,6 +3073,7 @@ export async function quoteSaleTotals(
         quantity: item.quantity,
         discount: item.discount ?? null,
         uomConversionId: item.uomConversionId ?? null,
+        priceOverride: item.priceOverride ?? null,
       })),
     );
     const trustedItems = baseItems.map((item) => {
@@ -2901,12 +3101,81 @@ export async function quoteSaleTotals(
     const usesTaxRules = [...taxRulesByVariant.values()].some(
       (rules) => rules.length > 0,
     );
+    // Customer-group layer (Phase 4): identical evaluation to createSale so
+    // the quoted total always equals the checkout total.
+    const groupPricing = await evaluateSaleGroupPricing(
+      tx,
+      businessId,
+      payload.customerId ?? null,
+      trustedItems,
+    );
+    const groupInput = toCartGroupInput(groupPricing);
+    // Promotion layer (Phase 5): same evaluation as createSale — a coupon in
+    // the request suppresses promotions that don't stack with coupons.
+    const promoEvaluation = await evaluateSalePromotions(
+      tx,
+      businessId,
+      trustedItems,
+      groupPricing,
+      Boolean(payload.couponCode?.trim()),
+    );
+    const promoInput = toCartPromotionInput(promoEvaluation);
+    const groupBlock =
+      groupPricing.groupId != null
+        ? {
+            group: {
+              id: groupPricing.groupId,
+              name: groupPricing.groupName ?? "",
+              discountAmount: groupPricing.total,
+            },
+          }
+        : {};
+    const promotionsBlock =
+      promoEvaluation.applied.length > 0
+        ? {
+            promotions: {
+              applied: promoEvaluation.applied,
+              total: promoEvaluation.total,
+            },
+          }
+        : {};
     const totals = usesTaxRules
-      ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant)
-      : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0));
+      ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant, groupInput, promoInput)
+      : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0), groupInput, promoInput);
+
+    // Minimum-price protection (Phase 6): the quote WARNS always (block or
+    // approve happens at createSale, permission-gated there).
+    const minPriceById = new Map(
+      variants.map((v) => [v.id, v.minSellingPrice == null ? null : Number(v.minSellingPrice)] as const),
+    );
+    const floorViolations = await evaluateMinimumFloors(
+      tx,
+      businessId,
+      trustedItems.map((item) => ({
+        variantId: item.variantId,
+        quantity: item.quantity,
+        minSellingPrice: minPriceById.get(item.variantId) ?? null,
+      })),
+      lineChargeAfterAllocations(trustedItems, totals),
+    );
+    const warningsBlock =
+      floorViolations.length > 0
+        ? {
+            warnings: floorViolations.map((v) => ({
+              variantId: v.variantId,
+              code: "below_minimum" as const,
+              message: v.message,
+              effectiveUnitPrice: v.effectiveUnitPrice,
+              minPrice: v.minPrice,
+              marginPercent: v.marginPercent,
+              floorMarginPercent: v.floorMarginPercent,
+            })),
+          }
+        : {};
 
     // Coupon preview: same evaluation rules as createSale (no lock), same
-    // v1 stacking rule — a coupon excludes the cart-level discount.
+    // v1 stacking rule — a coupon excludes the MANUAL cart-level discount
+    // but stacks with the automatic customer-group discount.
     let coupon: { code: string; discountAmount: number; description: string | null } | null = null;
     const couponCode = payload.couponCode?.trim();
     if (couponCode && payload.cartDiscount !== null && payload.cartDiscount !== undefined) {
@@ -2921,6 +3190,9 @@ export async function quoteSaleTotals(
         finalTotal: totals.finalTotal,
         usesTaxRules,
         perLine: "perLine" in totals ? totals.perLine : [],
+        ...groupBlock,
+        ...promotionsBlock,
+        ...warningsBlock,
         couponError:
           "Use either a cart discount or a coupon — not both.",
       };
@@ -2950,6 +3222,9 @@ export async function quoteSaleTotals(
           finalTotal: totals.finalTotal,
           usesTaxRules,
           perLine: "perLine" in totals ? totals.perLine : [],
+          ...groupBlock,
+          ...promotionsBlock,
+          ...warningsBlock,
           couponError:
             err instanceof Error ? err.message : "Coupon is not valid.",
         };
@@ -2968,6 +3243,9 @@ export async function quoteSaleTotals(
       finalTotal: roundMoney(Math.max(0, totals.finalTotal - couponDiscount)),
       usesTaxRules,
       perLine,
+      ...groupBlock,
+      ...promotionsBlock,
+      ...warningsBlock,
       ...(coupon ? { coupon } : {}),
       ...(coupon === null && couponCode
         ? { couponError: "Coupon is not valid." }

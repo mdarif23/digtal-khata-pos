@@ -114,6 +114,7 @@ function unitFieldsFor(unit: SellUnitRef | undefined, fallbackPrice: number) {
 export const useCartStore = create<CartStore>((set, get) => ({
   cart: [],
   checkoutIdempotencyKey: null,
+  belowMinimumReason: "",
   // One key per checkout attempt: retries of the SAME checkout reuse it so
   // the backend deduplicates; the next sale gets a fresh key.
   beginCheckout: () => {
@@ -287,6 +288,7 @@ export const useCartStore = create<CartStore>((set, get) => ({
       cart: [],
       // A fresh cart is a fresh checkout — never reuse the old sale's key.
       checkoutIdempotencyKey: null,
+      belowMinimumReason: "",
     })),
   addHoldItemsToCart: (holdItems) => {
     set(() => {
@@ -348,6 +350,16 @@ export const useCartStore = create<CartStore>((set, get) => ({
         ],
       };
     }),
+  setLinePriceOverride: (variantId, uomConversionId, override) =>
+    set((state) => ({
+      cart: state.cart.map((item) =>
+        item.variants.some((v) => v.id === variantId) &&
+        lineMatchesUnit(item, uomConversionId)
+          ? { ...item, priceOverride: override }
+          : item,
+      ),
+    })),
+  setBelowMinimumReason: (reason) => set({ belowMinimumReason: reason }),
 }));
 
 interface HoldCartStore {

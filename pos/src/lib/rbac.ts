@@ -43,6 +43,17 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "inventory.adjust", module: "inventory", description: "Adjust stock quantities" },
   { key: "inventory.transfer", module: "inventory", description: "Transfer stock between locations" },
 
+  // Pricing (percentage-based pricing management; cost visibility reuses
+  // products.view_cost — mirrors the backend catalog).
+  { key: "pricing.view", module: "pricing", description: "View pricing settings, rules and price previews" },
+  { key: "pricing.manage", module: "pricing", description: "Manage pricing settings and pricing rules" },
+  { key: "pricing.product.manage", module: "pricing", description: "Set product/variant pricing overrides and apply price changes" },
+  { key: "pricing.customer_groups.manage", module: "pricing", description: "Manage customer groups and group pricing" },
+  { key: "pricing.price_override", module: "pricing", description: "Override unit prices at the point of sale" },
+  { key: "pricing.below_minimum_override", module: "pricing", description: "Approve sales below the minimum price" },
+  { key: "pricing.history.view", module: "pricing", description: "View price change history and proposals" },
+  { key: "pricing.bulk_update", module: "pricing", description: "Perform bulk price updates" },
+
   { key: "customers.view", module: "customers", description: "View customers" },
   { key: "customers.create", module: "customers", description: "Create customers" },
   { key: "customers.edit", module: "customers", description: "Edit customers and record their payments" },
