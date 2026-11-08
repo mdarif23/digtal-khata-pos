@@ -9,6 +9,7 @@ import {
 import * as ctrl from "./finance.controller.js";
 import * as ownerCtrl from "./finance.owner.controller.js";
 import * as payrollCtrl from "./finance.payroll.controller.js";
+import * as overviewCtrl from "./finance.overview.controller.js";
 
 /**
  * Finance & Growth routes (Stage 3: ledger foundation). Business-scoped via
@@ -24,6 +25,11 @@ const write = [...read, requireFullAccess] as const;
 // Status & activation
 router.get("/api/finance/status", ...read, requireAnyPermission(["finance.view", "finance.overview.view"]), ctrl.getStatus);
 router.post("/api/finance/activation", ...write, requirePermission("finance.activation.manage"), ctrl.activate);
+
+// Financial overview, cash flow & growth analytics (Stage 6)
+router.get("/api/finance/overview", ...read, requireAnyPermission(["finance.overview.view", "finance.profit.view"]), overviewCtrl.getOverview);
+router.get("/api/finance/cash-flow", ...read, requirePermission("finance.overview.view"), overviewCtrl.getCashFlowReport);
+router.get("/api/finance/growth", ...read, requirePermission("finance.profit.view"), overviewCtrl.getGrowth);
 
 // Chart of accounts
 router.get("/api/finance/accounts", ...read, requireAnyPermission(["finance.journal.view", "finance.accounts.manage"]), ctrl.listAccounts);
