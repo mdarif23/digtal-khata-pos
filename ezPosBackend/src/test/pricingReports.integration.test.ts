@@ -182,6 +182,9 @@ describe("pricing reports integration", { skip: !runIntegration }, () => {
     const pricing = await api("POST", `/api/customer-groups/${groupId}/pricing`, {
       discountType: "percentage",
       discountValue: 10,
+      // The suite's member-sale math (group 30 → promo 15 → net 255) requires
+      // the stacked path: BOTH consent sides must be set (schema default is false).
+      stacksWithPromotions: true,
     });
     assert.equal(pricing.status, 201);
     const cust = await api("POST", "/api/customers", {
@@ -200,6 +203,10 @@ describe("pricing reports integration", { skip: !runIntegration }, () => {
           discountType: "fixed",
           discountValue: 15,
           canStackWithGroupDiscount: true,
+          // Members-only: an unrestricted whole-cart promotion would also
+          // auto-apply to the walk-in sale below (walk-ins get promotions
+          // with no group restriction), breaking its list-price totals.
+          groupIds: [groupId],
         })
       ).json as { data: { id: number } }
     ).data.id;
@@ -311,12 +318,10 @@ describe("pricing reports integration", { skip: !runIntegration }, () => {
     // price_adjustments and NEVER rewrite those snapshots. Both sales:
     // (100−50) + (200−100) = 150 member + 50 walk-in = 200 gross profit.
     const data = res.json.data as {
-      totals?: { grossProfit?: number };
-      summary?: { grossProfit?: number };
-      grossProfit?: number;
+      totals?: { adjustedGrossProfit?: number; totalGrossProfit?: number };
     };
     const grossProfit =
-      data.totals?.grossProfit ?? data.summary?.grossProfit ?? data.grossProfit;
+      data.totals?.adjustedGrossProfit ?? data.totals?.totalGrossProfit;
     assert.equal(Number(grossProfit), 200);
     void memberSaleId;
     void walkinSaleId;

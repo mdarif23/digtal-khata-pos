@@ -66,6 +66,7 @@ describe("pos price override + minimum floors integration", { skip: !runIntegrat
   let variantNoBatch = 0; // price 100, NO batches (cost unavailable)
   let overriderToken = ""; // pricing.price_override + below_minimum_override
   let plainToken = ""; // no pricing permissions
+  let priceOnlyToken = ""; // price_override but NOT below_minimum_override
 
   async function api(
     method: string,
@@ -178,8 +179,12 @@ describe("pos price override + minimum floors integration", { skip: !runIntegrat
 
     const variants: number[] = [];
     for (const spec of [
-      { name: "Override Priced", price: 100, qty: 30 },
-      { name: "Override NoBatch", price: 100, qty: 0 },
+      { name: "Override Priced", price: 100, qty: 30, cost: 50, source: "opening" as const },
+      // Sellable stock, but the batch cost is zeroed right after creation —
+      // the margin-floor case needs a variant with NO PRICED batches (the
+      // cost provider returns "unavailable" only for a zero/absent total),
+      // and opening stock validation rejects a 0 purchase price up front.
+      { name: "Override NoBatch", price: 100, qty: 10, cost: 50, source: "opening" as const },
     ]) {
       const unit = await api("POST", "/api/product/unit", {
         unitName: `${spec.name} Unit ${Date.now()}`,
@@ -199,7 +204,7 @@ describe("pos price override + minimum floors integration", { skip: !runIntegrat
         status: "active",
         imageUrl: null,
         imageFile: null,
-        source: "opening",
+        source: spec.source,
         variants: [
           {
             sku: "",
@@ -211,7 +216,7 @@ describe("pos price override + minimum floors integration", { skip: !runIntegrat
             imageUrl: null,
             imageFile: null,
             batchNumber: "",
-            purchasePrice: 50,
+            purchasePrice: spec.cost,
             quantity: spec.qty,
             expiryDate: null,
           },
@@ -230,8 +235,37 @@ describe("pos price override + minimum floors integration", { skip: !runIntegrat
     variantPriced = variants[0]!;
     variantNoBatch = variants[1]!;
 
-    overriderToken = await makeUser(["pricing.price_override", "pricing.below_minimum_override"]);
-    plainToken = await makeUser([]);
+    // Zero the NoBatch variant's batch purchase price (landed_cost_per_unit
+    // is GENERATED from it): sellable stock, but the cost provider reports
+    // "unavailable" — no priced batches on hand.
+    await pgClient!.query(
+      `UPDATE inventory_batches SET purchase_price = 0 WHERE variant_id = $1`,
+      [variantNoBatch],
+    );
+
+    // Base sale permissions are required to reach the override/floor gates at
+    // all — without pos.create_sale every sale 403s before pricing runs. The
+    // line-discount cases also need pos.apply_discount.
+    overriderToken = await makeUser([
+      "pos.view",
+      "pos.create_sale",
+      "pos.apply_discount",
+      "pricing.price_override",
+      "pricing.below_minimum_override",
+    ]);
+    plainToken = await makeUser([
+      "pos.view",
+      "pos.create_sale",
+      "pos.apply_discount",
+    ]);
+    // Sits at the override gate: may price-override, but a below-floor line
+    // still 400s because allowBelowMinimum stays false.
+    priceOnlyToken = await makeUser([
+      "pos.view",
+      "pos.create_sale",
+      "pos.apply_discount",
+      "pricing.price_override",
+    ]);
   });
 
   it("quotes an override and warns when the line lands below its minimum", async () => {
@@ -326,9 +360,10 @@ describe("pos price override + minimum floors integration", { skip: !runIntegrat
       `UPDATE product_variants SET min_selling_price = 90 WHERE id = $1`,
       [variantPriced],
     );
-    // No override permission AND below the floor → blocked (the floor gate
-    // fires before anything is written).
-    const blocked = await saleWith(plainToken, [
+    // price_override WITHOUT below_minimum_override → the controller override
+    // gate passes, but the floor still blocks (400) because allowBelowMinimum
+    // stays false.
+    const blocked = await saleWith(priceOnlyToken, [
       { variantId: variantPriced, quantity: 1, unitPrice: 100, discount: null, priceOverride: { unitPrice: 80 } },
     ]);
     assert.equal(blocked.status, 400);

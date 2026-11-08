@@ -141,12 +141,15 @@ describe("pricing apply (bulk/proposals/auto-update) integration", { skip: !runI
     assert.equal(child.status, 201);
     childCategoryId = child.json.data.value;
 
-    const specs: { name: string; price: number; cost: number; qty: number; categoryId: number | null }[] = [
-      { name: "Apply A", price: 100, cost: 50, qty: 30, categoryId: null },
-      { name: "Apply B", price: 100, cost: 50, qty: 0, categoryId: null },
-      { name: "Apply Cat", price: 200, cost: 100, qty: 30, categoryId: childCategoryId },
-      { name: "Apply Global", price: 300, cost: 150, qty: 30, categoryId: null },
-      { name: "Apply Fixed", price: 400, cost: 10, qty: 30, categoryId: null },
+    const specs: { name: string; price: number; cost: number; qty: number; source: "opening" | "purchase"; categoryId: number | null }[] = [
+      { name: "Apply A", price: 100, cost: 50, qty: 30, source: "opening", categoryId: null },
+      // Cost-unavailable case for the bulk/proposal engines: registered for
+      // future purchase (source "purchase" allows qty 0; opening stock now
+      // requires a positive quantity and would create a priced batch).
+      { name: "Apply B", price: 100, cost: 50, qty: 0, source: "purchase", categoryId: null },
+      { name: "Apply Cat", price: 200, cost: 100, qty: 30, source: "opening", categoryId: childCategoryId },
+      { name: "Apply Global", price: 300, cost: 150, qty: 30, source: "opening", categoryId: null },
+      { name: "Apply Fixed", price: 400, cost: 10, qty: 30, source: "opening", categoryId: null },
     ];
     const ids: number[] = [];
     for (const spec of specs) {
@@ -168,7 +171,7 @@ describe("pricing apply (bulk/proposals/auto-update) integration", { skip: !runI
         status: "active",
         imageUrl: null,
         imageFile: null,
-        source: "opening",
+        source: spec.source,
         variants: [
           {
             sku: "",
