@@ -440,6 +440,13 @@
       "when": 1794500011000,
       "tag": "0062_uom_transaction_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1794500012000,
+      "tag": "0063_pricing_foundation",
+      "breakpoints": true
     }
   ]
 }

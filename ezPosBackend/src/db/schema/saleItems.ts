@@ -13,6 +13,7 @@ import { sales } from "./sales.js";
 import { productVariants } from "./productVariants.js";
 import { productUnitConversions } from "./productUnitConversions.js";
 import { businesses } from "./businesses.js";
+import type { SalePriceAdjustment } from "./pricing.js";
 
 export const saleItems = pgTable(
   "sale_items",
@@ -92,6 +93,17 @@ export const saleItems = pgTable(
       scale: 6,
       mode: "number",
     }),
+    /**
+     * Pricing adjustments snapshot (migration 0063): the group/promotion/
+     * manual/coupon discounts applied to this line, in application order,
+     * with amounts and source ids. The sales header `discount` keeps its
+     * existing meaning; this column carries the attribution group-
+     * profitability and promotion-performance reports need.
+     */
+    priceAdjustments: jsonb("price_adjustments")
+      .$type<SalePriceAdjustment[]>()
+      .default([])
+      .notNull(),
   },
   (table) => [
     index("sale_items_business_id_idx").on(table.businessId),

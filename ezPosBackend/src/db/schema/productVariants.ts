@@ -36,6 +36,18 @@ export const productVariants = pgTable(
       scale: 2,
       mode: "number",
     }).notNull(),
+    /**
+     * Minimum selling-price floor (pricing, migration 0063). Protection
+     * metadata beside the price it protects — NOT a pricing rule. NULL = no
+     * explicit floor (the business-wide margin floor in pricing_settings
+     * still applies). Checkout: below floor → warn; block unless the caller
+     * holds pricing.below_minimum_override (override recorded with reason).
+     */
+    minSellingPrice: numeric("min_selling_price", {
+      precision: 12,
+      scale: 2,
+      mode: "number",
+    }),
 
     /**
      * Automated replenishment (Module 2C): reorder when available stock

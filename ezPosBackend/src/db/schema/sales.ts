@@ -98,6 +98,12 @@ export const sales = pgTable(
     exchangeOfSaleId: integer("exchange_of_sale_id"),
     /** Register attribution for staff performance (Module 15). */
     cashierUserId: integer("cashier_user_id").references(() => users.id),
+    /**
+     * Customer group AT SALE TIME (pricing, migration 0063) for group
+     * profitability reporting. Snapshot — deliberately NO foreign key:
+     * deleting a group must never rewrite historical sales.
+     */
+    customerGroupId: integer("customer_group_id"),
     fulfillmentStatus: fulfillmentStatusEnum("fulfillment_status")
       .default("unfulfilled")
       .notNull(),
@@ -162,6 +168,8 @@ export const sales = pgTable(
     }),
     index("sales_business_location_idx").on(table.businessId, table.locationId),
     index("sales_business_id_idx").on(table.businessId),
+    // Group-profitability reports aggregate by the sale-time group snapshot.
+    index("sales_customer_group_idx").on(table.customerGroupId),
     // Online order list + profitability scans filter by channel over a date
     // range within a business.
     index("sales_business_channel_date_idx").on(
