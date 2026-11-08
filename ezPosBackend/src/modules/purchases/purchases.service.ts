@@ -10,6 +10,11 @@ import { purchaseItems } from "../../db/schema/purchaseItems.js";
 import { purchases } from "../../db/schema/purchases.js";
 import { landedCosts } from "../../db/schema/landedCosts.js";
 import { and, asc, eq, getTableColumns, inArray } from "drizzle-orm";
+import { roundMoney } from "../../utils/roundMoney.js";
+import {
+  postPurchasePaymentLedgerEntry,
+  postPurchaseReceiveLedgerEntry,
+} from "./purchases.ledger.js";
 import { products } from "../../db/schema/products.js";
 import {
   ConflictError,
@@ -756,8 +761,9 @@ export async function createReceivePurchase(
     // 14. PAYMENT RECORD
     // =========================================================
 
+    let purchasePaymentId: number | null = null;
     if (newPaymentAmount > 0) {
-      await insertPurchasePayments(
+      purchasePaymentId = await insertPurchasePayments(
         tx,
         businessId,
         purchaseId,
@@ -765,6 +771,45 @@ export async function createReceivePurchase(
         newPaymentAmount,
         paymentNotes,
       );
+    }
+
+    // =========================================================
+    // 14b. FINANCE LEDGER POSTING (Finance & Growth Stage 3)
+    // Receive: DR 1050 Inventory + DR 1045 VAT input / CR 2010 payable.
+    // At-receive payment: DR 2010 / CR cash. Both no-op before Finance
+    // activation; idempotent per receiving submission / payment row.
+    // =========================================================
+    const receiveLineValues = receivingRecordInputs.map((record) => {
+      const line = existingItems.find((pi) => pi.id === record.purchaseItemId);
+      const ordered = Number(line?.quantity ?? 0);
+      const lineTax = Number(line?.tax ?? 0);
+      return {
+        value: roundMoney(record.acceptedQuantity * record.unitCost),
+        vatShare:
+          ordered > 0 ? roundMoney(lineTax * (record.acceptedQuantity / ordered)) : 0,
+      };
+    });
+    await postPurchaseReceiveLedgerEntry(tx, {
+      businessId,
+      purchaseId,
+      receiveEventId:
+        receiveLineValues.length > 0 && recordIdByItem.size > 0
+          ? Math.min(...recordIdByItem.values())
+          : null,
+      lines: receiveLineValues,
+      locationId,
+      actorUserId: actorUserId ?? null,
+    });
+    if (purchasePaymentId != null) {
+      await postPurchasePaymentLedgerEntry(tx, {
+        businessId,
+        paymentId: purchasePaymentId,
+        purchaseId,
+        amount: newPaymentAmount,
+        method: paymentMethod,
+        locationId,
+        actorUserId: actorUserId ?? null,
+      });
     }
 
     // =========================================================

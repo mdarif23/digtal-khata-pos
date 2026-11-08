@@ -30,6 +30,10 @@ import { saleRefunds } from "../../db/schema/saleRefunds.js";
 import { saleItemBatchConsumptions } from "../../db/schema/saleItemBatchConsumptions.js";
 import { saleRefundItems } from "../../db/schema/saleRefundItems.js";
 import {
+  postRefundLedgerEntry,
+  postSaleLedgerEntry,
+} from "./sales.ledger.js";
+import {
   type DashboardPeriod,
   getExpensesSummary,
   getInvoiceDues,
@@ -1310,6 +1314,20 @@ export async function createSale(
         });
       }
     }
+
+    // Finance & Growth: post the sale to the double-entry ledger (no-op
+    // before activation; idempotent per sale; atomic with the sale).
+    await postSaleLedgerEntry(tx, {
+      saleId: newSale.id,
+      businessId,
+      locationId,
+      payments: receivedPayments.map((payment) => ({
+        method: payment.method,
+        amount: Number(payment.amount ?? 0),
+      })),
+      actorUserId: cashierUserId,
+    });
+
     return {
       sale: newSale,
       change,
@@ -1455,6 +1473,9 @@ async function applySaleRefund(
     });
   }
 
+  // Value returned to inventory (Finance & Growth ledger hook input):
+  // restocked units re-enter at their original blended cost_at_sale.
+  let restockedCost = 0;
   for (const item of items) {
     const [variant] = await tx
       .select({
@@ -1502,6 +1523,7 @@ async function applySaleRefund(
       );
 
     if (options.disposition !== "restock") continue;
+    restockedCost += Number(item.costAtSale) * item.quantity;
 
     const [stock] = await tx
       .select()
@@ -1661,7 +1683,12 @@ async function applySaleRefund(
     }
   }
 
-  return { refundId: refund.id, refundTotal, locationId: sale.locationId };
+  return {
+    refundId: refund.id,
+    refundTotal,
+    restockedCost,
+    locationId: sale.locationId,
+  };
 }
 
 export async function createSingleRefund(
@@ -1705,7 +1732,7 @@ export async function createSingleRefund(
       throw new ConflictError("This sale item has already been returned");
     }
 
-    const { refundId, refundTotal, locationId: refundLocationId } =
+    const { refundId, refundTotal, restockedCost, locationId: refundLocationId } =
       await applySaleRefund(tx, businessId, saleItem.saleId, [saleItem], options);
     // Counter payout: a cash refund (or an un-specified one — the schema
     // defaults it to cash) physically leaves the drawer, so the actor's
@@ -1721,6 +1748,22 @@ export async function createSingleRefund(
         refundId,
       );
     }
+    // Finance & Growth: post the refund to the ledger (no-op before
+    // activation; idempotent per refund).
+    await postRefundLedgerEntry(tx, {
+      businessId,
+      saleId: saleItem.saleId,
+      refundId,
+      refundTotal,
+      cashOut:
+        options.refundMethod === undefined || options.refundMethod === "cash"
+          ? refundTotal
+          : 0,
+      nonCashMethod: options.refundMethod ?? null,
+      restockedCost,
+      locationId: refundLocationId,
+      actorUserId,
+    });
     await recordAuditInTx(tx, {
       businessId,
       actorUserId,
@@ -1808,7 +1851,7 @@ export async function createMultipleRefunds(
       throw new ConflictError("All items in this sale have already been returned");
     }
 
-    const { refundId, refundTotal, locationId: refundLocationId } =
+    const { refundId, refundTotal, restockedCost, locationId: refundLocationId } =
       await applySaleRefund(tx, businessId, id, refundableItems, options);
     // Counter payout (see createSingleRefund): cash refunds leave the
     // drawer transactionally; original_payment/store_credit never do.
@@ -1822,6 +1865,21 @@ export async function createMultipleRefunds(
         refundId,
       );
     }
+    // Finance & Growth: post the refund to the ledger (see createSingleRefund).
+    await postRefundLedgerEntry(tx, {
+      businessId,
+      saleId: id,
+      refundId,
+      refundTotal,
+      cashOut:
+        options.refundMethod === undefined || options.refundMethod === "cash"
+          ? refundTotal
+          : 0,
+      nonCashMethod: options.refundMethod ?? null,
+      restockedCost,
+      locationId: refundLocationId,
+      actorUserId,
+    });
     await recordAuditInTx(tx, {
       businessId,
       actorUserId,
@@ -2197,7 +2255,7 @@ export async function createSaleExchange(
 
     // 3. Refund side: the SAME allocation, ceiling, restock and serial
     // machinery as normal returns — one code path, no drift.
-    const { refundId, refundTotal } = await applySaleRefund(
+    const { refundId, refundTotal, restockedCost } = await applySaleRefund(
       tx,
       businessId,
       saleId,
@@ -2494,6 +2552,35 @@ export async function createSaleExchange(
         refundMethod: payload.refundMethod ?? (difference < -0.01 ? "cash" : null),
         disposition: payload.disposition,
       },
+    });
+
+    // Finance & Growth: post both sides of the exchange to the ledger.
+    // The refund's non-cash value lands on 1040 (customer credit) and is
+    // consumed by the replacement sale's own 1040 residual line — the two
+    // entries net the receivable to zero. Only the surplus payout moves cash.
+    await postRefundLedgerEntry(tx, {
+      businessId,
+      saleId,
+      refundId,
+      refundTotal,
+      cashOut: cashSurplusPayout,
+      nonCashMethod: payload.refundMethod ?? null,
+      restockedCost,
+      locationId: exchangeLocationId,
+      actorUserId,
+    });
+    await postSaleLedgerEntry(tx, {
+      saleId: exchangeSale.id,
+      businessId,
+      locationId: exchangeLocationId,
+      payments:
+        difference > 0.01
+          ? additionalPayments.map((payment) => ({
+              method: payment.method,
+              amount: Number(payment.amount ?? 0),
+            }))
+          : [],
+      actorUserId,
     });
 
     return {

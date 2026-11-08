@@ -30,6 +30,12 @@ import {
 } from "../../utils/handleError.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
 import type { Tx } from "../../services/audit.js";
+import {
+  postExpenseLedgerEntry,
+  postExpensePaymentLedgerEntry,
+  reverseExpenseLedgerEntry,
+  reverseExpensePaymentLedgerEntry,
+} from "./expenses.ledger.js";
 import { listExpenseAttachments } from "./expenses.attachments.service.js";
 import type {
   ExpenseCategoryWriteInput,
@@ -440,6 +446,7 @@ export async function createExpense(
     if (!expense) {
       throw new NotFoundError("Expense could not be created.");
     }
+    let initialPaymentId: number | null = null;
     if (initialPayment) {
       const paymentRows = await tx
         .insert(expensePayments)
@@ -460,6 +467,7 @@ export async function createExpense(
       if (!payment) {
         throw new NotFoundError("Settlement could not be recorded.");
       }
+      initialPaymentId = payment.id;
       if (initialPayment.registerSessionId) {
         await insertRegisterCashOut(tx, {
           businessId,
@@ -472,6 +480,29 @@ export async function createExpense(
         });
       }
     }
+    // Finance & Growth: post the expense to the ledger (no-op before
+    // activation; idempotent per expense; atomic with the expense).
+    await postExpenseLedgerEntry(tx, {
+      businessId,
+      expense: {
+        id: expense.id,
+        amount: Number(expense.amount),
+        paidAmount: Number(expense.paidAmount),
+        categoryId: expense.categoryId,
+        locationId: expense.locationId,
+        title: expense.title,
+      },
+      initialPayment:
+        initialPayment && initialPaymentId != null
+          ? {
+              paymentId: initialPaymentId,
+              amount: Number(initialPayment.amount),
+              method: data.payment_method,
+              registerSessionId: initialPayment.registerSessionId,
+            }
+          : null,
+      actorUserId: recordedBy,
+    });
     await recordAuditInTx(tx, {
       businessId,
       actorUserId: recordedBy,
@@ -599,6 +630,16 @@ export async function voidExpense(
     entityType: "expense",
     entityId: voided.id,
     metadata: { title: voided.title, reason: reason ?? null },
+  });
+  // Finance & Growth: reverse the expense's ledger entry — posted entries
+  // are never deleted, corrections are reversals.
+  await db.transaction(async (tx) => {
+    await reverseExpenseLedgerEntry(tx, {
+      businessId,
+      expenseId: voided.id,
+      reason: reason ?? "Expense voided",
+      actorUserId: deletedBy,
+    });
   });
   return { id: voided.id };
 }
@@ -750,6 +791,18 @@ export async function recordExpensePayment(
       });
     }
 
+    // Finance & Growth: post the settlement to the ledger (DR payable /
+    // CR cash; no-op before activation; idempotent per payment).
+    await postExpensePaymentLedgerEntry(tx, {
+      businessId,
+      paymentId: payment.id,
+      amount: Number(data.amount),
+      method: data.payment_method,
+      registerSessionId: data.register_session_id ?? null,
+      locationId: expense.locationId,
+      actorUserId: recordedBy,
+    });
+
     const paid = await sumSettledInTx(tx, businessId, expenseId);
     await tx
       .update(expenses)
@@ -841,6 +894,15 @@ export async function voidExpensePayment(
           eq(expensePayments.businessId, businessId),
         ),
       );
+
+    // Finance & Growth: reverse the settlement's ledger entry — posted
+    // entries are never deleted, corrections are reversals.
+    await reverseExpensePaymentLedgerEntry(tx, {
+      businessId,
+      paymentId: payment.id,
+      reason: "Settlement voided",
+      actorUserId: voidedBy,
+    });
 
     const paid = await sumSettledInTx(tx, businessId, expenseId);
     await tx

@@ -6,6 +6,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
+import { postPurchaseReturnLedgerEntry } from "../purchases/purchases.ledger.js";
 import {
   foldVariantOptionRows,
   variantNameFromMap,
@@ -208,6 +209,7 @@ export async function createPurchaseReturn(
             variantId: inventoryBatches.variantId,
             quantityRemaining: inventoryBatches.quantityRemaining,
             purchasePrice: inventoryBatches.purchasePrice,
+            landedCostPerUnit: inventoryBatches.landedCostPerUnit,
           })
           .from(inventoryBatches)
           .innerJoin(
@@ -230,7 +232,7 @@ export async function createPurchaseReturn(
       : [];
     const batchPoolByVariant = new Map<
       number,
-      { id: number; quantityRemaining: number; purchasePrice: number | string }[]
+      { id: number; quantityRemaining: number; purchasePrice: number | string; landedCostPerUnit: number }[]
     >();
     for (const row of poolRows) {
       if (row.variantId === null) continue;
@@ -239,10 +241,14 @@ export async function createPurchaseReturn(
         id: row.id,
         quantityRemaining: Number(row.quantityRemaining),
         purchasePrice: row.purchasePrice,
+        landedCostPerUnit: Number(row.landedCostPerUnit ?? row.purchasePrice),
       });
       batchPoolByVariant.set(row.variantId, pool);
     }
 
+    // Carrying value leaving inventory (Finance & Growth ledger hook input):
+    // returned units at their batch landed cost (original + allocated).
+    let batchCarryingValue = 0;
     for (const item of items) {
       const quantity = requestedByItem.get(item.id) ?? 0;
       const trackingType = item.trackingType;
@@ -274,6 +280,7 @@ export async function createPurchaseReturn(
           batch.quantityRemaining -= removed;
           remainingToRemove -= removed;
           landedConsumed.push({ batchId: batch.id, quantity: removed });
+          batchCarryingValue += removed * batch.landedCostPerUnit;
           const unitPrice = Math.max(
             0,
             Number(
@@ -423,6 +430,19 @@ export async function createPurchaseReturn(
       .where(
         and(eq(purchases.id, orderId), eq(purchases.businessId, businessId)),
       );
+
+    // Finance & Growth: post the return to the ledger — payable relieved at
+    // the credited amount, inventory reduced at batch carrying value, the
+    // spread to 4040/5070 (no-op before activation; idempotent per return).
+    await postPurchaseReturnLedgerEntry(tx, {
+      businessId,
+      returnId: purchaseReturn.id,
+      purchaseId: orderId,
+      totalAmount,
+      batchValue: batchCarryingValue,
+      locationId,
+      actorUserId: actorUserId ?? null,
+    });
 
     return {
       success: true,

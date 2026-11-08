@@ -370,6 +370,13 @@
 			"when": 1794500001000,
 			"tag": "0052_purchase_discrepancies",
 			"breakpoints": true
+		},
+		{
+			"idx": 53,
+			"version": "7",
+			"when": 1794500002000,
+			"tag": "0053_finance_ledger_foundation",
+			"breakpoints": true
 		}
 	]
 }

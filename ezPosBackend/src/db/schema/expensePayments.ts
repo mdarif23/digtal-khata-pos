@@ -17,6 +17,7 @@ import { sql } from "drizzle-orm";
 import { businesses } from "./businesses.js";
 import { expenses } from "./expenses.js";
 import { locations } from "./locations.js";
+import { paymentAccounts } from "./paymentAccounts.js";
 import { registerSessions } from "./registers.js";
 import { users } from "./users.js";
 
@@ -47,6 +48,11 @@ export const expensePayments = pgTable(
     locationId: integer("location_id"),
     /** Client-generated idempotency key (retried submits never duplicate). */
     clientUuid: uuid("client_uuid"),
+    /**
+     * Finance & Growth: bank/MFS account for non-cash settlements
+     * (payment_accounts). Nullable — legacy rows predate Finance.
+     */
+    paymentAccountId: integer("payment_account_id"),
     createdAt: timestamp("created_at", { mode: "string" }).default(
       sql`CURRENT_TIMESTAMP`,
     ),
@@ -71,6 +77,11 @@ export const expensePayments = pgTable(
       columns: [table.locationId, table.businessId],
       foreignColumns: [locations.id, locations.businessId],
       name: "expense_payments_location_business_fkey",
+    }),
+    foreignKey({
+      columns: [table.paymentAccountId, table.businessId],
+      foreignColumns: [paymentAccounts.id, paymentAccounts.businessId],
+      name: "expense_payments_payment_account_business_fkey",
     }),
     index("expense_payments_expense_id_idx").on(table.expenseId),
     index("expense_payments_business_date_idx").on(

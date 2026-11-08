@@ -289,13 +289,17 @@ export async function insertPurchasePayments(
   paymentMethod: "cash" | "bank_transfer" | "cheque" | "card" | "other",
   newPaymentAmount: number,
   paymentNotes: string | undefined,
-) {
-  await tx.insert(purchasePayments).values({
-    businessId,
-    purchaseId,
-    method: paymentMethod,
-    amount: newPaymentAmount,
-    notes: paymentNotes,
-    paymentDate: new Date(),
-  });
+): Promise<number | null> {
+  const [payment] = await tx
+    .insert(purchasePayments)
+    .values({
+      businessId,
+      purchaseId,
+      method: paymentMethod,
+      amount: newPaymentAmount,
+      notes: paymentNotes,
+      paymentDate: new Date(),
+    })
+    .returning({ id: purchasePayments.id });
+  return payment?.id ?? null;
 }

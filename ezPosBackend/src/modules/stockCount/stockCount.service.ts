@@ -23,6 +23,7 @@ import {
 } from "../../utils/handleError.js";
 import { recordAuditInTx } from "../../services/audit.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
+import { postStockCountLedgerEntry } from "../landed-cost/landed-cost.ledger.js";
 
 /**
  * Stock-count sessions (Module 2A/2B): create a count (whole location or a
@@ -318,6 +319,11 @@ export async function approveStockCount(
     }
 
     let applied = 0;
+    // Finance & Growth ledger inputs: value leaving/entering inventory at
+    // batch landed cost (shrinkage consumes FIFO; increases enter at the
+    // variant's average landed cost).
+    let shrinkageValue = 0;
+    let increaseValue = 0;
     for (const line of countedLines) {
       const [stock] = await tx
         .select({ id: inventoryStock.id, quantity: inventoryStock.quantity })
@@ -345,6 +351,7 @@ export async function approveStockCount(
           .select({
             id: inventoryBatches.id,
             quantityRemaining: inventoryBatches.quantityRemaining,
+            landedCostPerUnit: inventoryBatches.landedCostPerUnit,
           })
           .from(inventoryBatches)
           .where(
@@ -370,6 +377,7 @@ export async function approveStockCount(
                 eq(inventoryBatches.businessId, businessId),
               ),
             );
+          shrinkageValue += take * Number(batch.landedCostPerUnit ?? 0);
           toRemove -= take;
         }
       } else {
@@ -385,6 +393,7 @@ export async function approveStockCount(
             ),
           );
         const unitCost = Number(avgRow?.avgCost ?? 0);
+        increaseValue += delta * unitCost;
         await tx.insert(inventoryBatches).values({
           businessId,
           variantId: line.variantId,
@@ -421,6 +430,18 @@ export async function approveStockCount(
         updatedAt: new Date(),
       })
       .where(eq(stockCountSessions.id, sessionId));
+
+    // Finance & Growth: post the count variance to the ledger at batch
+    // landed cost (DR 5070/CR 1050 for shrinkage, reversed for gains;
+    // no-op before activation; idempotent per session).
+    await postStockCountLedgerEntry(tx, {
+      businessId,
+      sessionId,
+      shrinkageValue,
+      increaseValue,
+      locationId,
+      actorUserId,
+    });
 
     await recordAuditInTx(tx, {
       businessId,
