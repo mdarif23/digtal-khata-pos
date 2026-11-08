@@ -38,6 +38,9 @@ const assignSchema = z
     target: z.enum(["primary", "alias"]).default("primary"),
     replace: z.boolean().optional(),
     source: z.enum(["external", "internal"]).optional(),
+    // UOM (migration 0062): alias-level package qualifier (a box-of-12
+    // code). Primary barcodes are always the base unit.
+    uomConversionId: z.coerce.number().int().positive().nullish(),
   })
   .superRefine((value, ctx) => {
     if (value.barcode.trim() === "") {

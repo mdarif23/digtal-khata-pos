@@ -89,6 +89,35 @@ export const saleRefundRequestSchema = z.object({
   notes: z.string().trim().max(500).optional(),
   disposition: z.enum(["restock", "inspection", "damaged"]),
   /**
+   * Per-line partial returns (UOM Phase 5, migration 0062): quantities are
+   * BASE units (e.g. 3 pcs out of a Box-of-12 line). Absent = the full
+   * remaining quantity of every listed line (legacy behavior). The engine
+   * validates against received − previously returned.
+   */
+  quantities: z
+    .array(
+      z.object({
+        saleItemId: z.number().int().positive(),
+        quantity: z.number().int().positive(),
+      }),
+    )
+    .max(200)
+    .optional(),
+  /**
+   * Restock selection for PARTIAL returns of serial-tracked lines: exactly
+   * `quantity` serial ids per line; full-line returns keep the blanket
+   * all-serials-of-the-line behavior.
+   */
+  serialIds: z
+    .array(
+      z.object({
+        saleItemId: z.number().int().positive(),
+        serialIds: z.array(z.number().int().positive()).max(500),
+      }),
+    )
+    .max(200)
+    .optional(),
+  /**
    * How the money goes back. 'cash' = counter/drawer payout;
    * 'original_payment' = provider refund to the original instrument
    * (requires a captured payment intent for the sale and a provider with

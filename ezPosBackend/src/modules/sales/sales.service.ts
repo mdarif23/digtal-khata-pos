@@ -164,12 +164,19 @@ export async function getSalesData(businessId: number) {
       soldQuantity: saleItems.quantity,
       soldPrice: saleItems.sellingPrice,
       lineTotal: saleItems.lineTotal,
+      // UOM snapshot (migration 0062): sold-products can show "2 Box"
+      // instead of "24 pcs" for packaging-unit lines.
+      enteredQuantity: saleItems.enteredQuantity,
+      enteredUnitPrice: saleItems.enteredUnitPrice,
+      conversionFactor: saleItems.conversionFactor,
+      unitAbbreviation: units.abbreviation,
       createdAt: sales.createdAt,
     })
     .from(saleItems)
     .innerJoin(sales, eq(saleItems.saleId, sales.id))
     .innerJoin(productVariants, eq(saleItems.variantId, productVariants.id))
     .innerJoin(products, eq(productVariants.productId, products.id))
+    .leftJoin(units, eq(products.unitId, units.id))
     .leftJoin(categories, eq(products.categoryId, categories.id))
     .leftJoin(customers, eq(sales.customerId, customers.id))
     .where(
@@ -1451,8 +1458,65 @@ async function applySaleRefund(
       Math.max(0, roundMoney(Number(item.lineTotal) + delta * share)),
     );
   }
+  // Per-line partial returns (UOM Phase 5): a ledger of previously
+  // returned quantities per sale item replaces the once-only guard.
+  const priorReturnedRows = await tx
+    .select({
+      saleItemId: saleRefundItems.saleItemId,
+      returned: sql<string>`COALESCE(SUM(${saleRefundItems.quantity}), 0)`,
+    })
+    .from(saleRefundItems)
+    .innerJoin(saleRefunds, eq(saleRefundItems.refundId, saleRefunds.id))
+    .where(
+      and(eq(saleRefunds.saleId, saleId), eq(saleRefunds.businessId, businessId)),
+    )
+    .groupBy(saleRefundItems.saleItemId);
+  const returnedByItem = new Map<number, number>(
+    priorReturnedRows.flatMap((row) =>
+      row.saleItemId === null ? [] : [[row.saleItemId, Number(row.returned)] as const],
+    ),
+  );
+  const requestedQuantityByItemId = new Map<number, number>();
+  if (options.quantities) {
+    const wantedIds = new Set(items.map((i) => i.id));
+    for (const entry of options.quantities) {
+      if (!wantedIds.has(entry.saleItemId)) continue;
+      if (requestedQuantityByItemId.has(entry.saleItemId)) {
+        throw new BadRequestError(
+          "Duplicate quantity entries for the same sale item are not allowed.",
+        );
+      }
+      requestedQuantityByItemId.set(entry.saleItemId, entry.quantity);
+    }
+  }
+  const requestedByItem = new Map<number, number>();
+  for (const item of items) {
+    const remaining = item.quantity - (returnedByItem.get(item.id) ?? 0);
+    const requested = requestedQuantityByItemId.get(item.id) ?? remaining;
+    if (!Number.isInteger(requested) || requested <= 0) {
+      throw new BadRequestError(
+        `Invalid return quantity for sale item ${item.id}.`,
+      );
+    }
+    if (requested > remaining) {
+      throw new ConflictError(
+        `Cannot return ${requested} of sale item ${item.id}; only ${Math.max(remaining, 0)} unit(s) remain returnable.`,
+      );
+    }
+    requestedByItem.set(item.id, requested);
+  }
+
+  // Effective money is pro-rated by the returned share of each line, so a
+  // 3-of-12 partial return refunds exactly 3/12 of the line's effective
+  // value (cart-discount/VAT delta included).
   const batchEffective = items.reduce(
-    (sum, item) => sum + (effectiveByItemId.get(item.id) ?? 0),
+    (sum, item) =>
+      sum +
+      roundMoney(
+        (effectiveByItemId.get(item.id) ?? 0) *
+          (requestedByItem.get(item.id) ?? 0) /
+          Number(item.quantity),
+      ),
     0,
   );
 
@@ -1542,14 +1606,18 @@ async function applySaleRefund(
     }
 
     const effective = effectiveByItemId.get(item.id) ?? 0;
+    const returnedQuantity = requestedByItem.get(item.id) ?? item.quantity;
+    const effectiveShare = roundMoney(
+      (effective * returnedQuantity) / Number(item.quantity),
+    );
     await tx.insert(saleRefundItems).values({
       businessId,
       refundId: refund.id,
       saleItemId: item.id,
       productId: variant.productId,
-      quantity: item.quantity,
-      refundPrice: roundMoney(effective / item.quantity),
-      refundTotal: effective,
+      quantity: returnedQuantity,
+      refundPrice: effectiveShare / returnedQuantity,
+      refundTotal: effectiveShare,
     });
 
     const serialStatus =
@@ -1558,18 +1626,61 @@ async function applySaleRefund(
         : options.disposition === "damaged"
           ? "damaged"
           : "returned";
-    await tx
-      .update(serialNumbers)
-      .set({ status: serialStatus })
-      .where(
-        and(
-          eq(serialNumbers.saleItemId, item.id),
-          eq(serialNumbers.businessId, businessId),
-        ),
+    const partialReturn = returnedQuantity < Number(item.quantity);
+    if (variant.trackingType !== "serial") {
+      // Non-serial lines: the disposition applies to the returned units.
+      await tx
+        .update(serialNumbers)
+        .set({ status: serialStatus })
+        .where(
+          and(
+            eq(serialNumbers.saleItemId, item.id),
+            eq(serialNumbers.businessId, businessId),
+          ),
+        );
+    } else if (!partialReturn) {
+      // Full-line return: every serial of the line flips (legacy behavior).
+      await tx
+        .update(serialNumbers)
+        .set({ status: serialStatus })
+        .where(
+          and(
+            eq(serialNumbers.saleItemId, item.id),
+            eq(serialNumbers.businessId, businessId),
+          ),
+        );
+    } else {
+      // PARTIAL serial return: the operator must say WHICH serials came
+      // back — a package quantity can never bypass serial tracking.
+      const selection = options.serialIds?.find(
+        (entry) => entry.saleItemId === item.id,
       );
+      const wanted = selection?.serialIds ?? [];
+      if (wanted.length !== returnedQuantity) {
+        throw new BadRequestError(
+          `Select exactly ${returnedQuantity} serial number(s) for the partial return of sale item ${item.id}.`,
+        );
+      }
+      const updated = await tx
+        .update(serialNumbers)
+        .set({ status: serialStatus })
+        .where(
+          and(
+            inArray(serialNumbers.id, wanted),
+            eq(serialNumbers.saleItemId, item.id),
+            eq(serialNumbers.businessId, businessId),
+          ),
+        )
+        .returning({ id: serialNumbers.id });
+      if (updated.length !== wanted.length) {
+        throw new BadRequestError(
+          `One or more selected serials do not belong to sale item ${item.id}.`,
+        );
+      }
+    }
 
     if (options.disposition !== "restock") continue;
-    restockedCost += Number(item.costAtSale) * item.quantity;
+    restockedCost += Number(item.costAtSale) * returnedQuantity;
 
     const [stock] = await tx
       .select()
@@ -1594,7 +1705,7 @@ async function applySaleRefund(
     await tx
       .update(inventoryStock)
       .set({
-        quantity: sql`coalesce(${inventoryStock.quantity}, 0) + ${item.quantity}`,
+        quantity: sql`coalesce(${inventoryStock.quantity}, 0) + ${returnedQuantity}`,
       })
       .where(
         and(
@@ -1611,11 +1722,13 @@ async function applySaleRefund(
         locationId: stock.locationId,
         batchNumber: `RETURN-${refund.id}-${item.id}`,
         purchasePrice: item.costAtSale,
-        quantityReceived: item.quantity,
-        quantityRemaining: item.quantity,
+        quantityReceived: returnedQuantity,
+        quantityRemaining: returnedQuantity,
       })
       .returning({ id: inventoryBatches.id });
     if (variant.trackingType === "serial" && returnBatch) {
+      // Full-line returns re-point every serial of the line; partial
+      // returns re-point exactly the serials selected above.
       await tx
         .update(serialNumbers)
         .set({ batchId: returnBatch.id })
@@ -1623,6 +1736,13 @@ async function applySaleRefund(
           and(
             eq(serialNumbers.saleItemId, item.id),
             eq(serialNumbers.businessId, businessId),
+            partialReturn && options.serialIds
+              ? inArray(
+                  serialNumbers.id,
+                  options.serialIds.find((e) => e.saleItemId === item.id)
+                    ?.serialIds ?? [],
+                )
+              : undefined,
           ),
         );
     }
@@ -1657,7 +1777,7 @@ async function applySaleRefund(
   }
 
   const allSaleItems = await tx
-    .select({ id: saleItems.id })
+    .select({ id: saleItems.id, quantity: saleItems.quantity })
     .from(saleItems)
     .where(
       and(
@@ -1666,8 +1786,11 @@ async function applySaleRefund(
       ),
     )
     .for("update");
-  const refundedSaleItems = await tx
-    .select({ saleItemId: saleRefundItems.saleItemId })
+  const returnedAgg = await tx
+    .select({
+      saleItemId: saleRefundItems.saleItemId,
+      returned: sql<string>`COALESCE(SUM(${saleRefundItems.quantity}), 0)`,
+    })
     .from(saleRefundItems)
     .innerJoin(saleRefunds, eq(saleRefundItems.refundId, saleRefunds.id))
     .where(
@@ -1675,15 +1798,23 @@ async function applySaleRefund(
         eq(saleRefunds.saleId, saleId),
         eq(saleRefunds.businessId, businessId),
       ),
-    );
-  const refundedIds = new Set(
-    refundedSaleItems.flatMap((row) =>
-      row.saleItemId === null ? [] : [row.saleItemId],
+    )
+    .groupBy(saleRefundItems.saleItemId);
+  const returnedByItemAll = new Map<number, number>(
+    returnedAgg.flatMap((row) =>
+      row.saleItemId === null ? [] : [[row.saleItemId, Number(row.returned)] as const],
     ),
+  );
+  const quantitiesByItem = new Map(
+    allSaleItems.map((row) => [row.id, Number(row.quantity)]),
   );
   if (
     allSaleItems.length > 0 &&
-    allSaleItems.every((saleItem) => refundedIds.has(saleItem.id))
+    allSaleItems.every(
+      (saleItem) =>
+        (returnedByItemAll.get(saleItem.id) ?? 0) >=
+        (quantitiesByItem.get(saleItem.id) ?? 0),
+    )
   ) {
     await tx
       .update(sales)
@@ -1708,7 +1839,11 @@ async function applySaleRefund(
     if (current !== "returned") {
       const fullyReturned =
         allSaleItems.length > 0 &&
-        allSaleItems.every((saleItem) => refundedIds.has(saleItem.id));
+        allSaleItems.every(
+          (saleItem) =>
+            (returnedByItemAll.get(saleItem.id) ?? 0) >=
+            (quantitiesByItem.get(saleItem.id) ?? 0),
+        );
       const nextReturnState = fullyReturned
         ? "returned"
         : "partially_returned";
@@ -1764,20 +1899,8 @@ export async function createSingleRefund(
     if (sale.status !== "completed") {
       throw new ConflictError("Only completed sales can be returned");
     }
-    const [alreadyRefunded] = await tx
-      .select({ id: saleRefundItems.id })
-      .from(saleRefundItems)
-      .where(
-        and(
-          eq(saleRefundItems.saleItemId, saleItem.id),
-          eq(saleRefundItems.businessId, businessId),
-        ),
-      )
-      .limit(1);
-    if (alreadyRefunded) {
-      throw new ConflictError("This sale item has already been returned");
-    }
-
+    // Fully-returned lines are rejected inside applySaleRefund's returned
+    // ledger (partial returns may still refund the remainder).
     const { refundId, refundTotal, restockedCost, locationId: refundLocationId } =
       await applySaleRefund(tx, businessId, saleItem.saleId, [saleItem], options);
     // Counter payout: a cash refund (or an un-specified one — the schema
@@ -1875,24 +1998,34 @@ export async function createMultipleRefunds(
       .for("update");
     if (items.length === 0) throw new NotFoundError("Sale items not found");
 
-    const alreadyRefunded = await tx
-      .select({ saleItemId: saleRefundItems.saleItemId })
+    // Returnable = received − previously returned (per line). Fully
+    // returned lines drop out; partially returned lines refund the rest.
+    const alreadyReturned = await tx
+      .select({
+        saleItemId: saleRefundItems.saleItemId,
+        returned: sql<string>`COALESCE(SUM(${saleRefundItems.quantity}), 0)`,
+      })
       .from(saleRefundItems)
+      .innerJoin(saleRefunds, eq(saleRefundItems.refundId, saleRefunds.id))
       .where(
         and(
           eq(saleRefundItems.businessId, businessId),
+          eq(saleRefunds.saleId, id),
           inArray(
             saleRefundItems.saleItemId,
             items.map((item) => item.id),
           ),
         ),
-      );
-    const refundedIds = new Set(
-      alreadyRefunded.flatMap((row) =>
-        row.saleItemId === null ? [] : [row.saleItemId],
+      )
+      .groupBy(saleRefundItems.saleItemId);
+    const returnedBy = new Map<number, number>(
+      alreadyReturned.flatMap((row) =>
+        row.saleItemId === null ? [] : [[row.saleItemId, Number(row.returned)] as const],
       ),
     );
-    const refundableItems = items.filter((item) => !refundedIds.has(item.id));
+    const refundableItems = items.filter(
+      (item) => item.quantity - (returnedBy.get(item.id) ?? 0) > 0,
+    );
     if (refundableItems.length === 0) {
       throw new ConflictError("All items in this sale have already been returned");
     }

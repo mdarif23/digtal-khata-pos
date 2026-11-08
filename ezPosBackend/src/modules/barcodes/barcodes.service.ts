@@ -4,12 +4,15 @@ import {
   productVariants,
 } from "../../db/schema/productVariants.js";
 import { variantBarcodeAliases } from "../../db/schema/variantBarcodeAliases.js";
+import { productUnitConversions } from "../../db/schema/productUnitConversions.js";
+import { units as unitsTable } from "../../db/schema/units.js";
 import { products } from "../../db/schema/products.js";
 import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { auditLog } from "../../db/schema/auditLog.js";
 import { recordAudit, recordAuditInTx } from "../../services/audit.js";
 import { nextDocumentNumber } from "../../utils/documentSequence.js";
+import { roundMoney } from "../../utils/roundMoney.js";
 import {
   BadRequestError,
   ConflictError,
@@ -229,6 +232,10 @@ export async function assignBarcode(
     target: "primary" | "alias";
     replace?: boolean | undefined;
     source?: "external" | "internal" | undefined;
+    /** UOM (migration 0062): set on aliases that mean ONE PACKAGE of this
+     *  conversion unit (a box-of-12 code). Must belong to the variant's
+     *  product. Primary barcodes are always base-unit. */
+    uomConversionId?: number | null | undefined;
   },
 ): Promise<BarcodeVariantView> {
   const normalizedInput = input.barcode.trim();
@@ -331,6 +338,27 @@ export async function assignBarcode(
         .set({ barcode: code, barcodeFormat: validation.format })
         .where(eq(productVariants.id, variant.id));
     } else {
+      let uomConversionId: number | null = null;
+      if (input.uomConversionId != null) {
+        const [conversion] = await tx
+          .select({ id: productUnitConversions.id })
+          .from(productUnitConversions)
+          .where(
+            and(
+              eq(productUnitConversions.id, input.uomConversionId),
+              eq(productUnitConversions.businessId, businessId),
+              eq(productUnitConversions.productId, variant.productId),
+              eq(productUnitConversions.status, "active"),
+            ),
+          )
+          .limit(1);
+        if (!conversion) {
+          throw new BadRequestError(
+            "The packaging unit does not belong to this product or is inactive.",
+          );
+        }
+        uomConversionId = conversion.id;
+      }
       await tx.insert(variantBarcodeAliases).values({
         businessId,
         variantId: variant.id,
@@ -338,6 +366,7 @@ export async function assignBarcode(
         barcodeFormat: validation.format,
         source: input.source ?? "external",
         createdBy: userId,
+        uomConversionId,
       });
       await recordAuditInTx(tx, {
         businessId,
@@ -345,7 +374,11 @@ export async function assignBarcode(
         action: "barcode.alias_added",
         entityType: "variant",
         entityId: variant.id,
-        metadata: { barcode: code, format: validation.format },
+        metadata: {
+          barcode: code,
+          format: validation.format,
+          uomConversionId,
+        },
       });
     }
     return variant.id;
@@ -626,6 +659,17 @@ export type LookupResult =
       trackingType: string | null;
       /** On-hand quantity at the caller's active location (0 when unknown). */
       stockAtLocation: number;
+      /** UOM (migration 0062): set on package-alias matches — scanning this
+       *  code means ONE of this conversion unit (a box-of-12 code), with its
+       *  server-resolved per-unit price. Null = base unit. */
+      unit: {
+        conversionId: number;
+        unitId: number;
+        unitName: string;
+        unitAbbreviation: string | null;
+        conversionFactor: number;
+        salePrice: number;
+      } | null;
       /** Weighted-average landed cost — null unless the caller is
        *  purchase-cost authorized (purchases.view / purchases.create). */
       purchaseCost: number | null;
@@ -760,6 +804,7 @@ export async function lookupBarcode(
         productStatus: primary.productStatus,
         variantStatus: primary.variantStatus,
         trackingType: primary.trackingType,
+        unit: null,
       },
       businessId,
       options,
@@ -781,6 +826,12 @@ export async function lookupBarcode(
       productStatus: products.status,
       variantStatus: productVariants.status,
       trackingType: products.trackingType,
+      uomConversionId: productUnitConversions.id,
+      uomUnitId: unitsTable.id,
+      uomUnitName: unitsTable.name,
+      uomUnitAbbreviation: unitsTable.abbreviation,
+      uomFactor: productUnitConversions.conversionFactor,
+      uomSalePrice: productUnitConversions.salePrice,
     })
     .from(variantBarcodeAliases)
     .innerJoin(
@@ -791,6 +842,14 @@ export async function lookupBarcode(
       ),
     )
     .innerJoin(products, and(eq(products.id, productVariants.productId), eq(products.businessId, productVariants.businessId)))
+    .leftJoin(
+      productUnitConversions,
+      and(
+        eq(productUnitConversions.id, variantBarcodeAliases.uomConversionId),
+        eq(productUnitConversions.businessId, variantBarcodeAliases.businessId),
+      ),
+    )
+    .leftJoin(unitsTable, eq(unitsTable.id, productUnitConversions.unitId))
     .where(
       and(
         resolvable,
@@ -816,6 +875,23 @@ export async function lookupBarcode(
         productStatus: alias.productStatus,
         variantStatus: alias.variantStatus,
         trackingType: alias.trackingType,
+        unit: alias.uomConversionId
+          ? {
+              conversionId: alias.uomConversionId,
+              unitId: alias.uomUnitId!,
+              unitName: alias.uomUnitName!,
+              unitAbbreviation: alias.uomUnitAbbreviation,
+              conversionFactor: Number(alias.uomFactor),
+              // Server-authoritative price per package: configured or
+              // factor × variant price, rounded to currency.
+              salePrice:
+                alias.uomSalePrice != null
+                  ? Number(alias.uomSalePrice)
+                  : roundMoney(
+                      Number(alias.sellingPrice) * Number(alias.uomFactor),
+                    ),
+            }
+          : null,
       },
       businessId,
       options,
@@ -865,6 +941,7 @@ export async function lookupBarcode(
         productStatus: skuMatch.productStatus,
         variantStatus: skuMatch.variantStatus,
         trackingType: skuMatch.trackingType,
+        unit: null,
       },
       businessId,
       options,
