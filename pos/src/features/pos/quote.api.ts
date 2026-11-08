@@ -33,6 +33,8 @@ export interface QuoteTotals {
   perLine: QuoteLineTax[];
   coupon?: { code: string; discountAmount: number; description: string | null };
   couponError?: string;
+  /** Customer-group layer (Phase 4): automatic discount applied server-side. */
+  group?: { id: number; name: string; discountAmount: number };
 }
 
 export async function quoteSaleApi(payload: {

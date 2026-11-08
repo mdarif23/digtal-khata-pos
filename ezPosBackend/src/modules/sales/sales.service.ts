@@ -113,6 +113,10 @@ import {
   type DiscountInput,
   type TaxRuleSnapshot,
 } from "./utils/cartPricing.js";
+import {
+  evaluateSaleGroupPricing,
+  toCartGroupInput,
+} from "../pricing/pricing.salePricing.js";
 import { taxRates } from "../../db/schema/taxRates.js";
 import { productTaxes } from "../../db/schema/productTaxes.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
@@ -906,14 +910,25 @@ export async function createSale(
     const usesTaxRules = [...taxRulesByVariant.values()].some(
       (rules) => rules.length > 0,
     );
+    // Customer-group layer (Phase 4): automatic, computed BEFORE the manual
+    // cart discount (stacking policy — approved report §6). Empty for
+    // walk-ins and customers without an active group → zero behavior change.
+    const groupPricing = await evaluateSaleGroupPricing(
+      tx,
+      businessId,
+      customerId,
+      trustedItems,
+    );
+    const groupInput = toCartGroupInput(groupPricing);
     const totals = usesTaxRules
-      ? getCartTotalsWithTaxRules(trustedItems, discount, taxRulesByVariant)
-      : getCartTotals(trustedItems, discount, Number(vatPercent ?? 0));
+      ? getCartTotalsWithTaxRules(trustedItems, discount, taxRulesByVariant, groupInput)
+      : getCartTotals(trustedItems, discount, Number(vatPercent ?? 0), groupInput);
     const lineTaxes = "perLine" in totals ? totals.perLine : null;
 
     // Coupons (Module 6): server-validated; v1 stacking rule — a coupon
-    // replaces the cart-level discount (both is rejected). The discount
-    // reduces the final charge; recorded on the sale via coupon_redemptions.
+    // replaces the MANUAL cart-level discount (both is rejected) but stacks
+    // with the automatic customer-group discount. The discount reduces the
+    // final charge; recorded on the sale via coupon_redemptions.
     let couponEvaluation: Awaited<
       ReturnType<typeof evaluateCouponInTx>
     > | null = null;
@@ -935,8 +950,14 @@ export async function createSale(
       Math.max(0, totals.finalTotal - couponDiscount),
     );
 
+    // Header discount keeps its conflated meaning (line + manual cart) and
+    // now also carries the automatic group layer; per-line attribution lives
+    // in sale_items.price_adjustments (kind 'group').
     const totalDiscount = roundMoney(
-      totals.itemDiscount + totals.cartDiscountAmount,
+      totals.itemDiscount +
+        totals.cartDiscountAmount +
+        totals.groupCartAmount +
+        totals.lineGroupTotal,
     );
 
     // 6. Validate payment amounts against the final total (coupon applied).
@@ -975,6 +996,8 @@ export async function createSale(
         paymentStatus,
         status: "completed",
         channel: options.channel ?? undefined,
+        // Customer group AT SALE TIME (Phase 4 snapshot, no FK by design).
+        customerGroupId: groupPricing.groupId,
         idempotencyKey,
         idempotencyPayloadHash: payloadHash,
         terminalId,
@@ -1083,6 +1106,19 @@ export async function createSale(
           enteredQuantity: item.uomSnapshot?.enteredQuantity ?? null,
           enteredUnitPrice: item.uomSnapshot?.enteredUnitPrice ?? null,
           conversionFactor: item.uomSnapshot?.conversionFactor ?? null,
+          // Group-discount attribution (Phase 4): index-aligned with
+          // trustedItems via the totals pass; group name added here so the
+          // snapshot is self-describing.
+          priceAdjustments: (
+            "perLine" in totals
+              ? (lineTaxes?.[itemIndex]?.groupAdjustments ?? [])
+              : (totals.groupLineAdjustments[itemIndex] ?? [])
+          ).map((a) => ({
+            kind: "group" as const,
+            refId: a.refId,
+            name: groupPricing.groupName,
+            amount: a.amount,
+          })),
         })
         .returning({ id: saleItems.id });
       if (!saleItem) throw new Error("Failed to create sale item.");
@@ -2863,6 +2899,14 @@ export async function quoteSaleTotals(
     const priceById = new Map(
       variants.map((v) => [v.id, Number(v.sellingPrice)]),
     );
+    // Existence guard (same contract as createSale's validateVariants): a
+    // quote for a variant outside this business must 404, never price at 0.
+    const missingVariants = variantIds.filter((id) => !priceById.has(id));
+    if (missingVariants.length > 0) {
+      throw new NotFoundError(
+        `Variants not found in this business: ${missingVariants.join(", ")}.`,
+      );
+    }
     // UOM boundary: identical conversion to createSale, so a quoted total
     // always matches the checkout total for the same cart.
     const baseItems = await normalizeSaleItemsToBase(
@@ -2901,12 +2945,32 @@ export async function quoteSaleTotals(
     const usesTaxRules = [...taxRulesByVariant.values()].some(
       (rules) => rules.length > 0,
     );
+    // Customer-group layer (Phase 4): identical evaluation to createSale so
+    // the quoted total always equals the checkout total.
+    const groupPricing = await evaluateSaleGroupPricing(
+      tx,
+      businessId,
+      payload.customerId ?? null,
+      trustedItems,
+    );
+    const groupInput = toCartGroupInput(groupPricing);
+    const groupBlock =
+      groupPricing.groupId != null
+        ? {
+            group: {
+              id: groupPricing.groupId,
+              name: groupPricing.groupName ?? "",
+              discountAmount: groupPricing.total,
+            },
+          }
+        : {};
     const totals = usesTaxRules
-      ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant)
-      : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0));
+      ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant, groupInput)
+      : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0), groupInput);
 
     // Coupon preview: same evaluation rules as createSale (no lock), same
-    // v1 stacking rule — a coupon excludes the cart-level discount.
+    // v1 stacking rule — a coupon excludes the MANUAL cart-level discount
+    // but stacks with the automatic customer-group discount.
     let coupon: { code: string; discountAmount: number; description: string | null } | null = null;
     const couponCode = payload.couponCode?.trim();
     if (couponCode && payload.cartDiscount !== null && payload.cartDiscount !== undefined) {
@@ -2921,6 +2985,7 @@ export async function quoteSaleTotals(
         finalTotal: totals.finalTotal,
         usesTaxRules,
         perLine: "perLine" in totals ? totals.perLine : [],
+        ...groupBlock,
         couponError:
           "Use either a cart discount or a coupon — not both.",
       };
@@ -2950,6 +3015,7 @@ export async function quoteSaleTotals(
           finalTotal: totals.finalTotal,
           usesTaxRules,
           perLine: "perLine" in totals ? totals.perLine : [],
+          ...groupBlock,
           couponError:
             err instanceof Error ? err.message : "Coupon is not valid.",
         };
@@ -2968,6 +3034,7 @@ export async function quoteSaleTotals(
       finalTotal: roundMoney(Math.max(0, totals.finalTotal - couponDiscount)),
       usesTaxRules,
       perLine,
+      ...groupBlock,
       ...(coupon ? { coupon } : {}),
       ...(coupon === null && couponCode
         ? { couponError: "Coupon is not valid." }

@@ -42,7 +42,7 @@ const tk = (n: number) => `৳${n.toFixed(2)}`;
 // charge, including product tax rules the client cannot know. Local math
 // fills the gap instantly and keeps working offline / on quote failure.
 
-/** View shape: local getCartTotals fields plus the quote-only coupon fields. */
+/** View shape: local getCartTotals fields plus the quote-only coupon/group fields. */
 interface CartTotalsView {
   itemsBase: number;
   itemDiscount: number;
@@ -55,6 +55,7 @@ interface CartTotalsView {
   usesTaxRules?: boolean;
   coupon?: { code: string; discountAmount: number; description: string | null } | null;
   couponError?: string | null;
+  group?: { id: number; name: string; discountAmount: number } | null;
 }
 
 function useCartTotals(form: ShowCustomerInfoProps["form"]): CartTotalsView {
@@ -125,6 +126,7 @@ function useCartTotals(form: ShowCustomerInfoProps["form"]): CartTotalsView {
     usesTaxRules: quoted.usesTaxRules,
     coupon: quoted.coupon ?? null,
     couponError: quoted.couponError ?? null,
+    group: quoted.group ?? null,
   };
 }
 
@@ -537,6 +539,12 @@ function CartTextModal({
         <div className="flex justify-between py-1.5 text-sm text-emerald-700">
           <span>Discount</span>
           <span>-{tk(totals.cartDiscountAmount)}</span>
+        </div>
+      )}
+      {"group" in totals && totals.group && totals.group.discountAmount > 0 && (
+        <div className="flex justify-between py-1.5 text-sm text-emerald-700">
+          <span>{totals.group.name} pricing</span>
+          <span>-{tk(totals.group.discountAmount)}</span>
         </div>
       )}
       {"coupon" in totals && totals.coupon && (

@@ -61,6 +61,7 @@ import storefrontsRouter from "./modules/storefronts/storefronts.routes.js";
 import internalRouter from "./modules/internal/internal.routes.js";
 import financeRouter from "./modules/finance/finance.routes.js";
 import pricingRouter from "./modules/pricing/pricing.routes.js";
+import customerGroupsRouter from "./modules/customerGroups/customerGroups.routes.js";
 import {
   BadRequestError,
   ConflictError,
@@ -184,6 +185,7 @@ export function buildApp() {
   app.use("/", internalRouter);
   app.use("/", financeRouter);
   app.use("/", pricingRouter);
+  app.use("/", customerGroupsRouter);
 
   // error handling
   app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
