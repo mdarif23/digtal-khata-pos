@@ -94,6 +94,8 @@ export function HeldItemsDialog({
         <DialogFooter>
           <Button
             onClick={() => {
+              // Destructive: deletes EVERY held cart at this terminal.
+              if (!window.confirm("Delete ALL held carts? This cannot be undone.")) return;
               void clearHoldCarts().then(() => handleOpenChange(false));
             }}
           >

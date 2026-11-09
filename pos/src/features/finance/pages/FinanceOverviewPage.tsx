@@ -131,6 +131,13 @@ export function FinanceOverviewPage() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
           Profit &amp; Loss · {dateRange.startDate} → {dateRange.endDate}
         </h2>
+        <p className="-mt-2 mb-3 text-xs text-slate-400">
+          Figures come from the posted general ledger: revenue excludes VAT, owner
+          investments/withdrawals are financing (never revenue or expense), and
+          GL-only items such as shrinkage and depreciation are included — so
+          these numbers can differ slightly from the POS dashboard, which uses
+          sale totals incl. VAT.
+        </p>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <ReportMetricCard
             title="Net Revenue"

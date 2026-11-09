@@ -41,6 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getErrorMessage } from "@/utils/getErrorMessage";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useSalesStore } from "../stores/useSalesStore.js";
 import type {
   AllSoldProduct,
@@ -174,6 +175,7 @@ function isInDateRange(sale: AllSoldProduct, range: DateRange) {
 }
 
 export function Sales() {
+  const { hasPermission } = usePermissions();
   const sales = useSalesStore((state) => state.sales);
   const loading = useSalesStore((state) => state.loading);
   const error = useSalesStore((state) => state.error);
@@ -503,7 +505,7 @@ export function Sales() {
                               item.returnedQuantity >= item.soldQuantity ||
                               busySaleId !== null
                             }
-                            onClick={() => openItemRefund(item)}
+                            onClick={() => hasPermission("sales.return") && openItemRefund(item)}
                           >
                             <RotateCcw />
                             {item.returnedQuantity >= item.soldQuantity
@@ -576,7 +578,7 @@ export function Sales() {
                       (item) => item.returnedQuantity >= item.soldQuantity,
                     )
                   }
-                  onClick={() => openSaleRefund(selectedSale)}
+                  onClick={() => hasPermission("sales.return") && openSaleRefund(selectedSale)}
                 >
                   <RotateCcw />
                   Refund entire sale
