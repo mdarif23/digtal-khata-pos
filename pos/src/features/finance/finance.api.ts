@@ -1,4 +1,4 @@
-import axios from "axios";
+import api from "@/api/axios";
 import type { AccountBalance } from "./finance.types";
 import type {
   AccountingPeriod,
@@ -45,7 +45,7 @@ export interface CapitalTransactionFilters {
 // --- Status & activation ------------------------------------------------------
 
 export async function getFinanceStatusApi() {
-  const { data } = await axios.get<FinanceStatus>("/finance/status");
+  const { data } = await api.get<FinanceStatus>("/finance/status");
   return data;
 }
 
@@ -61,7 +61,7 @@ export async function activateFinanceApi(payload: {
   entryDate?: string;
   memo?: string | null;
 }) {
-  const { data } = await axios.post<{ activated: boolean; openingEntry: JournalEntry }>(
+  const { data } = await api.post<{ activated: boolean; openingEntry: JournalEntry }>(
     "/finance/activation",
     payload,
   );
@@ -71,19 +71,19 @@ export async function activateFinanceApi(payload: {
 // --- Accounts & journal ---------------------------------------------------------
 
 export async function getAccountsApi(includeArchived = false) {
-  const { data } = await axios.get<{ rows: FinanceAccount[] }>("/finance/accounts", {
+  const { data } = await api.get<{ rows: FinanceAccount[] }>("/finance/accounts", {
     params: includeArchived ? { include_archived: true } : undefined,
   });
   return data.rows;
 }
 
 export async function getPaymentAccountsApi() {
-  const { data } = await axios.get<{ rows: PaymentAccount[] }>("/finance/payment-accounts");
+  const { data } = await api.get<{ rows: PaymentAccount[] }>("/finance/payment-accounts");
   return data.rows;
 }
 
 export async function getBalancesApi(fromDate?: string, toDate?: string) {
-  const { data } = await axios.get<{ rows: AccountBalance[] }>(
+  const { data } = await api.get<{ rows: AccountBalance[] }>(
     "/finance/accounts/balances",
     { params: { from_date: fromDate, to_date: toDate } },
   );
@@ -99,7 +99,7 @@ export async function getJournalEntriesApi(filters: {
   page?: number;
   pageSize?: number;
 }) {
-  const { data } = await axios.get<{
+  const { data } = await api.get<{
     rows: JournalEntry[];
     meta: { page: number; pageSize: number; total: number; totalPages: number };
   }>("/finance/journal-entries", {
@@ -117,7 +117,7 @@ export async function getJournalEntriesApi(filters: {
 }
 
 export async function getJournalEntryApi(id: number) {
-  const { data } = await axios.get<JournalEntry & { lines: JournalEntry["lines"] }>(
+  const { data } = await api.get<JournalEntry & { lines: JournalEntry["lines"] }>(
     `/finance/journal-entries/${id}`,
   );
   return data;
@@ -135,7 +135,7 @@ export async function createJournalEntryApi(payload: {
     description?: string | null;
   }[];
 }) {
-  const { data } = await axios.post<{ entry: JournalEntry; lines: unknown[]; reused: boolean }>(
+  const { data } = await api.post<{ entry: JournalEntry; lines: unknown[]; reused: boolean }>(
     "/finance/journal-entries",
     payload,
   );
@@ -143,7 +143,7 @@ export async function createJournalEntryApi(payload: {
 }
 
 export async function reverseJournalEntryApi(id: number, reason: string, entryDate?: string) {
-  const { data } = await axios.post(`/finance/journal-entries/${id}/reverse`, {
+  const { data } = await api.post(`/finance/journal-entries/${id}/reverse`, {
     reason,
     entryDate,
   });
@@ -151,32 +151,32 @@ export async function reverseJournalEntryApi(id: number, reason: string, entryDa
 }
 
 export async function postDraftEntryApi(id: number) {
-  const { data } = await axios.post(`/finance/journal-entries/${id}/post`);
+  const { data } = await api.post(`/finance/journal-entries/${id}/post`);
   return data;
 }
 
 export async function deleteDraftEntryApi(id: number) {
-  const { data } = await axios.delete(`/finance/journal-entries/${id}`);
+  const { data } = await api.delete(`/finance/journal-entries/${id}`);
   return data;
 }
 
 export async function getPeriodsApi() {
-  const { data } = await axios.get<{ rows: AccountingPeriod[] }>("/finance/periods");
+  const { data } = await api.get<{ rows: AccountingPeriod[] }>("/finance/periods");
   return data.rows;
 }
 
 export async function closePeriodApi(id: number) {
-  const { data } = await axios.post(`/finance/periods/${id}/close`);
+  const { data } = await api.post(`/finance/periods/${id}/close`);
   return data;
 }
 
 export async function reopenPeriodApi(id: number) {
-  const { data } = await axios.post(`/finance/periods/${id}/reopen`);
+  const { data } = await api.post(`/finance/periods/${id}/reopen`);
   return data;
 }
 
 export async function getTrialBalanceApi(toDate?: string) {
-  const { data } = await axios.get<{
+  const { data } = await api.get<{
     sections: {
       type: string;
       accounts: { code: string; name: string; debit: string; credit: string }[];
@@ -193,28 +193,28 @@ export async function getTrialBalanceApi(toDate?: string) {
 // --- Dashboards -------------------------------------------------------------------
 
 export async function getOverviewApi(from: string, to: string) {
-  const { data } = await axios.get<FinancialOverview>("/finance/overview", {
+  const { data } = await api.get<FinancialOverview>("/finance/overview", {
     params: { from, to },
   });
   return data;
 }
 
 export async function getCashFlowApi(from: string, to: string) {
-  const { data } = await axios.get<CashFlowReport>("/finance/cash-flow", {
+  const { data } = await api.get<CashFlowReport>("/finance/cash-flow", {
     params: { from, to },
   });
   return data;
 }
 
 export async function getGrowthApi(period?: string, from?: string, to?: string) {
-  const { data } = await axios.get<GrowthReport>("/finance/growth", {
+  const { data } = await api.get<GrowthReport>("/finance/growth", {
     params: period ? { period } : { from, to },
   });
   return data;
 }
 
 export async function getBalanceSheetApi(asOf?: string) {
-  const { data } = await axios.get<BalanceSheet>("/finance/balance-sheet", {
+  const { data } = await api.get<BalanceSheet>("/finance/balance-sheet", {
     params: { asOf },
   });
   return data;
@@ -223,7 +223,7 @@ export async function getBalanceSheetApi(asOf?: string) {
 // --- Owner finance ------------------------------------------------------------------
 
 export async function getOwnersApi(includeInactive = false) {
-  const { data } = await axios.get<{ rows: OwnerProfile[] }>("/finance/owners", {
+  const { data } = await api.get<{ rows: OwnerProfile[] }>("/finance/owners", {
     params: includeInactive ? { include_inactive: true } : undefined,
   });
   return data.rows;
@@ -237,7 +237,7 @@ export async function createOwnerApi(payload: {
   ownershipPercent?: number | null;
   notes?: string | null;
 }) {
-  const { data } = await axios.post<OwnerProfile>("/finance/owners", payload);
+  const { data } = await api.post<OwnerProfile>("/finance/owners", payload);
   return data;
 }
 
@@ -250,12 +250,12 @@ export async function updateOwnerApi(
     isActive?: boolean;
   },
 ) {
-  const { data } = await axios.patch<OwnerProfile>(`/finance/owners/${id}`, payload);
+  const { data } = await api.patch<OwnerProfile>(`/finance/owners/${id}`, payload);
   return data;
 }
 
 export async function getCapitalTransactionsApi(filters: CapitalTransactionFilters) {
-  const { data } = await axios.get<{
+  const { data } = await api.get<{
     rows: CapitalTransaction[];
     meta: { page: number; pageSize: number; total: number; totalPages: number };
   }>("/finance/capital-transactions", {
@@ -279,7 +279,7 @@ export async function recordCapitalTransactionApi(payload: {
   reference?: string | null;
   description?: string | null;
 }) {
-  const { data } = await axios.post<{ transaction: CapitalTransaction; duplicate: boolean }>(
+  const { data } = await api.post<{ transaction: CapitalTransaction; duplicate: boolean }>(
     "/finance/capital-transactions",
     payload,
   );
@@ -287,12 +287,12 @@ export async function recordCapitalTransactionApi(payload: {
 }
 
 export async function getCapitalSummaryApi() {
-  const { data } = await axios.get<CapitalSummary>("/finance/capital-summary");
+  const { data } = await api.get<CapitalSummary>("/finance/capital-summary");
   return data;
 }
 
 export async function getProfitApi(from: string, to: string) {
-  const { data } = await axios.get<FinancialOverview["profit"]>("/finance/profit", {
+  const { data } = await api.get<FinancialOverview["profit"]>("/finance/profit", {
     params: { from, to },
   });
   return data;
@@ -301,7 +301,7 @@ export async function getProfitApi(from: string, to: string) {
 // --- Profit allocations -----------------------------------------------------------
 
 export async function getProfitAllocationsApi() {
-  const { data } = await axios.get<{ rows: ProfitAllocation[] }>("/finance/profit-allocations");
+  const { data } = await api.get<{ rows: ProfitAllocation[] }>("/finance/profit-allocations");
   return data.rows;
 }
 
@@ -316,12 +316,12 @@ export async function createAllocationApi(payload: {
     amount?: number | null;
   }[];
 }) {
-  const { data } = await axios.post<ProfitAllocation>("/finance/profit-allocations", payload);
+  const { data } = await api.post<ProfitAllocation>("/finance/profit-allocations", payload);
   return data;
 }
 
 export async function reverseAllocationApi(id: number, reason: string) {
-  const { data } = await axios.post(`/finance/profit-allocations/${id}/reverse`, { reason });
+  const { data } = await api.post(`/finance/profit-allocations/${id}/reverse`, { reason });
   return data;
 }
 
@@ -335,7 +335,7 @@ export async function realizeAllocationApi(
     txnDate?: string;
   },
 ) {
-  const { data } = await axios.post<{
+  const { data } = await api.post<{
     line: ProfitAllocation["lines"] extends (infer L)[] | undefined ? L : never;
     transaction: CapitalTransaction;
   }>(`/finance/profit-allocations/lines/${lineId}/realize`, payload);
@@ -350,7 +350,7 @@ export async function getEmployeesApi(filters: {
   page?: number;
   pageSize?: number;
 }) {
-  const { data } = await axios.get<{
+  const { data } = await api.get<{
     rows: Employee[];
     meta: { page: number; pageSize: number; total: number; totalPages: number };
   }>("/payroll/employees", {
@@ -365,7 +365,7 @@ export async function getEmployeesApi(filters: {
 }
 
 export async function getEmployeeApi(id: number) {
-  const { data } = await axios.get<Employee & { structures: EmployeeSalaryStructure[] }>(
+  const { data } = await api.get<Employee & { structures: EmployeeSalaryStructure[] }>(
     `/payroll/employees/${id}`,
   );
   return data;
@@ -387,7 +387,7 @@ export async function createEmployeeApi(payload: {
     overtimeRate?: number | null;
   } | null;
 }) {
-  const { data } = await axios.post<Employee>("/payroll/employees", payload);
+  const { data } = await api.post<Employee>("/payroll/employees", payload);
   return data;
 }
 
@@ -403,7 +403,7 @@ export async function updateEmployeeApi(
     notes: string | null;
   }>,
 ) {
-  const { data } = await axios.patch<Employee>(`/payroll/employees/${id}`, payload);
+  const { data } = await api.patch<Employee>(`/payroll/employees/${id}`, payload);
   return data;
 }
 
@@ -416,7 +416,7 @@ export async function createSalaryStructureApi(
     overtimeRate?: number | null;
   },
 ) {
-  const { data } = await axios.post<EmployeeSalaryStructure>(
+  const { data } = await api.post<EmployeeSalaryStructure>(
     `/payroll/employees/${employeeId}/salary-structures`,
     payload,
   );
@@ -429,7 +429,7 @@ export async function giveAdvanceApi(payload: {
   reason?: string | null;
   method?: string | null;
 }) {
-  const { data } = await axios.post<{ advance: SalaryAdvance; duplicate: boolean }>(
+  const { data } = await api.post<{ advance: SalaryAdvance; duplicate: boolean }>(
     `/payroll/employees/${payload.employeeId}/advances`,
     payload,
   );
@@ -437,19 +437,19 @@ export async function giveAdvanceApi(payload: {
 }
 
 export async function listAdvancesApi(employeeId: number) {
-  const { data } = await axios.get<{ rows: SalaryAdvance[] }>(
+  const { data } = await api.get<{ rows: SalaryAdvance[] }>(
     `/payroll/employees/${employeeId}/advances`,
   );
   return data.rows;
 }
 
 export async function getPayrollPeriodsApi() {
-  const { data } = await axios.get<{ rows: PayrollPeriod[] }>("/payroll/periods");
+  const { data } = await api.get<{ rows: PayrollPeriod[] }>("/payroll/periods");
   return data.rows;
 }
 
 export async function getPayrollPeriodApi(id: number) {
-  const { data } = await axios.get<PayrollPeriod>(`/payroll/periods/${id}`);
+  const { data } = await api.get<PayrollPeriod>(`/payroll/periods/${id}`);
   return data;
 }
 
@@ -470,7 +470,7 @@ export async function createPayrollPeriodApi(payload: {
     advanceDeduction?: number;
   }[];
 }) {
-  const { data } = await axios.post<PayrollPeriod>("/payroll/periods", payload);
+  const { data } = await api.post<PayrollPeriod>("/payroll/periods", payload);
   return data;
 }
 
@@ -490,7 +490,7 @@ export async function updatePayrollRecordApi(
     advanceDeduction: number;
   }>,
 ) {
-  const { data } = await axios.patch<PayrollRecord>(
+  const { data } = await api.patch<PayrollRecord>(
     `/payroll/periods/${periodId}/records/${recordId}`,
     payload,
   );
@@ -498,17 +498,17 @@ export async function updatePayrollRecordApi(
 }
 
 export async function approvePayrollPeriodApi(id: number) {
-  const { data } = await axios.post<PayrollPeriod>(`/payroll/periods/${id}/approve`);
+  const { data } = await api.post<PayrollPeriod>(`/payroll/periods/${id}/approve`);
   return data;
 }
 
 export async function cancelPayrollPeriodApi(id: number, reason: string) {
-  const { data } = await axios.post<PayrollPeriod>(`/payroll/periods/${id}/cancel`, { reason });
+  const { data } = await api.post<PayrollPeriod>(`/payroll/periods/${id}/cancel`, { reason });
   return data;
 }
 
 export async function reopenPayrollPeriodApi(id: number) {
-  const { data } = await axios.post<PayrollPeriod>(`/payroll/periods/${id}/reopen`);
+  const { data } = await api.post<PayrollPeriod>(`/payroll/periods/${id}/reopen`);
   return data;
 }
 
@@ -516,7 +516,7 @@ export async function recordSalaryPaymentApi(
   recordId: number,
   payload: { amount: number; method?: string | null; reference?: string | null },
 ) {
-  const { data } = await axios.post<{ payment: PayrollPayment; duplicate: boolean }>(
+  const { data } = await api.post<{ payment: PayrollPayment; duplicate: boolean }>(
     `/payroll/records/${recordId}/payments`,
     payload,
   );
@@ -524,14 +524,14 @@ export async function recordSalaryPaymentApi(
 }
 
 export async function getPayslipApi(recordId: number) {
-  const { data } = await axios.get<Payslip>(`/payroll/records/${recordId}/payslip`);
+  const { data } = await api.get<Payslip>(`/payroll/records/${recordId}/payslip`);
   return data;
 }
 
 // --- Loans & assets -------------------------------------------------------------------
 
 export async function getLoansApi() {
-  const { data } = await axios.get<{ rows: BusinessLoan[] }>("/finance/loans");
+  const { data } = await api.get<{ rows: BusinessLoan[] }>("/finance/loans");
   return data.rows;
 }
 
@@ -545,12 +545,12 @@ export async function createLoanApi(payload: {
   method?: string | null;
   installmentCount?: number | null;
 }) {
-  const { data } = await axios.post<BusinessLoan>("/finance/loans", payload);
+  const { data } = await api.post<BusinessLoan>("/finance/loans", payload);
   return data;
 }
 
 export async function getLoanRepaymentsApi(loanId: number) {
-  const { data } = await axios.get<{ rows: LoanRepayment[] }>(
+  const { data } = await api.get<{ rows: LoanRepayment[] }>(
     `/finance/loans/${loanId}/repayments`,
   );
   return data.rows;
@@ -560,7 +560,7 @@ export async function recordLoanRepaymentApi(
   loanId: number,
   payload: { principalAmount: number; interestAmount?: number; method?: string | null },
 ) {
-  const { data } = await axios.post<{ repayment: LoanRepayment; duplicate: boolean }>(
+  const { data } = await api.post<{ repayment: LoanRepayment; duplicate: boolean }>(
     `/finance/loans/${loanId}/repayments`,
     payload,
   );
@@ -568,7 +568,7 @@ export async function recordLoanRepaymentApi(
 }
 
 export async function getAssetsApi() {
-  const { data } = await axios.get<{ rows: BusinessAsset[] }>("/finance/assets");
+  const { data } = await api.get<{ rows: BusinessAsset[] }>("/finance/assets");
   return data.rows;
 }
 
@@ -580,12 +580,12 @@ export async function createAssetApi(payload: {
   usefulLifeMonths: number;
   method?: string | null;
 }) {
-  const { data } = await axios.post<BusinessAsset>("/finance/assets", payload);
+  const { data } = await api.post<BusinessAsset>("/finance/assets", payload);
   return data;
 }
 
 export async function runDepreciationApi(periodMonth?: string) {
-  const { data } = await axios.post<{ posted: number; totalAmount: string }>(
+  const { data } = await api.post<{ posted: number; totalAmount: string }>(
     "/finance/assets/depreciation/run",
     periodMonth ? { periodMonth } : {},
   );
@@ -605,14 +605,14 @@ export type FinanceReportKey =
   | "transactions";
 
 export async function getPnlReportApi(from: string, to: string) {
-  const { data } = await axios.get<PnlReport>("/finance/reports/pnl", {
+  const { data } = await api.get<PnlReport>("/finance/reports/pnl", {
     params: { from, to },
   });
   return data;
 }
 
 export async function getRetainedEarningsReportApi(from: string, to: string) {
-  const { data } = await axios.get<RetainedEarningsReport>(
+  const { data } = await api.get<RetainedEarningsReport>(
     "/finance/reports/retained-earnings",
     { params: { from, to } },
   );
@@ -627,14 +627,14 @@ export async function getFinanceReportApi(
   const params: Record<string, string> = {};
   if (from) params.from = from;
   if (to) params.to = to;
-  const { data } = await axios.get<FinanceReportTable>(`/finance/reports/${key}`, { params });
+  const { data } = await api.get<FinanceReportTable>(`/finance/reports/${key}`, { params });
   return data;
 }
 
 // --- Reconciliation & audit ------------------------------------------------------------
 
 export async function getReconciliationApi() {
-  const { data } = await axios.get<ReconciliationReport>("/finance/reconciliation");
+  const { data } = await api.get<ReconciliationReport>("/finance/reconciliation");
   return data;
 }
 
@@ -643,7 +643,7 @@ export async function getAuditLogApi(filters: {
   page?: number;
   pageSize?: number;
 }) {
-  const { data } = await axios.get<{
+  const { data } = await api.get<{
     rows: { id: number; action: string; entityType: string; entityId: number | null; createdAt: string; metadata: Record<string, unknown> }[];
     meta: { page: number; pageSize: number; total: number; totalPages: number };
   }>("/finance/audit-log", {

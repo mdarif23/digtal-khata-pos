@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -795,14 +795,21 @@ function RowLine({ label, value, strong }: { label: string; value: string; stron
 function PayslipDialog({ recordId, onClose }: { recordId: number; onClose: () => void }) {
   const [payslip, setPayslip] = useState<Awaited<ReturnType<typeof import("../finance.api").getPayslipApi>> | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const load = async () => {
-    const { getPayslipApi } = await import("../finance.api");
-    setPayslip(await getPayslipApi(recordId));
-    setLoaded(true);
-  };
-  useState(() => {
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      const { getPayslipApi } = await import("../finance.api");
+      const data = await getPayslipApi(recordId);
+      if (!cancelled) {
+        setPayslip(data);
+        setLoaded(true);
+      }
+    };
     void load();
-  });
+    return () => {
+      cancelled = true;
+    };
+  }, [recordId]);
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>

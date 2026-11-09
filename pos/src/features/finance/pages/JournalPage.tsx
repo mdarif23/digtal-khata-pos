@@ -39,6 +39,7 @@ import {
   getAccountsApi,
   reverseJournalEntryApi,
 } from "../finance.api";
+import { useInvalidateFinance } from "../hooks/useFinance";
 import {
   financeKeys,
   useJournalEntries,
@@ -422,6 +423,9 @@ function ManualEntryDialog({
           status,
           lines: lines
             .filter((l) => l.accountCode)
+            // The backend rejects a line without an amount ("exactly one of
+            // debit/credit > 0") — drop empty rows instead of a raw 400.
+            .filter((l) => (Number(l.debit) || 0) > 0 || (Number(l.credit) || 0) > 0)
             .map((l) => ({
               accountCode: l.accountCode,
               debit: Number(l.debit) || undefined,

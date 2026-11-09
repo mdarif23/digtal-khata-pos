@@ -150,6 +150,15 @@ export async function getOwnerCapitalReport(
 // ---------------------------------------------------------------------------
 
 export async function getAllocationReport(businessId: number, from: string, to: string) {
+  // The reports page builds its table from `columns` — omitting them renders
+  // a zero-column table (every other tabular report ships its columns).
+  const columns = [
+    { key: "periodStart", label: "Period start" },
+    { key: "periodEnd", label: "Period end" },
+    { key: "periodLabel", label: "Label" },
+    { key: "totalAllocated", label: "Allocated" },
+    { key: "status", label: "Status" },
+  ];
   const allocations = await db
     .select()
     .from(profitAllocations)
@@ -162,7 +171,7 @@ export async function getAllocationReport(businessId: number, from: string, to: 
     )
     .orderBy(desc(profitAllocations.periodStart));
   if (allocations.length === 0) {
-    return { range: { from, to }, rows: [], totalAllocated: "0.00", totalRealized: "0.00" };
+    return { range: { from, to }, rows: [], columns, totalAllocated: "0.00", totalRealized: "0.00" };
   }
   const lines = await db
     .select()
@@ -187,6 +196,7 @@ export async function getAllocationReport(businessId: number, from: string, to: 
       ...allocation,
       lines: lines.filter((l) => l.allocationId === allocation.id),
     })),
+    columns,
     totalAllocated: money(totalAllocatedPoisha),
     totalRealized: money(totalRealizedPoisha),
   };
