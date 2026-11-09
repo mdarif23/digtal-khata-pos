@@ -155,3 +155,18 @@ Every GL account reconciled to the poisha; books balance to zero.
 Real browser run on the dev stack: sign-up → business created → trial active → /account/subscription → trial expired via jobs sweep (POST /api/saas/jobs/run expired 1) → **lapsed state correctly rendered** ("Free trial expired") → Renew now → **status active, period +1 month** (lapsed-recovery fix verified) → plan switch → prorated invoice INV-2026-000001 pending → Billing → Pay now → **mock gateway redirect → /payment/success → server-side verify → "Payment confirmed"** → DB: subscription active, invoice paid, payment succeeded → **POS opens with the active session**.
 
 Note: the plan-switch button ordering selected the 0-cost plan (invoice BDT 0) — mechanics verified end-to-end; plan-grid targeting is a cosmetic UX note. Browser session: saasj3…@test.local / business 16 / INV-2026-000001.
+
+
+---
+
+## 9. Wave 4b — POS UX + FIN-9 (2026-11-10, commit e95a535)
+
+- Bangla QR number → runtime/env config (was hardcoded merchant number)
+- Clear-hold-carts destructive action now confirms
+- Sales page refund/exchange actions permission-gated client-side (sales.return)
+- Finance overview explains the GL-vs-dashboard variance (audit FIN-9 resolution: in-app explainer)
+
+### Remaining engineering backlog (P2, operational mitigations in place)
+1. sync.agent pullStock — wrap chunked inventory overwrite in one transaction (LAN sync deployments)
+2. backup restore — single-transaction restore or advisory lock against live sales during restore
+3. Both are behavior-preserving refactors; scheduled for a dedicated session with the sync e2e suite.
