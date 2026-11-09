@@ -62,6 +62,13 @@ export function IntegrationsCenter() {
     async (selectId?: number) => {
       if (!businessId) return;
       const result = await fetchIntegrations(businessId);
+      if (!result.ok) {
+        // Gated plan (403) or other failure — surface the server's message
+        // instead of crashing on a non-list payload.
+        setIntegrations([]);
+        setMessage({ text: result.message, ok: false });
+        return;
+      }
       const list = result.data ?? [];
       setIntegrations(list);
       const target = selectId ?? selectedId ?? list[0]?.id;
@@ -83,6 +90,11 @@ export function IntegrationsCenter() {
           setMode(detail.data.business.mode);
         }
         const keyList = await fetchStorefrontKeys(businessId);
+        if (!keyList.ok) {
+          setKeys([]);
+          setMessage({ text: keyList.message, ok: false });
+          return;
+        }
         setKeys(keyList.data ?? []);
       })();
     }

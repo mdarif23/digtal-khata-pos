@@ -137,13 +137,49 @@ export async function getOpenSubscription(
   return row ? (row as OpenSubscription) : null;
 }
 
+/**
+ * Latest subscription for a business in ANY status — used by read-only
+ * portal surfaces that must show the true state (canceled/expired included)
+ * instead of a phantom "no subscription".
+ */
+export async function getLatestSubscription(
+  businessId: number,
+  tx: Tx | Db = db,
+): Promise<OpenSubscription | null> {
+  const [row] = await tx
+    .select({
+      id: subscriptions.id,
+      businessId: subscriptions.businessId,
+      planId: subscriptions.planId,
+      status: subscriptions.status,
+      startsAt: subscriptions.startsAt,
+      currentPeriodStart: subscriptions.currentPeriodStart,
+      currentPeriodEnd: subscriptions.currentPeriodEnd,
+      cancelAtPeriodEnd: subscriptions.cancelAtPeriodEnd,
+      pendingPlanId: subscriptions.pendingPlanId,
+      planName: subscriptionPlans.name,
+      planSlug: subscriptionPlans.slug,
+      planPrice: subscriptionPlans.price,
+      planInterval: subscriptionPlans.interval,
+      planLimits: subscriptionPlans.limits,
+    })
+    .from(subscriptions)
+    .innerJoin(subscriptionPlans, eq(subscriptionPlans.id, subscriptions.planId))
+    .where(eq(subscriptions.businessId, businessId))
+    .orderBy(desc(subscriptions.id))
+    .limit(1);
+  return (row as OpenSubscription) ?? null;
+}
+
 async function requirePlan(planId: number) {
   const [plan] = await db
     .select({
       id: subscriptionPlans.id,
       name: subscriptionPlans.name,
+      slug: subscriptionPlans.slug,
       price: subscriptionPlans.price,
       interval: subscriptionPlans.interval,
+      limits: subscriptionPlans.limits,
       isActive: subscriptionPlans.isActive,
     })
     .from(subscriptionPlans)
@@ -198,6 +234,160 @@ export interface ChangePlanResult {
 }
 
 /**
+ * Plan change for a business whose subscription is NOT open (expired trial,
+ * expired/canceled paid plan) — the self-serve upgrade path that used to
+ * 404. Mirrors the renewal recovery: the latest expired/canceled row is
+ * switched to the target plan, a FULL target-period invoice is raised (a
+ * lapsed period has nothing to prorate), and the row keeps its non-open
+ * status until `verifyAndActivate` flips it active on successful payment —
+ * so no entitlement is granted before the money is verified.
+ * SUSPENDED subscriptions are excluded: lifting suspension is admin-only.
+ */
+async function changeLapsedSubscriptionPlan(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  businessId: number,
+  targetPlanId: number,
+  actor: Actor,
+): Promise<ChangePlanResult> {
+  const [lapsed] = await tx
+    .select({
+      id: subscriptions.id,
+      businessId: subscriptions.businessId,
+      planId: subscriptions.planId,
+      status: subscriptions.status,
+      startsAt: subscriptions.startsAt,
+      currentPeriodStart: subscriptions.currentPeriodStart,
+      currentPeriodEnd: subscriptions.currentPeriodEnd,
+      cancelAtPeriodEnd: subscriptions.cancelAtPeriodEnd,
+      pendingPlanId: subscriptions.pendingPlanId,
+      planName: subscriptionPlans.name,
+      planSlug: subscriptionPlans.slug,
+      planPrice: subscriptionPlans.price,
+      planInterval: subscriptionPlans.interval,
+      planLimits: subscriptionPlans.limits,
+    })
+    .from(subscriptions)
+    .innerJoin(subscriptionPlans, eq(subscriptionPlans.id, subscriptions.planId))
+    .where(
+      and(
+        eq(subscriptions.businessId, businessId),
+        inArray(subscriptions.status, ["expired", "canceled"]),
+      ),
+    )
+    .orderBy(desc(subscriptions.id))
+    .limit(1)
+    .for("update");
+  if (!lapsed) {
+    throw new NotFoundError(
+      "This business has no subscription to change. Start a new subscription instead.",
+    );
+  }
+  const target = await requirePlan(targetPlanId);
+  if (!target.isActive) {
+    throw new BadRequestError("That plan is no longer available.");
+  }
+
+  const now = new Date();
+  const periodEnd = addInterval(now, target.interval);
+
+  // One PENDING invoice per business: re-clicking upgrade updates the
+  // outstanding invoice in place instead of piling up duplicate bills.
+  // Paid invoices are immutable history and never touched.
+  const [pendingInvoice] = await tx
+    .select({ id: saasInvoices.id })
+    .from(saasInvoices)
+    .where(
+      and(
+        eq(saasInvoices.businessId, businessId),
+        eq(saasInvoices.status, "pending"),
+      ),
+    )
+    .orderBy(desc(saasInvoices.id))
+    .limit(1);
+
+  let invoice: { id: number; invoiceNumber: string; total: number };
+  if (pendingInvoice) {
+    await tx
+      .update(saasInvoices)
+      .set({
+        total: target.price,
+        periodStart: now,
+        periodEnd,
+        dueAt: addDays(now, 7),
+      })
+      .where(eq(saasInvoices.id, pendingInvoice.id));
+    invoice = {
+      id: pendingInvoice.id,
+      invoiceNumber: "",
+      total: target.price,
+    };
+  } else {
+    const issued = await issueInvoice(tx, {
+      businessId,
+      subscriptionId: lapsed.id,
+      total: target.price,
+      currency: "BDT",
+      periodStart: now,
+      periodEnd,
+      dueAt: addDays(now, 7),
+    });
+    invoice = {
+      id: issued.id,
+      invoiceNumber: issued.invoiceNumber,
+      total: issued.total,
+    };
+  }
+
+  await tx
+    .update(subscriptions)
+    .set({
+      planId: target.id,
+      currentPeriodStart: now,
+      currentPeriodEnd: periodEnd,
+      pendingPlanId: null,
+      cancelAtPeriodEnd: false,
+      updatedAt: now,
+    })
+    .where(eq(subscriptions.id, lapsed.id));
+
+  await recordEvent(tx, {
+    subscriptionId: lapsed.id,
+    eventType: "plan_upgraded",
+    fromStatus: lapsed.status,
+    toStatus: "expired",
+    actor,
+    metadata: {
+      fromPlanId: lapsed.planId,
+      toPlanId: target.id,
+      toPlanName: target.name,
+      invoiceId: invoice.id,
+      lapsed: true,
+    },
+  });
+
+  // Non-open until verified — return the row in the caller-facing shape.
+  // The status stays the lapsed one ("expired"/"canceled") until the payment
+  // verification flips it; OpenSubscription's type narrows statuses, so the
+  // lapsed status is carried as a cast on the caller-facing shape.
+  const updated = {
+    ...lapsed,
+    planId: target.id,
+    planName: target.name,
+    planSlug: target.slug,
+    planPrice: target.price,
+    planInterval: target.interval,
+    planLimits: target.limits,
+    currentPeriodStart: now,
+    currentPeriodEnd: periodEnd,
+  } as OpenSubscription;
+  return {
+    outcome: "upgraded",
+    subscription: updated,
+    invoice,
+  };
+}
+
+/**
  * Changes the business's plan. See the billing policy in the module docs.
  * The caller passes the verified businessId and actor — controllers supply
  * the actor from req.user; background jobs pass { type: "system" }.
@@ -208,12 +398,17 @@ export async function changePlan(
   actor: Actor,
 ): Promise<ChangePlanResult> {
   return db.transaction(async (tx) => {
-    const current = await getOpenSubscription(businessId, tx);
-    if (!current) {
-      throw new NotFoundError(
-        "This business has no open subscription to change.",
-      );
+    const open = await getOpenSubscription(businessId, tx);
+    if (!open) {
+      // Lapsed-business recovery (same policy as renewSubscription): the
+      // customer picks a plan, the full target-period invoice is raised
+      // immediately, and the subscription row stays non-open until the
+      // payment is server-verified (verifyAndActivate flips it active).
+      // SUSPENDED subscriptions are excluded — lifting suspension is an
+      // admin action.
+      return changeLapsedSubscriptionPlan(tx, businessId, targetPlanId, actor);
     }
+    const current = open;
     if (targetPlanId === current.planId) {
       throw new BadRequestError("The subscription is already on this plan.");
     }
@@ -489,11 +684,52 @@ export async function renewSubscription(
   actor: Actor,
 ): Promise<OpenSubscription> {
   return db.transaction(async (tx) => {
-    const current = await getOpenSubscription(businessId, tx);
-    if (!current) {
-      throw new NotFoundError(
-        "This business has no open subscription to renew.",
-      );
+    const open = await getOpenSubscription(businessId, tx);
+    let current: OpenSubscription;
+    if (open) {
+      current = open;
+    } else {
+      // Self-serve recovery: a business whose subscription has EXPIRED (or
+      // was customer-canceled) must be able to renew without admin help —
+      // the renewal reactivates that row and anchors the new period at now.
+      // SUSPENDED subscriptions are deliberately excluded: suspension is an
+      // admin action and cannot be lifted by calling this endpoint.
+      const [lapsed] = await tx
+        .select({
+          id: subscriptions.id,
+          businessId: subscriptions.businessId,
+          planId: subscriptions.planId,
+          status: subscriptions.status,
+          startsAt: subscriptions.startsAt,
+          currentPeriodStart: subscriptions.currentPeriodStart,
+          currentPeriodEnd: subscriptions.currentPeriodEnd,
+          cancelAtPeriodEnd: subscriptions.cancelAtPeriodEnd,
+          pendingPlanId: subscriptions.pendingPlanId,
+          planName: subscriptionPlans.name,
+          planSlug: subscriptionPlans.slug,
+          planPrice: subscriptionPlans.price,
+          planInterval: subscriptionPlans.interval,
+          planLimits: subscriptionPlans.limits,
+        })
+        .from(subscriptions)
+        .innerJoin(
+          subscriptionPlans,
+          eq(subscriptionPlans.id, subscriptions.planId),
+        )
+        .where(
+          and(
+            eq(subscriptions.businessId, businessId),
+            inArray(subscriptions.status, ["expired", "canceled"]),
+          ),
+        )
+        .orderBy(desc(subscriptions.id))
+        .limit(1);
+      if (!lapsed) {
+        throw new NotFoundError(
+          "This business has no subscription to renew.",
+        );
+      }
+      current = lapsed as OpenSubscription;
     }
 
     let planId = current.planId;

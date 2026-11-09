@@ -14,6 +14,24 @@ const SQL = `INSERT INTO subscription_plans (name, slug, interval, price, curren
       features = '{"multiLocation":true,"advancedReports":true,"storefrontApi":true,"woocommerceIntegration":true,"customStorefront":true,"multipleOnlineStores":true,"advancedWebhooks":true}'::jsonb,
       is_active = true`;
 
+/**
+ * psql is resolved cross-platform: PATH first, then the standard Windows
+ * installer location (the repo is developed on Windows where psql is often
+ * not on PATH).
+ */
+function psqlBin(): string {
+  if (process.platform !== "win32") return "psql";
+  try {
+    execSync("psql --version", { stdio: "ignore" });
+    return "psql";
+  } catch {
+    return "C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe";
+  }
+}
+
 export default function globalSetup(): void {
-  execSync(`psql "${DB_URL}" -v ON_ERROR_STOP=1`, { input: SQL });
+  execSync(`"${psqlBin()}" "${DB_URL}" -v ON_ERROR_STOP=1`, {
+    input: SQL,
+    stdio: ["pipe", "ignore", "pipe"],
+  });
 }

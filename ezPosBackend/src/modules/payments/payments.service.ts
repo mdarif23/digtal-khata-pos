@@ -317,8 +317,12 @@ export async function verifyAndActivate(
       .for("update");
     if (
       subscription &&
-      // A suspended customer who pays is back in good standing.
-      ["trialing", "past_due", "suspended"].includes(subscription.status)
+      // A suspended, expired, or canceled customer who completes a VERIFIED
+      // payment is back in good standing — taking money without restoring
+      // access is the failure mode this whitelist must never allow.
+      ["trialing", "past_due", "suspended", "expired", "canceled"].includes(
+        subscription.status,
+      )
     ) {
       await tx
         .update(subscriptions)

@@ -44,7 +44,12 @@ async function request<T>(
       ? SERVER_UNREACHABLE_MESSAGE
       : (body?.message ??
         (res.ok ? "Done." : "Something went wrong. Please try again."));
-  return { ok: res.ok, status: res.status, message, data: body ?? undefined };
+  if (!res.ok) {
+      // Error envelopes carry no data — never pass the { success, message }
+      // object through as data (same crash class as the integrations centers).
+      return { ok: false, status: res.status, message, data: undefined };
+    }
+    return { ok: res.ok, status: res.status, message, data: body ?? undefined };
 }
 
 export interface UpdateBusinessInput {

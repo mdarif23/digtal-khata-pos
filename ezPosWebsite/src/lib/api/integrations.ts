@@ -45,15 +45,18 @@ async function request<T>(
     message =
       res.status === 0
         ? SERVER_UNREACHABLE_MESSAGE
-        : res.ok
-          ? "Done."
-          : "Something went wrong.";
+        : ((body?.message as string | undefined) ??
+          (res.ok ? "Done." : "Something went wrong."));
   }
   return {
     ok: res.ok,
     status: res.status,
     message,
-    data: (data ?? undefined) as (T & { message?: string }) | undefined,
+    // Never hand an error envelope back as data: gated endpoints (403) and
+    // other failures omit the data key, so 'data' would otherwise be the
+    // whole { success, message } object — which crashed .map() calls in the
+    // UI. Failures carry NO data; the message above explains why.
+    data: (res.ok ? (data ?? undefined) : undefined) as (T & { message?: string }) | undefined,
   };
 }
 

@@ -3,6 +3,7 @@ import {
   cancelSubscription,
   changePlan,
   getInvoice,
+  getLatestSubscription,
   getOpenSubscription,
   listInvoices,
   listPayments,
@@ -118,7 +119,9 @@ export async function renewMySubscription(req: Request, res: Response) {
 
 export async function getCurrentSubscription(req: Request, res: Response) {
   try {
-    const subscription = await getOpenSubscription(getBusinessId(req));
+    const subscription =
+      (await getOpenSubscription(getBusinessId(req))) ??
+      (await getLatestSubscription(getBusinessId(req)));
     res.status(200).json({ success: true, data: subscription });
   } catch (err) {
     sendSafeError(res, err, "Unable to load the subscription right now.");

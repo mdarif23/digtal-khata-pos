@@ -84,8 +84,19 @@ async function request<T>(
     });
   } catch {
     // Network-level failure (backend down, CORS, DNS, timeout) — never an
-    // HTTP error. status 0 lets callers show the friendly offline message.
-    return { status: 0, body: null };
+    // HTTP error. One short retry absorbs dev-mode backend restarts (tsx
+    // watch refuses connections for a second or two while reloading).
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    try {
+      res = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        headers,
+        credentials: "include",
+        signal: AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS),
+      });
+    } catch {
+      return { status: 0, body: null };
+    }
   }
   const body = (await res.json().catch(() => null)) as T | null;
   return { status: res.status, body };
