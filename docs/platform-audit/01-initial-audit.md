@@ -117,3 +117,32 @@ POS findings (not yet fixed): hardcoded QR number in PaymentModal · "Clear Hold
 2. Approve Wave 2 empirical reconciliation (creates test data only in `ezpos_test`).
 3. Confirm the refund-attribution policy (refund date vs sale date) before Wave 1 item 2.
 4. Confirm whether Finance-Growth vs dashboard variance should be surfaced as an in-app explainer (FIN-9) or unified — this is a product decision.
+
+
+---
+
+## 7. Wave 2 empirical reconciliation — EXECUTED 2026-11-10 (ALL 32 CHECKS PASSED)
+
+Isolated backend on :3005 against ezpos_test; script ran as a real user: business+location → ledger activation (opening capital 10000) → PO 10 ordered, receive 6 (partially_received) then 4 (received), unpaid (payable 400) → sales with 10% discount (180), VAT 10% + split cash/due (110, due 50) → due collection → partial refund 1-of-2 restock → expense 50 → owner investment 10000 + withdrawal 2000 → cashier/manager role matrix → two-terminal parallel all-stock sale (one 201, one 404, stock 0, no negative) → idempotent replay (same sale id, stock deducted once).
+
+| Metric | Expected | Actual | Result |
+|---|---:|---:|---|
+| Stock conservation (10−3+1, then −6 winner sale) | 0 | 0 | PASS |
+| Customer due after collection | 0 | 0.00 | PASS |
+| Supplier payable (10×40 unpaid) | 400 | 400.00 | PASS |
+| GL 4010 revenue (ex-VAT) | 1080 | 1080 | PASS |
+| GL 4020 refund contra | 90 | 90 | PASS |
+| GL 5010 COGS (net of restock credit) | 400 | 400 | PASS |
+| GL 3010 owner capital (opening+investment) | 20000 | 20000 | PASS |
+| GL 3020 drawings | 2000 | 2000 | PASS |
+| GL cash 1010 | 18950 | 18950.00 | PASS |
+| Finance netRevenue (GL, ex-VAT) | 990 | 990.00 | PASS |
+| Finance net profit | 540 | 540.00 | PASS |
+| Dashboard net sales (incl VAT) | 1000 | 1000.00 | PASS |
+| Sales report net sales / refunds | 1000 / 90 | 1000 / 90 | PASS |
+| Roles: cashier users 403, manager capital 403, dashboard 200, cashier sale 201 | as stated | as stated | PASS |
+| Concurrency: parallel oversell 1 win/1 loss, no negative stock | as stated | as stated | PASS |
+| Idempotent replay: same sale, single deduction | as stated | as stated | PASS |
+
+FIN-9 variance observed exactly as documented: dashboard net sales 1000 vs GL 990 = S2 VAT 10.
+Every GL account reconciled to the poisha; books balance to zero.
