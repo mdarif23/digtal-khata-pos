@@ -146,3 +146,12 @@ Isolated backend on :3005 against ezpos_test; script ran as a real user: busines
 
 FIN-9 variance observed exactly as documented: dashboard net sales 1000 vs GL 990 = S2 VAT 10.
 Every GL account reconciled to the poisha; books balance to zero.
+
+
+---
+
+## 8. SaaS subscription journey — EXECUTED IN BROWSER 2026-11-10 (WORKFLOW 11)
+
+Real browser run on the dev stack: sign-up → business created → trial active → /account/subscription → trial expired via jobs sweep (POST /api/saas/jobs/run expired 1) → **lapsed state correctly rendered** ("Free trial expired") → Renew now → **status active, period +1 month** (lapsed-recovery fix verified) → plan switch → prorated invoice INV-2026-000001 pending → Billing → Pay now → **mock gateway redirect → /payment/success → server-side verify → "Payment confirmed"** → DB: subscription active, invoice paid, payment succeeded → **POS opens with the active session**.
+
+Note: the plan-switch button ordering selected the 0-cost plan (invoice BDT 0) — mechanics verified end-to-end; plan-grid targeting is a cosmetic UX note. Browser session: saasj3…@test.local / business 16 / INV-2026-000001.
