@@ -1,69 +1,82 @@
 import { sql } from "drizzle-orm";
 import { roundMoney } from "../../utils/roundMoney.js";
 import { variantOptionsJoinSql, variantNameSql } from "../../utils/variantDisplay.js";
+import { businessLocalDate, businessLocalToUtcWall } from "../../utils/money.js";
+import { getBusinessTimezone } from "../../services/ledger.js";
 import { db } from "../../db/schema/index.js";
 import type { DateRangeQuery } from "./reports.validation.js";
 
-function getDateBounds(params: DateRangeQuery) {
+/**
+ * Report date windows follow the BUSINESS calendar (businesses.timezone,
+ * default Asia/Dhaka) — never the server clock. The returned start/end are
+ * UTC wall-clock strings for the business-local day boundaries, so the
+ * `${start}::timestamp` comparisons below pin the exact same instants the
+ * Finance ledger (which posts entry_date in business-local time) uses.
+ */
+async function getDateBounds(businessId: number, params: DateRangeQuery) {
+  const tz = await getBusinessTimezone(db, businessId);
   const period = params.period || "this_month";
+  const today = businessLocalDate(new Date(), tz);
   if (period === "custom" && params.startDate && params.endDate) {
     return {
-      start: `${params.startDate} 00:00:00`,
-      end: `${params.endDate} 23:59:59.999`,
+      start: businessLocalToUtcWall(params.startDate, "00:00:00", tz),
+      end: businessLocalToUtcWall(params.endDate, "23:59:59.999", tz),
       startDateOnly: params.startDate,
       endDateOnly: params.endDate,
     };
   }
 
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
-
-  const fmt = (date: Date) => {
-    const yr = date.getFullYear();
-    const mo = String(date.getMonth() + 1).padStart(2, "0");
-    const da = String(date.getDate()).padStart(2, "0");
-    return `${yr}-${mo}-${da}`;
+  // Preset windows are arithmetic on the business-local "today" (YYYY-MM-DD),
+  // then converted to UTC wall-clock boundaries.
+  const shiftDay = (dateStr: string, days: number): string => {
+    const d = new Date(`${dateStr}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  const monthBoundsLocal = (dateStr: string): [string, string] => {
+    const first = `${dateStr.slice(0, 7)}-01`;
+    const lastDay = new Date(
+      `${first}T00:00:00Z`,
+    );
+    lastDay.setUTCMonth(lastDay.getUTCMonth() + 1);
+    lastDay.setUTCDate(0); // last day of the month
+    return [first, lastDay.toISOString().slice(0, 10)];
   };
 
   let startDate: string;
   let endDate: string;
 
   if (period === "today") {
-    startDate = fmt(now);
-    endDate = fmt(now);
+    startDate = today;
+    endDate = today;
   } else if (period === "yesterday") {
-    const yest = new Date(y, m, d - 1);
-    startDate = fmt(yest);
-    endDate = fmt(yest);
+    const yest = shiftDay(today, -1);
+    startDate = yest;
+    endDate = yest;
   } else if (period === "7d") {
-    const past = new Date(y, m, d - 6);
-    startDate = fmt(past);
-    endDate = fmt(now);
+    startDate = shiftDay(today, -6);
+    endDate = today;
   } else if (period === "30d") {
-    const past = new Date(y, m, d - 29);
-    startDate = fmt(past);
-    endDate = fmt(now);
+    startDate = shiftDay(today, -29);
+    endDate = today;
   } else if (period === "last_month") {
-    const firstDayLastMonth = new Date(y, m - 1, 1);
-    const lastDayLastMonth = new Date(y, m, 0);
-    startDate = fmt(firstDayLastMonth);
-    endDate = fmt(lastDayLastMonth);
+    const lastMonthToday = shiftDay(today, -Number(today.slice(8, 10)));
+    const [firstDayLastMonth] = monthBoundsLocal(lastMonthToday);
+    startDate = firstDayLastMonth;
+    endDate = lastMonthToday;
   } else if (period === "this_year") {
-    const firstDayYear = new Date(y, 0, 1);
-    startDate = fmt(firstDayYear);
-    endDate = fmt(now);
+    startDate = `${today.slice(0, 4)}-01-01`;
+    endDate = today;
   } else {
     // this_month
-    const firstDay = new Date(y, m, 1);
-    startDate = fmt(firstDay);
-    endDate = fmt(now);
+    const [firstDay] = monthBoundsLocal(today);
+    startDate = firstDay;
+    endDate = today;
   }
 
   return {
-    start: `${startDate} 00:00:00`,
-    end: `${endDate} 23:59:59.999`,
+    start: businessLocalToUtcWall(startDate, "00:00:00", tz),
+    end: businessLocalToUtcWall(endDate, "23:59:59.999", tz),
     startDateOnly: startDate,
     endDateOnly: endDate,
   };
@@ -84,7 +97,7 @@ function locationFilter(alias: string, locationId: number | undefined) {
 // ----------------------------------------------------
 
 export async function getSalesSummaryReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
 
   // Refund impact uses the POS-005 definition (refund money out, COGS back
   // only for restocked goods) and is attributed to the refund's own date —
@@ -227,7 +240,7 @@ export async function getSalesSummaryReport(businessId: number, params: DateRang
 }
 
 export async function getSalesByInvoiceReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const page = params.page || 1;
   const limit = params.limit || 50;
   const offset = (page - 1) * limit;
@@ -239,7 +252,8 @@ export async function getSalesByInvoiceReport(businessId: number, params: DateRa
     FROM sales s
     LEFT JOIN customers c ON c.id = s.customer_id
     WHERE s.business_id = ${businessId}${locationFilter("s", locationId)}
-    AND s.created_at >= ${start}::timestamp 
+    AND s.status IN ('completed', 'refunded')
+    AND s.created_at >= ${start}::timestamp
       AND s.created_at <= ${end}::timestamp
       ${params.paymentStatus ? sql`AND s.payment_status = ${params.paymentStatus}` : sql``}
       ${params.customerId ? sql`AND s.customer_id = ${params.customerId}` : sql``}
@@ -299,7 +313,7 @@ export async function getSalesByInvoiceReport(businessId: number, params: DateRa
 }
 
 export async function getProductSalesReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const page = params.page || 1;
   const limit = params.limit || 50;
   const offset = (page - 1) * limit;
@@ -336,10 +350,11 @@ export async function getProductSalesReport(businessId: number, params: DateRang
       COALESCE(u.abbreviation, u.name) AS "unitLabel",
       SUM(si.quantity)::int AS "qtySold",
       COALESCE(SUM(si.selling_price * si.quantity), 0)::numeric AS "grossSales",
-      COALESCE(SUM(si.discount * si.quantity), 0)::numeric AS "totalDiscount",
-      COALESCE(SUM(si.line_total), 0)::numeric AS "netSales",
-      COALESCE(SUM(si.cost_at_sale * si.quantity), 0)::numeric AS "totalCost",
-      COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0)::numeric AS "grossProfit",
+      COALESCE(SUM(si.discount * (si.quantity - COALESCE(rf.refunded_qty, 0))), 0)::numeric AS "totalDiscount",
+      COALESCE(SUM(si.line_total - COALESCE(rf.refunded_money, 0)), 0)::numeric AS "netSales",
+      COALESCE(SUM(si.cost_at_sale * (si.quantity - COALESCE(rf.refunded_qty, 0))), 0)::numeric AS "totalCost",
+      COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0)
+        - COALESCE(SUM(rf.refunded_money - si.cost_at_sale * COALESCE(rf.refunded_qty, 0)), 0)::numeric AS "grossProfit",
       CASE
         WHEN COALESCE(SUM(si.line_total), 0) > 0
         THEN ROUND(COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0) / SUM(si.line_total) * 100, 2)
@@ -353,6 +368,15 @@ export async function getProductSalesReport(businessId: number, params: DateRang
     LEFT JOIN categories cat ON cat.id = p.category_id
     LEFT JOIN brands b ON b.id = p.brand_id
     ${variantOptionsJoinSql("pv", "vol")}
+      LEFT JOIN (
+      SELECT sri.sale_item_id,
+             SUM(sri.quantity) AS refunded_qty,
+             SUM(sri.refund_total) AS refunded_money
+      FROM sale_refund_items sri
+      INNER JOIN sale_refunds sr ON sr.id = sri.refund_id
+      WHERE sr.business_id = ${businessId}
+      GROUP BY sri.sale_item_id
+    ) rf ON rf.sale_item_id = si.id
     WHERE s.status IN ('completed', 'refunded')
       AND s.business_id = ${businessId}${locationFilter("s", locationId)}
       AND s.created_at >= ${start}::timestamp
@@ -374,7 +398,7 @@ export async function getProductSalesReport(businessId: number, params: DateRang
 }
 
 export async function getCustomerSalesReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const page = params.page || 1;
   const limit = params.limit || 50;
   const offset = (page - 1) * limit;
@@ -422,7 +446,7 @@ export async function getCustomerSalesReport(businessId: number, params: DateRan
 }
 
 export async function getPaymentMethodReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
 
   // sale_payments carries no location: when a location scope is requested it
   // is applied through the payment's sale.
@@ -444,7 +468,7 @@ export async function getPaymentMethodReport(businessId: number, params: DateRan
 }
 
 export async function getSaleRefundsReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const page = params.page || 1;
   const limit = params.limit || 50;
   const offset = (page - 1) * limit;
@@ -489,7 +513,7 @@ export async function getSaleRefundsReport(businessId: number, params: DateRange
 // ----------------------------------------------------
 
 export async function getProfitReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
 
   // Refund accounting (POS-005): profit = item profit − refund money paid
   // out + the cost of goods that came back to inventory (restocked refunds
@@ -620,7 +644,7 @@ export async function getProfitReport(businessId: number, params: DateRangeQuery
 }
 
 export async function getExpenseReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { startDateOnly, endDateOnly } = getDateBounds(params);
+  const { startDateOnly, endDateOnly } = await getDateBounds(businessId, params);
   const page = params.page || 1;
   const limit = params.limit || 50;
   const offset = (page - 1) * limit;
@@ -745,7 +769,7 @@ export async function getStockReport(businessId: number, params: DateRangeQuery,
     SELECT COUNT(pv.id)::int AS total
     FROM product_variants pv
     INNER JOIN products p ON p.id = pv.product_id
-    WHERE p.business_id = ${businessId}${locationFilter("p", locationId)}
+    WHERE p.business_id = ${businessId}
       AND (p.status != 'deleted' OR p.status IS NULL)
       ${params.categoryId ? sql`AND p.category_id = ${params.categoryId}` : sql``}
       ${params.brandId ? sql`AND p.brand_id = ${params.brandId}` : sql``}
@@ -793,7 +817,7 @@ export async function getStockReport(businessId: number, params: DateRangeQuery,
       WHERE business_id = ${businessId}${locationFilter("inventory_batches", locationId)}
       GROUP BY variant_id
     ) ib ON ib.variant_id = pv.id
-    WHERE p.business_id = ${businessId}${locationFilter("p", locationId)}
+    WHERE p.business_id = ${businessId}
       AND (p.status != 'deleted' OR p.status IS NULL)
       ${params.categoryId ? sql`AND p.category_id = ${params.categoryId}` : sql``}
       ${params.brandId ? sql`AND p.brand_id = ${params.brandId}` : sql``}
@@ -820,7 +844,7 @@ export async function getStockReport(businessId: number, params: DateRangeQuery,
 }
 
 export async function getStockMovementReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const page = params.page || 1;
   const limit = params.limit || 50;
   const offset = (page - 1) * limit;
@@ -926,7 +950,7 @@ export async function getBatchExpiryReport(businessId: number, params: DateRange
  * supplier, order and the line's own historical unit cost.
  */
 export async function getPurchaseItemsReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const page = params.page || 1;
   const limit = params.limit || 50;
   const offset = (page - 1) * limit;
@@ -1000,7 +1024,7 @@ export async function getPurchaseItemsReport(businessId: number, params: DateRan
  * only reliable variant reference on refund rows.
  */
 export async function getSaleRefundItemsReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const page = params.page || 1;
   const limit = params.limit || 50;
   const offset = (page - 1) * limit;
@@ -1069,7 +1093,7 @@ export async function getSaleRefundItemsReport(businessId: number, params: DateR
 }
 
 export async function getPurchaseSummaryReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const page = params.page || 1;
   const limit = params.limit || 50;
   const offset = (page - 1) * limit;
@@ -1172,7 +1196,7 @@ export async function getSupplierPayablesReport(businessId: number, locationId?:
 // ----------------------------------------------------
 
 export async function getHourlySalesReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
 
   // Sales totals and item counts are aggregated in separate CTEs: joining
   // sale_items into the sales aggregate multiplies SUM(final_total) by each
@@ -1262,7 +1286,7 @@ export async function getHourlySalesReport(businessId: number, params: DateRange
 }
 
 export async function getTaxReconciliationReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
 
   const salesTax = await db.execute(sql`
     SELECT 
@@ -1338,7 +1362,7 @@ export async function getTaxReconciliationReport(businessId: number, params: Dat
 }
 
 export async function getInventoryShrinkageReport(businessId: number, params: DateRangeQuery, locationId?: number) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const page = params.page || 1;
   const limit = params.limit || 50;
   const offset = (page - 1) * limit;
@@ -1457,7 +1481,7 @@ export async function getRegisterCloseReport(
   params: DateRangeQuery,
   locationId?: number,
 ) {
-  const { start, end, startDateOnly, endDateOnly } = getDateBounds(params);
+  const { start, end, startDateOnly, endDateOnly } = await getDateBounds(businessId, params);
 
   // Per-session Z-report rows: closed sessions in the window (plus open
   // ones for live context). Cash figures come from the session's own
@@ -1662,7 +1686,7 @@ export async function getLocationComparisonReport(
   businessId: number,
   params: DateRangeQuery,
 ) {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
 
   const result = await db.execute(sql`
     WITH sales_by_location AS (
@@ -1926,7 +1950,7 @@ export async function getChannelPerformanceReport(
   params: DateRangeQuery,
   locationId?: number,
 ): Promise<ChannelPerformanceRow[]> {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const result = await db.execute(sql`
     SELECT s.channel::text AS channel,
            COUNT(*)::int AS orders,
@@ -2061,7 +2085,7 @@ export async function getStaffPerformanceReport(
   params: DateRangeQuery,
   locationId?: number,
 ): Promise<StaffPerformanceRow[]> {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
   const result = await db.execute(sql`
     SELECT s.cashier_user_id AS "cashierUserId", u.full_name AS "cashierName",
            COUNT(*)::int AS orders,
@@ -2210,7 +2234,7 @@ export async function getGroupProfitabilityReport(
   params: DateRangeQuery,
   locationId?: number,
 ): Promise<{ rows: GroupProfitabilityRow[] }> {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
 
   const result = await db.execute(sql`
     WITH base AS (
@@ -2305,7 +2329,7 @@ export async function getPromotionPerformanceReport(
   params: DateRangeQuery,
   locationId?: number,
 ): Promise<{ rows: PromotionPerformanceRow[] }> {
-  const { start, end } = getDateBounds(params);
+  const { start, end } = await getDateBounds(businessId, params);
 
   const result = await db.execute(sql`
     WITH usage AS (

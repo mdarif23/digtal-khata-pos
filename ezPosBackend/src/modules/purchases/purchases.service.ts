@@ -50,6 +50,7 @@ import {
 import { getReceivingSettings } from "./receivingSettings.service.js";
 import {
   getPurchaseCancelledValueInTx,
+  getPurchaseReturnedValueInTx,
 } from "./outstandingResolution.service.js";
 import {
   calculatePurchaseStatus,
@@ -945,6 +946,12 @@ export async function createReceivePurchase(
       purchaseId,
     );
 
+    const returnedAmount = await getPurchaseReturnedValueInTx(
+      tx,
+      businessId,
+      purchaseId,
+    );
+
     const {
       updatedPaidAmount,
       updatedDueAmount,
@@ -955,6 +962,7 @@ export async function createReceivePurchase(
       totalAmount: purchase.totalAmount,
       receivedAmount,
       cancelledAmount,
+      returnedAmount,
     });
 
     const paymentStatus = calculatePaymentStatus(

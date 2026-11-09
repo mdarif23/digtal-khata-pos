@@ -72,3 +72,50 @@ export function businessLocalDate(
     return at.toISOString().slice(0, 10);
   }
 }
+
+function tzOffsetMs(utcMs: number, timezone: string): number {
+  try {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        hour12: false,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+        .formatToParts(new Date(utcMs))
+        .map((p) => [p.type, p.value]),
+    );
+    const asUtc = Date.parse(
+      `${parts.year}-${parts.month}-${parts.day}T${parts.hour === "24" ? "00" : parts.hour}:${parts.minute}:${parts.second}Z`,
+    );
+    return asUtc - utcMs;
+  } catch {
+    return 0; // invalid timezone — treat as UTC
+  }
+}
+
+/**
+ * The UTC wall-clock string ("YYYY-MM-DD HH:MM:SS[.mmm]") that the given
+ * business-local wall time corresponds to. Reports compare timestamptz
+ * columns against `${start}::timestamp` in a UTC session, so feeding the
+ * UTC wall clock of the business-local boundary makes every date window
+ * follow the business calendar instead of UTC.
+ */
+export function businessLocalToUtcWall(
+  dateStr: string,
+  timeStr: string,
+  timezone: string,
+): string {
+  const guess = Date.parse(`${dateStr}T${timeStr}Z`);
+  if (Number.isNaN(guess)) return `${dateStr} ${timeStr}`;
+  const offset = tzOffsetMs(guess, timezone);
+  return new Date(guess - offset)
+    .toISOString()
+    .slice(0, timeStr.length === 8 ? 19 : 23)
+    .replace("T", " ");
+}
+

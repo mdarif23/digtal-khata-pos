@@ -1942,7 +1942,10 @@ async function applySaleRefund(
       locationId: stock.locationId,
       batchId: returnBatch?.id ?? null,
       movementType: "return",
-      quantity: item.quantity,
+      // The ACTUAL restocked quantity — a partial return of 2 of 12 must not
+      // log a 12-unit movement (stock math is already exact; this is the
+      // movements ledger that reconciliation and reports read).
+      quantity: returnedQuantity,
       referenceType: "sale_refund",
       referenceId: refund.id,
     });
