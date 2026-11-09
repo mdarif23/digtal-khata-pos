@@ -120,8 +120,8 @@ export async function initiatePayment(
       description: `ezPos subscription — invoice ${invoice.invoiceNumber}`,
       urls: {
         success: `${env.appUrl}/payment/success?paymentId=${paymentId}&businessId=${businessId}`,
-        fail: `${env.appUrl}/payment/failed?businessId=${businessId}`,
-        cancel: `${env.appUrl}/payment/canceled?businessId=${businessId}`,
+        fail: `${env.appUrl}/payment/failed?paymentId=${paymentId}&businessId=${businessId}`,
+        cancel: `${env.appUrl}/payment/canceled?paymentId=${paymentId}&businessId=${businessId}`,
       },
       ipnUrl: `${env.backendUrl}/api/payments/ipn`,
     });
