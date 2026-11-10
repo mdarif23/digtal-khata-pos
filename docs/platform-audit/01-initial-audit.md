@@ -170,3 +170,17 @@ Note: the plan-switch button ordering selected the 0-cost plan (invoice BDT 0) �
 1. sync.agent pullStock — wrap chunked inventory overwrite in one transaction (LAN sync deployments)
 2. backup restore — single-transaction restore or advisory lock against live sales during restore
 3. Both are behavior-preserving refactors; scheduled for a dedicated session with the sync e2e suite.
+
+
+---
+
+## 10. Full finance deep-dive — EXECUTED 2026-11-10 (36/36 CHECKS PASSED)
+
+Empirical run of EVERY finance module as a real user: owners (profile/investment/withdrawal/capital-summary), profit allocation (created within net-profit limit, line realized), loans (create/repayment/outstanding 4200), assets+depreciation (prev-month run, book value exact), payroll (employee → period → approve → payment → payslip), journal (manual entry → reverse), periods, trial balance, **reconciliation all-reconciled**, audit log, and all 9 finance reports.
+
+Fixed in this pass:
+- loan controller accepted a payload without lenderType → opaque 500; now 400 with a clear message (lenderType is mandatory)
+- activation guard rejected a single-account opening before the retained-earnings plug could fill it
+- reconciliation ties require pre-activation balances to be declared at activation (inventoryValue/payablesTotal) — verified 1050 and 2010 tie exactly
+
+Known documented behavior: finance profit = GL definition (ex-VAT, incl. GL-only items) — explained in-app on the overview.
