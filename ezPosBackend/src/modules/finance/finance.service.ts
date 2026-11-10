@@ -173,16 +173,21 @@ export async function activateFinance(
     if (input.ownerCapital > 0) {
       lines.push({ accountCode: "3010", credit: input.ownerCapital, description: "Owner capital at activation" });
     }
-    if (lines.length < 2) {
-      throw new BadRequestError(
-        "Activation needs at least one asset and one balancing value (e.g. owner capital).",
-      );
-    }
-
     const entryDate = input.entryDate ?? (await todayForBusiness(tx, businessId));
     const totalDebit = lines.reduce((sum, l) => sum + (l.debit ?? 0), 0);
     const totalCredit = lines.reduce((sum, l) => sum + (l.credit ?? 0), 0);
     const plug = Number((totalDebit - totalCredit).toFixed(2));
+
+    // The retained-earnings plug balances whatever the owner entered — a
+    // single cash account with no stated capital source is still a valid
+    // opening (the plug becomes opening equity/accumulated losses). Reject
+    // only an EMPTY activation: nothing entered at all, or a single account
+    // that balances against nothing (no plug would be posted).
+    if (lines.length === 0 || (lines.length === 1 && plug === 0)) {
+      throw new BadRequestError(
+        "Enter at least one opening balance (e.g. a cash account or owner capital) to activate the ledger.",
+      );
+    }
     if (plug > 0) {
       lines.push({ accountCode: "3030", credit: plug, description: "Retained earnings before Finance activation" });
     } else if (plug < 0) {
