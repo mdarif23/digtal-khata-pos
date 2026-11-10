@@ -491,6 +491,13 @@ function ActivationWizard() {
               ? `Retained earnings plug: ${formatCurrency(Math.abs(plug))} ${plug > 0 ? "(credit)" : "(debit)"}`
               : "Balanced exactly"}
           </span>
+          {plug !== 0 && num(ownerCapital) === 0 && (
+            <span className="block text-xs text-amber-700">
+              Tip: this plug books the difference as opening equity. If that
+              money is YOURS, enter it under "Owner capital invested to date"
+              instead — the Finance Growth module tracks owner money there.
+            </span>
+          )}
         </CardContent>
       </Card>
 
