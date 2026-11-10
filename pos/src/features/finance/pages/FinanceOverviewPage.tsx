@@ -335,16 +335,20 @@ function ActivationWizard() {
   const submit = async () => {
     setSubmitting(true);
     try {
-      await createEntityPromiseToast(
-        () => activateFinanceApi({
-          accounts: accounts.filter((a) => a.openingBalance > 0),
-          inventoryValue: num(inventoryValue),
-          receivablesTotal: num(receivablesTotal),
-          payablesTotal: num(payablesTotal),
-          ownerCapital: num(ownerCapital),
-        }),
-        { success: "Finance ledger activated", loading: "Posting opening balances…" },
-      );
+      await createEntityPromiseToast({
+        data: null,
+        apiCall: () =>
+          activateFinanceApi({
+            accounts: accounts.filter((a) => a.openingBalance > 0),
+            inventoryValue: num(inventoryValue),
+            receivablesTotal: num(receivablesTotal),
+            payablesTotal: num(payablesTotal),
+            ownerCapital: num(ownerCapital),
+          }),
+        entityName: "finance ledger",
+        success: "Finance ledger activated",
+        loading: "Posting opening balances…",
+      });
       invalidate();
       await new Promise((r) => setTimeout(r, 150));
       void financeKeys;
