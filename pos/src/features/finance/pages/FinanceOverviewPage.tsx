@@ -69,6 +69,12 @@ const initialAccounts: ActivationAccount[] = [
   { name: "Bank Account", type: "bank", openingBalance: 0 },
 ];
 
+const ACCOUNT_TYPE_OPTIONS = [
+  { value: "cash", label: "Cash (drawers)" },
+  { value: "bank", label: "Bank" },
+  { value: "mfs", label: "MFS wallet (bKash/Nagad)" },
+] as const;
+
 export function FinanceOverviewPage() {
   const status = useFinanceStatus();
   const reconciliation = useReconciliation();
@@ -384,7 +390,7 @@ function ActivationWizard() {
         </CardHeader>
         <CardContent className="space-y-3">
           {accounts.map((account, index) => (
-            <div key={account.type} className="grid grid-cols-3 items-end gap-3">
+            <div key={index} className="grid grid-cols-3 items-end gap-3">
               <div className="space-y-1">
                 <Label>Account name</Label>
                 <Input
@@ -396,6 +402,7 @@ function ActivationWizard() {
                 <Label>Type</Label>
                 <Select
                   value={account.type}
+                  items={ACCOUNT_TYPE_OPTIONS}
                   onValueChange={(value) =>
                     setAccount(index, { type: value as ActivationAccount["type"] })
                   }
@@ -404,9 +411,11 @@ function ActivationWizard() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Cash (drawers)</SelectItem>
-                    <SelectItem value="bank">Bank</SelectItem>
-                    <SelectItem value="mfs">MFS wallet (bKash/Nagad)</SelectItem>
+                    {ACCOUNT_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
