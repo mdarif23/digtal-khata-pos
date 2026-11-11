@@ -67,12 +67,16 @@ export function calculatePayments({
   );
 
   // You can only pay for goods that have actually been received, and never
-  // beyond the (cancellation-adjusted) invoice total.
-  const paymentLimit = Math.max(
-    0,
-    Math.min(
-      receivedAmount - currentPaidAmount,
-      effectiveTotal - currentPaidAmount,
+  // beyond the (cancellation-adjusted) invoice total. Rounded to the 2-dp
+  // money grid: float subtraction (345.66 − 25.32 = 320.33999999999996)
+  // must not reject a legitimate full-balance payment of ৳320.34.
+  const paymentLimit = roundMoney(
+    Math.max(
+      0,
+      Math.min(
+        receivedAmount - currentPaidAmount,
+        effectiveTotal - currentPaidAmount,
+      ),
     ),
   );
 
@@ -86,9 +90,11 @@ export function calculatePayments({
     );
   }
 
-  const updatedPaidAmount = currentPaidAmount + newPaymentAmount;
+  const updatedPaidAmount = roundMoney(currentPaidAmount + newPaymentAmount);
 
-  const updatedDueAmount = Math.max(0, effectiveTotal - updatedPaidAmount);
+  const updatedDueAmount = roundMoney(
+    Math.max(0, effectiveTotal - updatedPaidAmount),
+  );
 
   return {
     updatedPaidAmount,
