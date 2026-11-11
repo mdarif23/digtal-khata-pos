@@ -48,6 +48,7 @@ import syncStatusRouter from "./sync/syncStatus.routes.js";
 import offlineRouter from "./modules/offline/offline.routes.js";
 import barcodesRouter from "./modules/barcodes/barcodes.routes.js";
 import backupsRouter from "./modules/backups/backups.routes.js";
+import warrantyRouter from "./modules/warranty/warranty.routes.js";
 import supportRouter from "./modules/support/support.routes.js";
 import supportPortalRouter from "./modules/support/supportPortal.routes.js";
 import subscriptionsPortalRouter from "./modules/subscriptions/subscriptions.routes.js";
@@ -173,6 +174,7 @@ export function buildApp() {
   app.use("/", offlineRouter);
   app.use("/", barcodesRouter);
   app.use("/", backupsRouter);
+  app.use("/", warrantyRouter);
   app.use("/", supportRouter);
   app.use("/", supportPortalRouter);
   app.use("/", subscriptionsPortalRouter);

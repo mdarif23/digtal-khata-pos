@@ -1,4 +1,5 @@
 import { db } from "../../db/schema/index.js";
+import { captureSupplierWarrantyOnReceive } from "../warranty/supplierWarranty.service.js";
 import {
   foldVariantOptionRows,
   variantNameFromMap,
@@ -796,6 +797,27 @@ export async function createReceivePurchase(
       // never stocked, valued, or payable.
       if (receiveItem.receiveNow <= 0) {
         continue;
+      }
+
+      // Supplier warranty capture (migration 0064, decision D7): optional
+      // per-line fields recorded inside this receive transaction. Repeat
+      // receives accumulate quantity; the start date stays the first one.
+      if (receiveItem.warranty) {
+        if (!purchase.supplierId) {
+          throw new BadRequestError(
+            "Supplier warranty fields require the purchase to have a supplier.",
+          );
+        }
+        await captureSupplierWarrantyOnReceive(tx, {
+          businessId,
+          purchaseId,
+          purchaseItemId: purchaseItem.id,
+          supplierId: purchase.supplierId,
+          variantId: purchaseItem.variantId,
+          locationId,
+          acceptedQuantity: receiveItem.receiveNow,
+          warranty: receiveItem.warranty,
+        });
       }
 
       await updateProductVariants(

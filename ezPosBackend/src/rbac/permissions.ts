@@ -202,6 +202,16 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "backups.verify", module: "backup", description: "Verify backup package integrity" },
   { key: "backups.delete", module: "backup", description: "Delete backups subject to retention rules" },
   { key: "backups.restore", module: "backup", description: "Restore business data from a backup package (owner-level)" },
+
+  // Warranty management
+  { key: "warranty.view", module: "warranty", description: "View the warranty registry and warranty details" },
+  { key: "warranty.claim.create", module: "warranty", description: "Create customer warranty claims" },
+  { key: "warranty.claim.manage", module: "warranty", description: "Manage claim lifecycle: inspect, approve/reject, repair, replace, ready, pickup" },
+  { key: "warranty.claim.close", module: "warranty", description: "Close or cancel warranty claims" },
+  { key: "warranty.supplier.view", module: "warranty", description: "View supplier warranties and supplier claims" },
+  { key: "warranty.supplier.manage", module: "warranty", description: "Create and manage supplier warranties and supplier claims" },
+  { key: "warranty.reports.view", module: "warranty", description: "View warranty reports and statistics" },
+  { key: "warranty.config.manage", module: "warranty", description: "Manage product and variant warranty configuration" },
 ];
 
 export const ALL_PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((p) => p.key);
@@ -314,6 +324,15 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "finance.view",
     "finance.overview.view",
     "budget.view",
+    // Warranty: managers run the whole warranty program.
+    "warranty.view",
+    "warranty.claim.create",
+    "warranty.claim.manage",
+    "warranty.claim.close",
+    "warranty.supplier.view",
+    "warranty.supplier.manage",
+    "warranty.reports.view",
+    "warranty.config.manage",
   ],
 
   cashier: [
@@ -335,6 +354,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "orders.process",
     "orders.pack",
     "receipt_settings.view",
+    // Warranty: cashiers see warranty info and can register claims.
+    "warranty.view",
+    "warranty.claim.create",
   ],
 
   accountant: [
@@ -384,6 +406,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     // products.view_cost) and price history; no pricing management.
     "pricing.view",
     "pricing.history.view",
+    // Warranty: accountant reads warranties and warranty costs.
+    "warranty.view",
+    "warranty.supplier.view",
+    "warranty.reports.view",
   ],
 };
 
