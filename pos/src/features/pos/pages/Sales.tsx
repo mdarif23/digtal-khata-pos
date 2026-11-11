@@ -174,6 +174,33 @@ function isInDateRange(sale: AllSoldProduct, range: DateRange) {
   return date >= start && date <= now;
 }
 
+/** Refund states a sale can be filtered by. The backend flips `saleStatus`
+ *  to "refunded" only when EVERY line is fully returned; anything returned
+ *  on a completed sale is a partial refund (per-line returnedQuantity). */
+type RefundFilter = "all" | "completed" | "partial" | "refunded";
+
+const REFUND_FILTERS: RefundFilter[] = ["all", "completed", "partial", "refunded"];
+
+function isRefundFilter(value: string | null): value is RefundFilter {
+  return (REFUND_FILTERS as string[]).includes(value as string);
+}
+
+function refundStateOf(sale: AllSoldProduct): Exclude<RefundFilter, "all"> {
+  if (sale.saleStatus === "refunded") return "refunded";
+  const hasReturn = sale.items.some(
+    (item) => Number(item.returnedQuantity) > 0,
+  );
+  return hasReturn ? "partial" : "completed";
+}
+
+/** Units still returnable on a line: sold − already returned. */
+function remainingOf(item: SalesStoreType): number {
+  return Math.max(
+    0,
+    Number(item.soldQuantity) - Number(item.returnedQuantity),
+  );
+}
+
 export function Sales() {
   const { hasPermission } = usePermissions();
   const sales = useSalesStore((state) => state.sales);
@@ -184,6 +211,7 @@ export function Sales() {
   const returnSingleItems = useSalesStore((state) => state.returnSingleItems);
   const [query, setQuery] = useState("");
   const [dateRange, setDateRange] = useState<DateRange>("all");
+  const [refundFilter, setRefundFilter] = useState<RefundFilter>("all");
   const [selectedSaleId, setSelectedSaleId] = useState<number | null>(null);
   const [busySaleId, setBusySaleId] = useState<number | null>(null);
   const [refundTarget, setRefundTarget] = useState<
@@ -201,6 +229,12 @@ export function Sales() {
   const [refundMethod, setRefundMethod] = useState<
     "cash" | "store_credit" | "original_payment"
   >("cash");
+  // Per-line return quantities (saleItemId → units coming back). Prefilled
+  // with each line's full remaining quantity; the cashier lowers a value to
+  // return only part of a line ("customer bought 3, returns 1").
+  const [refundQuantities, setRefundQuantities] = useState<
+    Record<number, number>
+  >({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<SaleReceiptData | null>(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
@@ -227,6 +261,9 @@ export function Sales() {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     return allSales.filter((sale) => {
       if (!isInDateRange(sale, dateRange)) return false;
+      if (refundFilter !== "all" && refundStateOf(sale) !== refundFilter) {
+        return false;
+      }
       if (!normalizedQuery) return true;
       return (
         String(sale.id).includes(normalizedQuery) ||
@@ -238,7 +275,7 @@ export function Sales() {
         )
       );
     });
-  }, [allSales, dateRange, query]);
+  }, [allSales, dateRange, refundFilter, query]);
   const selectedSale =
     allSales.find((sale) => sale.id === selectedSaleId) ?? null;
 
@@ -256,6 +293,13 @@ export function Sales() {
     setRefundReason(null);
     setRefundDisposition(null);
     setRefundNotes("");
+    setRefundQuantities(
+      Object.fromEntries(
+        sale.items
+          .filter((item) => remainingOf(item) > 0)
+          .map((item) => [item.saleItemsId, remainingOf(item)]),
+      ),
+    );
     setRefundTarget({ type: "sale", sale });
   };
 
@@ -264,6 +308,9 @@ export function Sales() {
     setRefundReason(null);
     setRefundDisposition(null);
     setRefundNotes("");
+    if (remainingOf(item) > 0) {
+      setRefundQuantities({ [item.saleItemsId]: remainingOf(item) });
+    }
     setRefundTarget({ type: "item", item });
   };
 
@@ -275,6 +322,24 @@ export function Sales() {
       refundTarget.type === "sale"
         ? refundTarget.sale.id
         : refundTarget.item.saleId;
+    // Lines the cashier actually wants back, with their quantities.
+    const targetLines =
+      refundTarget.type === "sale"
+        ? refundTarget.sale.items.filter((item) => remainingOf(item) > 0)
+        : [refundTarget.item];
+    const chosen = targetLines
+      .map((item) => ({
+        item,
+        quantity: refundQuantities[item.saleItemsId] ?? remainingOf(item),
+      }))
+      .filter((entry) => entry.quantity > 0);
+    if (chosen.length === 0) {
+      setActionError("Set a return quantity on at least one line.");
+      return;
+    }
+    const isWholeSaleReturn =
+      chosen.length === targetLines.length &&
+      chosen.every((entry) => entry.quantity === remainingOf(entry.item));
     setActionError(null);
     setBusySaleId(saleId);
     try {
@@ -284,18 +349,45 @@ export function Sales() {
         ...(refundNotes.trim() ? { notes: refundNotes.trim() } : {}),
         refundMethod,
       };
-      if (refundTarget.type === "sale") {
-        await returnProducts(refundTarget.sale.id, options);
-        setSelectedSaleId((current) =>
-          current === refundTarget.sale.id ? null : current,
-        );
+      if (isWholeSaleReturn) {
+        // Nothing customized — one legacy whole-line request (the backend
+        // defaults absent quantities to each line's full remaining).
+        if (refundTarget.type === "sale") {
+          await returnProducts(refundTarget.sale.id, options);
+          setSelectedSaleId((current) =>
+            current === refundTarget.sale.id ? null : current,
+          );
+        } else {
+          await returnSingleItems(refundTarget.item, options);
+          const remainingItems = selectedSale?.items.filter(
+            (item) => item.saleItemsId !== refundTarget.item.saleItemsId,
+          );
+          if (selectedSale?.id === refundTarget.item.saleId && remainingItems?.length === 0) {
+            setSelectedSaleId(null);
+          }
+        }
       } else {
-        await returnSingleItems(refundTarget.item, options);
-        const remainingItems = selectedSale?.items.filter(
-          (item) => item.saleItemsId !== refundTarget.item.saleItemsId,
-        );
-        if (selectedSale?.id === refundTarget.item.saleId && remainingItems?.length === 0) {
-          setSelectedSaleId(null);
+        // Partial return: the backend's whole-sale endpoint defaults every
+        // line to its full remainder, so per-line selections go through the
+        // single-item endpoint, one request per returned line.
+        for (const { item, quantity } of chosen) {
+          if (item.trackingType === "serial") {
+            // Full remainder only — partial serial returns need a serial
+            // selection the sales list doesn't provide.
+            await returnSingleItems(item, options);
+          } else {
+            await returnSingleItems(item, {
+              ...options,
+              quantities: [
+                { saleItemId: item.saleItemsId, quantity },
+              ],
+            });
+          }
+        }
+        if (refundTarget.type === "sale") {
+          setSelectedSaleId((current) =>
+            current === refundTarget.sale.id ? null : current,
+          );
         }
       }
       setRefundTarget(null);
@@ -409,6 +501,25 @@ export function Sales() {
                 <SelectItem value="today">Today</SelectItem>
                 <SelectItem value="7-days">Last 7 days</SelectItem>
                 <SelectItem value="30-days">Last 30 days</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={refundFilter}
+              onValueChange={(value) => {
+                if (isRefundFilter(value)) setRefundFilter(value);
+              }}
+            >
+              <SelectTrigger
+                aria-label="Filter sales by refund status"
+                className="sm:w-44"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sales</SelectItem>
+                <SelectItem value="completed">No returns</SelectItem>
+                <SelectItem value="partial">Partially refunded</SelectItem>
+                <SelectItem value="refunded">Fully refunded</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -598,16 +709,89 @@ export function Sales() {
           <DialogHeader>
             <DialogTitle>
               {refundTarget?.type === "sale"
-                ? "Return entire sale"
+                ? "Return items from sale"
                 : "Return sale item"}
             </DialogTitle>
             <DialogDescription>
-              Choose a reason and stock disposition. The return is recorded
-              against the sale and the inventory database.
+              Set how many units of each line come back, then choose a reason
+              and stock disposition. Serial-tracked lines are returned whole.
             </DialogDescription>
           </DialogHeader>
           {refundTarget && (
             <div className="space-y-4">
+              {(() => {
+                const lines =
+                  refundTarget.type === "sale"
+                    ? refundTarget.sale.items.filter(
+                        (item) => remainingOf(item) > 0,
+                      )
+                    : [refundTarget.item];
+                return (
+                  <div className="overflow-hidden rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Item</TableHead>
+                          <TableHead className="text-right">Sold</TableHead>
+                          <TableHead className="text-right">
+                            Return qty
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {lines.map((item) => {
+                          const remaining = remainingOf(item);
+                          const isSerial = item.trackingType === "serial";
+                          const value =
+                            refundQuantities[item.saleItemsId] ?? remaining;
+                          return (
+                            <TableRow key={item.saleItemsId}>
+                              <TableCell>
+                                <div className="font-medium">
+                                  {item.variantName || item.productName}
+                                </div>
+                                {isSerial && (
+                                  <div className="text-xs text-muted-foreground">
+                                    Serial-tracked — returned whole
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {remaining}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Input
+                                  aria-label={`Return quantity for ${item.variantName || item.productName}`}
+                                  type="number"
+                                  min={0}
+                                  max={remaining}
+                                  step={1}
+                                  disabled={isSerial}
+                                  value={value}
+                                  onChange={(event) => {
+                                    const parsed = Math.floor(
+                                      Number(event.target.value),
+                                    );
+                                    if (!Number.isFinite(parsed)) return;
+                                    setRefundQuantities((current) => ({
+                                      ...current,
+                                      [item.saleItemsId]: Math.min(
+                                        Math.max(parsed, 0),
+                                        remaining,
+                                      ),
+                                    }));
+                                  }}
+                                  className="ml-auto h-8 w-20 text-right"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                );
+              })()}
               <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="return-reason">
                   Return reason
