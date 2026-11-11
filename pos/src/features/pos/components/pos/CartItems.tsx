@@ -512,7 +512,10 @@ export function CartCalculation({
           {/* discount is applied on the amount after item discounts */}
           <DiscountModal form={form} subTotal={totals.itemsTotal} />
         </div>
-        <CouponInput form={form} />
+        {/* full-width row: a 1/6 cell clipped the placeholder text */}
+        <div className="col-span-6">
+          <CouponInput form={form} />
+        </div>
         <div className="col-span-6">
           {/* payment gets the amount after discount, plus VAT */}
           <PaymentModal
