@@ -166,6 +166,9 @@ export async function getSalesData(businessId: number) {
       id: products.id,
       variantId: productVariants.id,
       productName: products.name,
+      // Returned to the frontend so the partial-return UI can keep serial
+      // lines whole (a partial serial return requires a serial selection).
+      trackingType: products.trackingType,
       sku: productVariants.sku,
       barcode: productVariants.barcode,
       category: categories.name,
@@ -257,6 +260,7 @@ export async function getSalesData(businessId: number) {
       returnedQuantity: returned?.quantity ?? 0,
       returnReason: returned?.reasons.join(", ") ?? null,
       returnDisposition: returned?.dispositions.at(-1) ?? null,
+      trackingType: row.trackingType,
     };
   });
 }
