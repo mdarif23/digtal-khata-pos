@@ -367,7 +367,7 @@ function CartItemRow({ item }: { item: CartItem }) {
               )}
             </span>
 
-            {(isUomLine || hasPackagingUnits) && !isSerial && sellUnits && (
+            {(isUomLine || hasPackagingUnits) && !isSerial && (
               <UnitSwitcher
                 units={units}
                 currentUomConversionId={lineUnit}
@@ -447,6 +447,7 @@ function CartItemRow({ item }: { item: CartItem }) {
 
               <CartQuantityInput
                 itemId={variantId}
+                uomConversionId={lineUnit}
                 quantity={quantity}
                 addCustomCartQuantity={(id, newQty) => {
                   const deltaBase = (newQty - quantity) * conversionFactor;
@@ -828,12 +829,16 @@ export function CartItemDiscount({
 // ---------- quantity input ----------
 interface CartQuantityInputProps {
   itemId: number;
+  /** Scopes the store readback to THIS unit line (null = base) — a product
+   *  can have a Box line and a Pcs line with the same id. */
+  uomConversionId?: number | null;
   quantity: number; // from the cart store
   addCustomCartQuantity: (id: number, qty: number) => void;
 }
 
 export function CartQuantityInput({
   itemId,
+  uomConversionId = null,
   quantity,
   addCustomCartQuantity,
 }: CartQuantityInputProps) {
@@ -854,10 +859,16 @@ export function CartQuantityInput({
     }
 
     // Show what the store really holds (it may clamp to available stock).
-    // Zustand updates synchronously, so this reads the new value.
+    // Zustand updates synchronously, so this reads the new value — matched
+    // by (product, unit) so it can't sync to the other unit's line.
     const stored =
-      useCartStore.getState().cart.find((i) => i.id === itemId)?.quantity ??
-      quantity;
+      useCartStore
+        .getState()
+        .cart.find(
+          (i) =>
+            i.id === itemId &&
+            (i.uomConversionId ?? null) === uomConversionId,
+        )?.quantity ?? quantity;
     setInputValue(String(stored));
   };
 

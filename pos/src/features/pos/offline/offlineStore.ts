@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import axios from "../../../api/axios.js";
+import { refreshStockAfterTransaction } from "../stores/useSalesStore.js";
 import {
   appendSyncLog,
   getOutboxEntry,
@@ -238,6 +239,11 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
       }
       if (synced > 0 || failed > 0) {
         set({ lastSyncAt: new Date().toISOString() });
+      }
+      // Synced sales decremented server-side stock; the grid and the
+      // sell-units cache won't reflect it until refreshed (best-effort).
+      if (synced > 0) {
+        void refreshStockAfterTransaction();
       }
     } finally {
       set({ syncing: false });

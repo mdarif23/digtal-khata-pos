@@ -6,7 +6,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { AddCustomer } from "@/features/Contacts/pages/Customer";
+import { CustomerDialog } from "@/features/Contacts/components/customers/CustomerDialog";
 import { useCustomerStore } from "@/store/useCustomerStore";
 import { useState } from "react";
 import { Controller, type UseFormReturn } from "react-hook-form";
@@ -28,57 +28,43 @@ export function CartHeader({
   form: UseFormReturn<CartSchemaType>;
   cartItemCount: number;
 }) {
-  const {
-    customerInfo,
-    handleOnchange,
-    resetCustomerInfo,
-    handleAddCustomer,
-  } = useCustomerStore();
-  const [isOpenCustomerModal, setIsOpenCustomerModal] = useState(false);
   return (
-    <>
-      <div className="space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Current sale
-            </p>
-            <h2 className="mt-1 text-lg font-semibold tracking-tight">
-              Order details
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              {cartItemCount} {cartItemCount === 1 ? "line item" : "line items"}
-            </p>
-          </div>
-          <div className="w-28 shrink-0 sm:w-40">
-            <SaleDatePicker form={form} />
-          </div>
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Current sale
+          </p>
+          <h2 className="mt-1 text-lg font-semibold tracking-tight">
+            Order details
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            {cartItemCount} {cartItemCount === 1 ? "line item" : "line items"}
+          </p>
         </div>
-        <div className="flex gap-2">
-          <div className="min-w-0 flex-1">
-            <CustomerInputAndSearch form={form} />
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            aria-label="Add a new customer"
-            onClick={() => setIsOpenCustomerModal(true)}
-          >
-            <UserPlus />
-          </Button>
+        <div className="w-28 shrink-0 sm:w-40">
+          <SaleDatePicker form={form} />
         </div>
       </div>
-      {isOpenCustomerModal && (
-        <AddCustomer
-          handleOnchange={handleOnchange}
-          customerInfo={customerInfo}
-          handleAddCustomer={handleAddCustomer}
-          setIsOpenCustomerModal={setIsOpenCustomerModal}
-          resetCustomerInfo={resetCustomerInfo}
+      <div className="flex gap-2">
+        <div className="min-w-0 flex-1">
+          <CustomerInputAndSearch form={form} />
+        </div>
+        {/* Same dialog the /customer page uses — one form, one validation. */}
+        <CustomerDialog
+          trigger={
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label="Add a new customer"
+            >
+              <UserPlus />
+            </Button>
+          }
         />
-      )}
-    </>
+      </div>
+    </div>
   );
 }
 export function CustomerInputAndSearch({
