@@ -51,6 +51,20 @@ function initialsOf(name: string): string {
     .join("");
 }
 
+/**
+ * Match a nav URL against the current location, including query strings —
+ * report sub-items live on `/reports?tab=…`, which plain pathname equality
+ * never matches. A query-less URL only matches when the search is empty so
+ * "All Reports Hub" (/reports) and the tab items don't highlight together.
+ */
+function isNavActive(url: string, pathname: string, search: string): boolean {
+  const queryIndex = url.indexOf("?");
+  if (queryIndex === -1) {
+    return pathname === url && search === "";
+  }
+  return pathname === url.slice(0, queryIndex) && search === url.slice(queryIndex);
+}
+
 export function AppSidebar() {
   const location = useLocation();
   const user = getSessionUser();
@@ -113,7 +127,7 @@ export function AppSidebar() {
               return (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
-                    isActive={location.pathname === item.url}
+                    isActive={isNavActive(item.url, location.pathname, location.search)}
                     tooltip={item.title}
                     render={<Link to={item.url} />}
                     size="lg"
@@ -125,7 +139,7 @@ export function AppSidebar() {
               );
             }
             const hasActiveChild = item.items.some(
-              (subItem) => location.pathname === subItem.url,
+              (subItem) => isNavActive(subItem.url, location.pathname, location.search),
             );
 
             return (
@@ -137,7 +151,11 @@ export function AppSidebar() {
                 <SidebarMenuItem>
                   <CollapsibleTrigger
                     render={
-                      <SidebarMenuButton tooltip={item.title} size="lg">
+                      <SidebarMenuButton
+                        tooltip={item.title}
+                        size="lg"
+                        isActive={hasActiveChild}
+                      >
                         <Icon />
 
                         <span>{item.title}</span>
@@ -170,7 +188,7 @@ export function AppSidebar() {
                         .map((subItem) => (
                         <SidebarMenuSubItem key={subItem.title}>
                           <SidebarMenuSubButton
-                            isActive={location.pathname === subItem.url}
+                            isActive={isNavActive(subItem.url, location.pathname, location.search)}
                             render={<Link to={subItem.url} />}
                             size="md"
                           >
