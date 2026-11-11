@@ -417,7 +417,8 @@ export function Sales() {
         </Button>
       </header>
 
-      {error && (
+      <LocationRequiredNotice error={error} />
+      {error && !error.toLowerCase().includes("no locations") && (
         <div
           role="alert"
           className="flex flex-col gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
