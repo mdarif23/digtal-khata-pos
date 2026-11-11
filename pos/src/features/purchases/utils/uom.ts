@@ -15,6 +15,19 @@ export function roundQuantity(value: number): number {
 }
 
 /**
+ * Display form for quantities: snapped to the 3-dp grid, integers plain,
+ * never raw float residue ("1.001" comes from numeric(12,3) values).
+ */
+export function formatQty(value: number | string | null | undefined): string {
+  const num = Number(value ?? 0);
+  if (!Number.isFinite(num)) return "0";
+  const rounded = roundQuantity(num);
+  return Number.isInteger(rounded)
+    ? rounded.toLocaleString()
+    : String(rounded);
+}
+
+/**
  * entered × factor → base units. The result can carry rounding residue for
  * fractional factors; `isWholeBaseQuantity` reports whether it sits on the
  * integer-stock grid the backend enforces for stock-touching flows.

@@ -282,15 +282,16 @@ describe("PurchaseViewItems (return page, Phase 2 preview)", () => {
       );
     });
     expect(await screen.findByText("Expected goods credit")).toBeVisible();
-    // SummaryCard renders "TK <amount>" as one text node.
-    // Goods credit AND the supplier-credit card both show TK 500.00.
-    expect(screen.getAllByText("TK 500.00").length).toBeGreaterThanOrEqual(1);
+    // SummaryCard renders "৳ <amount>" as one text node (currency symbol
+    // unified with the rest of the purchases UI).
+    // Goods credit AND the supplier-credit card both show ৳ 500.00.
+    expect(screen.getAllByText("৳ 500.00").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Landed-cost reversal")).toBeVisible();
-    expect(screen.getByText("TK 50.00")).toBeInTheDocument();
+    expect(screen.getByText("৳ 50.00")).toBeInTheDocument();
     expect(
       screen.getByText("Total expected supplier credit"),
     ).toBeVisible();
-    expect(screen.getByText("TK 550.00")).toBeInTheDocument();
+    expect(screen.getByText("৳ 550.00")).toBeInTheDocument();
     // Fully paid purchase → the credit surfaces as supplier credit.
     expect(screen.getByText("Supplier credit balance created")).toBeVisible();
     // The disclaimer note.

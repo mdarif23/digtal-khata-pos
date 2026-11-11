@@ -2,6 +2,10 @@ import { useWatch, type UseFormReturn } from "react-hook-form";
 import { Controller } from "react-hook-form";
 import { Wallet } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import {
+  formatCurrency,
+  roundMoney,
+} from "../../utils/formatCurrency";
 import type { ReceiveItemsFormValues } from "../../schemas/receiveItem.schema";
 import { ReceivingCostSummary } from "./ReceivingCostSummary";
 
@@ -24,14 +28,12 @@ export function ReceivingPaymentSection({
   receivingTotal,
   paidAmount,
   dueAmount,
-  formatCurrency,
 }: {
   form: UseFormReturn<ReceiveItemsFormValues>;
   paymentLimit: number;
   receivingTotal: number;
   paidAmount: number;
   dueAmount: number;
-  formatCurrency: (value: number) => string;
 }) {
   const paymentAmount =
     useWatch({ control: form.control, name: "paymentAmount" }) ?? 0;
@@ -94,16 +96,32 @@ export function ReceivingPaymentSection({
                   step="0.01"
                   onChange={(event) => {
                     const amount = Number(event.target.value);
+                    // Round to the 2-dp money grid — a raw float echo
+                    // (320.33999999999997) blocks the final ৳0.34 payment.
                     field.onChange(
                       Number.isFinite(amount)
-                        ? Math.min(Math.max(0, amount), paymentLimit)
+                        ? roundMoney(Math.min(Math.max(0, amount), paymentLimit))
                         : 0,
                     );
                   }}
                   aria-invalid={fieldState.invalid}
                 />
-                <span className="text-xs text-muted-foreground">
-                  Maximum payable: ৳ {formatCurrency(paymentLimit)}
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Maximum payable: ৳ {formatCurrency(paymentLimit)}</span>
+                  {paymentLimit > 0 && (
+                    <button
+                      type="button"
+                      className="font-medium text-primary underline-offset-2 hover:underline"
+                      onClick={() =>
+                        form.setValue("paymentAmount", paymentLimit, {
+                          shouldValidate: true,
+                          shouldDirty: true,
+                        })
+                      }
+                    >
+                      Pay full balance
+                    </button>
+                  )}
                 </span>
                 {fieldState.error && (
                   <span className="block text-xs text-destructive">

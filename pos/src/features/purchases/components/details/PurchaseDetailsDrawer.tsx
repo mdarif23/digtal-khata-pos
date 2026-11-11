@@ -11,6 +11,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDate } from "@/features/reports/utils/reportUtils";
+import { formatQty } from "../../utils/uom";
 import { useLandedCostDocument } from "@/features/landed-cost/hooks/useLandedCost";
 import { PurchaseCostSummary } from "../purchases/PurchaseCostSummary";
 import {
@@ -258,18 +259,18 @@ export function PurchaseDetailsDrawer({
                             {enteredLine ? (
                               <>
                                 <span data-testid="entered-order">
-                                  {item.enteredQuantity} {unit!.unitName}
+                                  {formatQty(item.enteredQuantity)} {unit!.unitName}
                                 </span>
                                 <span className="block text-xs text-muted-foreground">
-                                  = {item.quantity} {baseUnitName}
+                                  = {formatQty(item.quantity)} {baseUnitName}
                                 </span>
                               </>
                             ) : (
-                              item.quantity
+                              formatQty(item.quantity)
                             )}
                           </td>
                           <td className="px-3 py-2 text-right">
-                            {item.receivedQuantity}
+                            {formatQty(item.receivedQuantity)}
                           </td>
                           <td className="px-3 py-2 text-right">
                             {enteredLine ? (
