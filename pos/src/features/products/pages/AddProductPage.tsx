@@ -25,7 +25,7 @@ import {
   ProductTypeOutput,
   productSchema,
 } from "@/features/products/product.schema.js";
-import { defaultValues } from "../constants/form-defaults.js";
+import { defaultValues, withFormDefaults } from "../constants/form-defaults.js";
 import { VariantsInfoCard } from "../components/addProductPage/VariantsInfoCard.js";
 import { GeneralInfoCard } from "../components/addProductPage/GeneralInfoCard.js";
 import { ShippingInfoCard } from "../components/addProductPage/ShippingInfoCard.js";
@@ -119,7 +119,7 @@ const ProductStockForm = () => {
     try {
       const product = await getProductForEditApi(id);
       if (isCancelled()) return;
-      form.reset(product);
+      form.reset(withFormDefaults(product));
       // Phase 7: read-only inventory summary for the edit view (batches,
       // expiry, serial counts — never editable from the form).
       const inventory = Object.fromEntries(
