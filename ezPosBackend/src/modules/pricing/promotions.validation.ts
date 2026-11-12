@@ -68,6 +68,18 @@ export const promotionStrictSchema = z
     maxDiscountAmount: z.number().min(0).nullable(),
     canStackWithGroupDiscount: z.boolean(),
     canStackWithCoupons: z.boolean(),
+    // ---- Phase 3 (Feature 8) ----
+    promoKind: z
+      .enum(["discount", "bogo", "buy_x_get_y", "mix_match", "quantity_tier"])
+      .default("discount"),
+    rule: z.record(z.string(), z.unknown()).nullable().optional(),
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
+    startTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+    endTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+    locationId: z.coerce.number().int().positive().nullable().optional(),
+    usageLimit: z.number().int().min(1).nullable().optional(),
+    perCustomerLimit: z.number().int().min(1).nullable().optional(),
+    priority: z.number().int().min(0).max(1000).optional(),
     isActive: z.boolean(),
   })
   .superRefine(refinePromotionShape);
@@ -85,6 +97,17 @@ export const promotionCreateSchema = z
     maxDiscountAmount: z.number().min(0).nullable().optional(),
     canStackWithGroupDiscount: z.boolean().optional(),
     canStackWithCoupons: z.boolean().optional(),
+    promoKind: z
+      .enum(["discount", "bogo", "buy_x_get_y", "mix_match", "quantity_tier"])
+      .optional(),
+    rule: z.record(z.string(), z.unknown()).nullable().optional(),
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
+    startTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+    endTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+    locationId: z.coerce.number().int().positive().nullable().optional(),
+    usageLimit: z.number().int().min(1).nullable().optional(),
+    perCustomerLimit: z.number().int().min(1).nullable().optional(),
+    priority: z.number().int().min(0).max(1000).optional(),
     isActive: z.boolean().optional(),
     /** Group eligibility: absent/empty = every customer (incl. walk-ins). */
     groupIds: z.array(z.coerce.number().int().positive()).max(100).optional(),
@@ -119,6 +142,17 @@ export const promotionUpdateSchema = z
     maxDiscountAmount: z.number().min(0).nullable().optional(),
     canStackWithGroupDiscount: z.boolean().optional(),
     canStackWithCoupons: z.boolean().optional(),
+    promoKind: z
+      .enum(["discount", "bogo", "buy_x_get_y", "mix_match", "quantity_tier"])
+      .optional(),
+    rule: z.record(z.string(), z.unknown()).nullable().optional(),
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
+    startTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+    endTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+    locationId: z.coerce.number().int().positive().nullable().optional(),
+    usageLimit: z.number().int().min(1).nullable().optional(),
+    perCustomerLimit: z.number().int().min(1).nullable().optional(),
+    priority: z.number().int().min(0).max(1000).optional(),
     isActive: z.boolean().optional(),
     /** Present (even empty) = replace the eligibility list. */
     groupIds: z.array(z.coerce.number().int().positive()).max(100).optional(),

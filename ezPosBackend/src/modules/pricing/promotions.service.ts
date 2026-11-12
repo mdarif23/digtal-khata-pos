@@ -218,6 +218,15 @@ export async function createPromotion(
     maxDiscountAmount?: number | null | undefined;
     canStackWithGroupDiscount?: boolean | undefined;
     canStackWithCoupons?: boolean | undefined;
+    promoKind?: "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier" | undefined;
+    rule?: Record<string, unknown> | null | undefined;
+    daysOfWeek?: number[] | null | undefined;
+    startTime?: string | null | undefined;
+    endTime?: string | null | undefined;
+    locationId?: number | null | undefined;
+    usageLimit?: number | null | undefined;
+    perCustomerLimit?: number | null | undefined;
+    priority?: number | undefined;
     isActive?: boolean | undefined;
     groupIds?: number[] | undefined;
   },
@@ -245,6 +254,15 @@ export async function createPromotion(
       maxDiscountAmount: payload.maxDiscountAmount ?? null,
       canStackWithGroupDiscount: payload.canStackWithGroupDiscount ?? false,
       canStackWithCoupons: payload.canStackWithCoupons ?? false,
+      promoKind: (payload.promoKind as string | undefined) ?? "discount",
+      rule: (payload.rule as Record<string, unknown> | null | undefined) ?? null,
+      daysOfWeek: (payload.daysOfWeek as number[] | null | undefined) ?? null,
+      startTime: (payload.startTime as string | null | undefined) ?? null,
+      endTime: (payload.endTime as string | null | undefined) ?? null,
+      locationId: (payload.locationId as number | null | undefined) ?? null,
+      usageLimit: (payload.usageLimit as number | null | undefined) ?? null,
+      perCustomerLimit: (payload.perCustomerLimit as number | null | undefined) ?? null,
+      priority: (payload.priority as number | undefined) ?? 0,
       isActive: payload.isActive ?? true,
     })
     .returning();
@@ -310,6 +328,31 @@ export async function updatePromotion(
       existing.canStackWithGroupDiscount,
     canStackWithCoupons:
       (payload.canStackWithCoupons as boolean | undefined) ?? existing.canStackWithCoupons,
+    promoKind:
+      (payload.promoKind as string | undefined) ??
+      (existing.promoKind as string | undefined) ??
+      "discount",
+    rule:
+      (payload.rule as Record<string, unknown> | null | undefined) ??
+      (existing.rule as Record<string, unknown> | null | undefined) ??
+      null,
+    daysOfWeek:
+      (payload.daysOfWeek as number[] | null | undefined) ??
+      (existing.daysOfWeek as number[] | null | undefined) ??
+      null,
+    startTime:
+      (payload.startTime as string | null | undefined) ?? existing.startTime ?? null,
+    endTime:
+      (payload.endTime as string | null | undefined) ?? existing.endTime ?? null,
+    locationId:
+      (payload.locationId as number | null | undefined) ?? existing.locationId ?? null,
+    usageLimit:
+      (payload.usageLimit as number | null | undefined) ?? existing.usageLimit ?? null,
+    perCustomerLimit:
+      (payload.perCustomerLimit as number | null | undefined) ??
+      existing.perCustomerLimit ??
+      null,
+    priority: (payload.priority as number | undefined) ?? existing.priority ?? 0,
     isActive: (payload.isActive as boolean | undefined) ?? existing.isActive,
   };
   const parsed = promotionStrictSchema.safeParse(merged);
@@ -340,6 +383,15 @@ export async function updatePromotion(
       maxDiscountAmount: merged.maxDiscountAmount,
       canStackWithGroupDiscount: merged.canStackWithGroupDiscount,
       canStackWithCoupons: merged.canStackWithCoupons,
+      promoKind: merged.promoKind,
+      rule: merged.rule,
+      daysOfWeek: merged.daysOfWeek,
+      startTime: merged.startTime,
+      endTime: merged.endTime,
+      locationId: merged.locationId,
+      usageLimit: merged.usageLimit,
+      perCustomerLimit: merged.perCustomerLimit,
+      priority: merged.priority,
       isActive: merged.isActive,
       updatedAt: new Date(),
     })

@@ -381,6 +381,22 @@ export const pricingPromotions = pgTable(
     canStackWithCoupons: boolean("can_stack_with_coupons")
       .default(false)
       .notNull(),
+    // ---- Phase 3 extensions (master prompt Feature 8) ----
+    /** discount (legacy default) | bogo | buy_x_get_y | mix_match | quantity_tier */
+    promoKind: varchar("promo_kind", { length: 20 }).notNull().default("discount"),
+    /** Kind-specific configuration, validated by the engine. */
+    rule: jsonb("rule").$type<Record<string, unknown>>(),
+    /** Day-of-week window (0=Sun .. 6=Sat), evaluated in Asia/Dhaka (UTC+6). */
+    daysOfWeek: jsonb("days_of_week").$type<number[]>(),
+    /** Time-of-day window "HH:MM" in Asia/Dhaka. */
+    startTime: varchar("start_time", { length: 5 }),
+    endTime: varchar("end_time", { length: 5 }),
+    /** NULL = every location of the business. */
+    locationId: integer("location_id"),
+    usageLimit: integer("usage_limit"),
+    perCustomerLimit: integer("per_customer_limit"),
+    /** Higher priority applies first when several promotions match. */
+    priority: integer("priority").notNull().default(0),
     isActive: boolean("is_active").default(true).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -595,5 +611,29 @@ export const productPriceHistory = pgTable(
       foreignColumns: [users.id],
       name: "pph_user_fkey",
     }).onDelete("set null"),
+  ],
+);
+
+/**
+ * Per-sale promotion usage (Phase 3): idempotent per (business, sale,
+ * promotion) so replays never double-count; powers usage_limit and
+ * per_customer_limit enforcement.
+ */
+export const promotionUsage = pgTable(
+  "promotion_usage",
+  {
+    id: serial("id").primaryKey().notNull(),
+    businessId: integer("business_id")
+      .notNull()
+      .references(() => businesses.id, { onDelete: "cascade" }),
+    promotionId: integer("promotion_id").notNull(),
+    saleId: integer("sale_id").notNull(),
+    customerId: integer("customer_id"),
+    usedAt: timestamp("used_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique("promotion_usage_sale_promo_uq").on(t.businessId, t.saleId, t.promotionId),
+    index("promotion_usage_promo_idx").on(t.businessId, t.promotionId),
+    index("promotion_usage_customer_idx").on(t.businessId, t.customerId),
   ],
 );

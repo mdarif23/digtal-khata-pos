@@ -71,6 +71,7 @@ import {
   consumeStoreCreditInTx,
   grantStoreCreditInTx,
 } from "../../services/storeCredit.js";
+import { promotionUsage } from "../../db/schema/pricing.js";
 import {
   computeEligibleEarnBaseInTx,
   earnLoyaltyPointsInTx,
@@ -1025,6 +1026,7 @@ export async function createSale(
       trustedItems,
       groupPricing,
       Boolean(couponCode),
+      { locationId, customerId },
     );
     const promoInput = toCartPromotionInput(promoEvaluation);
     const totals = usesTaxRules
@@ -1658,6 +1660,32 @@ export async function createSale(
         ...(belowMinimumApprovedBy !== null ? { belowMinimumApprovedBy } : {}),
       },
     });
+
+    // Phase 3: record promotion usage — idempotent per (sale, promotion) via
+    // the unique constraint; powers usage_limit / per_customer_limit.
+    const appliedPromoIds = [
+      ...new Set(
+        [
+          ...promoEvaluation.cartAmounts.map((a) => a.refId),
+          ...promoEvaluation.lineAdjustments.flatMap((a) =>
+            a && a.refId != null ? [a.refId] : [],
+          ),
+        ].filter((id): id is number => typeof id === "number"),
+      ),
+    ];
+    if (appliedPromoIds.length > 0) {
+      await tx
+        .insert(promotionUsage)
+        .values(
+          appliedPromoIds.map((promotionId) => ({
+            businessId,
+            promotionId,
+            saleId,
+            ...(customerId !== null ? { customerId } : {}),
+          })),
+        )
+        .onConflictDoNothing();
+    }
 
     // Coupon redemption recorded atomically with the sale (Module 6).
     if (couponEvaluation) {
@@ -3391,6 +3419,7 @@ export async function quoteSaleTotals(
       trustedItems,
       groupPricing,
       Boolean(payload.couponCode?.trim()),
+      { locationId, customerId: payload.customerId ?? null },
     );
     const promoInput = toCartPromotionInput(promoEvaluation);
     const groupBlock =
@@ -3403,15 +3432,20 @@ export async function quoteSaleTotals(
             },
           }
         : {};
-    const promotionsBlock =
-      promoEvaluation.applied.length > 0
+    const promotionsBlock = {
+      ...(promoEvaluation.applied.length > 0
         ? {
             promotions: {
               applied: promoEvaluation.applied,
               total: promoEvaluation.total,
             },
           }
-        : {};
+        : {}),
+      // Phase 3 offer discovery: promotions the cart almost qualifies for.
+      ...(promoEvaluation.nearMisses.length > 0
+        ? { nearMisses: promoEvaluation.nearMisses }
+        : {}),
+    };
     const totals = usesTaxRules
       ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant, groupInput, promoInput)
       : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0), groupInput, promoInput);
