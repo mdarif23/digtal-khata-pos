@@ -14,6 +14,7 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { hashPassword } from "../../utils/password.js";
+import { recordAudit } from "../../services/audit.js";
 import { WILDCARD_PERMISSION } from "../../rbac/permissions.js";
 import { ensureDefaultRoles } from "../roles/roles.service.js";
 import { assertWithinUserLimit } from "../../services/entitlements.js";
@@ -190,6 +191,7 @@ export async function replaceUserLocationAssignments(
 export async function createStaffUser(
   businessId: number,
   input: CreateStaffUserInput,
+  callerId: number | null = null,
 ): Promise<MemberSummary> {
   // Makes Manager/Cashier/Accountant available for businesses created before
   // the RBAC migration; a no-op for businesses that already have them.
@@ -254,6 +256,17 @@ export async function createStaffUser(
     input.locationIds ?? [],
   );
 
+  // Phase 1: administration audit (master prompt F12-A). Best-effort
+  // (non-transactional) — the creation itself is already committed.
+  recordAudit({
+    businessId,
+    actorUserId: callerId,
+    action: "user.created",
+    entityType: "user",
+    entityId: createdUserId,
+    afterState: { fullName: input.fullName },
+  });
+
   const members = await listMembers(businessId);
   const created = members.find((m) => m.email === input.email);
   if (!created) {
@@ -265,14 +278,20 @@ export async function createStaffUser(
 async function getTargetMember(
   businessId: number,
   targetUserId: number,
-): Promise<{ membershipId: number; primaryRoleSlug: string }> {
+): Promise<{
+  membershipId: number;
+  primaryRoleSlug: string;
+  isActive: boolean;
+}> {
   const [membership] = await db
     .select({
       membershipId: businessMemberships.id,
       primaryRoleSlug: roles.slug,
+      isActive: users.isActive,
     })
     .from(businessMemberships)
     .innerJoin(roles, eq(roles.id, businessMemberships.roleId))
+    .innerJoin(users, eq(users.id, businessMemberships.userId))
     .where(
       and(
         eq(businessMemberships.businessId, businessId),
@@ -368,6 +387,26 @@ export async function updateMember(
     );
   }
 
+  // Phase 1: administration audit with before/after (safe fields only).
+  recordAudit({
+    businessId,
+    actorUserId: callerId,
+    action: input.isActive === false ? "user.disabled" : "user.updated",
+    entityType: "user",
+    entityId: targetUserId,
+    beforeState: {
+      isActive: target.isActive,
+      primaryRoleSlug: target.primaryRoleSlug,
+    },
+    afterState: {
+      ...(input.roleIds !== undefined ? { roleIds: input.roleIds } : {}),
+      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      ...(input.locationIds !== undefined
+        ? { locationIds: input.locationIds }
+        : {}),
+    },
+  });
+
   const members = await listMembers(businessId);
   const updated = members.find((m) => m.userId === targetUserId);
   if (!updated) {
@@ -404,4 +443,12 @@ export async function resetMemberPassword(
     .where(
       and(eq(refreshTokens.userId, targetUserId), isNull(refreshTokens.revokedAt)),
     );
+  // Phase 1: password resets are security events — always audited.
+  recordAudit({
+    businessId,
+    actorUserId: callerId,
+    action: "user.password_reset",
+    entityType: "user",
+    entityId: targetUserId,
+  });
 }

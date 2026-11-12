@@ -19,6 +19,7 @@ import {
   type DefaultRoleSlug,
 } from "../../rbac/permissions.js";
 import { slugifyBusinessName } from "../../utils/subscription.js";
+import { recordAudit, recordAuditInTx } from "../../services/audit.js";
 import { WILDCARD_PERMISSION } from "../../rbac/permissions.js";
 import type { CreateRoleInput, UpdateRoleInput } from "./roles.validation.js";
 
@@ -200,7 +201,13 @@ export async function listPermissionCatalog(): Promise<
 async function getBusinessRole(
   businessId: number,
   roleId: number,
-): Promise<{ id: number; name: string; slug: string; isSystem: boolean }> {
+): Promise<{
+  id: number;
+  name: string;
+  slug: string;
+  isSystem: boolean;
+  permissionKeys: string[];
+}> {
   const [role] = await db
     .select({
       id: roles.id,
@@ -213,7 +220,12 @@ async function getBusinessRole(
   if (!role) {
     throw new NotFoundError("Role not found.");
   }
-  return role;
+  const keys = await db
+    .select({ key: permissions.key })
+    .from(rolePermissions)
+    .innerJoin(permissions, eq(permissions.id, rolePermissions.permissionId))
+    .where(eq(rolePermissions.roleId, roleId));
+  return { ...role, permissionKeys: keys.map((k) => k.key).sort() };
 }
 
 /**
@@ -249,6 +261,7 @@ async function assertCallerDoesNotHoldRole(
 export async function createRole(
   businessId: number,
   input: CreateRoleInput,
+  callerId: number | null = null,
 ): Promise<RoleSummary> {
   const slug = slugifyBusinessName(input.name).slice(0, 50);
   const [existing] = await db
@@ -268,6 +281,14 @@ export async function createRole(
       false,
       input.permissionKeys,
     );
+    recordAudit({
+      businessId,
+      actorUserId: callerId,
+      action: "role.created",
+      entityType: "role",
+      entityId: role.id,
+      afterState: { name: input.name, slug },
+    });
     return {
       id: role.id,
       name: input.name,
@@ -313,6 +334,21 @@ export async function updateRole(
         .update(roles)
         .set({ name: input.name })
         .where(eq(roles.id, roleId));
+    }
+    // Phase 1: permission-set changes are a core audit event (F12-A) — the
+    // before/after key lists are the whole diff.
+    if (input.permissionKeys !== undefined) {
+      recordAuditInTx(tx, {
+        businessId,
+        actorUserId: callerId,
+        action: "role.permissions_changed",
+        entityType: "role",
+        entityId: roleId,
+        beforeState: { permissionKeys: role.permissionKeys },
+        afterState: {
+          permissionKeys: [...new Set(input.permissionKeys)].sort(),
+        },
+      });
     }
   });
 
@@ -370,6 +406,15 @@ export async function deleteRole(
   }
 
   await db.delete(roles).where(eq(roles.id, roleId));
+  // Phase 1: administration audit.
+  recordAudit({
+    businessId,
+    actorUserId: callerId,
+    action: "role.deleted",
+    entityType: "role",
+    entityId: roleId,
+    beforeState: { name: role.name, slug: role.slug },
+  });
 }
 
 export interface RoleUser {
