@@ -497,16 +497,34 @@ export async function executeRestoreJob(jobId: number): Promise<void> {
     const isRemap = job.mode === "new_business";
     const idMaps = new Map<string, Map<number, number>>();
     let doneGroups = 0;
+    // Captured so the nested restoreTables() closure keeps the narrowed
+    // (non-null) types — TS will not carry let/param narrowing into a
+    // function declared in the same scope.
+    const restoreJob = job;
+    const restoreParsed = parsed;
 
-    if (job.mode !== "selective" && parsed.rows) {
-      await applyProfile(parsed, targetBusinessId, isRemap, warnings);
+    // audit_log is append-only (migration 0065 trigger). A full restore must
+    // delete rows absent from the package, so the trigger is disabled for the
+    // duration of the table work and re-enabled no matter how this ends.
+    // Explicit DDL (not a session GUC) because the restore runs across the
+    // whole connection pool.
+    await db.execute(sql`ALTER TABLE "audit_log" DISABLE TRIGGER "audit_log_append_only"`);
+    try {
+      await restoreTables();
+    } finally {
+      await db.execute(sql`ALTER TABLE "audit_log" ENABLE TRIGGER "audit_log_append_only"`);
+    }
+
+    async function restoreTables(): Promise<void> {
+    if (restoreJob.mode !== "selective" && restoreParsed.rows) {
+      await applyProfile(restoreParsed, targetBusinessId, isRemap, warnings);
     }
 
     for (const group of groups) {
       for (const tableName of group.tables) {
         if (isRemap && NEW_BUSINESS_SKIP_TABLES.has(tableName)) continue;
         const spec = TABLE_SPECS[tableName]!;
-        const rows = parsed.rows?.[tableName] ?? [];
+        const rows = restoreParsed.rows?.[tableName] ?? [];
         if (isRemap) {
           await insertRemapped(db, spec, rows, targetBusinessId, idMaps, warnings);
         } else {
@@ -515,13 +533,13 @@ export async function executeRestoreJob(jobId: number): Promise<void> {
             spec,
             rows,
             targetBusinessId,
-            job.mode === "full",
+            restoreJob.mode === "full",
           );
           if (kept > 0) keptRows.push({ table: tableName, count: kept });
         }
       }
       doneGroups++;
-      await setJob(job.id, job.businessId, {
+      await setJob(restoreJob.id, restoreJob.businessId, {
         stage: `restoring:${group.key}`,
         progress: {
           percent: Math.round((doneGroups / groups.length) * 80),
@@ -533,6 +551,7 @@ export async function executeRestoreJob(jobId: number): Promise<void> {
 
     if (isRemap) {
       await applyNewBusinessSpecials(targetBusinessId, idMaps, warnings);
+    }
     }
 
     await setJob(job.id, job.businessId, {

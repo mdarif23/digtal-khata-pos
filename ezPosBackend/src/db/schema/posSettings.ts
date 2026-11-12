@@ -1,11 +1,25 @@
 import {
   boolean,
   integer,
+  jsonb,
   numeric,
   pgTable,
   timestamp,
 } from "drizzle-orm/pg-core";
 import { businesses } from "./businesses.js";
+
+/**
+ * Which sensitive operations demand a manager approval token (Phase 1).
+ * Keys are ManagerOpType values; an absent key means "not required".
+ * register_reopen is ALWAYS approval-gated (code-enforced) and therefore
+ * deliberately not configurable here.
+ */
+export type ApprovalRequiredConfig = {
+  sale_refund?: boolean;
+  sale_cancel?: boolean;
+  cash_movement?: boolean;
+  below_minimum_price?: boolean;
+};
 
 /**
  * Per-business POS operating policy (multi-terminal Phase 1). Singleton row
@@ -38,6 +52,18 @@ export const posSettings = pgTable("pos_settings", {
     scale: 2,
     mode: "number",
   }),
+  /**
+   * Phase 1: when true, cash sales are rejected unless the seller (or their
+   * terminal) has an open register session — closes the "cash sold with no
+   * drawer open, movement silently dropped" hole. Default off (previous
+   * behaviour).
+   */
+  requireOpenDrawer: boolean("require_open_drawer").default(false).notNull(),
+  /** Phase 1: per-operation manager-approval requirements (see type above). */
+  approvalRequired: jsonb("approval_required")
+    .$type<ApprovalRequiredConfig>()
+    .default({})
+    .notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

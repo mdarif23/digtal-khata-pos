@@ -39,6 +39,15 @@ export const auditLog = pgTable(
     action: varchar({ length: 80 }).notNull(), // e.g. "sale.create", "sale.refund"
     entityType: varchar("entity_type", { length: 40 }).notNull(),
     entityId: integer("entity_id"),
+    /** Location context when the event happened at a shop counter. */
+    locationId: integer("location_id"),
+    /** The actor's role name at event time (denormalized — roles change). */
+    actorRole: varchar("actor_role", { length: 60 }),
+    /** Safe before/after snapshots — shallow, non-sensitive fields only. */
+    beforeState: jsonb("before_state").$type<Record<string, unknown>>(),
+    afterState: jsonb("after_state").$type<Record<string, unknown>>(),
+    /** Correlation id for tracing one request across multiple audit rows. */
+    requestId: varchar("request_id", { length: 64 }),
     metadata: jsonb()
       .$type<Record<string, unknown>>()
       .notNull()
@@ -53,5 +62,10 @@ export const auditLog = pgTable(
       table.createdAt,
     ),
     index("audit_log_entity_idx").on(table.entityType, table.entityId),
+    index("audit_log_action_idx").on(table.businessId, table.action),
+    index("audit_log_actor_created_idx").on(
+      table.actorUserId,
+      table.createdAt,
+    ),
   ],
 );
