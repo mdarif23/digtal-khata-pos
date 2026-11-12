@@ -1217,6 +1217,33 @@ export async function setDenominationConfig(
 }
 
 /**
+ * Phase 1 gate: when pos_settings.require_open_drawer is on, a cash sale is
+ * rejected unless the seller (or their terminal) has an open register
+ * session at this location. Uses the same attribution lookup as the movement
+ * recorder, so "open" means exactly "this cash would land somewhere".
+ */
+export async function assertOpenDrawerForCashInTx(
+  tx: Tx,
+  businessId: number,
+  userId: number,
+  locationId: number,
+  terminalId: number | null = null,
+): Promise<void> {
+  const session = await findOpenSessionForAttribution(
+    tx,
+    businessId,
+    userId,
+    locationId,
+    terminalId,
+  );
+  if (!session) {
+    throw new ConflictError(
+      "This business requires an open register session before accepting cash. Open your drawer first.",
+    );
+  }
+}
+
+/**
  * Auto-records the cash portion of a sale into an open register session
  * (same transaction as the sale — atomic). Attribution preference: the
  * session bound to the sale's TERMINAL (the drawer the money physically

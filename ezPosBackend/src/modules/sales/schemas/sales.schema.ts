@@ -85,6 +85,11 @@ export const createSalePayloadSchema = z.object({
   // the affected sale lines and in the audit log.
   belowMinimumReason: z.string().trim().max(300).optional(),
 
+  // Phase 1: one-time manager approval token (from POST /api/manager-approval/
+  // verify) required when pos_settings.approval_required gates the operation
+  // (below-minimum pricing today; refund requests carry their own field).
+  approvalToken: z.string().max(120).optional(),
+
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),
 });
@@ -141,6 +146,12 @@ export const saleRefundRequestSchema = z.object({
    * retryable; provider_refund_id stays NULL until it succeeds).
    */
   refundMethod: z.enum(["cash", "original_payment", "store_credit"]).optional(),
+  /**
+   * Phase 1: one-time manager approval token, required when
+   * pos_settings.approval_required.sale_refund is on. Consumed inside the
+   * refund transaction.
+   */
+  approvalToken: z.string().max(120).optional(),
 });
 
 // 3. Export the TypeScript type for your payload

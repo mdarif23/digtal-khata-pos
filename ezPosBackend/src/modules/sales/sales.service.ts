@@ -24,6 +24,7 @@ import { salePayments } from "../../db/schema/salePayments.js";
 import {
   BadRequestError,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
 } from "../../utils/handleError.js";
 import { saleRefunds } from "../../db/schema/saleRefunds.js";
@@ -92,9 +93,15 @@ import {
 } from "./sales.validation.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 import {
+  assertOpenDrawerForCashInTx,
   recordCashRefundInTx,
   recordCashSaleInTx,
 } from "../cashRegisters/cashRegisters.service.js";
+import {
+  consumeApprovalInTx,
+  isApprovalRequired,
+} from "../../services/managerApproval.js";
+import { getRequireOpenDrawer } from "../posSettings/posSettings.service.js";
 import { units } from "../../db/schema/units.js";
 import { alias } from "drizzle-orm/pg-core";
 import { productUnitConversions } from "../../db/schema/productUnitConversions.js";
@@ -911,7 +918,12 @@ export async function createSale(
   const idempotencyKey = data.idempotencyKey?.trim() || null;
   // Binds the idempotency key to THIS payload so a replay with different
   // sale data cannot masquerade as a retry (see findSaleByIdempotencyKey).
-  const payloadHash = idempotencyKey ? sha256OfJson(data) : null;
+  // The approval token is excluded: a retry after a timeout may legitimately
+  // carry a freshly minted token — that must still resolve to the SAME sale,
+  // not a duplicate.
+  const { approvalToken: _approvalToken, ...idempotencyPayload } = data;
+  void _approvalToken;
+  const payloadHash = idempotencyKey ? sha256OfJson(idempotencyPayload) : null;
   const batchShortfalls: { variantId: number; qty: number }[] = [];
 
   const result = await db.transaction(async (tx) => {
@@ -1041,6 +1053,7 @@ export async function createSale(
       lineCharges,
     );
     const payloadBelowMinimumReason = data.belowMinimumReason?.trim() || null;
+    let belowMinimumApprovedBy: number | null = null;
     if (floorViolations.length > 0) {
       if (!options.allowBelowMinimum) {
         throw new BadRequestError(
@@ -1057,6 +1070,20 @@ export async function createSale(
         throw new BadRequestError(
           "A reason is required for a sale that prices below the minimum.",
         );
+      }
+      // Phase 1: the business may additionally demand a one-time manager
+      // approval token for below-minimum pricing (pos_settings).
+      if (await isApprovalRequired(businessId, "pricing.below_minimum")) {
+        if (!data.approvalToken) {
+          throw new ForbiddenError(
+            "A manager approval is required for below-minimum pricing.",
+          );
+        }
+        const approval = await consumeApprovalInTx(tx, businessId, {
+          token: data.approvalToken,
+          opType: "pricing.below_minimum",
+        });
+        belowMinimumApprovedBy = approval.approverUserId;
       }
     }
     // Snapshot entries for overridden lines + below-minimum approvals,
@@ -1578,6 +1605,20 @@ export async function createSale(
         // A sale without a cashier (LAN replicas of legacy rows) records no
         // drawer movement — register_transactions.userId is NOT NULL.
         if (cashierUserId !== null) {
+          // Phase 1 gate: when require_open_drawer is on, cash cannot change
+          // hands without a drawer to land in (offline replays included).
+          if (
+            cashAmount > 0 &&
+            (await getRequireOpenDrawer(businessId))
+          ) {
+            await assertOpenDrawerForCashInTx(
+              tx,
+              businessId,
+              cashierUserId,
+              locationId,
+              terminalId,
+            );
+          }
           await recordCashSaleInTx(
             tx,
             businessId,
@@ -1610,6 +1651,7 @@ export async function createSale(
         dueAmount: Number(newSale.dueAmount),
         paymentStatus: newSale.paymentStatus,
         itemCount: items.length,
+        ...(belowMinimumApprovedBy !== null ? { belowMinimumApprovedBy } : {}),
       },
     });
 
@@ -2224,6 +2266,21 @@ export async function createSingleRefund(
     if (sale.status !== "completed") {
       throw new ConflictError("Only completed sales can be returned");
     }
+    // Phase 1: manager approval when the business requires it for refunds —
+    // consumed inside this transaction so a rollback un-burns the token.
+    if (await isApprovalRequired(businessId, "sale.refund")) {
+      if (!options.approvalToken) {
+        throw new ForbiddenError(
+          "A manager approval is required to refund this sale.",
+        );
+      }
+      await consumeApprovalInTx(tx, businessId, {
+        token: options.approvalToken,
+        opType: "sale.refund",
+        entityType: "sale",
+        entityId: saleItem.saleId,
+      });
+    }
     // Fully-returned lines are rejected inside applySaleRefund's returned
     // ledger (partial returns may still refund the remainder).
     const { refundId, refundTotal, restockedCost, locationId: refundLocationId } =
@@ -2312,6 +2369,22 @@ export async function createMultipleRefunds(
     if (!sale) throw new NotFoundError("Sale not found");
     if (sale.status !== "completed") {
       throw new ConflictError("Only completed sales can be returned");
+    }
+
+    // Phase 1: manager approval when the business requires it for refunds —
+    // consumed inside this transaction so a rollback un-burns the token.
+    if (await isApprovalRequired(businessId, "sale.refund")) {
+      if (!options.approvalToken) {
+        throw new ForbiddenError(
+          "A manager approval is required to refund this sale.",
+        );
+      }
+      await consumeApprovalInTx(tx, businessId, {
+        token: options.approvalToken,
+        opType: "sale.refund",
+        entityType: "sale",
+        entityId: id,
+      });
     }
 
     const items = await tx
