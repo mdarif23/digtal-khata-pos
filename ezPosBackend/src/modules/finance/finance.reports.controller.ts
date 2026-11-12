@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { getBusinessId } from "../../middleware/business.js";
 import { sendSafeError } from "../../utils/safeError.js";
+import { safeCsvCell } from "../../utils/csv.js";
 import * as reports from "./finance.reports.service.js";
 
 const isoDate = /^\d{4}-\d{2}-\d{2}$/;
@@ -24,13 +25,11 @@ function csvResponse(
   columns: { key: string; label: string }[],
   rows: Record<string, unknown>[],
 ): void {
-  const escape = (value: unknown): string => {
-    const s = value == null ? "" : String(value);
-    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
+  // safeCsvCell = formula-injection guard + RFC-4180 escaping (Phase 1):
+  // report labels/rows can embed user input (customer names, references).
   const lines = [
-    columns.map((c) => escape(c.label)).join(","),
-    ...rows.map((row) => columns.map((c) => escape(row[c.key])).join(",")),
+    columns.map((c) => safeCsvCell(c.label)).join(","),
+    ...rows.map((row) => columns.map((c) => safeCsvCell(row[c.key])).join(",")),
   ];
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader(

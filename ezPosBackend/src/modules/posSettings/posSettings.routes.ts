@@ -30,13 +30,27 @@ const manage = [
   requirePermission("settings.edit"),
 ] as const;
 
+const approvalRequiredSchema = z
+  .object({
+    sale_refund: z.boolean().optional(),
+    cash_movement: z.boolean().optional(),
+    below_minimum_price: z.boolean().optional(),
+  })
+  .strict();
+
 const patchSchema = z
   .object({
     requireTerminal: z.boolean().optional(),
     allowMultipleDrawerSessions: z.boolean().optional(),
+    requireOpenDrawer: z.boolean().optional(),
+    approvalRequired: approvalRequiredSchema.optional(),
   })
   .refine(
-    (v) => v.requireTerminal !== undefined || v.allowMultipleDrawerSessions !== undefined,
+    (v) =>
+      v.requireTerminal !== undefined ||
+      v.allowMultipleDrawerSessions !== undefined ||
+      v.requireOpenDrawer !== undefined ||
+      v.approvalRequired !== undefined,
     { message: "Nothing to update." },
   );
 
