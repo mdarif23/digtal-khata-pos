@@ -6,6 +6,7 @@ import {
   escapeHtml,
   formatDocumentDate,
   formatMoney,
+  formatWarrantyDurationLabel,
 } from "./shared.js";
 
 /**
@@ -115,6 +116,16 @@ export async function renderReceiptHtml(input: ReceiptRenderInput): Promise<Rece
         continue;
       }
       if (adj.amount > 0) parts.push(`${esc(adj.name ?? adj.kind)}: -${money(adj.amount)}`);
+    }
+    // Warranty enrichment (migration 0064): sold serials and the issued
+    // warranty snapshot, when the backend attached them to the line.
+    if (item.serialNumbers?.length) {
+      parts.push(`Serial: ${item.serialNumbers.map((sn) => esc(sn)).join(", ")}`);
+    }
+    if (item.warranty) {
+      parts.push(
+        `Warranty: ${esc(formatWarrantyDurationLabel(item.warranty.duration, item.warranty.durationUnit))} — valid until ${esc(formatDocumentDate(item.warranty.validUntil))}`,
+      );
     }
     return parts.map((p) => `<div class="sub">${p}</div>`).join("");
   };

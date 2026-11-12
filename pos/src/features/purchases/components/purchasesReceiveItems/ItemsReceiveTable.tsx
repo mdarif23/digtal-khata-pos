@@ -12,6 +12,7 @@ import { unitOptionLabel, formatQty } from "../../utils/uom";
 import { formatCurrency } from "../../utils/formatCurrency";
 import { SerialsDialog } from "./SerialsDialog";
 import { BatchesDialog } from "./BatchesDialog";
+import { WarrantyDialog } from "./WarrantyDialog";
 import { ReceivingDiscrepancyDialog } from "../receiving/ReceivingDiscrepancyDialog";
 import { ResolveOutstandingDialog } from "../receiving/ResolveOutstandingDialog";
 import {
@@ -299,6 +300,14 @@ function ReceiveItemRow({
           </div>
         ) : (
           <Minus className="size-4 text-muted-foreground" />
+        )}
+        {/* Supplier warranty (migration 0064): optional per-line capture.
+            Only offered while the line still has something to receive — a
+            complete line gets no new goods (and no warranty). */}
+        {!disabled && (
+          <div className="mt-1">
+            <WarrantyDialog item={item} form={form} index={index} />
+          </div>
         )}
       </td>
       <td className="px-4 py-2">

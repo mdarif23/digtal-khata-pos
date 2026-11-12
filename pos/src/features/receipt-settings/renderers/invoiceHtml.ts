@@ -4,6 +4,7 @@ import {
   escapeHtml,
   formatDocumentDate,
   formatMoney,
+  formatWarrantyDurationLabel,
 } from "./shared.js";
 
 /**
@@ -110,6 +111,18 @@ export function renderInvoiceHtml(input: InvoiceRenderInput): InvoiceHtml {
           if (adj.amount > 0) {
             lines.push(`<div class="muted small">${esc(adj.name ?? adj.kind)}: -${money(adj.amount)}</div>`);
           }
+        }
+        // Warranty enrichment (migration 0064): sold serials and the issued
+        // warranty snapshot, when the backend attached them to the line.
+        if (item.serialNumbers?.length) {
+          lines.push(
+            `<div class="muted small">Serial: ${item.serialNumbers.map((sn) => esc(sn)).join(", ")}</div>`,
+          );
+        }
+        if (item.warranty) {
+          lines.push(
+            `<div class="muted small">Warranty: ${esc(formatWarrantyDurationLabel(item.warranty.duration, item.warranty.durationUnit))} — valid until ${esc(formatDocumentDate(item.warranty.validUntil))}</div>`,
+          );
         }
         return lines.join("");
       },

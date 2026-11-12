@@ -120,6 +120,16 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
 
   { key: "locations.view", module: "settings", description: "View business locations" },
   { key: "locations.manage", module: "settings", description: "Create, edit and deactivate locations" },
+
+  // Warranty management (backend catalog: src/rbac/permissions.ts)
+  { key: "warranty.view", module: "warranty", description: "View the warranty registry and warranty details" },
+  { key: "warranty.claim.create", module: "warranty", description: "Create customer warranty claims" },
+  { key: "warranty.claim.manage", module: "warranty", description: "Manage claim lifecycle: inspect, approve/reject, repair, replace, ready, pickup" },
+  { key: "warranty.claim.close", module: "warranty", description: "Close or cancel warranty claims" },
+  { key: "warranty.supplier.view", module: "warranty", description: "View supplier warranties and supplier claims" },
+  { key: "warranty.supplier.manage", module: "warranty", description: "Create and manage supplier warranties and supplier claims" },
+  { key: "warranty.reports.view", module: "warranty", description: "View warranty reports and statistics" },
+  { key: "warranty.config.manage", module: "warranty", description: "Manage product and variant warranty configuration" },
 ];
 
 export const ALL_PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map(

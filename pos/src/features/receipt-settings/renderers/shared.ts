@@ -49,6 +49,18 @@ export function escapeHtml(value: unknown): string {
 }
 
 /**
+ * Human duration label for a warranty snapshot — "12 Months", "30 Days",
+ * "2 Years". Mirrors the backend's WarrantyReceiptSummary duration/unit pair.
+ */
+export function formatWarrantyDurationLabel(
+  duration: number,
+  durationUnit: string,
+): string {
+  const unit = durationUnit.charAt(0).toUpperCase() + durationUnit.slice(1);
+  return `${duration} ${unit}`;
+}
+
+/**
  * Escapes a data URL for use inside an HTML attribute. Data URLs are
  * base64 + a declared mime — the mime part is validated server-side, but
  * escape anyway so nothing can break out of the attribute.
