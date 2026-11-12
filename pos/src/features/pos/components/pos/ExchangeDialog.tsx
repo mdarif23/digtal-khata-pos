@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { useWatch, type UseFormReturn } from "react-hook-form";
 import {
   Dialog,
@@ -239,7 +240,7 @@ export function ExchangeDialog({
       toast.add({
         type: "error",
         description:
-          err instanceof Error ? err.message : "The exchange could not be recorded.",
+          getErrorMessage(err),
         priority: "high",
       });
     } finally {

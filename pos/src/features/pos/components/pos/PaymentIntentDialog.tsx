@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import {
   Dialog,
   DialogContent,
@@ -81,7 +82,7 @@ export function PaymentIntentDialog({
       toast.add({
         type: "error",
         description:
-          err instanceof Error ? err.message : "Could not start the payment.",
+          getErrorMessage(err),
         priority: "high",
       });
       setBusy(false);

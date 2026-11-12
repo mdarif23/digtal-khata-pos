@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import {
   Archive,
   CalendarClock,
@@ -151,7 +152,7 @@ export function RecurringTemplatesDialog({
     } catch (err) {
       toast.add({
         title:
-          err instanceof Error ? err.message : "Could not generate expenses",
+          getErrorMessage(err),
         type: "error",
       });
     }

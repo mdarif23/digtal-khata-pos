@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { Link, useParams } from "react-router";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -204,7 +205,7 @@ function LandedCostEditor({ purchaseId }: { purchaseId: number }) {
   const previewIssues: string[] = previewErrorBody?.issues
     ? previewErrorBody.issues.map((issue) => issue.message)
     : previewQuery.error
-      ? [previewQuery.error.message]
+      ? [getErrorMessage(previewQuery.error)]
       : [];
 
   const lineContext = useMemo(

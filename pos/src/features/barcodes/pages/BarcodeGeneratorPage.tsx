@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -229,7 +230,7 @@ export function BarcodeGeneratorPage() {
       setSelectedIds(new Set());
     } catch (error) {
       toast.add({
-        title: error instanceof Error ? error.message : "Generation failed.",
+        title: getErrorMessage(error),
         type: "error",
         priority: "high",
       });
@@ -255,7 +256,7 @@ export function BarcodeGeneratorPage() {
       setManualBarcode("");
     } catch (error) {
       toast.add({
-        title: error instanceof Error ? error.message : "Assignment failed.",
+        title: getErrorMessage(error),
         type: "error",
         priority: "high",
       });

@@ -1,4 +1,5 @@
 import { useState, type FormEvent, type ReactElement } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,7 +63,7 @@ export function CustomerDialog({ trigger }: { trigger?: ReactElement }) {
       setOpen(false);
     } catch (error: unknown) {
       setFormError(
-        error instanceof Error ? error.message : "Could not create customer.",
+        getErrorMessage(error),
       );
     } finally {
       setIsSubmitting(false);

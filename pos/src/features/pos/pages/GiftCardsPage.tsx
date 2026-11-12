@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import {
   Card,
   CardContent,
@@ -108,7 +109,7 @@ export function GiftCardsPage() {
       toast.add({
         type: "error",
         description:
-          err instanceof Error ? err.message : "Could not issue the card.",
+          getErrorMessage(err),
         priority: "high",
       });
     } finally {

@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { Link, useLocation, useNavigate } from "react-router";
 import {
   ArrowLeft,
@@ -419,7 +420,7 @@ export const PurchasesList = () => {
               role="alert"
               className="m-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
             >
-              {list.error.message}
+              {getErrorMessage(list.error)}
             </p>
           )}
 

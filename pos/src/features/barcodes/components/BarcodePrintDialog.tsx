@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,7 +78,7 @@ export function BarcodePrintDialog(props: PrintDialogProps) {
       props.onPrinted?.();
     } catch (error) {
       toast.add({
-        title: error instanceof Error ? error.message : "Printing failed.",
+        title: getErrorMessage(error),
         type: "error",
         priority: "high",
       });
@@ -105,7 +106,7 @@ export function BarcodePrintDialog(props: PrintDialogProps) {
       props.onPrinted?.();
     } catch (error) {
       toast.add({
-        title: error instanceof Error ? error.message : "PDF export failed.",
+        title: getErrorMessage(error),
         type: "error",
         priority: "high",
       });
