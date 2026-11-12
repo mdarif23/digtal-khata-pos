@@ -25,11 +25,12 @@ import {
   ProductTypeOutput,
   productSchema,
 } from "@/features/products/product.schema.js";
-import { defaultValues } from "../constants/form-defaults.js";
+import { defaultValues, withFormDefaults } from "../constants/form-defaults.js";
 import { VariantsInfoCard } from "../components/addProductPage/VariantsInfoCard.js";
 import { GeneralInfoCard } from "../components/addProductPage/GeneralInfoCard.js";
 import { ShippingInfoCard } from "../components/addProductPage/ShippingInfoCard.js";
 import { UnitsPackagingCard } from "../components/addProductPage/UnitsPackagingCard.js";
+import { WarrantyConfigCard } from "../components/addProductPage/WarrantyConfigCard.js";
 import { RightColumnInfoCard } from "../components/addProductPage/RightColumnInfoCard.js";
 import { SaveAndUpdateActionsCard } from "../components/addProductPage/SaveAndUpdateActionsCard.js";
 import useProductStore from "@/features/products/useProductStore.js";
@@ -119,7 +120,7 @@ const ProductStockForm = () => {
     try {
       const product = await getProductForEditApi(id);
       if (isCancelled()) return;
-      form.reset(product);
+      form.reset(withFormDefaults(product));
       // Phase 7: read-only inventory summary for the edit view (batches,
       // expiry, serial counts — never editable from the form).
       const inventory = Object.fromEntries(
@@ -323,6 +324,13 @@ const ProductStockForm = () => {
               {/* Units & Packaging is a post-create step: the backend needs a
                   productId, so create mode shows an informational empty state. */}
               <UnitsPackagingCard
+                productId={
+                  isEditing && productId !== undefined ? Number(productId) : null
+                }
+              />
+              {/* Warranty config lives on its own endpoints (not the product
+                  save payload) — same post-create condition as above. */}
+              <WarrantyConfigCard
                 productId={
                   isEditing && productId !== undefined ? Number(productId) : null
                 }

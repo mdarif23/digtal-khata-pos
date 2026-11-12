@@ -76,3 +76,18 @@ export function formatPurchaseOrderNumber(
 export function formatProductSku(number: number): string {
   return `SKU-${String(number).padStart(6, "0")}`;
 }
+
+/** Formats a customer warranty number: WRN-<issue-year>-<6 digits>. */
+export function formatWarrantyNumber(year: number, number: number): string {
+  return `WRN-${year}-${String(number).padStart(6, "0")}`;
+}
+
+/** Formats a customer warranty claim number: CLM-<issue-year>-<6 digits>. */
+export function formatWarrantyClaimNumber(year: number, number: number): string {
+  return `CLM-${year}-${String(number).padStart(6, "0")}`;
+}
+
+/** Formats a supplier warranty claim number: SWC-<issue-year>-<6 digits>. */
+export function formatSupplierClaimNumber(year: number, number: number): string {
+  return `SWC-${year}-${String(number).padStart(6, "0")}`;
+}

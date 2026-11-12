@@ -490,7 +490,7 @@ export function OnlineOrderDetailsPage() {
               </button>
               <button
                 type="button"
-                disabled={markPaid.isPending}
+                disabled={markPaid.isPending || deliverOrder.isPending}
                 onClick={async () => {
                   setCodOpen(false);
                   await onAction("COD payment collected", () =>
@@ -509,7 +509,7 @@ export function OnlineOrderDetailsPage() {
               </button>
               <button
                 type="button"
-                disabled={markPaid.isPending}
+                disabled={markPaid.isPending || deliverOrder.isPending}
                 onClick={async () => {
                   setCodOpen(false);
                   await onAction("Payment recorded", () =>

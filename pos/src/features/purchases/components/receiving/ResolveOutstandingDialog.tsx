@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { formatCurrency } from "../../utils/formatCurrency";
 import { outstandingOf } from "../../utils/receiveQuantities";
+import { formatQty, roundQuantity } from "../../utils/uom";
 import type {
   OutstandingResolution,
   PurchasesItems,
@@ -59,13 +60,15 @@ export function ResolveOutstandingDialog({ item }: { item: PurchasesItems }) {
   if (outstanding <= 0) return null;
 
   const submit = async () => {
-    const trimmed = quantity > outstanding ? outstanding : quantity;
+    const trimmed = Math.min(quantity, outstanding);
     try {
       const result = await resolve.mutateAsync({
         items: [
           {
             purchaseItemId: item.id,
-            quantity: Math.max(0, Math.floor(trimmed)),
+            // Fractional quantities are legitimate (numeric(12,3) lines) —
+            // never floor them, or a 0.024 remainder can never be resolved.
+            quantity: roundQuantity(Math.max(0, trimmed)),
             resolution,
             ...(reason.trim() ? { reason: reason.trim() } : {}),
           },
@@ -93,7 +96,7 @@ export function ResolveOutstandingDialog({ item }: { item: PurchasesItems }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button nativeButton={false} size="sm" variant="ghost">
+          <Button nativeButton size="sm" variant="ghost">
             Resolve…
           </Button>
         }
@@ -102,8 +105,8 @@ export function ResolveOutstandingDialog({ item }: { item: PurchasesItems }) {
         <DialogHeader>
           <DialogTitle>Resolve outstanding quantity</DialogTitle>
           <DialogDescription>
-            {item.variantName || item.productName} — {outstanding} outstanding
-            of {item.quantity} ordered.
+            {item.variantName || item.productName} — {formatQty(outstanding)}{" "}
+            outstanding of {formatQty(item.quantity)} ordered.
           </DialogDescription>
         </DialogHeader>
 
@@ -138,7 +141,7 @@ export function ResolveOutstandingDialog({ item }: { item: PurchasesItems }) {
               type="number"
               min={0}
               max={outstanding}
-              step={1}
+              step={0.001}
               value={quantity}
               disabled={resolution !== "cancel"}
               onChange={(event) =>

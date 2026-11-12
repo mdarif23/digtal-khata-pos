@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { Link, useParams } from "react-router";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -106,7 +107,11 @@ export function LandedCostPage() {
           {contextQuery.error?.message ?? "This purchase has no landed-cost context."}
         </EmptyState>
         <div className="mt-4 text-center">
-          <Button variant="outline" render={<Link to="/purchases-list" />}>
+          <Button
+            nativeButton={false}
+            variant="outline"
+            render={<Link to="/purchases-list" />}
+          >
             <ArrowLeft /> Back to purchases
           </Button>
         </div>
@@ -204,7 +209,7 @@ function LandedCostEditor({ purchaseId }: { purchaseId: number }) {
   const previewIssues: string[] = previewErrorBody?.issues
     ? previewErrorBody.issues.map((issue) => issue.message)
     : previewQuery.error
-      ? [previewQuery.error.message]
+      ? [getErrorMessage(previewQuery.error)]
       : [];
 
   const lineContext = useMemo(
@@ -332,12 +337,7 @@ function LandedCostEditor({ purchaseId }: { purchaseId: number }) {
                 type="button"
                 size="sm"
                 variant="outline"
-                nativeButton={false}
-                render={
-                  <button
-                    onClick={() => setExpenses((rows) => [...rows, newExpenseRow()])}
-                  />
-                }
+                onClick={() => setExpenses((rows) => [...rows, newExpenseRow()])}
               >
                 <Plus /> Add expense
               </Button>
@@ -530,14 +530,9 @@ function LandedCostEditor({ purchaseId }: { purchaseId: number }) {
                         type="button"
                         size="sm"
                         variant="ghost"
-                        nativeButton={false}
-                        render={
-                          <button
-                            aria-label="Remove expense"
-                            onClick={() =>
-                              setExpenses((rows) => rows.filter((_, i) => i !== index))
-                            }
-                          />
+                        aria-label="Remove expense"
+                        onClick={() =>
+                          setExpenses((rows) => rows.filter((_, i) => i !== index))
                         }
                       >
                         <Trash2 className="size-4 text-rose-500" />
@@ -615,10 +610,7 @@ function LandedCostEditor({ purchaseId }: { purchaseId: number }) {
               type="button"
               variant="outline"
               disabled={saving || !previewInput}
-              nativeButton={false}
-              render={
-                <button onClick={saveDraft} disabled={saving || !previewInput} />
-              }
+              onClick={saveDraft}
             >
               {saving ? "Saving…" : documentId ? "Save draft" : "Create draft"}
             </Button>
@@ -626,18 +618,13 @@ function LandedCostEditor({ purchaseId }: { purchaseId: number }) {
               <Button
                 type="button"
                 disabled={previewQuery.isPending || !preview}
-                nativeButton={false}
-                render={
-                  <button
-                    onClick={() => {
-                      if (!confirmingPost) {
-                        setConfirmingPost(true);
-                        return;
-                      }
-                      void post();
-                    }}
-                  />
-                }
+                onClick={() => {
+                  if (!confirmingPost) {
+                    setConfirmingPost(true);
+                    return;
+                  }
+                  void post();
+                }}
               >
                 {confirmingPost
                   ? "Confirm posting?"

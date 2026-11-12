@@ -69,6 +69,12 @@ const initialAccounts: ActivationAccount[] = [
   { name: "Bank Account", type: "bank", openingBalance: 0 },
 ];
 
+const ACCOUNT_TYPE_OPTIONS = [
+  { value: "cash", label: "Cash (drawers)" },
+  { value: "bank", label: "Bank" },
+  { value: "mfs", label: "MFS wallet (bKash/Nagad)" },
+] as const;
+
 export function FinanceOverviewPage() {
   const status = useFinanceStatus();
   const reconciliation = useReconciliation();
@@ -131,6 +137,13 @@ export function FinanceOverviewPage() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
           Profit &amp; Loss · {dateRange.startDate} → {dateRange.endDate}
         </h2>
+        <p className="-mt-2 mb-3 text-xs text-slate-400">
+          Figures come from the posted general ledger: revenue excludes VAT, owner
+          investments/withdrawals are financing (never revenue or expense), and
+          GL-only items such as shrinkage and depreciation are included — so
+          these numbers can differ slightly from the POS dashboard, which uses
+          sale totals incl. VAT.
+        </p>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <ReportMetricCard
             title="Net Revenue"
@@ -328,16 +341,20 @@ function ActivationWizard() {
   const submit = async () => {
     setSubmitting(true);
     try {
-      await createEntityPromiseToast(
-        () => activateFinanceApi({
-          accounts: accounts.filter((a) => a.openingBalance > 0),
-          inventoryValue: num(inventoryValue),
-          receivablesTotal: num(receivablesTotal),
-          payablesTotal: num(payablesTotal),
-          ownerCapital: num(ownerCapital),
-        }),
-        { success: "Finance ledger activated", loading: "Posting opening balances…" },
-      );
+      await createEntityPromiseToast({
+        data: null,
+        apiCall: () =>
+          activateFinanceApi({
+            accounts: accounts.filter((a) => a.openingBalance > 0),
+            inventoryValue: num(inventoryValue),
+            receivablesTotal: num(receivablesTotal),
+            payablesTotal: num(payablesTotal),
+            ownerCapital: num(ownerCapital),
+          }),
+        entityName: "finance ledger",
+        success: "Finance ledger activated",
+        loading: "Posting opening balances…",
+      });
       invalidate();
       await new Promise((r) => setTimeout(r, 150));
       void financeKeys;
@@ -373,7 +390,7 @@ function ActivationWizard() {
         </CardHeader>
         <CardContent className="space-y-3">
           {accounts.map((account, index) => (
-            <div key={account.type} className="grid grid-cols-3 items-end gap-3">
+            <div key={index} className="grid grid-cols-3 items-end gap-3">
               <div className="space-y-1">
                 <Label>Account name</Label>
                 <Input
@@ -385,6 +402,7 @@ function ActivationWizard() {
                 <Label>Type</Label>
                 <Select
                   value={account.type}
+                  items={ACCOUNT_TYPE_OPTIONS}
                   onValueChange={(value) =>
                     setAccount(index, { type: value as ActivationAccount["type"] })
                   }
@@ -393,9 +411,11 @@ function ActivationWizard() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Cash (drawers)</SelectItem>
-                    <SelectItem value="bank">Bank</SelectItem>
-                    <SelectItem value="mfs">MFS wallet (bKash/Nagad)</SelectItem>
+                    {ACCOUNT_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -480,6 +500,13 @@ function ActivationWizard() {
               ? `Retained earnings plug: ${formatCurrency(Math.abs(plug))} ${plug > 0 ? "(credit)" : "(debit)"}`
               : "Balanced exactly"}
           </span>
+          {plug !== 0 && num(ownerCapital) === 0 && (
+            <span className="block text-xs text-amber-700">
+              Tip: this plug books the difference as opening equity. If that
+              money is YOURS, enter it under "Owner capital invested to date"
+              instead — the Finance Growth module tracks owner money there.
+            </span>
+          )}
         </CardContent>
       </Card>
 

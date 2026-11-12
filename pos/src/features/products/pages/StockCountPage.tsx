@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import {
   Card,
   CardContent,
@@ -114,7 +115,7 @@ export function StockCountPage() {
       toast.add({
         type: "error",
         description:
-          err instanceof Error ? err.message : "Could not start the count.",
+          getErrorMessage(err),
         priority: "high",
       });
     } finally {
@@ -223,7 +224,7 @@ export function StockCountPage() {
       toast.add({
         type: "error",
         description:
-          err instanceof Error ? err.message : "Could not record the counts.",
+          getErrorMessage(err),
         priority: "high",
       });
     } finally {
@@ -250,7 +251,7 @@ export function StockCountPage() {
       toast.add({
         type: "error",
         description:
-          err instanceof Error ? err.message : "Could not approve the count.",
+          getErrorMessage(err),
         priority: "high",
       });
     } finally {
@@ -271,7 +272,7 @@ export function StockCountPage() {
       toast.add({
         type: "error",
         description:
-          err instanceof Error ? err.message : "Could not cancel.",
+          getErrorMessage(err),
         priority: "high",
       });
     } finally {

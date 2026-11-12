@@ -141,12 +141,15 @@ describe("pricing apply (bulk/proposals/auto-update) integration", { skip: !runI
     assert.equal(child.status, 201);
     childCategoryId = child.json.data.value;
 
-    const specs: { name: string; price: number; cost: number; qty: number; categoryId: number | null }[] = [
-      { name: "Apply A", price: 100, cost: 50, qty: 30, categoryId: null },
-      { name: "Apply B", price: 100, cost: 50, qty: 0, categoryId: null },
-      { name: "Apply Cat", price: 200, cost: 100, qty: 30, categoryId: childCategoryId },
-      { name: "Apply Global", price: 300, cost: 150, qty: 30, categoryId: null },
-      { name: "Apply Fixed", price: 400, cost: 10, qty: 30, categoryId: null },
+    const specs: { name: string; price: number; cost: number; qty: number; source: "opening" | "purchase"; categoryId: number | null }[] = [
+      { name: "Apply A", price: 100, cost: 50, qty: 30, source: "opening", categoryId: null },
+      // Cost-unavailable case for the bulk/proposal engines: registered for
+      // future purchase (source "purchase" allows qty 0; opening stock now
+      // requires a positive quantity and would create a priced batch).
+      { name: "Apply B", price: 100, cost: 50, qty: 0, source: "purchase", categoryId: null },
+      { name: "Apply Cat", price: 200, cost: 100, qty: 30, source: "opening", categoryId: childCategoryId },
+      { name: "Apply Global", price: 300, cost: 150, qty: 30, source: "opening", categoryId: null },
+      { name: "Apply Fixed", price: 400, cost: 10, qty: 30, source: "opening", categoryId: null },
     ];
     const ids: number[] = [];
     for (const spec of specs) {
@@ -168,7 +171,7 @@ describe("pricing apply (bulk/proposals/auto-update) integration", { skip: !runI
         status: "active",
         imageUrl: null,
         imageFile: null,
-        source: "opening",
+        source: spec.source,
         variants: [
           {
             sku: "",
@@ -201,6 +204,15 @@ describe("pricing apply (bulk/proposals/auto-update) integration", { skip: !runI
       number,
       number,
     ];
+
+    // Business default = markup 0 so an UNRULED variant resolves to a
+    // percentage method: the cost-less variant (B) then reports an explicit
+    // "Cost unavailable" instead of an invalid fixed-price configuration.
+    const settings = await api("PUT", "/api/pricing/settings", {
+      defaultMethod: "markup",
+      defaultPercentage: 0,
+    });
+    assert.equal(settings.status, 200, JSON.stringify(settings.json));
   });
 
   it("bulk previews and applies with per-row blocked reasons", async () => {
@@ -316,12 +328,21 @@ describe("pricing apply (bulk/proposals/auto-update) integration", { skip: !runI
   });
 
   it("stales pending proposals when the recommendation moves", async () => {
-    // variantA currently 60 (markup 20 over cost 50). Tighten the rule to
-    // markup 30 → new recommendation 65; regenerate stales the old pending.
+    // variantA currently 60 (markup 20 over cost 50). First move the rule to
+    // markup 10 → rec 55 → a pending proposal is created; tightening to
+    // markup 30 (rec 65) then stales that pending and creates the fresh one.
     const rules = await api("GET", "/api/pricing/rules");
     const ruleA = (rules.json as { data: { id: number; variantId: number | null }[] }).data.find(
       (r) => r.variantId === variantA,
     )!;
+    const first = await api("PATCH", `/api/pricing/rules/${ruleA.id}`, { percentage: 10 });
+    assert.equal(first.status, 200);
+    const firstGen = await api("POST", "/api/pricing/proposals/generate");
+    assert.equal(firstGen.status, 200);
+    const firstData = (firstGen.json as { data: { created: number; staled: number } }).data;
+    assert.equal(firstData.created, 1); // A pending (55)
+    assert.equal(firstData.staled, 0);
+
     const patch = await api("PATCH", `/api/pricing/rules/${ruleA.id}`, { percentage: 30 });
     assert.equal(patch.status, 200);
 
@@ -360,7 +381,10 @@ describe("pricing apply (bulk/proposals/auto-update) integration", { skip: !runI
     const run1Data = (run1.json as { data: { applied: number; skipped: number; blocked: { variantId: number; reason: string }[]; unchanged: number } }).data;
     assert.equal(run1Data.applied, 1); // variantA only
     assert.equal(run1Data.skipped, 1); // fixed-protected variantFixed
-    assert.equal(run1Data.blocked.length, 1); // variantB has no rule coverage (not scanned)
+    // The GLOBAL rule covers every variant, so B IS scanned: its recommendation
+    // (global markup over cost) is blocked with an explicit cost-unavailable.
+    assert.equal(run1Data.blocked.length, 1);
+    assert.match(String(run1Data.blocked[0]!.reason), /Cost unavailable/);
 
     const priceA = await pgClient!.query(
       `SELECT selling_price FROM product_variants WHERE id = $1`,

@@ -22,17 +22,31 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, openSync } from "node:fs";
+import { appendFileSync, openSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { hashTerminalSecret } from "../middleware/terminalAuth.js";
 
 const stage5: { lan?: any; lanToken?: string } = {};
 
-/** npx→node is a process GROUP (detached spawn) — kill the whole group so
- * the real server never outlives its handle (orphan servers poisoned
- * several runs before this). */
+/** npx→node is a process GROUP (detached spawn on POSIX) — kill the whole
+ * tree so the real server never outlives its handle (orphan servers
+ * poisoned several runs before this). Windows has no process-group signal:
+ * taskkill /T walks the tree instead. */
 function killTree(proc: ChildProcess | null): void {
   if (!proc || proc.pid === undefined) return;
+  if (process.platform === "win32") {
+    try {
+      execFileSync("taskkill", ["/PID", String(proc.pid), "/T", "/F"], {
+        stdio: "ignore",
+      });
+      return;
+    } catch {
+      // fall through to the direct kill
+    }
+  }
   try {
     process.kill(-proc.pid, "SIGKILL");
   } catch {
@@ -54,13 +68,29 @@ function urlFor(db: string): string {
 }
 const CLOUD_URL = urlFor(CLOUD_DB);
 const LAN_URL = urlFor(LAN_DB);
-const BACKEND_DIR = new URL("../..", import.meta.url).pathname;
+const BACKEND_DIR = fileURLToPath(new URL("../..", import.meta.url));
+const TSX_CLI = join(BACKEND_DIR, "node_modules", "tsx", "dist", "cli.mjs");
 const JWT = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const CLOUD_PORT = 3100;
 const RUN_STAMP = String(process.ppid);
-const CLOUD_LOG = `/tmp/ezpos-stage5-cloud-${RUN_STAMP}.log`;
-const LAN_LOG = `/tmp/ezpos-stage5-lan-${RUN_STAMP}.log`;
+const CLOUD_LOG = join(tmpdir(), `ezpos-stage5-cloud-${RUN_STAMP}.log`);
+const LAN_LOG = join(tmpdir(), `ezpos-stage5-lan-${RUN_STAMP}.log`);
 const LAN_PORT = 3200;
+
+/** Cross-platform server spawn: direct node + tsx CLI (spawning `npx` is a
+ * .cmd shim on Windows and fails without a shell). */
+function spawnServer(
+  env: Record<string, string>,
+  logFd: number,
+  detached = false,
+): ChildProcess {
+  return spawn(process.execPath, [TSX_CLI, "src/server.ts"], {
+    cwd: BACKEND_DIR,
+    env,
+    detached,
+    stdio: ["ignore", logFd, logFd],
+  });
+}
 
 async function adminClient() {
   const { Client } = await import("pg");
@@ -143,8 +173,7 @@ describe("Stage 5 — cross-mode integration (real cloud + LAN topology)", { ski
     // Migrate both in parallel (each apply-migration invocation is one node
     // process; the loop is the repo's reliable migrator path).
     const migrate = (db: string) => {
-      const files = execFileSync("ls", [`${BACKEND_DIR}/drizzle`], { encoding: "utf8" })
-        .split("\n")
+      const files = readdirSync(join(BACKEND_DIR, "drizzle"))
         .filter((f) => /^\d{4}_.*\.sql$/.test(f))
         .sort();
       for (const file of files) {
@@ -210,22 +239,18 @@ describe("Stage 5 — cross-mode integration (real cloud + LAN topology)", { ski
 
   it("cloud boots and the shop is seeded on the cloud", async () => {
     const cloudLog = openSync(CLOUD_LOG, "w");
-    cloudProc = spawn("npx", ["tsx", "src/server.ts"], {
-      cwd: BACKEND_DIR,
-      env: {
-        ...process.env,
-        PORT: String(CLOUD_PORT),
-        DATABASE_URL: CLOUD_URL,
-        AUTH_JWT_SECRET: JWT,
-        JOBS_ENABLED: "false",
-        AUTH_RATE_LIMIT_MAX: "10000",
-        EZPOS_SYNC_ENABLED: "false",
-      },
-      stdio: ["ignore", cloudLog, cloudLog],
-    });
+    cloudProc = spawnServer({
+      ...process.env,
+      PORT: String(CLOUD_PORT),
+      DATABASE_URL: CLOUD_URL,
+      AUTH_JWT_SECRET: JWT,
+      JOBS_ENABLED: "false",
+      AUTH_RATE_LIMIT_MAX: "10000",
+      EZPOS_SYNC_ENABLED: "false",
+    }, cloudLog);
     await waitFor("cloud server up", () => {
       if (cloudProc?.exitCode !== null && cloudProc?.exitCode !== undefined) {
-        throw new Error(`cloud process exited early (code ${cloudProc.exitCode}) — see /tmp/ezpos-stage5-cloud.log`);
+        throw new Error(`cloud process exited early (code ${cloudProc.exitCode}) — see ${CLOUD_LOG}`);
       }
       return serverUp(CLOUD_PORT);
     }, 60_000);
@@ -324,7 +349,7 @@ describe("Stage 5 — cross-mode integration (real cloud + LAN topology)", { ski
       },
     });
     console.log("[stage5] credential self-check:", selfCheck.status);
-    lanProc = spawn("npx", ["tsx", "src/server.ts"], { detached: true, cwd: BACKEND_DIR, env: lanEnv, stdio: ["ignore", lanLog, lanLog] });
+    lanProc = spawnServer(lanEnv, lanLog, true);
     await waitFor("LAN server up", () => serverUp(LAN_PORT), 60_000);
     appendFileSync(LAN_LOG, `\n[lan up at ${new Date().toISOString()}]\n`);
     // First sweeps: identity + catalog + stock land locally.
@@ -456,20 +481,16 @@ describe("Stage 5 — cross-mode integration (real cloud + LAN topology)", { ski
     }
 
     // "Internet back": restart the cloud.
-    const cloudLog2 = openSync("/tmp/ezpos-stage5-cloud.log", "a");
-    cloudProc = spawn("npx", ["tsx", "src/server.ts"], {
-      cwd: BACKEND_DIR,
-      env: {
-        ...process.env,
-        PORT: String(CLOUD_PORT),
-        DATABASE_URL: CLOUD_URL,
-        AUTH_JWT_SECRET: JWT,
-        JOBS_ENABLED: "false",
-        AUTH_RATE_LIMIT_MAX: "10000",
-        EZPOS_SYNC_ENABLED: "false",
-      },
-      stdio: ["ignore", cloudLog2, cloudLog2],
-    });
+    const cloudLog2 = openSync(CLOUD_LOG, "a");
+    cloudProc = spawnServer({
+      ...process.env,
+      PORT: String(CLOUD_PORT),
+      DATABASE_URL: CLOUD_URL,
+      AUTH_JWT_SECRET: JWT,
+      JOBS_ENABLED: "false",
+      AUTH_RATE_LIMIT_MAX: "10000",
+      EZPOS_SYNC_ENABLED: "false",
+    }, cloudLog2);
     await waitFor("cloud back up", () => serverUp(CLOUD_PORT), 60_000);
     await waitFor("both burst sales replicated", async () => {
       const { rows } = await dbQuery(CLOUD_DB, 
@@ -506,8 +527,8 @@ describe("Stage 5 — cross-mode integration (real cloud + LAN topology)", { ski
 
     // Restart with the same configuration — the sale was already committed
     // locally, so nothing can be lost.
-    const lanLog2 = openSync("/tmp/ezpos-stage5-lan.log", "a");
-    lanProc = spawn("npx", ["tsx", "src/server.ts"], { detached: true, cwd: BACKEND_DIR, env: lanEnv, stdio: ["ignore", lanLog2, lanLog2] });
+    const lanLog2 = openSync(LAN_LOG, "a");
+    lanProc = spawnServer(lanEnv, lanLog2, true);
     await waitFor("LAN back up", () => serverUp(LAN_PORT), 60_000);
     await waitFor("post-restart sale replicated", async () => {
       const { rows } = await dbQuery(CLOUD_DB, 
@@ -549,8 +570,8 @@ describe("Stage 5 — cross-mode integration (real cloud + LAN topology)", { ski
     await new Promise((resolve) => setTimeout(resolve, 500));
     agentSecretCurrent = replacementSecret;
     lanEnv = { ...lanEnv, EZPOS_SYNC_TERMINAL_ID: String(replacementId), EZPOS_SYNC_TERMINAL_SECRET: replacementSecret };
-    const lanLog3 = openSync("/tmp/ezpos-stage5-lan.log", "a");
-    lanProc = spawn("npx", ["tsx", "src/server.ts"], { detached: true, cwd: BACKEND_DIR, env: lanEnv, stdio: ["ignore", lanLog3, lanLog3] });
+    const lanLog3 = openSync(LAN_LOG, "a");
+    lanProc = spawnServer(lanEnv, lanLog3, true);
     await waitFor("LAN back up with replacement agent", () => serverUp(LAN_PORT), 60_000);
 
     // Pushes resume: ring one more sale and wait for it on the cloud.

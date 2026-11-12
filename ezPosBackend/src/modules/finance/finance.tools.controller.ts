@@ -47,6 +47,13 @@ export async function createLoan(req: Request, res: Response) {
         .status(400)
         .json({ success: false, message: "lenderName and a positive principal are required." });
     }
+    const LENDER_TYPES = ["bank", "mfs", "owner", "other"] as const;
+    if (!LENDER_TYPES.includes(input.lenderType as never)) {
+      return res.status(400).json({
+        success: false,
+        message: "lenderType is required — one of bank, mfs, owner, other.",
+      });
+    }
     const loan = await tools.createLoan(businessId, input, req.user?.id ?? null);
     res.status(201).json(loan);
   } catch (err) {

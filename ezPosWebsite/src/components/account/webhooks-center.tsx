@@ -44,6 +44,15 @@ export function WebhooksCenter() {
     async (selectId?: number) => {
       if (!businessId) return;
       const result = await fetchWebhookEndpoints(businessId);
+      if (!result.ok) {
+        // Gated plan (403) or other failure — surface the server's message
+        // instead of crashing on a non-list payload.
+        setEndpoints([]);
+        setMessage({ text: result.message, ok: false });
+        setDeliveries([]);
+        setSelectedId(null);
+        return;
+      }
       const list = result.data ?? [];
       setEndpoints(list);
       const target = selectId ?? selectedId ?? list[0]?.id;

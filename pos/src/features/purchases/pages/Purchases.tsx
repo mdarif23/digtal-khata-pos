@@ -480,7 +480,11 @@ export function PurchasesOrder() {
               receiving.
             </p>
           </div>
-          <Button variant="outline" render={<Link to="/purchases-list" />}>
+          <Button
+            nativeButton={false}
+            variant="outline"
+            render={<Link to="/purchases-list" />}
+          >
             View purchase orders <ArrowRight />
           </Button>
         </header>

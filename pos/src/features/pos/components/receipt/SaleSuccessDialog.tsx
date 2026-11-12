@@ -8,10 +8,11 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog.js";
 import { Button } from "@/components/ui/button.js";
-import { CheckCircle2, Printer, Eye, PlusCircle, Check, Copy } from "lucide-react";
+import { CheckCircle2, Printer, Eye, PlusCircle, Check, Copy, ShieldCheck } from "lucide-react";
 import type { SaleReceiptData } from "../../types/receipt.types.js";
 import { resolveReceiptConfig, usePrintReceipt } from "../../hooks/usePrintReceipt.js";
 import { ReceiptPrintDialog } from "./ReceiptPrintDialog.js";
+import { printWarrantyCertificate } from "@/features/warranty/renderers/warrantyCertificateHtml.js";
 
 interface SaleSuccessDialogProps {
   receipt: SaleReceiptData | null;
@@ -61,6 +62,50 @@ export function SaleSuccessDialog({
 
   const handleDirectPrint = () => {
     printReceipt(receipt);
+  };
+
+  // Warranty certificate (migration 0064): offered only when the receipt
+  // carries at least one issued warranty line. The certificate payload is
+  // constructed from the receipt — the first warranted line prints (a
+  // certificate covers a single warranty number).
+  const warrantedItems = receipt.items.filter((item) => item.warranty);
+
+  const handlePrintWarrantyCertificate = () => {
+    const line = warrantedItems[0];
+    const itemWarranty = line?.warranty;
+    if (!itemWarranty) return;
+    const business = receipt.business;
+    printWarrantyCertificate({
+      warranty: {
+        warranty: {
+          warrantyNumber: itemWarranty.warrantyNumber,
+          customerName: receipt.customer?.name || "Walk-in Customer",
+          customerPhone: receipt.customer?.phone ?? null,
+          productName: line.productName,
+          variantOptionLabel: line.variantName,
+          serialNumber: line.serialNumbers?.[0] ?? null,
+          provider: itemWarranty.provider,
+          warrantyType: itemWarranty.warrantyType,
+          duration: itemWarranty.duration,
+          durationUnit: itemWarranty.durationUnit,
+          startDate: itemWarranty.startDate,
+          expiryDate: itemWarranty.validUntil,
+          terms: null,
+          invoiceNumber: receipt.invoiceNumber,
+        },
+        claims: [],
+      },
+      branding: {
+        name: business?.name || "ezPos Store",
+        logoUrl: business?.logoUrl ?? null,
+        phone: business?.phone ?? null,
+        email: business?.email ?? null,
+        address: business?.address ?? null,
+        website: business?.website ?? null,
+        vatBin: business?.vatBin ?? null,
+        tagline: business?.tagline ?? null,
+      },
+    });
   };
 
   return (
@@ -154,6 +199,18 @@ export function SaleSuccessDialog({
                 <Eye className="size-4" />
                 Preview
               </Button>
+
+              {warrantedItems.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={handlePrintWarrantyCertificate}
+                >
+                  <ShieldCheck className="size-4" />
+                  Print Warranty Certificate
+                </Button>
+              )}
             </div>
 
             <Button

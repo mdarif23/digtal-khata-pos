@@ -37,6 +37,24 @@ export const receiveItemsFormSchema = z.object({
         serialNumbers: z.array(
           z.string().min(1, "Serial number cannot be empty"),
         ),
+        // Supplier warranty (migration 0064): optional per-line terms
+        // captured while receiving; the warranty start date is the first
+        // receive date. Mirrors the backend receiveItem.schema.ts warranty
+        // object (the backend defaults durationUnit/provider when omitted).
+        warranty: z
+          .object({
+            duration: z.number().int().positive().max(360),
+            durationUnit: z.enum(["days", "months", "years"]),
+            provider: z.enum([
+              "manufacturer",
+              "seller",
+              "distributor",
+              "supplier",
+              "third_party",
+            ]),
+            terms: z.string().max(5000).nullish(),
+          })
+          .optional(),
         // UOM (migration 0062): the packaging unit receiveNow,
         // rejectedQuantity and batches are entered in. Null/absent = the
         // product's base unit — the server converts authoritatively and

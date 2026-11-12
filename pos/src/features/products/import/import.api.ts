@@ -1,4 +1,4 @@
-import api, { getAccessToken, getActiveBusinessId } from "@/api/axios";
+import api, { API_BASE_URL, getAccessToken, getActiveBusinessId } from "@/api/axios";
 
 export interface ImportSessionSummary {
   id: number;
@@ -66,7 +66,7 @@ function unwrap<T>(res: { data: { data: T } }): T {
 export const productImportApi = {
   upload: async (file: File, worksheet?: string, headerRow = 1) => {
     const res = await fetch(
-      `/api/products/import/upload?filename=${encodeURIComponent(file.name)}${
+      `${API_BASE_URL}/products/import/upload?filename=${encodeURIComponent(file.name)}${
         worksheet ? `&worksheet=${encodeURIComponent(worksheet)}` : ""
       }&headerRow=${headerRow}`,
       {
@@ -142,6 +142,6 @@ export const productExportApi = {
     for (const [key, value] of Object.entries(filters)) {
       if (value !== undefined && value !== "") params.set(key, String(value));
     }
-    return `/api/products/export?${params.toString()}`;
+    return `${API_BASE_URL}/products/export?${params.toString()}`;
   },
 };

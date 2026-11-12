@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { AxiosResponse } from "axios";
 
@@ -72,11 +73,7 @@ export function useReportData<T>(
       if (requestId.current !== id) return;
       const gate = extractEntitlementError(err);
       if (gate) setEntitlementError(gate);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to load report data from server"
-      );
+      setError(getErrorMessage(err));
     } finally {
       if (requestId.current === id) setLoading(false);
     }

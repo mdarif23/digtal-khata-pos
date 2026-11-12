@@ -3,7 +3,7 @@ import { SummaryCardProps } from "../../purchase.types";
 export const SummaryCard = ({ card, formatCurrency }: SummaryCardProps) => {
   const displayValue =
     "total" in card
-      ? `TK ${formatCurrency(card.total)}`
+      ? `৳ ${formatCurrency(card.total)}`
       : (card.status ?? "N/A");
   return (
     <div className={`flex items-center p-3 ${card.bg} rounded-lg`}>

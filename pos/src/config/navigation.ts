@@ -249,4 +249,16 @@ export const navigation = [
     icon: ReceiptText,
     permission: "receipt_settings.view",
   },
+  {
+    title: "Warranty Management",
+    icon: ShieldCheck,
+    anyPermission: ["warranty.view", "warranty.supplier.view"],
+    items: [
+      { title: "Overview", url: "/warranty", permission: "warranty.view" },
+      { title: "Warranty Registry", url: "/warranty/registry", permission: "warranty.view" },
+      { title: "Warranty Claims", url: "/warranty/claims", permission: "warranty.view" },
+      { title: "Supplier Warranties", url: "/warranty/supplier", permission: "warranty.supplier.view" },
+      { title: "Supplier Claims", url: "/warranty/supplier-claims", permission: "warranty.supplier.view" },
+    ],
+  },
 ];

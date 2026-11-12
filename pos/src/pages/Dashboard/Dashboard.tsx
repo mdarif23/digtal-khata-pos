@@ -24,11 +24,11 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+import { ChartResponsiveContainer } from "@/components/common/ChartResponsiveContainer";
 import { Link } from "react-router";
 import axios from "../../api/axios.js";
 import { useSessionStore } from "@/auth/sessionStore";
@@ -454,10 +454,16 @@ export default function DashboardComponent() {
       setLastUpdated(new Date());
     } catch (loadError: unknown) {
       if (requestId.current !== activeRequestId) return;
+      // Prefer the backend's own message (e.g. "This business has no
+      // locations yet…") over axios's generic status-code text.
+      const backendMessage =
+        (loadError as { response?: { data?: { message?: string } } })
+          ?.response?.data?.message ?? null;
       setError(
-        loadError instanceof Error
+        backendMessage ??
+        (loadError instanceof Error
           ? loadError.message
-          : "Unable to load dashboard data.",
+          : "Unable to load dashboard data."),
       );
     } finally {
       if (requestId.current === activeRequestId) setLoading(false);
@@ -653,7 +659,27 @@ export default function DashboardComponent() {
           </Link>
         </nav>
 
-        {error ? (
+        {error && error.includes("no locations yet") ? (
+          <div
+            role="status"
+            className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-4"
+          >
+            <p className="text-sm font-medium text-sky-900">
+              Create your first location to see your dashboard.
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              The dashboard tracks sales, stock, and cash per location. Add one
+              under Products → Locations, then come back — everything fills in
+              automatically.
+            </p>
+            <a
+              href="/locations"
+              className="mt-3 inline-flex items-center gap-2 rounded-lg bg-sky-700 px-3 py-2 text-sm font-medium text-white hover:bg-sky-800"
+            >
+              Go to Locations <ArrowRight aria-hidden="true" className="size-4" />
+            </a>
+          </div>
+        ) : error ? (
           <div
             role="alert"
             className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
@@ -867,7 +893,7 @@ export default function DashboardComponent() {
               </div>
             ) : hasData ? (
               <div className="mt-2 h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
+                <ChartResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">
@@ -926,7 +952,7 @@ export default function DashboardComponent() {
                       activeDot={{ r: 4, strokeWidth: 0 }}
                     />
                   </AreaChart>
-                </ResponsiveContainer>
+                </ChartResponsiveContainer>
               </div>
             ) : (
               <div className="mt-5">

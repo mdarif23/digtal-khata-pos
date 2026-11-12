@@ -1,6 +1,7 @@
 import { env } from "../config/env.js";
 import { runSubscriptionSweeps } from "./subscriptionJobs.js";
 import { runCommerceSweeps } from "./commerceJobs.js";
+import { runWarrantySweeps } from "./warrantyJobs.js";
 import { runIntegrationSweeps } from "./integrationJobs.js";
 import { processWebhookDeliveries } from "../modules/webhooks/webhookDelivery.service.js";
 import { generateDueExpensesForAllBusinesses } from "../modules/expenses/expenses.templates.service.js";
@@ -36,7 +37,7 @@ export function startScheduler(): void {
       runBudgetAlertSweeps(),
       runAssetDepreciationSweeps(),
     ])
-      .then(([sub, commerce, integrations, deliveries, expenses, backups]) => {
+      .then(([sub, commerce, integrations, deliveries, expenses, backups, warranty]) => {
         const total =
           sub.expiredTrials +
           sub.trialReminders +
@@ -54,7 +55,7 @@ export function startScheduler(): void {
           backups.backupsStarted +
           backups.expiredDeleted;
         if (total > 0) {
-          console.info("Scheduled sweeps:", { ...sub, ...commerce, expenses, backups });
+          console.info("Scheduled sweeps:", { ...sub, ...commerce, expenses, backups, warranty });
         }
       })
       .catch((err) => console.error("Scheduled sweeps failed:", err))

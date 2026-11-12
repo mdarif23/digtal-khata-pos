@@ -10,6 +10,7 @@ import {
   Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { productExportApi } from "../../import/import.api";
 import {
   Card,
   CardContent,
@@ -86,7 +87,7 @@ export default function ProductOverview({
           </Button>
           <a
             className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-input bg-background px-4 py-2 text-sm font-medium shadow-sm hover:bg-accent"
-            href="/api/products/export?format=xlsx"
+            href={productExportApi.url("xlsx", {})}
           >
             <Download aria-hidden="true" />
             Export XLSX

@@ -9,11 +9,11 @@ import {
   Legend,
   Pie,
   PieChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+import { ChartResponsiveContainer } from "@/components/common/ChartResponsiveContainer";
 import { formatCurrency, formatNumber } from "../utils/reportUtils";
 
 const COLORS = [
@@ -58,7 +58,7 @@ export function ReportTrendChart({
 
   return (
     <div style={{ height, width: "100%" }}>
-      <ResponsiveContainer width="100%" height="100%">
+      <ChartResponsiveContainer width="100%" height="100%">
         <AreaChart
           data={data}
           margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
@@ -136,7 +136,7 @@ export function ReportTrendChart({
             />
           ))}
         </AreaChart>
-      </ResponsiveContainer>
+      </ChartResponsiveContainer>
     </div>
   );
 }
@@ -174,7 +174,7 @@ export function ReportBarChart({
 
   return (
     <div style={{ height, width: "100%" }}>
-      <ResponsiveContainer width="100%" height="100%">
+      <ChartResponsiveContainer width="100%" height="100%">
         <BarChart
           data={data}
           layout={layout}
@@ -262,7 +262,7 @@ export function ReportBarChart({
             />
           ))}
         </BarChart>
-      </ResponsiveContainer>
+      </ChartResponsiveContainer>
     </div>
   );
 }
@@ -291,7 +291,7 @@ export function ReportPieChart({
 
   return (
     <div style={{ height, width: "100%" }}>
-      <ResponsiveContainer width="100%" height="100%">
+      <ChartResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
             data={data}
@@ -329,8 +329,7 @@ export function ReportPieChart({
             wrapperStyle={{ fontSize: "12px" }}
           />
         </PieChart>
-      </ResponsiveContainer>
+      </ChartResponsiveContainer>
     </div>
   );
 }
-

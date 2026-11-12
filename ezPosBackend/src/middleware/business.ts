@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/schema/index.js";
 import { businessMemberships } from "../db/schema/businessMemberships.js";
 import { businesses } from "../db/schema/businesses.js";
@@ -117,18 +117,18 @@ async function resolveBusinessContext(
           ).map((row) => row.key);
   }
 
+  // The LATEST subscription in any status — computeSubscriptionState maps
+  // non-open statuses (expired/canceled) to read-only, so the portal and POS
+  // see the TRUE state instead of a phantom "no subscription".
   const [subscription] = await db
     .select({
       status: subscriptions.status,
       currentPeriodEnd: subscriptions.currentPeriodEnd,
     })
     .from(subscriptions)
-    .where(
-      and(
-        eq(subscriptions.businessId, businessId),
-        inArray(subscriptions.status, [...OPEN_SUBSCRIPTION_STATUSES]),
-      ),
-    );
+    .where(eq(subscriptions.businessId, businessId))
+    .orderBy(desc(subscriptions.id))
+    .limit(1);
 
   req.membership = {
     membershipId: membership.membershipId,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import {
   Card,
   CardContent,
@@ -100,7 +101,7 @@ export function AttendancePage() {
       toast.add({
         type: "error",
         description:
-          err instanceof Error ? err.message : "The action failed.",
+          getErrorMessage(err),
         priority: "high",
       });
     } finally {

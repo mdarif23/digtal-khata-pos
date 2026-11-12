@@ -67,6 +67,14 @@ import { GrowthPage } from "@/features/finance/pages/GrowthPage";
 import { LoansPage } from "@/features/finance/pages/LoansPage";
 import { AssetsPage } from "@/features/finance/pages/AssetsPage";
 import { JournalPage } from "@/features/finance/pages/JournalPage";
+import { WarrantyOverviewPage } from "@/features/warranty/pages/WarrantyOverviewPage";
+import { WarrantyRegistryPage } from "@/features/warranty/pages/WarrantyRegistryPage";
+import { WarrantyRegistryDetailPage } from "@/features/warranty/pages/WarrantyRegistryDetailPage";
+import { WarrantyClaimsPage } from "@/features/warranty/pages/WarrantyClaimsPage";
+import { WarrantyClaimDetailPage } from "@/features/warranty/pages/WarrantyClaimDetailPage";
+import { SupplierWarrantiesPage } from "@/features/warranty/pages/SupplierWarrantiesPage";
+import { SupplierClaimsPage } from "@/features/warranty/pages/SupplierClaimsPage";
+import { SupplierClaimDetailPage } from "@/features/warranty/pages/SupplierClaimDetailPage";
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -76,6 +84,7 @@ const REPORTS_PERMISSIONS = [
   "reports.inventory.view",
   "reports.financial.view",
   "reports.online_profitability.view",
+  "warranty.reports.view",
 ];
 
 const FINANCE_OVERVIEW_PERMISSIONS = ["finance.overview.view", "finance.profit.view"];
@@ -602,6 +611,70 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="roles.view">
             <RolesPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/warranty",
+        element: (
+          <RequirePermission permission="warranty.view">
+            <WarrantyOverviewPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/warranty/registry",
+        element: (
+          <RequirePermission permission="warranty.view">
+            <WarrantyRegistryPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/warranty/registry/:id",
+        element: (
+          <RequirePermission permission="warranty.view">
+            <WarrantyRegistryDetailPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/warranty/claims",
+        element: (
+          <RequirePermission permission="warranty.view">
+            <WarrantyClaimsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/warranty/claims/:id",
+        element: (
+          <RequirePermission permission="warranty.view">
+            <WarrantyClaimDetailPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/warranty/supplier",
+        element: (
+          <RequirePermission permission="warranty.supplier.view">
+            <SupplierWarrantiesPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/warranty/supplier-claims",
+        element: (
+          <RequirePermission permission="warranty.supplier.view">
+            <SupplierClaimsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/warranty/supplier-claims/:id",
+        element: (
+          <RequirePermission permission="warranty.supplier.view">
+            <SupplierClaimDetailPage />
           </RequirePermission>
         ),
       },

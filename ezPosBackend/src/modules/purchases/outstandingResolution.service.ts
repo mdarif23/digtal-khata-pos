@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { DbTransaction } from "./purchase.types.js";
 import { db } from "../../db/schema/index.js";
+import { purchaseReturns } from "../../db/schema/purchaseReturns.js";
 import { purchaseDiscrepancies } from "../../db/schema/purchaseDiscrepancies.js";
 import { purchaseItems } from "../../db/schema/purchaseItems.js";
 import { purchases } from "../../db/schema/purchases.js";
@@ -481,4 +482,27 @@ export async function getPurchaseDiscrepancyDetail(
       })),
     },
   };
+}
+
+/**
+ * Total money credited back to the supplier by PURCHASE RETURNS for one
+ * purchase — the payable reduction that the payment cap must respect
+ * alongside short-receive cancellations (audit FIN-8: without it a supplier
+ * could be overpaid after a return).
+ */
+export async function getPurchaseReturnedValueInTx(
+  tx: DbTransaction,
+  businessId: number,
+  purchaseId: number,
+): Promise<number> {
+  const [row] = await tx
+    .select({ total: purchaseReturns.totalAmount })
+    .from(purchaseReturns)
+    .where(
+      and(
+        eq(purchaseReturns.businessId, businessId),
+        eq(purchaseReturns.purchaseId, purchaseId),
+      ),
+    );
+  return Number(row?.total ?? 0);
 }

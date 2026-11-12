@@ -53,6 +53,22 @@ const NONE: SaleGroupPricing = {
   stacksWithPromotions: true,
 };
 
+/** Membership without applicable pricing rows: no discount, but the group
+ * identity is preserved so promotion group-restrictions still match. */
+function membershipWithoutPricing(
+  groupId: number,
+  groupName: string | null,
+): SaleGroupPricing {
+  return {
+    groupId,
+    groupName,
+    cartAmounts: [],
+    lineAdjustments: [],
+    total: 0,
+    stacksWithPromotions: true,
+  };
+}
+
 interface GroupPricingRow {
   id: number;
   scopeCategoryId: number | null;
@@ -121,7 +137,11 @@ export async function evaluateSaleGroupPricing(
         eq(customerGroupPricing.isActive, true),
       ),
     )) as unknown as (typeof customerGroupPricing.$inferSelect)[];
-  if (rows.length === 0) return NONE;
+  if (rows.length === 0) {
+    // Keep the group identity: promotion group-restrictions are evaluated
+    // against it even when this group grants no pricing.
+    return membershipWithoutPricing(group.id, group.name);
+  }
 
   // Server-side date validation against the business-local calendar date.
   const [bizRow] = await dbe
@@ -158,7 +178,11 @@ export async function evaluateSaleGroupPricing(
       if (row.validTo && row.validTo < today) return false;
       return true;
     });
-  if (eligible.length === 0) return NONE;
+  if (eligible.length === 0) {
+    // Rows exist but none apply to this cart — the membership identity is
+    // still real (promotion group-restrictions evaluate against it).
+    return membershipWithoutPricing(group.id, group.name);
+  }
 
   // Variant → product/category map for scoped matching (one query).
   const variantIds = [...new Set(items.map((i) => i.variantId))];

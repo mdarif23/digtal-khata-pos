@@ -59,7 +59,12 @@ async function request<T>(
     ok: res.ok,
     status: res.status,
     message,
-    data: (data ?? undefined) as (T & { message?: string }) | undefined,
+    // Never hand an error envelope back as data: gated endpoints (403) omit
+    // the data key, so 'data' would otherwise be the whole error object —
+    // which crashed .map() calls in the UI.
+    data: (res.ok ? (data ?? undefined) : undefined) as (T & {
+      message?: string;
+    }) | undefined,
   };
 }
 

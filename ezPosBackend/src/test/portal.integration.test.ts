@@ -229,8 +229,23 @@ describe("customer portal integration", { skip: !runIntegration }, () => {
       `/api/businesses/${ctx.businessId}/subscription/change-plan`,
       { planId: await createPlan(500) },
     );
-    // No open subscription after immediate cancel — clear 404, not a lockout.
-    assert.equal(changePlan.status, 404);
+    // Lapsed recovery: a canceled customer CAN re-choose a plan — the
+    // backend raises a full-period invoice and keeps the subscription
+    // canceled (read-only) until the payment is server-verified. The
+    // cancellation email promises "choose a plan again at any time".
+    assert.equal(changePlan.status, 200);
+    assert.equal(changePlan.body.data.outcome, "upgraded");
+    assert.ok(changePlan.body.data.invoice, "pending invoice must be raised");
+
+    // Re-choosing a plan does NOT grant entitlement before payment —
+    // writes stay blocked while the subscription is canceled.
+    const writeAfterChange = await api(
+      ctx,
+      "PUT",
+      `/api/businesses/${ctx.businessId}`,
+      { name: "Still Nope" },
+    );
+    assert.equal(writeAfterChange.status, 403);
   });
 
   it("billing data is scoped: another member cannot read foreign invoices", async () => {

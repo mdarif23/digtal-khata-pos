@@ -120,8 +120,8 @@ export async function initiatePayment(
       description: `ezPos subscription — invoice ${invoice.invoiceNumber}`,
       urls: {
         success: `${env.appUrl}/payment/success?paymentId=${paymentId}&businessId=${businessId}`,
-        fail: `${env.appUrl}/payment/failed?businessId=${businessId}`,
-        cancel: `${env.appUrl}/payment/canceled?businessId=${businessId}`,
+        fail: `${env.appUrl}/payment/failed?paymentId=${paymentId}&businessId=${businessId}`,
+        cancel: `${env.appUrl}/payment/canceled?paymentId=${paymentId}&businessId=${businessId}`,
       },
       ipnUrl: `${env.backendUrl}/api/payments/ipn`,
     });
@@ -317,8 +317,12 @@ export async function verifyAndActivate(
       .for("update");
     if (
       subscription &&
-      // A suspended customer who pays is back in good standing.
-      ["trialing", "past_due", "suspended"].includes(subscription.status)
+      // A suspended, expired, or canceled customer who completes a VERIFIED
+      // payment is back in good standing — taking money without restoring
+      // access is the failure mode this whitelist must never allow.
+      ["trialing", "past_due", "suspended", "expired", "canceled"].includes(
+        subscription.status,
+      )
     ) {
       await tx
         .update(subscriptions)

@@ -33,6 +33,30 @@ const PERIOD_OPTIONS = [
   { value: "this_year", label: "This year vs last year" },
 ];
 
+/** Change badge from a raw percentage — module scope so the MetricWithChange
+ * helper can use it (a nested definition was unreachable from it and crashed
+ * the whole page with "changeBadge is not defined"). */
+function renderChangeBadge(value: number | null | undefined) {
+  if (value == null) {
+    return (
+      <Badge variant="outline" className="text-xs text-slate-500">
+        insufficient data
+      </Badge>
+    );
+  }
+  const up = value >= 0;
+  return (
+    <Badge
+      variant="outline"
+      className={`gap-1 text-xs ${up ? "text-emerald-700" : "text-rose-700"}`}
+    >
+      {up ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+      {up ? "+" : ""}
+      {value}%
+    </Badge>
+  );
+}
+
 export function GrowthPage() {
   const [period, setPeriod] = useState("this_month");
   const growth = useGrowth(period, period);
@@ -40,28 +64,6 @@ export function GrowthPage() {
   const current = growth.data?.current;
   const previous = growth.data?.previous;
   const changes = growth.data?.changes;
-
-  const changeBadge = (key: string) => {
-    const value = changes?.[key];
-    if (value == null) {
-      return (
-        <Badge variant="outline" className="text-xs text-slate-500">
-          insufficient data
-        </Badge>
-      );
-    }
-    const up = value >= 0;
-    return (
-      <Badge
-        variant="outline"
-        className={`gap-1 text-xs ${up ? "text-emerald-700" : "text-rose-700"}`}
-      >
-        {up ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
-        {up ? "+" : ""}
-        {value}%
-      </Badge>
-    );
-  };
 
   return (
     <div className="space-y-6">
@@ -256,7 +258,7 @@ function MetricWithChange({
     <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs font-medium text-slate-500">{title}</p>
-        {changeBadge(change)}
+        {renderChangeBadge(change)}
       </div>
       <p className="mt-1.5 text-xl font-semibold text-slate-950">
         {isCount ? (value ?? "—") : formatCurrency(value as string | undefined)}

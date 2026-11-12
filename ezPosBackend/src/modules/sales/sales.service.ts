@@ -132,6 +132,16 @@ import type { DbTransaction } from "../purchases/purchase.types.js";
 import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
 import { serialNumbers } from "../../db/schema/serialNumbers.js";
 import {
+  applyRefundWarrantyEffects,
+  createWarrantiesForSaleItems,
+  voidWarrantiesForSale,
+  type WarrantyGenerationItem,
+} from "../warranty/warrantyEngine.service.js";
+import {
+  getSerialsForSale,
+  getWarrantiesForSale,
+} from "../warranty/warranty.service.js";
+import {
   formatSaleInvoiceNumber,
   nextDocumentNumber,
 } from "../../utils/documentSequence.js";
@@ -166,6 +176,9 @@ export async function getSalesData(businessId: number) {
       id: products.id,
       variantId: productVariants.id,
       productName: products.name,
+      // Returned to the frontend so the partial-return UI can keep serial
+      // lines whole (a partial serial return requires a serial selection).
+      trackingType: products.trackingType,
       sku: productVariants.sku,
       barcode: productVariants.barcode,
       category: categories.name,
@@ -257,6 +270,7 @@ export async function getSalesData(businessId: number) {
       returnedQuantity: returned?.quantity ?? 0,
       returnReason: returned?.reasons.join(", ") ?? null,
       returnDisposition: returned?.dispositions.at(-1) ?? null,
+      trackingType: row.trackingType,
     };
   });
 }
@@ -509,6 +523,17 @@ function getPaymentStatus(paid: number, due: number) {
   return "unpaid";
 }
 
+/** Per-line warranty summary embedded in the receipt payload. */
+interface WarrantyReceiptSummary {
+  warrantyNumber: string;
+  provider: string;
+  warrantyType: string;
+  duration: number;
+  durationUnit: string;
+  startDate: Date;
+  validUntil: Date;
+}
+
 export async function getSaleReceipt(businessId: number, saleId: number) {
   const [sale] = await db
     .select({
@@ -637,6 +662,37 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
     getDocumentSettings(businessId),
   ]);
 
+  // Warranty enrichment (migration 0064): per-line serial texts + warranty
+  // snapshots so receipts/invoices can print warranty sub-lines. Additive —
+  // consumers that don't know the fields ignore them.
+  const [serialRows, warrantyRows] = await Promise.all([
+    getSerialsForSale(businessId, saleId),
+    getWarrantiesForSale(businessId, saleId),
+  ]);
+  const serialsByItem = new Map<number, string[]>();
+  for (const row of serialRows) {
+    if (row.saleItemId == null) continue;
+    const list = serialsByItem.get(row.saleItemId) ?? [];
+    list.push(row.serialNumber);
+    serialsByItem.set(row.saleItemId, list);
+  }
+  const warrantyByItem = new Map<number, WarrantyReceiptSummary>();
+  for (const row of warrantyRows) {
+    // First warranty per line is the display row (quantity lines have one;
+    // serial lines share the same terms per unit).
+    if (!warrantyByItem.has(row.saleItemId)) {
+      warrantyByItem.set(row.saleItemId, {
+        warrantyNumber: row.warrantyNumber,
+        provider: row.provider,
+        warrantyType: row.warrantyType,
+        duration: row.duration,
+        durationUnit: row.durationUnit,
+        startDate: row.startDate,
+        validUntil: row.expiryDate,
+      });
+    }
+  }
+
   return {
     saleId: sale.id,
     invoiceNumber: sale.invoiceNumber,
@@ -678,6 +734,8 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
         enteredUnitPrice: item.enteredUnitPrice == null ? null : Number(item.enteredUnitPrice),
         conversionFactor: item.conversionFactor == null ? null : Number(item.conversionFactor),
         enteredUnitAbbreviation: item.enteredUnitAbbreviation ?? null,
+        serialNumbers: serialsByItem.get(item.id) ?? undefined,
+        warranty: warrantyByItem.get(item.id) ?? undefined,
       };
     }),
     subtotal: Number(sale.subtotal ?? 0),
@@ -910,7 +968,12 @@ export async function createSale(
             `Valid selling price not found for variant ${item.variantId}.`,
           );
         }
-        return { ...item, unitPrice, trackingType: variant.trackingType };
+        return {
+          ...item,
+          unitPrice,
+          trackingType: variant.trackingType,
+          productId: variant.productId,
+        };
       })
       .sort((a, b) => a.variantId - b.variantId); // same lock order for every cashier
 
@@ -1174,6 +1237,7 @@ export async function createSale(
     // 9. Insert sale items with price, cost, and tax snapshots. perLine is
     // index-aligned with trustedItems (both derive from the same list; unit
     // prices are pre-validated so no line is skipped in the totals pass).
+    const warrantyItems: WarrantyGenerationItem[] = [];
     for (const [itemIndex, item] of trustedItems.entries()) {
       const line = getLinePricing(item.unitPrice, item.quantity, item.discount);
       const lineTax = lineTaxes?.[itemIndex];
@@ -1392,6 +1456,33 @@ export async function createSale(
         quantity: item.quantity,
         referenceType: "sale",
         referenceId: saleId,
+      });
+
+      // Warranty generation input: the sale item id and the concrete sold
+      // serials exist by this point. Products without an active warranty
+      // config are filtered inside the engine (D2/D4 — quantity rows for
+      // ordinary products, per-serial rows for trackingType='serial').
+      warrantyItems.push({
+        saleItemId: saleItem.id,
+        productId: item.productId,
+        variantId: item.variantId,
+        quantity: item.quantity,
+        serialIds: item.trackingType === "serial" ? (cost.serialIds ?? []) : [],
+      });
+    }
+
+    // 8b. Issue customer warranties inside the same transaction — the sale
+    // and its warranties commit or roll back together. Idempotency: the
+    // replay path above returns before this point, and the partial unique
+    // indexes make duplicate rows impossible regardless.
+    if (warrantyItems.length > 0) {
+      await createWarrantiesForSaleItems(tx, {
+        businessId,
+        locationId,
+        saleId,
+        saleDate,
+        customerId: customerId ?? null,
+        items: warrantyItems,
       });
     }
 
@@ -1868,6 +1959,44 @@ async function applySaleRefund(
       }
     }
 
+    // Warranty coverage follows the return, unit-exactly (D2): serial
+    // warranties void only for the serials that came back; quantity
+    // warranties track returned units and void when exhausted.
+    if (variant.trackingType === "serial") {
+      const serialIdsForWarranty = partialReturn
+        ? (options.serialIds
+            ?.find((entry) => entry.saleItemId === item.id)
+            ?.serialIds ?? [])
+        : (
+            await tx
+              .select({ id: serialNumbers.id })
+              .from(serialNumbers)
+              .where(
+                and(
+                  eq(serialNumbers.saleItemId, item.id),
+                  eq(serialNumbers.businessId, businessId),
+                ),
+              )
+          ).map((row) => row.id);
+      if (serialIdsForWarranty.length > 0) {
+        await applyRefundWarrantyEffects(tx, {
+          businessId,
+          saleItemId: item.id,
+          returnedQuantity,
+          serialIds: serialIdsForWarranty,
+          refundId: refund.id,
+        });
+      }
+    } else {
+      await applyRefundWarrantyEffects(tx, {
+        businessId,
+        saleItemId: item.id,
+        returnedQuantity,
+        serialIds: [],
+        refundId: refund.id,
+      });
+    }
+
     if (options.disposition !== "restock") continue;
     restockedCost += Number(item.costAtSale) * returnedQuantity;
 
@@ -1942,7 +2071,10 @@ async function applySaleRefund(
       locationId: stock.locationId,
       batchId: returnBatch?.id ?? null,
       movementType: "return",
-      quantity: item.quantity,
+      // The ACTUAL restocked quantity — a partial return of 2 of 12 must not
+      // log a 12-unit movement (stock math is already exact; this is the
+      // movements ledger that reconciliation and reports read).
+      quantity: returnedQuantity,
       referenceType: "sale_refund",
       referenceId: refund.id,
     });
@@ -2009,6 +2141,10 @@ async function applySaleRefund(
       .update(sales)
       .set({ status: "refunded" })
       .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)));
+    // Full return = every unit came back → void every remaining warranty of
+    // the sale (D2). History (claims/events) is preserved; only coverage
+    // ends.
+    await voidWarrantiesForSale(tx, { businessId, saleId, refundId: refund.id });
   }
 
   // Online orders: mirror the return on the fulfillment workflow (module
@@ -2676,7 +2812,12 @@ export async function createSaleExchange(
             `Valid selling price not found for variant ${item.variantId}.`,
           );
         }
-        return { ...item, unitPrice, trackingType: variant.trackingType };
+        return {
+          ...item,
+          unitPrice,
+          trackingType: variant.trackingType,
+          productId: variant.productId,
+        };
       })
       .sort((a, b) => a.variantId - b.variantId);
 
@@ -2780,6 +2921,7 @@ export async function createSaleExchange(
     // The replacement is a real sale: batches AND the per-location stock row
     // must both move, plus the sale movement row — omitting the stock
     // decrement desynchronized batches from inventory_stock (audit R1).
+    const exchangeWarrantyItems: WarrantyGenerationItem[] = [];
     for (const [itemIndex, item] of trustedReplacements.entries()) {
       const line = getLinePricing(item.unitPrice, item.quantity, item.discount);
       const cost = await consumeStockFifo(
@@ -2849,6 +2991,28 @@ export async function createSaleExchange(
         quantity: item.quantity,
         referenceType: "sale",
         referenceId: exchangeSale.id,
+      });
+
+      // Replacement items earn warranties like any other sale (D2). Serial-
+      // tracked replacements are rejected upstream, so these are always
+      // quantity-based rows keyed to the replacement sale's customer.
+      exchangeWarrantyItems.push({
+        saleItemId: saleItem.id,
+        productId: item.productId,
+        variantId: item.variantId,
+        quantity: item.quantity,
+        serialIds: [],
+      });
+    }
+
+    if (exchangeWarrantyItems.length > 0) {
+      await createWarrantiesForSaleItems(tx, {
+        businessId,
+        locationId: exchangeLocationId,
+        saleId: exchangeSale.id,
+        saleDate: new Date(),
+        customerId: original.customerId ?? null,
+        items: exchangeWarrantyItems,
       });
     }
 
@@ -3121,7 +3285,7 @@ export async function quoteSaleTotals(
     );
     const promoInput = toCartPromotionInput(promoEvaluation);
     const groupBlock =
-      groupPricing.groupId != null
+      groupPricing.groupId != null && groupPricing.total > 0
         ? {
             group: {
               id: groupPricing.groupId,

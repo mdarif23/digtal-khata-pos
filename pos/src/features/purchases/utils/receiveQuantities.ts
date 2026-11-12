@@ -11,13 +11,17 @@ import {
  * over-receiving warning.
  */
 
-/** Outstanding = ordered − received − cancelled (cancelled is written off). */
+/** Outstanding = ordered − received − cancelled (cancelled is written off).
+ *  Rounded to the 3-dp grid — raw float subtraction prints residues like
+ *  0.023999999999999133 for numeric(12,3) quantities. */
 export function outstandingOf(item: PurchasesItems): number {
-  return Math.max(
-    0,
-    Number(item.quantity) -
-      Number(item.receivedQuantity || 0) -
-      Number(item.cancelledQuantity || 0),
+  return roundQuantity(
+    Math.max(
+      0,
+      Number(item.quantity) -
+        Number(item.receivedQuantity || 0) -
+        Number(item.cancelledQuantity || 0),
+    ),
   );
 }
 

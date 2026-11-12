@@ -19,7 +19,13 @@ import { CartSchemaType, PaymentSchemaType } from "../../schemas/cart.schema";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
 import { useState } from "react";
 
-const QR_NUMBER = "01870707900"; // move to settings/config later
+// Bangla QR destination: runtime config (public/config.js) → env → legacy
+// default. Was hardcoded; shops have different merchant numbers.
+const QR_NUMBER =
+  (typeof window !== "undefined" &&
+    (window as { ezposConfig?: { qrNumber?: string } }).ezposConfig?.qrNumber) ||
+  (import.meta.env.VITE_QR_NUMBER as string | undefined) ||
+  "01870707900";
 
 // ---------- helpers ----------
 const money = (n: number | undefined) =>

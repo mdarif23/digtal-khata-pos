@@ -13,6 +13,7 @@
  * Double-guarded: runs ONLY with INTEGRATION_TESTS=1 AND DATABASE_URL
  * pointing at ezpos_test (fail-closed).
  */
+import { businessLocalDate } from "../utils/money.js";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { AddressInfo } from "node:net";
@@ -146,7 +147,9 @@ describe("finance reports integration", { skip: !runIntegration }, () => {
   let variantId = 0;
   let employeeId = 0;
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
+  // Business-local date (the ledger posts entries with entry_date in the
+  // business timezone, default Asia/Dhaka) — UTC dates go stale after 18:00 UTC.
+  const today = businessLocalDate(new Date(), "Asia/Dhaka");
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 
   before(async () => {

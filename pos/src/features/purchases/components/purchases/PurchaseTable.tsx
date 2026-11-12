@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { PurchaseCart } from "../../purchase.types";
 import { buildVariantOptionsLabel } from "@/lib/variantDisplay";
+import { formatCurrency } from "../../utils/formatCurrency";
 import { usePurchaseUnits } from "../../hooks/usePurchaseUnits";
 import {
   formatConversionHint,
@@ -148,7 +149,7 @@ export function PurchaseTable({
                   />
                 </td>
                 <td className="whitespace-nowrap px-2 py-3 text-right font-medium">
-                  {lineTotal.toFixed(2)}
+                  {formatCurrency(lineTotal)}
                 </td>
                 <td className="px-2 py-2">
                   <Button

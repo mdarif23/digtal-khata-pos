@@ -31,16 +31,28 @@ function Metric({
 
 export function AdminOverview() {
   const [data, setData] = useState<SaasOverview | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       const result = await fetchOverview();
-      if (result.ok && result.data) setData(result.data);
+      if (result.ok && result.data) {
+        setData(result.data);
+      } else if (result.data === undefined) {
+        setLoadError(result.message);
+      }
     })();
   }, []);
 
   if (!data) {
-    return (
+    return loadError ? (
+      <div className="py-12 text-center" role="alert">
+        <p className="text-sm font-medium text-slate-700">
+          Could not load SaaS metrics.
+        </p>
+        <p className="mt-1 text-sm text-slate-500">{loadError}</p>
+      </div>
+    ) : (
       <p className="py-12 text-center text-sm text-slate-500" role="status">
         Loading SaaS metrics…
       </p>

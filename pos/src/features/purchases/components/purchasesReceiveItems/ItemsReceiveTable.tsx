@@ -8,9 +8,11 @@ import {
   findUnitByConversionId,
   type PurchaseUnitOption,
 } from "../../hooks/usePurchaseUnits";
-import { unitOptionLabel } from "../../utils/uom";
+import { unitOptionLabel, formatQty } from "../../utils/uom";
+import { formatCurrency } from "../../utils/formatCurrency";
 import { SerialsDialog } from "./SerialsDialog";
 import { BatchesDialog } from "./BatchesDialog";
+import { WarrantyDialog } from "./WarrantyDialog";
 import { ReceivingDiscrepancyDialog } from "../receiving/ReceivingDiscrepancyDialog";
 import { ResolveOutstandingDialog } from "../receiving/ResolveOutstandingDialog";
 import {
@@ -125,11 +127,11 @@ function ReceiveItemRow({
     form.formState.errors.items?.[index]?.batches?.message;
   const orderedLabel =
     item.enteredQuantity != null
-      ? `${item.enteredQuantity} ${item.productUnit ?? ""}`.trim()
-      : String(item.quantity);
+      ? `${formatQty(item.enteredQuantity)} ${item.productUnit ?? ""}`.trim()
+      : formatQty(item.quantity);
   const orderedBaseHint =
     item.enteredQuantity != null && Number(item.conversionFactor) !== 1
-      ? `= ${item.quantity} ${item.productUnit ?? ""}`.trim()
+      ? `= ${formatQty(item.quantity)} ${item.productUnit ?? ""}`.trim()
       : null;
 
   return (
@@ -204,13 +206,13 @@ function ReceiveItemRow({
         )}
       </td>
       <td className="px-3 py-3 text-right">
-        {item.receivedQuantity}
+        {formatQty(item.receivedQuantity)}
         <span className="block text-xs text-muted-foreground">
           {item.productUnit ?? ""}
         </span>
       </td>
       <td className="px-3 py-3 text-right font-medium">
-        {outstanding}
+        {formatQty(outstanding)}
         <span className="block text-xs text-muted-foreground">
           {item.productUnit ?? ""}
         </span>
@@ -274,7 +276,7 @@ function ReceiveItemRow({
         </span>
       </td>
       <td className="whitespace-nowrap px-3 py-3 text-right font-medium">
-        {rowTotal.toFixed(2)}
+        {formatCurrency(rowTotal)}
       </td>
       <td className="px-4 py-2">
         <div className="mb-1">
@@ -298,6 +300,14 @@ function ReceiveItemRow({
           </div>
         ) : (
           <Minus className="size-4 text-muted-foreground" />
+        )}
+        {/* Supplier warranty (migration 0064): optional per-line capture.
+            Only offered while the line still has something to receive — a
+            complete line gets no new goods (and no warranty). */}
+        {!disabled && (
+          <div className="mt-1">
+            <WarrantyDialog item={item} form={form} index={index} />
+          </div>
         )}
       </td>
       <td className="px-4 py-2">

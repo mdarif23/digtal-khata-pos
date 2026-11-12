@@ -26,6 +26,7 @@ import {
 import { getPurchaseReceivedAmountInTx } from "../purchases/receive/receive.service.js";
 import {
   getPurchaseCancelledValueInTx,
+  getPurchaseReturnedValueInTx,
 } from "../purchases/outstandingResolution.service.js";
 import type {
   CustomerPaymentInput,
@@ -702,12 +703,18 @@ export async function recordSupplierPayment(
       businessId,
       purchaseId,
     );
+    const returnedAmount = await getPurchaseReturnedValueInTx(
+      tx,
+      businessId,
+      purchaseId,
+    );
     const paymentMath = calculatePayments({
       paidAmount: purchase.paidAmount,
       paymentAmount: roundMoney(amount),
       totalAmount: purchase.totalAmount,
       receivedAmount,
       cancelledAmount,
+      returnedAmount,
     });
 
     let inserted: { id: number } | undefined;

@@ -106,6 +106,13 @@ export async function storeUrlProblem(
   // harness itself fail-closes on a database named ezpos_test, so this flag
   // never reaches a real deployment that runs the normal test entrypoint.
   if (process.env.INTEGRATION_TESTS === "1") return null;
+  // Opt-in for local development: connecting a WooCommerce store running on
+  // this machine (http://localhost:<port>) is legitimate, but the SSRF guard
+  // would reject the private host. The flag is an explicit developer choice;
+  // production must never set it (enforced below).
+  const allowPrivate =
+    process.env.ALLOW_PRIVATE_STORE_URLS === "1" && !env.isProduction;
+  if (allowPrivate) return null;
 
   let parsed: URL;
   try {

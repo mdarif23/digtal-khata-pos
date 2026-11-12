@@ -77,6 +77,12 @@ export const env = {
   emailFrom: process.env.EMAIL_FROM?.trim() || "",
   /** Public website origin used for links inside emails. */
   appUrl: process.env.APP_URL?.trim() || "http://localhost:3001",
+  /**
+   * Declarative platform-admin bootstrap: when set, the server promotes this
+   * (already registered) user to platform_admin at startup if they are not
+   * one yet. Leave unset after the first admin exists.
+   */
+  platformAdminEmail: process.env.PLATFORM_ADMIN_EMAIL?.trim().toLowerCase() || "",
   passwordResetTokenTtlHours: optionalInt("PASSWORD_RESET_TOKEN_TTL_HOURS", 2),
   /**
    * Payment gateway. "mock" issues deterministic dev/test sessions and is

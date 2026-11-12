@@ -442,6 +442,12 @@ export async function generateProposals(
         unchanged++;
         continue;
       }
+      // Fixed-price protection (mirrors the auto-update sweep default): a
+      // fixed rule is a deliberate price — the engine never proposes around it.
+      if (rec.isFixedSource) {
+        unchanged++;
+        continue;
+      }
       const pending = await tx
         .select()
         .from(priceChangeProposals)
@@ -452,6 +458,27 @@ export async function generateProposals(
             eq(priceChangeProposals.status, "pending"),
           ),
         );
+      // Only a MOVED recommendation warrants a proposal — a recommendation
+      // equal to the current price creates no proposal. If older pendings
+      // exist, the recommendation moved BACK to the current price and those
+      // pendings are obsolete.
+      if (rec.recommended === rec.oldPrice) {
+        if (pending.length > 0) {
+          await tx
+            .update(priceChangeProposals)
+            .set({ status: "stale", updatedAt: new Date() })
+            .where(
+              and(
+                eq(priceChangeProposals.businessId, businessId),
+                eq(priceChangeProposals.variantId, variantId),
+                eq(priceChangeProposals.status, "pending"),
+              ),
+            );
+          staled += pending.length;
+        }
+        unchanged++;
+        continue;
+      }
       const matching = pending.find(
         (p) =>
           Number(p.recommendedPrice) === rec.recommended &&

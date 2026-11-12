@@ -211,6 +211,9 @@ describe("pricing promotions integration", { skip: !runIntegration }, () => {
     const pricing = await api("POST", `/api/customer-groups/${groupId}/pricing`, {
       discountType: "fixed",
       discountValue: 40,
+      // The stacking matrix below needs the group layer to consent (see the
+      // "BOTH sides consent" case); the schema default is false.
+      stacksWithPromotions: true,
     });
     assert.equal(pricing.status, 201);
     const vip = await api("POST", "/api/customer-groups", { name: "VIP" });
@@ -425,6 +428,9 @@ describe("pricing promotions integration", { skip: !runIntegration }, () => {
       categoryId,
       discountType: "percentage",
       discountValue: 10,
+      // Member cart with the Members group layer applied — stacking needs
+      // both consent sides (the group row already stacks).
+      canStackWithGroupDiscount: true,
     });
     // Line 1 (cat, 100) gets 10; line 2 (plain, 200) gets nothing.
     const res = await quote({
@@ -538,6 +544,8 @@ describe("pricing promotions integration", { skip: !runIntegration }, () => {
       discountType: "fixed",
       discountValue: 10,
       groupIds: [vipGroupId],
+      // The member assertion stacks this over the Members group layer.
+      canStackWithGroupDiscount: true,
     });
     // Walk-in: restricted promotion does not apply.
     const walkin = await quote({
@@ -550,8 +558,9 @@ describe("pricing promotions integration", { skip: !runIntegration }, () => {
       customerId: customerMember,
     });
     assert.equal((wrongGroup.json as { data: { promotions?: unknown } }).data.promotions, undefined);
-    // Join VIP → applies (stacking with the Members group layer: fixed 10 on
-    // the post-group 60).
+    // Join VIP → applies. Membership is a single column (joining VIP
+    // REPLACES the Members group), so the 40 layer disappears — VIP carries
+    // no pricing rows and the fixed 10 lands on the list price.
     const join = await api("PUT", `/api/customer-groups/${vipGroupId}/members`, {
       customerIds: [customerMember],
     });
@@ -560,10 +569,14 @@ describe("pricing promotions integration", { skip: !runIntegration }, () => {
       items: [{ variantId: variantCat, quantity: 1, discount: null }],
       customerId: customerMember,
     });
-    const data = (member.json as { data: { promotions: { total: number }; group: { discountAmount: number } } }).data;
+    const data = (member.json as { data: { promotions: { total: number }; group?: unknown } }).data;
     assert.equal(data.promotions.total, 10);
-    assert.equal(data.group.discountAmount, 40);
-    await api("DELETE", `/api/customer-groups/${vipGroupId}/members/${customerMember}`);
+    assert.equal(data.group, undefined);
+    // Membership is a single column — "remove" would leave the customer
+    // groupless; reassign to the home group the suite's later tests assume.
+    await api("PUT", `/api/customer-groups/${groupId}/members`, {
+      customerIds: [customerMember],
+    });
     await setActive(id, false);
   });
 

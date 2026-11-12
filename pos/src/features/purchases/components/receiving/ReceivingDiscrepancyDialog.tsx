@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "../../utils/formatCurrency";
+import { formatQty } from "../../utils/uom";
 import {
   outstandingOf,
   overReceiveInUnitOf,
@@ -98,7 +99,7 @@ export function ReceivingDiscrepancyDialog({
       <DialogTrigger
         render={
           <Button
-            nativeButton={false}
+            nativeButton
             size="sm"
             variant={over || Number(rejectedQuantity) > 0 ? "outline" : "ghost"}
             className={
@@ -125,8 +126,10 @@ export function ReceivingDiscrepancyDialog({
         <DialogHeader>
           <DialogTitle>Discrepancy details</DialogTitle>
           <DialogDescription>
-            {item.variantName || item.productName} — ordered {item.quantity} ·
-            received {item.receivedQuantity} · outstanding {outstanding}
+            {item.variantName || item.productName} — ordered{" "}
+            {formatQty(item.quantity)} · received{" "}
+            {formatQty(item.receivedQuantity)} · outstanding{" "}
+            {formatQty(outstanding)}
           </DialogDescription>
         </DialogHeader>
 

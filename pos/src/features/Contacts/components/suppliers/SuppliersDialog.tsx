@@ -73,16 +73,16 @@ export function SupplierDialog() {
   const isSubmitting = form.formState.isSubmitting;
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <form id="supplier-form" onSubmit={form.handleSubmit(onSubmit)}>
-        <DialogTrigger
-          render={
-            <Button variant="outline">
-              <Plus />
-              Add Supplier
-            </Button>
-          }
-        />
-        <DialogContent className="sm:max-w-sm">
+      <DialogTrigger
+        render={
+          <Button variant="outline">
+            <Plus />
+            Add Supplier
+          </Button>
+        }
+      />
+      <DialogContent className="sm:max-w-sm">
+        <form id="supplier-form" onSubmit={form.handleSubmit(onSubmit)}>
           <DialogHeader>
             <DialogTitle>Add Supplier</DialogTitle>
           </DialogHeader>
@@ -134,8 +134,8 @@ export function SupplierDialog() {
               )}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </form>
+        </form>
+      </DialogContent>
     </Dialog>
   );
 }

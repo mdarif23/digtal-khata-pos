@@ -16,6 +16,13 @@ export const defaultValues: ProductTypeInput = {
   imageFile: null,
   supplierId: null,
   source: "purchase",
+  shippingWeightKg: null,
+  shippingLengthCm: null,
+  shippingWidthCm: null,
+  shippingHeightCm: null,
+  packagingInstructions: "",
+  handlingInstructions: "",
+  isFragile: false,
   variants: [
     {
       sku: "",
@@ -36,6 +43,17 @@ export const defaultValues: ProductTypeInput = {
     },
   ],
 };
+
+/**
+ * Edit mode: backend payloads omit optional keys (shipping dims, handling
+ * instructions, isFragile). Filling them from `defaultValues` keeps form
+ * values deep-equal to defaults so the dirty guard doesn't fire on mount.
+ */
+export const withFormDefaults = (values: ProductTypeInput): ProductTypeInput => ({
+  ...defaultValues,
+  ...values,
+});
+
 export const createVariant = (variant: GeneratedVariant): ProductVariantType => ({
   sku: "",
   barcode: "",

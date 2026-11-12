@@ -11,6 +11,7 @@
  * Double-guarded: runs ONLY with INTEGRATION_TESTS=1 AND DATABASE_URL
  * pointing at ezpos_test (fail-closed). Plain `npm test` NEVER runs this.
  */
+import { businessLocalDate } from "../utils/money.js";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { AddressInfo } from "node:net";
@@ -160,7 +161,9 @@ describe("owner finance integration", { skip: !runIntegration }, () => {
   let ownerId = 0;
   let secondOwnerId = 0;
   let variantId = 0;
-  const today = new Date().toISOString().slice(0, 10);
+  // Business-local date (the ledger posts entries with entry_date in the
+  // business timezone, default Asia/Dhaka) — UTC dates go stale after 18:00 UTC.
+  const today = businessLocalDate(new Date(), "Asia/Dhaka");
 
   before(async () => {
     owner = await createOwner(`ownfin-owner`);

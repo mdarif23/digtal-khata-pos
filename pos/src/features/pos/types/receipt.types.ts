@@ -15,6 +15,21 @@ export interface SaleReceiptTaxDetail {
   amount: number;
 }
 
+/**
+ * Per-line warranty snapshot (backend getSaleReceipt enrichment): present
+ * when the sold line carries an issued warranty. Additive — older receipts
+ * omit it.
+ */
+export interface SaleReceiptItemWarranty {
+  warrantyNumber: string;
+  provider: string;
+  warrantyType: string;
+  duration: number;
+  durationUnit: string;
+  startDate: string | Date;
+  validUntil: string | Date;
+}
+
 export interface SaleReceiptItem {
   id: number;
   variantId: number;
@@ -52,6 +67,13 @@ export interface SaleReceiptItem {
     amount: number;
     reason?: string | null;
   }[];
+  /**
+   * Warranty enrichment (migration 0064): the serial texts of the sold
+   * units and this line's issued-warranty snapshot, rendered as per-line
+   * sub-lines on receipts/invoices when present.
+   */
+  serialNumbers?: string[];
+  warranty?: SaleReceiptItemWarranty;
 }
 
 export interface SaleReceiptPayment {

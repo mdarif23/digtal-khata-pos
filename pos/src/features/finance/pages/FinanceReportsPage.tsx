@@ -8,7 +8,7 @@ import { ReportDateFilter } from "@/features/reports/components/ReportDateFilter
 import { ReportTable, type ReportColumn } from "@/features/reports/components/ReportTable";
 import { formatCurrency } from "@/features/reports/utils/reportUtils";
 import type { ReportFilters } from "@/features/reports/types/report.types";
-import axios from "axios";
+import api from "@/api/axios";
 import {
   financeKeys,
 } from "../hooks/useFinance";
@@ -106,7 +106,7 @@ export function FinanceReportsPage() {
     ((TABULAR_TABS as string[]).includes(tab) && table.isLoading);
 
   const downloadCsv = async () => {
-    const response = await axios.get(`/finance/reports/${tab}`, {
+    const response = await api.get(`/finance/reports/${tab}`, {
       params: { format: "csv", from, to },
       responseType: "blob",
     });

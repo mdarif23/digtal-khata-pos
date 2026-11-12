@@ -21,6 +21,17 @@ export interface Items {
   }[];
   serialNumbers: string[];
   /**
+   * Supplier warranty capture (migration 0064): optional per-line terms
+   * recorded inside the receive transaction. Absent = no supplier warranty
+   * recorded for this delivery.
+   */
+  warranty?: {
+    duration: number;
+    durationUnit: "days" | "months" | "years";
+    provider?: string | undefined;
+    terms?: string | null | undefined;
+  } | undefined;
+  /**
    * UOM (migration 0062): the packaging unit the operator entered
    * receiveNow/rejectedQuantity/batches in. NULL/absent = the product's
    * base unit. After normalization (see normalizeReceiveItemsToBase) every

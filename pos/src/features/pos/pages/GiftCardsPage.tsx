@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import {
   Card,
   CardContent,
@@ -108,7 +109,7 @@ export function GiftCardsPage() {
       toast.add({
         type: "error",
         description:
-          err instanceof Error ? err.message : "Could not issue the card.",
+          getErrorMessage(err),
         priority: "high",
       });
     } finally {
@@ -151,7 +152,7 @@ export function GiftCardsPage() {
           ) : cards.length === 0 ? (
             <p className="text-sm text-muted-foreground">No gift cards yet.</p>
           ) : (
-            <div className="overflow-hidden rounded-md border">
+            <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-left">
                   <tr>

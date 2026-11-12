@@ -135,7 +135,7 @@ function AdminStorefrontRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`/saas-admin/businesses/${row.businessId}`}
+              href="/saas-admin/businesses"
               className="font-semibold text-slate-900 hover:underline"
             >
               {row.name}

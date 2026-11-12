@@ -59,6 +59,14 @@ export function clearAccessToken(): void {
 export const SERVER_UNREACHABLE_MESSAGE =
   "Cannot reach the ezPos server. Make sure the backend is running (ezPosBackend: npm run dev).";
 
+/**
+ * Auth calls must never hang forever: a half-open keep-alive socket (e.g.
+ * the backend was restarted) would otherwise leave the app stuck on a
+ * loading screen with no way to recover. 10s is far above a healthy
+ * round-trip and far below a user's patience.
+ */
+const AUTH_FETCH_TIMEOUT_MS = 10_000;
+
 async function request<T>(
   path: string,
   init: RequestInit = {},
@@ -72,11 +80,23 @@ async function request<T>(
       ...init,
       headers,
       credentials: "include",
+      signal: AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS),
     });
   } catch {
-    // Network-level failure (backend down, CORS, DNS) — never an HTTP error.
-    // status 0 lets callers show the friendly offline message.
-    return { status: 0, body: null };
+    // Network-level failure (backend down, CORS, DNS, timeout) — never an
+    // HTTP error. One short retry absorbs dev-mode backend restarts (tsx
+    // watch refuses connections for a second or two while reloading).
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    try {
+      res = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        headers,
+        credentials: "include",
+        signal: AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS),
+      });
+    } catch {
+      return { status: 0, body: null };
+    }
   }
   const body = (await res.json().catch(() => null)) as T | null;
   return { status: res.status, body };
@@ -91,6 +111,7 @@ export async function refreshSession(): Promise<boolean> {
         const res = await fetch(`${API_BASE}/api/auth/refresh`, {
           method: "POST",
           credentials: "include",
+          signal: AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS),
         });
         if (!res.ok) return null;
         const body = (await res.json()) as { accessToken?: string };

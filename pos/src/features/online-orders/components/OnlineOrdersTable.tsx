@@ -27,7 +27,7 @@ export function OnlineOrdersTable({
     return (
       <div
         role="alert"
-        className="flex flex-col items-center gap-3 rounded-lg border border-rose-200 bg-rose-50 py-10 text-center"
+        className="flex flex-col items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 py-10 text-center"
       >
         <p className="text-sm font-medium text-rose-700">
           Unable to load online orders.

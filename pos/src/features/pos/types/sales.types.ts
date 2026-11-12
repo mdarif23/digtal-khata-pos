@@ -28,6 +28,9 @@ export interface SalesStoreType {
   returnedQuantity: number;
   returnReason: string | null;
   returnDisposition: "restock" | "inspection" | "damaged" | null;
+  /** Serial-tracked lines cannot be partially returned without selecting
+   *  serials — the return dialog keeps them whole. */
+  trackingType?: "none" | "batch" | "serial" | null;
 }
 export interface SaleRefundRequest {
   reason:
@@ -38,6 +41,12 @@ export interface SaleRefundRequest {
     | "other";
   notes?: string;
   disposition: "restock" | "inspection" | "damaged";
+  /** Per-line partial returns: how many units of each sale item come back.
+   *  Omitted = the full remaining quantity of every listed line (legacy
+   *  whole-sale behavior). Serial-tracked lines can't be partially returned
+   *  without a serial selection, so the UI keeps those lines whole. */
+  quantities?: { saleItemId: number; quantity: number }[];
+  refundMethod?: "cash" | "store_credit" | "original_payment";
 }
 export type CreateSaleResponse = {
   success: boolean;

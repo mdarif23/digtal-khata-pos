@@ -128,7 +128,7 @@ function LandedCostFeedbackNotice({
       </Button>
       {onDismiss && (
         <Button
-          nativeButton={false}
+          nativeButton
           size="icon"
           variant="ghost"
           aria-label="Dismiss landed cost notice"

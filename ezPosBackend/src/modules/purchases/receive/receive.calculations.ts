@@ -39,6 +39,8 @@ export function calculatePayments({
   totalAmount,
   receivedAmount,
   cancelledAmount = 0,
+  /** Invoice value credited back by purchase returns (audit FIN-8). */
+  returnedAmount = 0,
 }: {
   paidAmount: number;
   paymentAmount: number;
@@ -46,6 +48,8 @@ export function calculatePayments({
   receivedAmount: number;
   /** Invoice value written off by short-receiving cancellations (Phase 3). */
   cancelledAmount?: number;
+  /** Invoice value credited back by purchase returns (audit FIN-8). */
+  returnedAmount?: number;
 }): {
   updatedPaidAmount: number;
   receivedAmount: number;
@@ -57,15 +61,22 @@ export function calculatePayments({
   const newPaymentAmount = Number(paymentAmount ?? 0);
   // The effective invoice total nets out cancelled quantities — a payable
   // reduction must survive subsequent payments.
-  const effectiveTotal = Math.max(0, totalAmount - Math.max(0, cancelledAmount));
+  const effectiveTotal = Math.max(
+    0,
+    totalAmount - Math.max(0, cancelledAmount) - Math.max(0, returnedAmount),
+  );
 
   // You can only pay for goods that have actually been received, and never
-  // beyond the (cancellation-adjusted) invoice total.
-  const paymentLimit = Math.max(
-    0,
-    Math.min(
-      receivedAmount - currentPaidAmount,
-      effectiveTotal - currentPaidAmount,
+  // beyond the (cancellation-adjusted) invoice total. Rounded to the 2-dp
+  // money grid: float subtraction (345.66 − 25.32 = 320.33999999999996)
+  // must not reject a legitimate full-balance payment of ৳320.34.
+  const paymentLimit = roundMoney(
+    Math.max(
+      0,
+      Math.min(
+        receivedAmount - currentPaidAmount,
+        effectiveTotal - currentPaidAmount,
+      ),
     ),
   );
 
@@ -79,9 +90,11 @@ export function calculatePayments({
     );
   }
 
-  const updatedPaidAmount = currentPaidAmount + newPaymentAmount;
+  const updatedPaidAmount = roundMoney(currentPaidAmount + newPaymentAmount);
 
-  const updatedDueAmount = Math.max(0, effectiveTotal - updatedPaidAmount);
+  const updatedDueAmount = roundMoney(
+    Math.max(0, effectiveTotal - updatedPaidAmount),
+  );
 
   return {
     updatedPaidAmount,

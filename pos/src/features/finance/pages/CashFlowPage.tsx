@@ -108,9 +108,12 @@ export function CashFlowPage() {
           <CardContent>
             <ReportTrendChart
               data={series}
-              dataKey="net"
-              xAxisKey="date"
-              title="Net cash movement per day"
+              xKey="date"
+              lines={[
+                { key: "inflow", name: "Inflow", color: "#059669", isCurrency: true },
+                { key: "outflow", name: "Outflow", color: "#e11d48", isCurrency: true },
+                { key: "net", name: "Net", color: "#0284c7", isCurrency: true },
+              ]}
             />
           </CardContent>
         </Card>

@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { Link, useLocation, useNavigate } from "react-router";
 import {
   ArrowLeft,
@@ -15,6 +16,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
+import { formatQty } from "../utils/uom";
 import {
   LandedCostAdjustmentNotice,
   LandedCostReversalNotice,
@@ -70,11 +72,12 @@ function useDebouncedValue<T>(value: T, delay = 300): T {
 }
 
 export const PurchasesList = () => {
+  const location = useLocation();
   // Filters seed from the URL (Phase 8: they survive navigating away to a
   // purchase's receive/landed-cost pages and back) and every change is
   // written back with replace:true so history stays clean.
   const initialParams = useMemo(
-    () => new URLSearchParams(useLocation().search),
+    () => new URLSearchParams(location.search),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -112,7 +115,6 @@ export const PurchasesList = () => {
   const [dateFrom, setDateFrom] = useState(initialParams.get("from") ?? "");
   const [dateTo, setDateTo] = useState(initialParams.get("to") ?? "");
   const debouncedSearch = useDebouncedValue(search);
-  const location = useLocation();
   const navigate = useNavigate();
   // Landed-cost feedback handed over from a just-completed receive/return.
   const noticeState = (location.state as PurchaseNoticeState) ?? null;
@@ -418,7 +420,7 @@ export const PurchasesList = () => {
               role="alert"
               className="m-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
             >
-              {list.error.message}
+              {getErrorMessage(list.error)}
             </p>
           )}
 
@@ -478,7 +480,7 @@ export const PurchasesList = () => {
                       </select>
                     </label>
                     <Button
-                      nativeButton={false}
+                      nativeButton
                       size="sm"
                       variant="outline"
                       disabled={pagination.page <= 1 || list.isFetching}
@@ -487,7 +489,7 @@ export const PurchasesList = () => {
                       <ArrowLeft /> Previous
                     </Button>
                     <Button
-                      nativeButton={false}
+                      nativeButton
                       size="sm"
                       variant="outline"
                       disabled={
@@ -563,13 +565,6 @@ function SummaryCard({
   );
 }
 
-const SORTABLE_COLUMNS = [
-  { column: "purchaseOrderNumber" as const, label: "Order" },
-  { column: "purchaseDate" as const, label: "Date" },
-  { column: "totalAmount" as const, label: "Total" },
-  { column: "dueAmount" as const, label: "Due" },
-];
-
 const PurchaseOrderTable = memo(function PurchaseOrderTable({
   purchases,
   sortBy,
@@ -590,23 +585,46 @@ const PurchaseOrderTable = memo(function PurchaseOrderTable({
       <table className="w-full min-w-[1120px] text-left text-sm">
         <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
           <tr>
-            {SORTABLE_COLUMNS.map((entry) => (
-              <SortableHeader
-                key={entry.column}
-                column={entry.column}
-                label={entry.label}
-                sortBy={sortBy}
-                sortOrder={sortOrder}
-                onSort={onSort}
-                align={entry.column === "purchaseOrderNumber" ? "left" : "right"}
-              />
-            ))}
+            {/* Header order MUST match PurchaseOrderRow's <td> order — a
+                mismatch silently labels the wrong columns. */}
+            <SortableHeader
+              column="purchaseOrderNumber"
+              label="Order"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={onSort}
+              align="left"
+            />
             <th className="px-4 py-3 font-medium">Supplier</th>
+            <SortableHeader
+              column="purchaseDate"
+              label="Date"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={onSort}
+              align="left"
+            />
             <th className="px-4 py-3 text-right font-medium">Lines</th>
             <th className="px-4 py-3 text-right font-medium">
               Outstanding qty
             </th>
+            <SortableHeader
+              column="totalAmount"
+              label="Total"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={onSort}
+              align="right"
+            />
             <th className="px-4 py-3 text-right font-medium">Paid</th>
+            <SortableHeader
+              column="dueAmount"
+              label="Due"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={onSort}
+              align="right"
+            />
             <th className="px-4 py-3 font-medium">Payment</th>
             <th className="px-4 py-3 font-medium">Receiving</th>
             <th className="px-4 py-3 font-medium">Return status</th>
@@ -711,7 +729,7 @@ const PurchaseOrderRow = memo(function PurchaseOrderRow({
       </td>
       <td className="px-4 py-4 text-right">{purchase.totalItems}</td>
       <td className="px-4 py-4 text-right">
-        {purchase.outstandingQuantity}
+        {formatQty(purchase.outstandingQuantity)}
         {purchase.fullyCancelled && (
           <span className="ml-1 text-xs text-muted-foreground">
             (cancelled)

@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/schema/index.js";
 import {
   subscriptionPlans,
@@ -59,7 +59,12 @@ export async function getEntitlements(
   businessId: number,
   tx: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0] = db,
 ): Promise<Entitlements> {
-  const [row] = await tx
+  // Resolve the OPEN subscription; when none exists (expired trial, canceled
+  // plan), fall back to the LATEST subscription in any status so the portal
+  // reports the true state ("Ended — read-only") instead of pretending the
+  // business has no plan at all. computeSubscriptionState maps non-open
+  // statuses to read-only, so this grants nothing extra.
+  const [open] = await tx
     .select({
       subscriptionId: subscriptions.id,
       status: subscriptions.status,
@@ -84,6 +89,32 @@ export async function getEntitlements(
       ),
     )
     .limit(1);
+
+  const row =
+    open ??
+    (
+      await tx
+        .select({
+          subscriptionId: subscriptions.id,
+          status: subscriptions.status,
+          currentPeriodStart: subscriptions.currentPeriodStart,
+          currentPeriodEnd: subscriptions.currentPeriodEnd,
+          cancelAtPeriodEnd: subscriptions.cancelAtPeriodEnd,
+          planId: subscriptionPlans.id,
+          planName: subscriptionPlans.name,
+          planSlug: subscriptionPlans.slug,
+          limits: subscriptionPlans.limits,
+          features: subscriptionPlans.features,
+        })
+        .from(subscriptions)
+        .innerJoin(
+          subscriptionPlans,
+          eq(subscriptionPlans.id, subscriptions.planId),
+        )
+        .where(eq(subscriptions.businessId, businessId))
+        .orderBy(desc(subscriptions.id))
+        .limit(1)
+    )[0];
 
   if (!row) {
     return { plan: null, subscription: null };

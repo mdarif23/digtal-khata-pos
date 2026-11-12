@@ -390,7 +390,7 @@ export function StockAdjustment() {
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="text-sm font-medium text-primary">Inventory</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
             Stock adjustment
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">

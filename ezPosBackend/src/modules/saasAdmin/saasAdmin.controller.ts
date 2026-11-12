@@ -24,6 +24,18 @@ export async function getOverview(_req: Request, res: Response) {
   }
 }
 
+export async function getAuditLogs(req: Request, res: Response) {
+  try {
+    const parsed = Number.parseInt(String(req.query.limit ?? ""), 10);
+    const limit = Number.isInteger(parsed) && parsed > 0 ? parsed : 100;
+    res
+      .status(200)
+      .json({ success: true, data: await saasAdminService.getAuditLogs(limit) });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to load audit logs right now.");
+  }
+}
+
 export async function getBusinesses(req: Request, res: Response) {
   try {
     res.status(200).json({

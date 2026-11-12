@@ -16,7 +16,7 @@ import {
   type ReceiveItemsFormValues,
 } from "../schemas/receiveItem.schema";
 import { usePurchasesStore } from "../usePurchaseStore";
-import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
+import { formatCurrency, roundMoney } from "@/features/purchases/utils/formatCurrency";
 import { useReceivePurchase } from "../hooks/useReceivePurchase";
 import {
   outstandingOf,
@@ -256,29 +256,39 @@ export const ReceiveItems = () => {
     form.setValue(`items.${index}.batches`, [], { shouldDirty: true });
   };
 
-  const receivingTotal = watchedItems.reduce(
-    (sum, item) =>
-      sum + (Number(item.receiveNow) || 0) * (Number(item.unitCost) || 0),
-    0,
+  const receivingTotal = roundMoney(
+    watchedItems.reduce(
+      (sum, item) =>
+        sum + (Number(item.receiveNow) || 0) * (Number(item.unitCost) || 0),
+      0,
+    ),
   );
   const hasItemsToReceive = watchedItems.some(
     (item) => Number(item.receiveNow) > 0,
   );
   // Client-side estimate of the payable limit (order cost × received units).
   // The backend recomputes this from the actual batch costs and is
-  // authoritative — a rejected amount surfaces as a 400 toast.
-  const previouslyReceivedValue = receiveItems.reduce(
-    (sum, item) =>
-      sum + Number(item.receivedQuantity || 0) * Number(item.unitCost || 0),
-    0,
+  // authoritative — a rejected amount surfaces as a 400 toast. Rounded to
+  // the 2-dp money grid: raw float sums land just below the real balance
+  // (320.33999999999997) and clamp the final ৳0.34 payment.
+  const previouslyReceivedValue = roundMoney(
+    receiveItems.reduce(
+      (sum, item) =>
+        sum + Number(item.receivedQuantity || 0) * Number(item.unitCost || 0),
+      0,
+    ),
   );
-  const paymentLimit = Math.max(
-    0,
-    Math.min(dueAmount, previouslyReceivedValue + receivingTotal - paidAmount),
+  const paymentLimit = roundMoney(
+    Math.max(
+      0,
+      Math.min(dueAmount, previouslyReceivedValue + receivingTotal - paidAmount),
+    ),
   );
 
   useEffect(() => {
-    if (Number(paymentAmount) > paymentLimit) {
+    // Tolerance of half a cent so float noise never truncates a legitimate
+    // full-balance payment; the stored value stays on the money grid.
+    if (Number(paymentAmount) > paymentLimit + 0.005) {
       form.setValue("paymentAmount", paymentLimit, {
         shouldValidate: true,
         shouldDirty: true,
@@ -589,7 +599,6 @@ export const ReceiveItems = () => {
             receivingTotal={receivingTotal}
             paidAmount={paidAmount}
             dueAmount={dueAmount}
-            formatCurrency={formatCurrency}
           />
 
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">

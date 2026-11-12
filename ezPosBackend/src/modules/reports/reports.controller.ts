@@ -32,7 +32,7 @@ export async function getSalesSummary(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -47,7 +47,7 @@ export async function getSalesByInvoice(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -62,7 +62,7 @@ export async function getSaleRefundItems(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -77,7 +77,7 @@ export async function getPurchaseItems(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -92,7 +92,7 @@ export async function getProductSales(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -107,7 +107,7 @@ export async function getCustomerSales(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -122,7 +122,7 @@ export async function getPaymentMethods(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -137,7 +137,7 @@ export async function getSaleRefunds(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -152,7 +152,7 @@ export async function getProfit(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -167,7 +167,7 @@ export async function getExpenses(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -182,7 +182,7 @@ export async function getCustomerReceivables(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -193,7 +193,7 @@ export async function getStock(req: Request, res: Response) {
     const data = await reportsService.getStockReport(getBusinessId(req), params, locationId);
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -208,7 +208,7 @@ export async function getStockMovements(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -223,7 +223,7 @@ export async function getBatchExpiry(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -238,7 +238,7 @@ export async function getPurchaseSummary(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -251,7 +251,7 @@ export async function getSupplierPayables(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -266,7 +266,7 @@ export async function getHourlySales(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -281,7 +281,7 @@ export async function getTaxReconciliation(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -296,7 +296,7 @@ export async function getInventoryShrinkage(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -311,7 +311,7 @@ export async function getRegisterClose(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -325,12 +325,8 @@ export async function getLocationComparison(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
-}
-
-function sendSafe(err: unknown, res: Response) {
-  sendSafeError(res, err, "Unable to generate this report right now.");
 }
 
 export async function getInventoryAging(req: Request, res: Response) {
@@ -342,7 +338,7 @@ export async function getInventoryAging(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -358,7 +354,7 @@ export async function getDeadStock(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -373,7 +369,7 @@ export async function getChannelPerformance(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -386,7 +382,7 @@ export async function getCustomerLifetimeValue(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -397,7 +393,7 @@ export async function getCustomerRetention(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -412,7 +408,7 @@ export async function getStaffPerformance(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -425,7 +421,7 @@ export async function getSalesForecast(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -442,7 +438,7 @@ export async function getGroupProfitability(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }
 
@@ -457,6 +453,6 @@ export async function getPromotionPerformance(req: Request, res: Response) {
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
-    sendSafe(err, res);
+    sendSafeError(res, err, "Unable to load the report.");
   }
 }

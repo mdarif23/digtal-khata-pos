@@ -57,6 +57,27 @@ export async function audit(
   });
 }
 
+/** Latest admin-panel actions for the Audit logs page (newest first). */
+export async function getAuditLogs(limit = 100) {
+  const capped = Math.min(Math.max(limit, 1), 500);
+  return db
+    .select({
+      id: saasAdminAudit.id,
+      action: saasAdminAudit.action,
+      entityType: saasAdminAudit.entityType,
+      entityId: saasAdminAudit.entityId,
+      metadata: saasAdminAudit.metadata,
+      createdAt: saasAdminAudit.createdAt,
+      adminUserId: saasAdminAudit.adminUserId,
+      adminEmail: users.email,
+      adminName: users.fullName,
+    })
+    .from(saasAdminAudit)
+    .innerJoin(users, eq(users.id, saasAdminAudit.adminUserId))
+    .orderBy(desc(saasAdminAudit.id))
+    .limit(capped);
+}
+
 // ---------------------------------------------------------------------------
 // Overview metrics
 // ---------------------------------------------------------------------------
