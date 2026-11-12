@@ -70,6 +70,14 @@ export const productImportSessions = pgTable(
     createdBy: integer("created_by")
       .notNull()
       .references(() => users.id),
+    /**
+     * Phase 1: which entity this session imports — 'products' (default) or
+     * the contact imports ('customers' | 'suppliers'). The one-running-per-
+     * business index became per business+entity (migration 0066).
+     */
+    entityType: varchar("entity_type", { length: 20 })
+      .notNull()
+      .default("products"),
     filename: varchar("filename", { length: 255 }).notNull(),
     fileHash: varchar("file_hash", { length: 64 }).notNull(),
     fileSize: integer("file_size").notNull(),

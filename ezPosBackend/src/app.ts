@@ -63,6 +63,8 @@ import internalRouter from "./modules/internal/internal.routes.js";
 import financeRouter from "./modules/finance/finance.routes.js";
 import managerApprovalRouter from "./modules/managerApproval/managerApproval.routes.js";
 import auditLogRouter from "./modules/auditLog/auditLog.routes.js";
+import dataImportRouter from "./modules/dataImport/contactImport.routes.js";
+import exportsRouter from "./modules/exports/exports.routes.js";
 import pricingRouter from "./modules/pricing/pricing.routes.js";
 import customerGroupsRouter from "./modules/customerGroups/customerGroups.routes.js";
 import promotionsApiRouter from "./modules/pricing/promotions.routes.js";
@@ -191,6 +193,8 @@ export function buildApp() {
   app.use("/", financeRouter);
   app.use("/", managerApprovalRouter);
   app.use("/", auditLogRouter);
+  app.use("/", dataImportRouter);
+  app.use("/", exportsRouter);
   app.use("/", pricingRouter);
   app.use("/", customerGroupsRouter);
   app.use("/", promotionsApiRouter);

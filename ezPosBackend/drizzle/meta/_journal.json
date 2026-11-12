@@ -461,6 +461,13 @@
       "when": 1794500014000,
       "tag": "0065_phase1_operational_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794500015000,
+      "tag": "0066_import_entity_type",
+      "breakpoints": true
     }
   ]
 }
