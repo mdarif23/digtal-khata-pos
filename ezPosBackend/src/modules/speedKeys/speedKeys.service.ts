@@ -92,7 +92,7 @@ export async function saveLayout(
   scopeId: number,
   tiles: SpeedKeyTile[],
 ): Promise<SpeedKeyTile[]> {
-  validateTiles(businessId, tiles);
+  await validateTiles(businessId, tiles);
   const normalized = tiles
     .map((tile, idx) => ({ ...tile, sortOrder: tile.sortOrder ?? idx }))
     .sort((a, b) => a.sortOrder - b.sortOrder);
