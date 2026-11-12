@@ -47,6 +47,9 @@ import { SupplierDetailsPage } from "@/features/procurement/pages/SupplierDetail
 import { ReorderDashboardPage } from "@/features/procurement/pages/ReorderDashboardPage";
 import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
 import { AuditLogsPage } from "@/features/audit/AuditLogsPage";
+import { LoyaltySettingsPage } from "@/features/loyalty/LoyaltySettingsPage";
+import { QuotationsPage } from "@/features/quotations/QuotationsPage";
+import { CommsSettingsPage } from "@/features/comms/CommsSettingsPage";
 import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
@@ -412,6 +415,30 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="promotions.view">
             <CouponsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/loyalty-settings",
+        element: (
+          <RequirePermission permission="loyalty.manage">
+            <LoyaltySettingsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/quotations",
+        element: (
+          <RequirePermission permission="quotations.view">
+            <QuotationsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/comms-settings",
+        element: (
+          <RequirePermission permission="comms.manage">
+            <CommsSettingsPage />
           </RequirePermission>
         ),
       },

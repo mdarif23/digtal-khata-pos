@@ -38,6 +38,12 @@ const MENU_ITEMS: MenuItem[] = [
   { label: "Purchases Order", icon: MdManageAccounts, path: "/purchases" },
   { label: "Purchases List", icon: MdManageAccounts, path: "/purchases-list" },
   {
+    label: "Quotations",
+    icon: RiFileList2Fill,
+    path: "/quotations",
+    anyPermission: ["quotations.view"],
+  },
+  {
     label: "Audit Log",
     icon: RiFileList2Fill,
     path: "/audit-logs",
