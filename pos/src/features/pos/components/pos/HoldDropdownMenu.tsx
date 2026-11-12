@@ -13,6 +13,7 @@ import {
   useHoldCartStore,
 } from "@/features/pos/stores/useCartStore";
 import { HeldItemsDialog } from "./HeldItemsDialog";
+import { useHotkeyAction } from "../../hotkeys/hotkeyBus";
 
 export function HoldDropdownMenu() {
   const [open, setOpen] = useState(false);
@@ -22,6 +23,16 @@ export function HoldDropdownMenu() {
   const resetCart = useCartStore((state) => state.resetCart);
   const cart = useCartStore((state) => state.cart);
   const { holdCart } = useHoldCartStore();
+
+  // Phase 3 hotkeys: F2 hold (same guard as the menu item), F3 retrieve.
+  useHotkeyAction("hold-sale", () => {
+    if (cart.length === 0) return;
+    void holdCart(cart).then((held) => {
+      if (held) resetCart();
+    });
+  });
+  useHotkeyAction("retrieve-held", () => setOpen(true));
+
   return (
     <>
       <DropdownMenu>

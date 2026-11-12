@@ -12,6 +12,9 @@ import {
   CreateSalePayload,
   createSalePayloadSchema,
 } from "../schemas/cart.schema.js";
+import { useHotkeyAction } from "../hotkeys/hotkeyBus";
+import { PosHotkeyManager } from "../hotkeys/PosHotkeyManager";
+import { usePrintReceipt } from "../hooks/usePrintReceipt";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
 import {
   Card,
@@ -88,6 +91,19 @@ function Pos() {
     },
   });
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+
+  // Phase 3 hotkeys: F6 payment, F7 reprint last receipt, F5 customer
+  // search focus. The manager component renders the ? cheatsheet.
+  useHotkeyAction("payment", () => setIsPaymentDialogOpen(true));
+  useHotkeyAction("customer", () => {
+    document
+      .querySelector<HTMLElement>('[data-hotkey-target="customer-search"]')
+      ?.focus();
+  });
+  const { printReceipt } = usePrintReceipt();
+  useHotkeyAction("print-receipt", () => {
+    if (lastReceipt) void printReceipt(lastReceipt);
+  });
 
   async function onSubmit(data: CartSchemaType) {
     // Claim the checkout key before anything else: every retry of THIS
@@ -254,6 +270,7 @@ function Pos() {
             <NotificationBell revision={notificationRevision} />
             <SyncStatusIndicator />
             <RegisterDialog />
+            <PosHotkeyManager />
           </div>
         </div>
         <section className="flex h-[60dvh] min-h-[420px] shrink-0 flex-col overflow-hidden rounded-xl border bg-background shadow-sm lg:h-full lg:min-h-0 lg:shrink">

@@ -309,6 +309,9 @@ function CartItemRow({ item }: { item: CartItem }) {
   const unitPrice = item.unitPrice ?? Number(variant.sellingPrice);
   const line = getLinePricing(unitPrice, quantity, item.discount);
   const isSerial = item.trackingType === "serial";
+  const [discountSignal, setDiscountSignal] = useState(0);
+  // Phase 3 hotkey: F4 opens the discount dialog.
+  useHotkeyAction("discount", () => setDiscountSignal((n) => n + 1));
   const [isSerialOpen, setIsSerialOpen] = useState(false);
 
   // Sell units for the switcher chip — lazily fetched per cart line and
@@ -511,7 +514,7 @@ export function CartCalculation({
         </div>
         <div className="col-span-2">
           {/* discount is applied on the amount after item discounts */}
-          <DiscountModal form={form} subTotal={totals.itemsTotal} />
+          <DiscountModal form={form} subTotal={totals.itemsTotal} openSignal={discountSignal} />
         </div>
         {/* full-width row: a 1/6 cell clipped the placeholder text */}
         <div className="col-span-6">
