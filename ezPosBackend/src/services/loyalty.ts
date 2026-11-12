@@ -439,10 +439,9 @@ async function insertLedgerRow(
     note: string;
   },
 ): Promise<void> {
-  const [balanceRow] = await tx
-    .select({
-      balance: sql<string>`COALESCE(SUM(${loyaltyLedger.points}), 0)`,
-    })
+  // Row-level lock + JS sum — FOR UPDATE cannot wrap an aggregate.
+  const lockRows = await tx
+    .select({ points: loyaltyLedger.points })
     .from(loyaltyLedger)
     .where(
       and(
@@ -451,7 +450,10 @@ async function insertLedgerRow(
       ),
     )
     .for("update");
-  const balanceBefore = Number(balanceRow?.balance ?? 0);
+  const balanceBefore = lockRows.reduce(
+    (sum, row) => sum + Number(row.points),
+    0,
+  );
   await tx.insert(loyaltyLedger).values({
     businessId: input.businessId,
     customerId: input.customerId,
@@ -539,7 +541,9 @@ export async function earnLoyaltyPointsInTx(
     (input.meetsMinimum ?? base >= rule.minTransactionAmount);
   const ruleMultiplier = ruleActive ? rule.multiplier : 1;
 
-  // Tier multiplier from the CURRENT tier (state read inside the tx).
+  // Tier multiplier: re-evaluate first so tier changes made between sales
+  // (new tiers, edited thresholds) apply immediately at earn time.
+  await evaluateLoyaltyTierInTx(tx, input.businessId, input.customerId);
   const [state] = await tx
     .select({ tierId: customerLoyaltyState.tierId })
     .from(customerLoyaltyState)
@@ -895,6 +899,25 @@ export async function adjustLoyaltyPointsInTx(
     redeemedDelta: input.points < 0 ? -input.points : 0,
   });
   return input.points;
+}
+
+/**
+ * Records a customer sale's spend toward tier qualification — called for
+ * EVERY completed customer sale (not only earning ones): tiers qualify on
+ * total purchases. Re-evaluates the tier transactionally. Refunds do not
+ * reduce lifetime spend in v1 (documented).
+ */
+export async function recordLoyaltySpendInTx(
+  tx: Tx,
+  input: { businessId: number; customerId: number; amount: number },
+): Promise<void> {
+  if (input.amount <= 0) return;
+  await upsertStateInTx(tx, {
+    businessId: input.businessId,
+    customerId: input.customerId,
+    spendDelta: roundMoney(input.amount),
+  });
+  await evaluateLoyaltyTierInTx(tx, input.businessId, input.customerId);
 }
 
 /**

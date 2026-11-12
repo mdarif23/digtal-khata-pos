@@ -75,6 +75,7 @@ import {
   computeEligibleEarnBaseInTx,
   earnLoyaltyPointsInTx,
   getEarnRule,
+  recordLoyaltySpendInTx,
   redeemLoyaltyPointsInTx,
   restoreRedeemedPointsInTx,
   reverseLoyaltyPointsInTx,
@@ -1702,6 +1703,16 @@ export async function createSale(
           meetsMinimum: earnBase >= rule.minTransactionAmount,
         });
       }
+    }
+
+    // Phase 2A: every customer sale counts toward tier-qualifying spend
+    // (independent of whether points were earned on it).
+    if (customerId !== null) {
+      await recordLoyaltySpendInTx(tx, {
+        businessId,
+        customerId,
+        amount: Number(newSale.finalTotal ?? 0),
+      });
     }
 
     // Finance & Growth: post the sale to the double-entry ledger (no-op
