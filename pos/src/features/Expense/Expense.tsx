@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { exportToCsv } from "@/features/reports/utils/reportUtils";
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import { useSessionStore } from "@/auth/sessionStore";
 import { ExpenseDialog } from "./components/ExpenseDialog";
 import { ExpenseCategoriesDialog } from "./components/ExpenseCategoriesDialog";
@@ -162,8 +163,8 @@ export function Expense() {
     try {
       const rows = await exportMutation.mutateAsync(queryFilters);
       exportExpenseRows(rows);
-    } catch {
-      // The mutation error surfaces via the toast convention below.
+    } catch (exportError: unknown) {
+      setActionError(getErrorMessage(exportError));
     } finally {
       setExporting(false);
     }

@@ -259,9 +259,9 @@ export function LocationsPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 lg:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Locations</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Locations</h1>
           <p className="text-sm text-muted-foreground">
             Stores, warehouses and outlets. One product catalog, independent
             stock per location.

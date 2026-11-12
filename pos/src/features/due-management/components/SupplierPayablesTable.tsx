@@ -89,7 +89,7 @@ function createColumns(
           {row.original.isOverdue ? (
             <Badge
               variant="outline"
-              className="border-red-200 bg-red-50 text-red-700"
+              className="border-destructive/30 bg-destructive/5 text-red-700"
             >
               Overdue
             </Badge>

@@ -222,7 +222,7 @@ export function CouponsPage() {
           ) : coupons.length === 0 ? (
             <p className="text-sm text-muted-foreground">No coupons yet.</p>
           ) : (
-            <div className="overflow-hidden rounded-md border">
+            <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-left">
                   <tr>

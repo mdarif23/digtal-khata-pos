@@ -70,7 +70,7 @@ export function PriceHistoryPage() {
               No price changes recorded yet.
             </p>
           ) : (
-            <div className="overflow-hidden rounded-md border">
+            <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-left">
                   <tr>

@@ -214,7 +214,7 @@ export function SalesDataTable({
       <div className="flex justify-end">
         <DataTableViewOptions table={table} />
       </div>
-      <div className="overflow-hidden rounded-md border">
+      <div className="overflow-x-auto rounded-md border">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
