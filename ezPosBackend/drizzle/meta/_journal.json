@@ -475,6 +475,13 @@
       "when": 1794500016000,
       "tag": "0067_loyalty_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794500017000,
+      "tag": "0068_quotations",
+      "breakpoints": true
     }
   ]
 }

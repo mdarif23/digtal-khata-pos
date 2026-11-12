@@ -9,6 +9,7 @@ import { runBackupSweeps } from "../modules/backups/backups.service.js";
 import { runBudgetAlertSweeps } from "../modules/expenses/expenses.budgets.alerts.js";
 import { runAssetDepreciationSweeps } from "../modules/finance/finance.tools.service.js";
 import { runLoyaltyExpirySweep } from "../services/loyalty.js";
+import { runQuotationExpirySweep } from "../modules/quotations/quotations.service.js";
 
 /**
  * In-process scheduler: sweeps subscription lifecycle jobs on a fixed
@@ -38,6 +39,7 @@ export function startScheduler(): void {
       runBudgetAlertSweeps(),
       runAssetDepreciationSweeps(),
       runLoyaltyExpirySweep(null),
+      runQuotationExpirySweep(),
     ])
       .then(([sub, commerce, integrations, deliveries, expenses, backups, warranty]) => {
         const total =
