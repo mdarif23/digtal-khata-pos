@@ -81,7 +81,7 @@ export function WarrantyRegistryPage() {
   const canCreateClaim = hasPermission("warranty.claim.create");
 
   const columns = useMemo(
-    () => [
+    () => columnHelper.columns([
       columnHelper.accessor("warrantyNumber", {
         id: "warrantyNumber",
         header: "Warranty #",
@@ -217,7 +217,7 @@ export function WarrantyRegistryPage() {
           </div>
         ),
       }),
-    ],
+    ]),
     [canCreateClaim],
   );
 
@@ -247,7 +247,7 @@ export function WarrantyRegistryPage() {
 
             <Select
               value={status}
-              onValueChange={(value) => setStatus(value)}
+              onValueChange={(value) => setStatus(value ?? "all")}
             >
               <SelectTrigger className="lg:w-44" aria-label="Filter by status">
                 <SelectValue />

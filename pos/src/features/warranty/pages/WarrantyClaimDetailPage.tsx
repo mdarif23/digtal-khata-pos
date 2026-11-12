@@ -69,7 +69,7 @@ export function WarrantyClaimDetailPage() {
   }, [query.isError, query.error]);
 
   const siblingColumns = useMemo(
-    () => [
+    () => columnHelper.columns([
       columnHelper.accessor("claimNumber", {
         id: "claimNumber",
         header: "Claim #",
@@ -115,7 +115,7 @@ export function WarrantyClaimDetailPage() {
           </span>
         ),
       }),
-    ],
+    ]),
     [claimId],
   );
 

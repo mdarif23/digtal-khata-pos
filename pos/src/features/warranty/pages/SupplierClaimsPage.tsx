@@ -62,7 +62,7 @@ export function SupplierClaimsPage() {
   }, [debouncedSearch, status, pageSize]);
 
   const columns = useMemo(
-    () => [
+    () => columnHelper.columns([
       columnHelper.accessor("claimNumber", {
         id: "claimNumber",
         header: "Claim #",
@@ -146,7 +146,7 @@ export function SupplierClaimsPage() {
           </Button>
         ),
       }),
-    ],
+    ]),
     [],
   );
 
@@ -174,7 +174,7 @@ export function SupplierClaimsPage() {
                 className="pl-8"
               />
             </div>
-            <Select value={status} onValueChange={(value) => setStatus(value)}>
+            <Select value={status} onValueChange={(value) => setStatus(value ?? "all")}>
               <SelectTrigger className="lg:w-52" aria-label="Filter by status">
                 <SelectValue />
               </SelectTrigger>

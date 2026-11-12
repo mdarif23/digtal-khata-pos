@@ -76,7 +76,7 @@ export function SupplierWarrantiesPage() {
   }, [debouncedSearch, status, pageSize]);
 
   const columns = useMemo(
-    () => [
+    () => columnHelper.columns([
       columnHelper.display({
         id: "supplier",
         header: "Supplier",
@@ -154,7 +154,7 @@ export function SupplierWarrantiesPage() {
             <span className="text-slate-400">—</span>
           ),
       }),
-    ],
+    ]),
     [],
   );
 
@@ -190,7 +190,7 @@ export function SupplierWarrantiesPage() {
                 className="pl-8"
               />
             </div>
-            <Select value={status} onValueChange={(value) => setStatus(value)}>
+            <Select value={status} onValueChange={(value) => setStatus(value ?? "all")}>
               <SelectTrigger className="lg:w-44" aria-label="Filter by status">
                 <SelectValue />
               </SelectTrigger>

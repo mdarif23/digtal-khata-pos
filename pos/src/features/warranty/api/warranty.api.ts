@@ -359,9 +359,9 @@ export function getWarrantyExpiryReportApi(filters: WarrantyExpiryReportFilters)
 }
 
 export function getWarrantyClaimsReportApi(filters: {
-  dateFrom?: string;
-  dateTo?: string;
-  locationId?: number;
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
+  locationId?: number | undefined;
 }) {
   return api.get<Envelope<WarrantyClaimsReportData>>(
     "/reports/warranty/claims",

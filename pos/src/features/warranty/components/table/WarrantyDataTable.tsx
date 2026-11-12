@@ -1,6 +1,7 @@
 import {
   useTable,
   type ColumnDef,
+  type RowData,
 } from "@tanstack/react-table";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -14,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { warrantyTableFeatures, type WarrantyTableFeatures } from "./warranty-table-features";
 
-interface WarrantyDataTableProps<TData> {
+interface WarrantyDataTableProps<TData extends RowData> {
   columns: ColumnDef<WarrantyTableFeatures, TData>[];
   data: TData[];
   loading?: boolean | undefined;
@@ -37,7 +38,7 @@ const PAGE_SIZES = [10, 20, 25, 50];
  * Sorting/filtering happens on the backend — the table renders exactly the
  * rows the current query returned.
  */
-export function WarrantyDataTable<TData>({
+export function WarrantyDataTable<TData extends RowData>({
   columns,
   data,
   loading = false,
@@ -128,7 +129,7 @@ export function WarrantyDataTable<TData>({
                   key={row.id}
                   className="hover:bg-slate-50/50 transition-colors border-b border-slate-100 last:border-0"
                 >
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getAllCells().map((cell) => (
                     <TableCell key={cell.id} className="text-sm text-slate-700">
                       <table.FlexRender cell={cell} />
                     </TableCell>

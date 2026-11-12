@@ -71,7 +71,7 @@ export function WarrantyClaimsPage() {
   }, [debouncedSearch, status, claimType, pageSize]);
 
   const columns = useMemo(
-    () => [
+    () => columnHelper.columns([
       columnHelper.accessor("claimNumber", {
         id: "claimNumber",
         header: "Claim #",
@@ -175,7 +175,7 @@ export function WarrantyClaimsPage() {
           </Button>
         ),
       }),
-    ],
+    ]),
     [],
   );
 
@@ -238,7 +238,7 @@ export function WarrantyClaimsPage() {
                 className="pl-8"
               />
             </div>
-            <Select value={claimType} onValueChange={(value) => setClaimType(value)}>
+            <Select value={claimType} onValueChange={(value) => setClaimType(value ?? "all")}>
               <SelectTrigger className="lg:w-48" aria-label="Filter by claim type">
                 <SelectValue />
               </SelectTrigger>

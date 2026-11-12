@@ -165,31 +165,31 @@ export function ClaimActionDialog({
   ): Promise<boolean> => {
     try {
       switch (key) {
-        case "under_inspection":
+        case "under_inspection": {
+          const inspectionNotes = optional(values.inspectionNotes);
           await inspect.mutateAsync({
             claimId,
             body: {
-              ...(optional(values.inspectionNotes)
-                ? { inspectionNotes: optional(values.inspectionNotes) }
-                : {}),
+              ...(inspectionNotes ? { inspectionNotes } : {}),
               ...(values.receivedDate
                 ? { receivedDate: values.receivedDate }
                 : {}),
             },
           });
           return true;
+        }
         case "approved": {
+          const inspectionNotes = optional(values.inspectionNotes);
           const assignedUserId = values.assignedUserId
             ? Number(values.assignedUserId)
             : undefined;
+          const note = optional(values.note);
           await approve.mutateAsync({
             claimId,
             body: {
-              ...(optional(values.inspectionNotes)
-                ? { inspectionNotes: optional(values.inspectionNotes) }
-                : {}),
+              ...(inspectionNotes ? { inspectionNotes } : {}),
               ...(assignedUserId !== undefined ? { assignedUserId } : {}),
-              ...(optional(values.note) ? { note: optional(values.note) } : {}),
+              ...(note ? { note } : {}),
             },
           });
           return true;
@@ -207,27 +207,26 @@ export function ClaimActionDialog({
         }
         case "repairing":
         case "waiting_parts": {
+          const repairDescription = optional(values.repairDescription);
+          const partsUsed = optional(values.partsUsed);
           const repairCost = values.repairCost
             ? Number(values.repairCost)
             : undefined;
           const assignedUserId = values.assignedUserId
             ? Number(values.assignedUserId)
             : undefined;
+          const note = optional(values.note);
           await repair.mutateAsync({
             claimId,
             body: {
               status: key,
-              ...(optional(values.repairDescription)
-                ? { repairDescription: optional(values.repairDescription) }
-                : {}),
-              ...(optional(values.partsUsed)
-                ? { partsUsed: optional(values.partsUsed) }
-                : {}),
+              ...(repairDescription ? { repairDescription } : {}),
+              ...(partsUsed ? { partsUsed } : {}),
               ...(repairCost !== undefined && Number.isFinite(repairCost)
                 ? { repairCost }
                 : {}),
               ...(assignedUserId !== undefined ? { assignedUserId } : {}),
-              ...(optional(values.note) ? { note: optional(values.note) } : {}),
+              ...(note ? { note } : {}),
             },
           });
           return true;
@@ -243,18 +242,16 @@ export function ClaimActionDialog({
             });
             return false;
           }
+          const replacementSerialNumber = optional(
+            values.replacementSerialNumber,
+          );
+          const note = optional(values.note);
           await replace.mutateAsync({
             claimId,
             body: {
               replacementVariantId: variantId,
-              ...(optional(values.replacementSerialNumber)
-                ? {
-                    replacementSerialNumber: optional(
-                      values.replacementSerialNumber,
-                    ),
-                  }
-                : {}),
-              ...(optional(values.note) ? { note: optional(values.note) } : {}),
+              ...(replacementSerialNumber ? { replacementSerialNumber } : {}),
+              ...(note ? { note } : {}),
             },
           });
           return true;

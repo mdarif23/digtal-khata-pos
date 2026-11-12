@@ -18,6 +18,7 @@ import {
   PackageOpen,
   Receipt,
   RotateCcw,
+  ShieldCheck,
   ShoppingCart,
   TrendingUp,
   Truck,
@@ -58,6 +59,8 @@ import { SupplierPayablesReport } from "./SupplierPayablesReport";
 import { LocationComparisonReport } from "./LocationComparisonReport";
 import { RegisterSessionsReport } from "./RegisterSessionsReport";
 import { OnlineStoreProfitabilityReport } from "./OnlineStoreProfitabilityReport";
+import { WarrantyExpiryReport } from "@/features/warranty/components/reports/WarrantyExpiryReport";
+import { WarrantyClaimsReport } from "@/features/warranty/components/reports/WarrantyClaimsReport";
 
 type ReportTabId =
   // Sales
@@ -95,7 +98,10 @@ type ReportTabId =
   // Purchases
   | "purchases-summary"
   | "purchases-items"
-  | "supplier-payables";
+  | "supplier-payables"
+  // Warranty
+  | "warranty-expiry"
+  | "warranty-claims";
 
 interface ReportGroup {
   name: string;
@@ -278,6 +284,24 @@ const REPORT_GROUPS: ReportGroup[] = [
       },
     ],
   },
+  {
+    name: "Warranty Reports",
+    icon: ShieldCheck,
+    items: [
+      {
+        id: "warranty-expiry",
+        label: "Warranty Expiry",
+        icon: Calendar,
+        description: "Warranties approaching expiry across the registry",
+      },
+      {
+        id: "warranty-claims",
+        label: "Warranty Claims",
+        icon: AlertOctagon,
+        description: "Claim volume, status, and resolution outcomes",
+      },
+    ],
+  },
 ];
 
 export default function ReportsHub() {
@@ -351,6 +375,10 @@ export default function ReportsHub() {
         return <PurchaseItemsReport />;
       case "supplier-payables":
         return <SupplierPayablesReport />;
+      case "warranty-expiry":
+        return <WarrantyExpiryReport />;
+      case "warranty-claims":
+        return <WarrantyClaimsReport />;
       default:
         return <SalesSummaryReport />;
     }

@@ -51,7 +51,7 @@ export function WarrantyRegistryDetailPage() {
   }, [query.isError, query.error]);
 
   const claimColumns = useMemo(
-    () => [
+    () => columnHelper.columns([
       columnHelper.accessor("claimNumber", {
         id: "claimNumber",
         header: "Claim #",
@@ -101,7 +101,7 @@ export function WarrantyRegistryDetailPage() {
           </span>
         ),
       }),
-    ],
+    ]),
     [],
   );
 
