@@ -37,6 +37,8 @@ export interface QuoteTotals {
   group?: { id: number; name: string; discountAmount: number };
   /** Auto-applied promotions (Phase 5). */
   promotions?: { applied: { id: number; name: string; amount: number }[]; total: number };
+  /** Phase 3 offer discovery: promotions the cart almost qualifies for. */
+  nearMisses?: { id: number; name: string; reason: string }[];
   /** Minimum-price warnings (Phase 6): always informational on the quote. */
   warnings?: {
     variantId: number;

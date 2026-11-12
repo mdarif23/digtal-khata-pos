@@ -14,6 +14,7 @@ import axios from "../../../../api/axios.js";
 import { useCustomerStore } from "@/store/useCustomerStore.js";
 import { PaymentModal } from "./PaymentModal.js";
 import { DiscountModal } from "./DiscountModal.js";
+import { useHotkeyAction } from "../../hotkeys/hotkeyBus";
 import { HoldDropdownMenu } from "./HoldDropdownMenu.js";
 import { Card, CardContent } from "@/components/ui/card.js";
 import { Input } from "@/components/ui/input.js";
@@ -68,6 +69,7 @@ interface CartTotalsView {
   couponError?: string | null;
   group?: { id: number; name: string; discountAmount: number } | null;
   promotions?: { applied: { id: number; name: string; amount: number }[]; total: number } | null;
+  nearMisses?: { id: number; name: string; reason: string }[] | null;
   warnings?: {
     variantId: number;
     code: string;
@@ -148,6 +150,7 @@ function useCartTotals(form: ShowCustomerInfoProps["form"]): CartTotalsView {
     couponError: quoted.couponError ?? null,
     group: quoted.group ?? null,
     promotions: quoted.promotions ?? null,
+    nearMisses: quoted.nearMisses ?? null,
     warnings: quoted.warnings ?? null,
   };
 }
@@ -240,7 +243,7 @@ function CouponInput({ form }: { form: ShowCustomerInfoProps["form"] }) {
 
 // ---------- cart list ----------
 export default function CartItems() {
-  const cart = useCartStore((state) => state.cart);
+    const cart = useCartStore((state) => state.cart);
 
   return (
     <>
@@ -309,9 +312,6 @@ function CartItemRow({ item }: { item: CartItem }) {
   const unitPrice = item.unitPrice ?? Number(variant.sellingPrice);
   const line = getLinePricing(unitPrice, quantity, item.discount);
   const isSerial = item.trackingType === "serial";
-  const [discountSignal, setDiscountSignal] = useState(0);
-  // Phase 3 hotkey: F4 opens the discount dialog.
-  useHotkeyAction("discount", () => setDiscountSignal((n) => n + 1));
   const [isSerialOpen, setIsSerialOpen] = useState(false);
 
   // Sell units for the switcher chip — lazily fetched per cart line and
@@ -500,7 +500,10 @@ export function CartCalculation({
   isPaymentDialogOpen,
   setIsPaymentDialogOpen,
 }: ShowCustomerInfoProps) {
-  const totals = useCartTotals(form);
+const [discountSignal, setDiscountSignal] = useState(0);
+  // Phase 3 hotkey: F4 opens the discount dialog.
+  useHotkeyAction("discount", () => setDiscountSignal((n) => n + 1));
+    const totals = useCartTotals(form);
 
   return (
     <div className="space-y-2">
@@ -586,6 +589,16 @@ function CartTextModal({
               : `${totals.promotions.applied.length} promotions`}
           </span>
           <span>-{tk(totals.promotions.total)}</span>
+        </div>
+      )}
+      {"nearMisses" in totals && totals.nearMisses && totals.nearMisses.length > 0 && (
+        <div className="grid gap-0.5 py-1">
+          {totals.nearMisses.slice(0, 3).map((offer) => (
+            <div key={offer.id} className="flex justify-between text-xs text-amber-700">
+              <span className="font-medium">{offer.name}</span>
+              <span>{offer.reason}</span>
+            </div>
+          ))}
         </div>
       )}
       {"coupon" in totals && totals.coupon && (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ProductList } from "@/features/pos/components/pos/ProductList.js";
+import { SpeedKeyGrid } from "@/features/pos/speedKeys/SpeedKeyGrid";
 import { CartHeader } from "@/features/pos/components/pos/CartHeader.js";
 import CartItems, {
   CartCalculation,
@@ -15,6 +16,8 @@ import {
 import { useHotkeyAction } from "../hotkeys/hotkeyBus";
 import { PosHotkeyManager } from "../hotkeys/PosHotkeyManager";
 import { usePrintReceipt } from "../hooks/usePrintReceipt";
+import { CfdManageDialog } from "../cfd/CfdManageDialog";
+import { pushCfdPayloadApi, type CfdPushPayload } from "../cfd/cfd.api";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
 import {
   Card,
@@ -104,6 +107,52 @@ function Pos() {
   useHotkeyAction("print-receipt", () => {
     if (lastReceipt) void printReceipt(lastReceipt);
   });
+
+  // ---- Customer-facing display push (Phase 3) ----------------------------
+  const cartValue = useCartStore((state) => state.cart);
+  const cfdDisplayId = useCfdDisplayId();
+  const cartKey = JSON.stringify(
+    cartValue.map((item) => ({
+      name: item.name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      discount: item.discount ?? null,
+    })),
+  );
+  useEffect(() => {
+    if (cfdDisplayId === null) return;
+    const timer = setTimeout(() => {
+      const items = cartValue.map((item) => {
+        const unitPrice = Number(item.priceOverride?.unitPrice ?? item.unitPrice ?? 0);
+        const gross = roundMoney(Number(item.quantity) * unitPrice);
+        const lineDiscount =
+          item.discount?.type === "percentage"
+            ? roundMoney((gross * Math.min(item.discount.value, 100)) / 100)
+            : item.discount?.type === "fixed"
+              ? roundMoney(Math.min(item.discount.value, gross))
+              : 0;
+        return {
+          name: item.name,
+          variantName: (item.unitName ?? null) as string | null,
+          quantity: Number(item.quantity),
+          unitPrice,
+          lineTotal: roundMoney(gross - lineDiscount),
+        };
+      });
+      const gross = items.reduce((sum, i) => sum + i.lineTotal, 0);
+      const payload: CfdPushPayload = {
+        status: items.length === 0 ? "idle" : "cart",
+        items,
+        discountTotal: 0,
+        vatTotal: 0,
+        grandTotal: roundMoney(gross),
+        paidTotal: 0,
+        dueTotal: 0,
+      };
+      void pushCfdPayloadApi(cfdDisplayId, payload).catch(() => undefined);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [cfdDisplayId, cartKey, cartValue]);
 
   async function onSubmit(data: CartSchemaType) {
     // Claim the checkout key before anything else: every retry of THIS
@@ -271,11 +320,13 @@ function Pos() {
             <SyncStatusIndicator />
             <RegisterDialog />
             <PosHotkeyManager />
+            <CfdManageDialog />
           </div>
         </div>
         <section className="flex h-[60dvh] min-h-[420px] shrink-0 flex-col overflow-hidden rounded-xl border bg-background shadow-sm lg:h-full lg:min-h-0 lg:shrink">
           {/* Page-scoped wedge capture pauses while checkout/receipt dialogs
               are up — scans must never edit the cart mid-payment. */}
+          <SpeedKeyGrid />
           <ProductList
             scannerEnabled={!isPaymentDialogOpen && !isSuccessDialogOpen}
           />
@@ -324,3 +375,24 @@ function Pos() {
 }
 
 export default Pos;
+
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/** Locally-persisted target display for the POS cart push (Phase 3). */
+function useCfdDisplayId(): number | null {
+  const [displayId, setDisplayId] = useState<number | null>(null);
+  useEffect(() => {
+    const stored = localStorage.getItem("ezpos.cfd.pushDisplayId");
+    setDisplayId(stored ? Number(stored) : null);
+    const onChange = (event: StorageEvent) => {
+      if (event.key === "ezpos.cfd.pushDisplayId") {
+        setDisplayId(event.newValue ? Number(event.newValue) : null);
+      }
+    };
+    window.addEventListener("storage", onChange);
+    return () => window.removeEventListener("storage", onChange);
+  }, []);
+  return displayId;
+}

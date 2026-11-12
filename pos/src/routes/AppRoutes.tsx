@@ -50,6 +50,7 @@ import { AuditLogsPage } from "@/features/audit/AuditLogsPage";
 import { LoyaltySettingsPage } from "@/features/loyalty/LoyaltySettingsPage";
 import { QuotationsPage } from "@/features/quotations/QuotationsPage";
 import { CommsSettingsPage } from "@/features/comms/CommsSettingsPage";
+import { CfdDisplayPage } from "@/features/pos/cfd/CfdDisplayPage";
 import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
@@ -100,6 +101,12 @@ const router = createBrowserRouter([
     // tran_id; verification happens server-side before anything is recorded.
     path: "/payment/return",
     element: <PaymentIntentReturn />,
+  },
+  {
+    // Customer-facing display (Phase 3): READ-ONLY second screen with its
+    // own pairing/token auth — deliberately OUTSIDE the authed layout.
+    path: "/cfd",
+    element: <CfdDisplayPage />,
   },
   {
     path: "/",
