@@ -5,6 +5,7 @@ import {
   numeric,
   pgTable,
   timestamp,
+  varchar,
 } from "drizzle-orm/pg-core";
 import { businesses } from "./businesses.js";
 
@@ -64,6 +65,10 @@ export const posSettings = pgTable("pos_settings", {
     .$type<ApprovalRequiredConfig>()
     .default({})
     .notNull(),
+  /** Phase 3 CFD: idle-screen copy shown when the customer display has no cart. */
+  cfdIdleMessage: varchar("cfd_idle_message", { length: 200 }),
+  /** Phase 3 CFD: promotional banner copy on the idle screen. */
+  cfdPromoMessage: varchar("cfd_promo_message", { length: 200 }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

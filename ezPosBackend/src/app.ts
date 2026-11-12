@@ -67,6 +67,8 @@ import dataImportRouter from "./modules/dataImport/contactImport.routes.js";
 import exportsRouter from "./modules/exports/exports.routes.js";
 import quotationsRouter from "./modules/quotations/quotations.routes.js";
 import commsRouter from "./modules/comms/comms.routes.js";
+import speedKeysRouter from "./modules/speedKeys/speedKeys.routes.js";
+import cfdRouter from "./modules/cfd/cfd.routes.js";
 import pricingRouter from "./modules/pricing/pricing.routes.js";
 import customerGroupsRouter from "./modules/customerGroups/customerGroups.routes.js";
 import promotionsApiRouter from "./modules/pricing/promotions.routes.js";
@@ -204,6 +206,8 @@ export function buildApp() {
   app.use("/", exportsRouter);
   app.use("/", quotationsRouter);
   app.use("/", commsRouter);
+  app.use("/", speedKeysRouter);
+  app.use("/", cfdRouter);
   app.use("/", pricingRouter);
   app.use("/", customerGroupsRouter);
   app.use("/", promotionsApiRouter);
