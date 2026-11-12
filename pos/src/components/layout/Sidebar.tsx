@@ -8,6 +8,7 @@ import {
   RiArchiveDrawerFill,
   RiMoneyDollarBoxFill,
   RiUserFill,
+  RiFileList2Fill,
 } from "react-icons/ri";
 import { MdPointOfSale, MdManageAccounts } from "react-icons/md";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -36,6 +37,12 @@ const MENU_ITEMS: MenuItem[] = [
   { label: "Customers", icon: MdManageAccounts, path: "/customer" },
   { label: "Purchases Order", icon: MdManageAccounts, path: "/purchases" },
   { label: "Purchases List", icon: MdManageAccounts, path: "/purchases-list" },
+  {
+    label: "Audit Log",
+    icon: RiFileList2Fill,
+    path: "/audit-logs",
+    anyPermission: ["audit.view"],
+  },
   {
     label: "Hardware",
     icon: RiUserFill,

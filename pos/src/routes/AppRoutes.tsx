@@ -46,6 +46,7 @@ import { PriceCheckPage } from "@/features/procurement/pages/PriceCheckPage";
 import { SupplierDetailsPage } from "@/features/procurement/pages/SupplierDetailsPage";
 import { ReorderDashboardPage } from "@/features/procurement/pages/ReorderDashboardPage";
 import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
+import { AuditLogsPage } from "@/features/audit/AuditLogsPage";
 import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
@@ -411,6 +412,14 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="promotions.view">
             <CouponsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/audit-logs",
+        element: (
+          <RequirePermission permission="audit.view">
+            <AuditLogsPage />
           </RequirePermission>
         ),
       },
