@@ -480,7 +480,7 @@ export const PurchasesList = () => {
                       </select>
                     </label>
                     <Button
-                      nativeButton={false}
+                      nativeButton
                       size="sm"
                       variant="outline"
                       disabled={pagination.page <= 1 || list.isFetching}
@@ -489,7 +489,7 @@ export const PurchasesList = () => {
                       <ArrowLeft /> Previous
                     </Button>
                     <Button
-                      nativeButton={false}
+                      nativeButton
                       size="sm"
                       variant="outline"
                       disabled={
@@ -584,50 +584,52 @@ const PurchaseOrderTable = memo(function PurchaseOrderTable({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1120px] text-left text-sm">
         <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
-          {/* Header order MUST match PurchaseOrderRow's <td> order — a
-              mismatch silently labels the wrong columns. */}
-          <SortableHeader
-            column="purchaseOrderNumber"
-            label="Order"
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            onSort={onSort}
-            align="left"
-          />
-          <th className="px-4 py-3 font-medium">Supplier</th>
-          <SortableHeader
-            column="purchaseDate"
-            label="Date"
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            onSort={onSort}
-            align="left"
-          />
-          <th className="px-4 py-3 text-right font-medium">Lines</th>
-          <th className="px-4 py-3 text-right font-medium">
-            Outstanding qty
-          </th>
-          <SortableHeader
-            column="totalAmount"
-            label="Total"
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            onSort={onSort}
-            align="right"
-          />
-          <th className="px-4 py-3 text-right font-medium">Paid</th>
-          <SortableHeader
-            column="dueAmount"
-            label="Due"
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            onSort={onSort}
-            align="right"
-          />
-          <th className="px-4 py-3 font-medium">Payment</th>
-          <th className="px-4 py-3 font-medium">Receiving</th>
-          <th className="px-4 py-3 font-medium">Return status</th>
-          <th className="px-5 py-3 text-right font-medium">Actions</th>
+          <tr>
+            {/* Header order MUST match PurchaseOrderRow's <td> order — a
+                mismatch silently labels the wrong columns. */}
+            <SortableHeader
+              column="purchaseOrderNumber"
+              label="Order"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={onSort}
+              align="left"
+            />
+            <th className="px-4 py-3 font-medium">Supplier</th>
+            <SortableHeader
+              column="purchaseDate"
+              label="Date"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={onSort}
+              align="left"
+            />
+            <th className="px-4 py-3 text-right font-medium">Lines</th>
+            <th className="px-4 py-3 text-right font-medium">
+              Outstanding qty
+            </th>
+            <SortableHeader
+              column="totalAmount"
+              label="Total"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={onSort}
+              align="right"
+            />
+            <th className="px-4 py-3 text-right font-medium">Paid</th>
+            <SortableHeader
+              column="dueAmount"
+              label="Due"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={onSort}
+              align="right"
+            />
+            <th className="px-4 py-3 font-medium">Payment</th>
+            <th className="px-4 py-3 font-medium">Receiving</th>
+            <th className="px-4 py-3 font-medium">Return status</th>
+            <th className="px-5 py-3 text-right font-medium">Actions</th>
+          </tr>
         </thead>
         <tbody className="divide-y">
           {purchases.map((purchase) => (

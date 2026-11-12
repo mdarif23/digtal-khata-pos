@@ -4,11 +4,11 @@ import {
   AreaChart,
   CartesianGrid,
   Legend,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+import { ChartResponsiveContainer } from "@/components/common/ChartResponsiveContainer";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -180,7 +180,7 @@ export function DueSummaryCards() {
             </p>
           ) : (
             <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
+              <ChartResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="collectedFill" x1="0" y1="0" x2="0" y2="1">
@@ -214,7 +214,7 @@ export function DueSummaryCards() {
                     strokeWidth={2}
                   />
                 </AreaChart>
-              </ResponsiveContainer>
+              </ChartResponsiveContainer>
             </div>
           )}
         </CardContent>

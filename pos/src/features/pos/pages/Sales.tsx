@@ -54,6 +54,7 @@ import type { SaleReceiptData } from "../types/receipt.types.js";
 import { ReceiptPrintDialog } from "../components/receipt/ReceiptPrintDialog.js";
 import { ExchangeDialog } from "../components/pos/ExchangeDialog.js";
 import { PaymentIntentDialog } from "../components/pos/PaymentIntentDialog.js";
+import { LocationRequiredNotice } from "@/components/common/LocationRequiredNotice.js";
 
 const DATE_RANGES = ["all", "today", "7-days", "30-days"] as const;
 type DateRange = (typeof DATE_RANGES)[number];

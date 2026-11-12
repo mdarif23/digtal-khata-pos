@@ -15,7 +15,10 @@ import { createExchangeApi } from "../../sales.api.js";
 import { quoteSaleApi } from "../../quote.api.js";
 import { useSalesStore } from "../../stores/useSalesStore.js";
 import useProductStore from "@/features/products/useProductStore.js";
-import type { SalesStoreType } from "../types/sales.types.js";
+import type {
+  AllSoldProduct,
+  SalesStoreType,
+} from "../types/sales.types.js";
 import { buildVariantName } from "@/lib/variantDisplay";
 import type { LookupMatch } from "@/features/barcodes/barcode.api.js";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner.js";
@@ -44,7 +47,7 @@ export function ExchangeDialog({
   open,
   onOpenChange,
 }: {
-  sale: SalesStoreType;
+  sale: AllSoldProduct;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -63,7 +66,7 @@ export function ExchangeDialog({
 
   const returnableItems = useMemo(
     () =>
-      ((sale.items ?? []) as SalesStoreType[]).filter(
+      sale.items.filter(
         (item) => item.returnedQuantity < item.soldQuantity,
       ),
     [sale],

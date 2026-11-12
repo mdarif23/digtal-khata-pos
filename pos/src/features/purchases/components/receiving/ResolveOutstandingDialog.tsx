@@ -96,7 +96,7 @@ export function ResolveOutstandingDialog({ item }: { item: PurchasesItems }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button nativeButton={false} size="sm" variant="ghost">
+          <Button nativeButton size="sm" variant="ghost">
             Resolve…
           </Button>
         }

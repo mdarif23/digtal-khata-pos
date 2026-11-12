@@ -99,7 +99,7 @@ export function ReceivingDiscrepancyDialog({
       <DialogTrigger
         render={
           <Button
-            nativeButton={false}
+            nativeButton
             size="sm"
             variant={over || Number(rejectedQuantity) > 0 ? "outline" : "ghost"}
             className={

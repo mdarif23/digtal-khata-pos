@@ -24,11 +24,11 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+import { ChartResponsiveContainer } from "@/components/common/ChartResponsiveContainer";
 import { Link } from "react-router";
 import axios from "../../api/axios.js";
 import { useSessionStore } from "@/auth/sessionStore";
@@ -893,7 +893,7 @@ export default function DashboardComponent() {
               </div>
             ) : hasData ? (
               <div className="mt-2 h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
+                <ChartResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">
@@ -952,7 +952,7 @@ export default function DashboardComponent() {
                       activeDot={{ r: 4, strokeWidth: 0 }}
                     />
                   </AreaChart>
-                </ResponsiveContainer>
+                </ChartResponsiveContainer>
               </div>
             ) : (
               <div className="mt-5">

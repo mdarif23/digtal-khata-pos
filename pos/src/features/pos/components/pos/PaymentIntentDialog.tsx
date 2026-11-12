@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
 import { toast } from "@/components/ui/toast.js";
 import { createPaymentIntentApi } from "../../sales.api.js";
-import type { SalesStoreType } from "../types/sales.types.js";
 
 const tk = (n: number) => `৳${n.toFixed(2)}`;
 
@@ -27,7 +26,11 @@ export function PaymentIntentDialog({
   open,
   onOpenChange,
 }: {
-  sale: SalesStoreType;
+  sale: {
+    id: number;
+    invoiceNumber: string;
+    dueAmount: number;
+  };
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {

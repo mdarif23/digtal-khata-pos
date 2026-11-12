@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Sidebar,
   SidebarContent,
@@ -100,6 +101,8 @@ export function AppSidebar() {
     }
     return true;
   });
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
   return (
     <Sidebar variant="inset">
       <SidebarHeader className="bg-sidebar-accent border-b border-sidebar-border rounded mb-2">
@@ -144,7 +147,13 @@ export function AppSidebar() {
 
             return (
               <Collapsible
-                defaultOpen={hasActiveChild}
+                open={openGroups[item.title] ?? hasActiveChild}
+                onOpenChange={(open) =>
+                  setOpenGroups((current) => ({
+                    ...current,
+                    [item.title]: open,
+                  }))
+                }
                 key={item.title}
                 className="group/collapsible"
               >

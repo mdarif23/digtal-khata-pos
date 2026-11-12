@@ -5,8 +5,12 @@ import { ArrowRight } from "lucide-react";
  * yet — retrying can never succeed, so guide the user to Locations instead
  * of a dead-end "Try again" banner. Render only when the error matches.
  */
-export function LocationRequiredNotice({ error }: { error: string }) {
-  if (!error.toLowerCase().includes("no locations")) return null;
+export function LocationRequiredNotice({
+  error,
+}: {
+  error: string | null | undefined;
+}) {
+  if (!error?.toLowerCase().includes("no locations")) return null;
   return (
     <div
       role="status"

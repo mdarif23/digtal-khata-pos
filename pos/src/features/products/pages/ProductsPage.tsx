@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LocationRequiredNotice } from "@/components/common/LocationRequiredNotice";
 import ProductOverview from "../components/ProductsPage/Table.js";
 import { DataTable } from "../components/ProductsPage/Table/data-table.js";
 import { columns } from "../components/ProductsPage/Table/columns.js";

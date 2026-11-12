@@ -93,7 +93,7 @@ export function ProductTaxCell({
   return (
     <>
       <Button
-        nativeButton={false}
+        nativeButton
         variant="ghost"
         size="icon-sm"
         aria-label={`Tax rates for ${productName}`}
