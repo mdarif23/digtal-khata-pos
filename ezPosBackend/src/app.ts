@@ -66,6 +66,7 @@ import auditLogRouter from "./modules/auditLog/auditLog.routes.js";
 import dataImportRouter from "./modules/dataImport/contactImport.routes.js";
 import exportsRouter from "./modules/exports/exports.routes.js";
 import quotationsRouter from "./modules/quotations/quotations.routes.js";
+import commsRouter from "./modules/comms/comms.routes.js";
 import pricingRouter from "./modules/pricing/pricing.routes.js";
 import customerGroupsRouter from "./modules/customerGroups/customerGroups.routes.js";
 import promotionsApiRouter from "./modules/pricing/promotions.routes.js";
@@ -104,6 +105,11 @@ export function buildApp() {
             "/api/integrations/woocommerce/webhook/",
           )
         ) {
+          (req as Request & { __rawBody?: string }).__rawBody =
+            buf.toString("utf8");
+        }
+        // Comms delivery webhooks also verify HMACs over the EXACT bytes.
+        if (req.originalUrl?.startsWith("/api/comms/webhook/")) {
           (req as Request & { __rawBody?: string }).__rawBody =
             buf.toString("utf8");
         }
@@ -197,6 +203,7 @@ export function buildApp() {
   app.use("/", dataImportRouter);
   app.use("/", exportsRouter);
   app.use("/", quotationsRouter);
+  app.use("/", commsRouter);
   app.use("/", pricingRouter);
   app.use("/", customerGroupsRouter);
   app.use("/", promotionsApiRouter);

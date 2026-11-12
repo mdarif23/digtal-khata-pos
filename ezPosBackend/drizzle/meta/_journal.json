@@ -482,6 +482,13 @@
       "when": 1794500017000,
       "tag": "0068_quotations",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794500018000,
+      "tag": "0069_comms_foundation",
+      "breakpoints": true
     }
   ]
 }

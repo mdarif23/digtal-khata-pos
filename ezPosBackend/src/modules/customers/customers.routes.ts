@@ -30,6 +30,13 @@ router.post(
   requirePermission("customers.create"),
   customersController.createCustomer,
 );
+// Phase 2C: communication consent toggles (scoped; customers.edit).
+router.patch(
+  "/api/customers/:id/consent",
+  ...write,
+  requirePermission("customers.edit"),
+  customersController.patchCustomerConsent,
+);
 // Store credit balance for the checkout's store_credit payment method.
 router.get(
   "/api/customers/:id/store-credit",
