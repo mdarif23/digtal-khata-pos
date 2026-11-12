@@ -135,6 +135,11 @@ router.post(
           terminalId,
           terminalName: req.terminal.name,
           userId: req.user!.id,
+          // Phase 1 (audit finding): the offline path previously hardcoded
+          // callerIsOwner=true, letting any syncing user close another
+          // cashier's drawer by replaying their client_session_id. The same
+          // ownership rule as the online path now applies.
+          callerIsOwner: req.membership?.permissions.includes("*") ?? false,
         },
         parsed.data.ops as OfflineOp[],
       );

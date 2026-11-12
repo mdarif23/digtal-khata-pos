@@ -35,7 +35,12 @@ export interface AuditEntry {
 /** Transaction handle type for recordAuditInTx callers (shared). */
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export async function recordAuditInTx(tx: Tx, entry: AuditEntry): Promise<void> {
+/** recordAuditInTx only inserts — it accepts the root db handle too, so
+ * helpers typed with a db-or-tx union (e.g. register attribution) can call
+ * it without casts. */
+export type DbLike = typeof db | Tx;
+
+export async function recordAuditInTx(tx: DbLike, entry: AuditEntry): Promise<void> {
   await tx.insert(auditLog).values({
     businessId: entry.businessId,
     actorUserId: entry.actorUserId,

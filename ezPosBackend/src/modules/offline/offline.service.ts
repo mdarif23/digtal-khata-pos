@@ -248,6 +248,8 @@ interface OfflineContext {
   terminalId: number;
   terminalName: string;
   userId: number;
+  /** True when the syncing user holds the wildcard (owner) permission. */
+  callerIsOwner: boolean;
 }
 
 export async function applyOfflineOps(
@@ -645,7 +647,7 @@ async function applyDrawerCloseOp(ctx: OfflineContext, op: OfflineOp): Promise<O
   await cashRegistersService.closeSession(
     ctx.businessId,
     ctx.userId,
-    true, // the offline actor is the session's own cashier in the normal flow
+    ctx.callerIsOwner,
     session.id,
     roundMoney(Number(payload.countedCash)),
     payload.notes ?? undefined,
