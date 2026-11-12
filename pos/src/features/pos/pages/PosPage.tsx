@@ -227,6 +227,21 @@ function Pos() {
         return;
       }
       console.error("Sale submission error:", error);
+      // Phase 1: surface server rejections (e.g. require_open_drawer 409,
+      // payment validation) — previously this was console-only.
+      const serverMessage =
+        typeof error === "object" &&
+        error !== null &&
+        "response" in error &&
+        typeof (error as { response?: { data?: { message?: string } } }).response
+          ?.data?.message === "string"
+          ? (error as { response: { data: { message: string } } }).response.data
+              .message
+          : null;
+      toast.add({
+        title: serverMessage ?? "The sale could not be completed.",
+        type: "error",
+      });
     }
   }
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ContactListLayout } from "../components/ContactListLayout";
 import { CustomersTable } from "../components/customers/CustomersTable";
+import { ContactImportExportButtons } from "../components/ContactImportExportButtons";
 import { CustomerDialog } from "../components/customers/CustomerDialog";
 import { useCustomerStore } from "@/store/useCustomerStore";
 import { getCustomerDueSummaryApi } from "@/api/customer.api";
@@ -70,7 +71,12 @@ export function CustomersPage() {
     <ContactListLayout
       title="Customers"
       description="Manage customer contacts and keep an eye on outstanding balances."
-      action={<CustomerDialog />}
+      action={
+        <div className="flex gap-2">
+          <ContactImportExportButtons entity="customers" />
+          <CustomerDialog />
+        </div>
+      }
       metrics={[
         {
           label: "Total customers",
