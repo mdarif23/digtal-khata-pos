@@ -468,6 +468,13 @@
       "when": 1794500015000,
       "tag": "0066_import_entity_type",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794500016000,
+      "tag": "0067_loyalty_engine",
+      "breakpoints": true
     }
   ]
 }

@@ -72,8 +72,11 @@ import {
   grantStoreCreditInTx,
 } from "../../services/storeCredit.js";
 import {
+  computeEligibleEarnBaseInTx,
   earnLoyaltyPointsInTx,
+  getEarnRule,
   redeemLoyaltyPointsInTx,
+  restoreRedeemedPointsInTx,
   reverseLoyaltyPointsInTx,
 } from "../../services/loyalty.js";
 import { redeemGiftCardInTx } from "../../services/giftCards.js";
@@ -1666,9 +1669,10 @@ export async function createSale(
       });
     }
 
-    // Loyalty earn on the cash-equivalent amount paid (Module 7): dues
-    // earn nothing, and points/store-credit-funded portions do not earn
-    // points on themselves.
+    // Loyalty earn (Phase 2A engine): dues earn nothing, points/store-
+    // credit/gift-card-funded portions do not earn on themselves, and the
+    // earning rule's excluded products/categories never earn. The base is
+    // capped by the amount actually paid, so dues still earn nothing.
     if (customerId !== null && paidAmount > 0) {
       const fundedByAccount = receivedPayments
         .filter(
@@ -1678,14 +1682,24 @@ export async function createSale(
             payment.method === "gift_card",
         )
         .reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
-      const earnBase = roundMoney(paidAmount - fundedByAccount);
+      const rule = await getEarnRule(businessId);
+      const eligibleLines = await computeEligibleEarnBaseInTx(tx, {
+        businessId,
+        saleId,
+        excludedProductIds: rule.excludedProductIds,
+        excludedCategoryIds: rule.excludedCategoryIds,
+      });
+      const earnBase = roundMoney(
+        Math.max(0, Math.min(eligibleLines, paidAmount) - fundedByAccount),
+      );
       if (earnBase > 0) {
         await earnLoyaltyPointsInTx(tx, {
           businessId,
           customerId,
-          paidAmount: earnBase,
+          eligibleBase: earnBase,
           sourceId: saleId,
           actorUserId: cashierUserId,
+          meetsMinimum: earnBase >= rule.minTransactionAmount,
         });
       }
     }
@@ -1902,6 +1916,17 @@ async function applySaleRefund(
       customerId: sale.customerId,
       refundedAmount: refundTotal,
       sourceId: saleId,
+    });
+    // Phase 2A: points REDEEMED on the refunded sale come back
+    // proportionally (never expiring) — each refund restores at most once
+    // because the sourceId is the refund id.
+    await restoreRedeemedPointsInTx(tx, {
+      businessId,
+      customerId: sale.customerId,
+      saleId,
+      refundId: refund.id,
+      refundTotal,
+      saleFinalTotal: Number(sale.finalTotal ?? 0),
     });
   }
 
