@@ -24,6 +24,7 @@ const transferWrite = [...write, requireFeature("multiLocation")] as const;
 router.get("/api/stock-transfers", ...read, stockTransfersController.getTransfers);
 router.get("/api/stock-transfers/:transferId", ...read, stockTransfersController.getTransfer);
 router.post("/api/stock-transfers", ...transferWrite, stockTransfersController.postTransfer);
+router.post("/api/stock-transfers/:transferId/authorize", ...transferWrite, stockTransfersController.postTransferAuthorize);
 router.post("/api/stock-transfers/:transferId/ship", ...transferWrite, stockTransfersController.postTransferShip);
 router.post("/api/stock-transfers/:transferId/receive", ...transferWrite, stockTransfersController.postTransferReceive);
 router.post("/api/stock-transfers/:transferId/cancel", ...transferWrite, stockTransfersController.postTransferCancel);

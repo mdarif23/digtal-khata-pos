@@ -23,6 +23,8 @@ export const receiveTransferSchema = z.object({
       }),
     )
     .optional(),
+  /** Phase 4: shortfall reasons keyed by item id (discrepancy recording). */
+  reasons: z.record(z.string(), z.string().max(500)).optional(),
 });
 
 export type CreateTransferInput = z.infer<typeof createTransferSchema>;

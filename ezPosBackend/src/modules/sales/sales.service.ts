@@ -72,6 +72,7 @@ import {
   grantStoreCreditInTx,
 } from "../../services/storeCredit.js";
 import { promotionUsage } from "../../db/schema/pricing.js";
+import { getBomsForVariants } from "../bom/bom.service.js";
 import {
   computeEligibleEarnBaseInTx,
   earnLoyaltyPointsInTx,
@@ -969,8 +970,17 @@ export async function createSale(
     );
 
     // 3. Lock inventory rows and validate stock (aggregated base demand).
+    // Phase 4 (Feature 9): composite variants consume their BOM components
+    // (assemble-on-sale) — their OWN stock is not validated here; component
+    // availability is enforced in the consumption loop.
+    const bomByVariant = await getBomsForVariants(
+      businessId,
+      baseItems.map((i) => i.variantId),
+    );
+
     await validateStock(tx, businessId, locationId, variantIds, baseItems, {
       ...(options.allowNegativeStock ? { allowNegative: true } : {}),
+      skipVariants: [...bomByVariant.keys()],
     });
 
     // 2. Trusted prices and tracking types come from the database
@@ -993,6 +1003,21 @@ export async function createSale(
         };
       })
       .sort((a, b) => a.variantId - b.variantId); // same lock order for every cashier
+
+    // Phase 4 (Feature 10): identity (base-unit) lines must be whole
+    // numbers UNLESS the variant is sold by weight (scale/PLU selling).
+    for (const item of trustedItems) {
+      const variant = variantMap.get(item.variantId);
+      if (
+        !variant?.soldByWeight &&
+        item.uomSnapshot?.conversionId == null &&
+        !Number.isInteger(item.quantity)
+      ) {
+        throw new BadRequestError(
+          `Quantity must be a whole number for variant ${item.variantId} (not sold by weight).`,
+        );
+      }
+    }
 
     // 5. Calculate every total from the same trusted items. When any line's
     // product carries tax rules, VAT comes from those rules (server-side,

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  jsonb,
   check,
   foreignKey,
   index,
@@ -46,6 +47,11 @@ export const stockTransfers = pgTable(
     notes: text(),
     shippedAt: timestamp("shipped_at", { withTimezone: true }),
     receivedAt: timestamp("received_at", { withTimezone: true }),
+    /** Phase 4 (Feature 17): explicit authorization; ship auto-authorizes. */
+    authorizedBy: integer("authorized_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }),
     createdByUserId: integer("created_by_user_id").references(() => users.id, {
       onDelete: "restrict",
     }),
@@ -96,6 +102,8 @@ export const stockTransferItems = pgTable(
     unitCost: numeric("unit_cost", { precision: 10, scale: 2, mode: "number" })
       .notNull()
       .default(0),
+    /** Phase 4: serial numbers shipped for serial-tracked variants. */
+    serialNumbers: jsonb("serial_numbers").$type<string[]>(),
   },
   (table) => [
     index("stock_transfer_items_transfer_idx").on(table.transferId),
@@ -108,6 +116,41 @@ export const stockTransferItems = pgTable(
       columns: [table.variantId, table.businessId],
       foreignColumns: [productVariants.id, productVariants.businessId],
       name: "stock_transfer_items_variant_business_fkey",
+    }),
+  ],
+);
+
+/**
+ * Phase 4 (Feature 17): receive-time shortfalls recorded explicitly — the
+ * shipped quantity that never arrived, with the receiver's reason. Tenancy
+ * enforced via the composite FK to stock_transfers.
+ */
+export const transferDiscrepancies = pgTable(
+  "transfer_discrepancies",
+  {
+    id: serial("id").primaryKey().notNull(),
+    businessId: integer("business_id")
+      .notNull()
+      .references(() => businesses.id, { onDelete: "cascade" }),
+    transferId: integer("transfer_id").notNull(),
+    itemId: integer("item_id").notNull(),
+    shippedQty: integer("shipped_qty").notNull(),
+    receivedQty: integer("received_qty").notNull(),
+    difference: integer("difference").notNull(),
+    reason: text(),
+    recordedBy: integer("recorded_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("transfer_discrepancies_transfer_idx").on(table.transferId),
+    foreignKey({
+      columns: [table.transferId, table.businessId],
+      foreignColumns: [stockTransfers.id, stockTransfers.businessId],
+      name: "transfer_discrepancies_transfer_business_fkey",
     }),
   ],
 );

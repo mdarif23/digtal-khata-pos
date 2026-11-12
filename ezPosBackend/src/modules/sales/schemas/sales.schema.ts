@@ -48,13 +48,16 @@ const cartItemPayloadSchema = z
       .nullish(),
   })
   .superRefine((data, ctx) => {
-    // Identity lines stay integer (legacy contract); UOM lines convert to
-    // whole base units in the service (INTEGER stock invariant).
-    if (data.uomConversionId == null && !Number.isInteger(data.quantity)) {
+    // Phase 4 (Feature 10): fractional quantities are allowed here and the
+    // SERVICE enforces the per-variant rule (identity lines must be whole
+    // UNLESS the variant is sold by weight — sold_by_weight). UOM lines
+    // still convert to whole base units in the service (INTEGER stock
+    // invariant for allocated packaging).
+    if (!Number.isFinite(data.quantity) || data.quantity <= 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["quantity"],
-        message: "Quantity must be a whole number.",
+        message: "Quantity must be a positive number.",
       });
     }
   });

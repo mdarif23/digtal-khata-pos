@@ -496,6 +496,13 @@
       "when": 1794500019000,
       "tag": "0070_phase3_checkout_speed",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1794500020000,
+      "tag": "0071_phase4_advanced_inventory",
+      "breakpoints": true
     }
   ]
 }
