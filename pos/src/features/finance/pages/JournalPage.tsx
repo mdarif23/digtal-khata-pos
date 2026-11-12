@@ -106,7 +106,13 @@ export function JournalPage() {
             <CardTitle className="text-base">Accounting periods</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {(periods.data ?? []).slice(0, 8).map((period) => (
+            {periods.isLoading ? (
+              <p className="py-2 text-xs text-slate-400">Loading periods…</p>
+            ) : (periods.data ?? []).length === 0 ? (
+              <p className="py-2 text-xs text-slate-400">
+                No accounting periods yet — one is created with the first posted entry.
+              </p>
+            ) : (periods.data ?? []).slice(0, 8).map((period) => (
               <div
                 key={period.id}
                 className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm"

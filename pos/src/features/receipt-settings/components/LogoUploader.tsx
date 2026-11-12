@@ -100,7 +100,11 @@ export function LogoUploader({ logoUrl, disabled }: LogoUploaderProps) {
                 size="sm"
                 className="text-destructive hover:text-destructive"
                 disabled={disabled || busy}
-                onClick={() => remove.mutate()}
+                onClick={() => {
+                  // Destructive: the logo appears on every receipt and invoice.
+                  if (!window.confirm("Remove the receipt logo? Receipts and invoices will print without it.")) return;
+                  remove.mutate();
+                }}
               >
                 <Trash2 className="size-4" />
                 Remove
