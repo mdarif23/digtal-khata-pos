@@ -207,6 +207,8 @@ async function getTransferDetailInTx(
       notes: stockTransfers.notes,
       shippedAt: stockTransfers.shippedAt,
       receivedAt: stockTransfers.receivedAt,
+      authorizedBy: stockTransfers.authorizedBy,
+      authorizedAt: stockTransfers.authorizedAt,
       createdAt: stockTransfers.createdAt,
     })
     .from(stockTransfers)
@@ -424,6 +426,7 @@ export async function shipTransfer(
         referenceType: "stock_transfer",
         referenceId: transfer.id,
       });
+
     }
 
     await tx
@@ -664,6 +667,7 @@ export async function receiveTransfer(
 
     const refreshed = await tx
       .select({
+        id: stockTransferItems.id,
         quantity: stockTransferItems.quantity,
         quantityShipped: stockTransferItems.quantityShipped,
         quantityReceived: stockTransferItems.quantityReceived,
@@ -675,9 +679,30 @@ export async function receiveTransfer(
           eq(stockTransferItems.businessId, businessId),
         ),
       );
-    const fullyReceived = refreshed.every(
+    let fullyReceived = refreshed.every(
       (item) => item.quantityReceived >= item.quantityShipped && item.quantityShipped > 0,
     );
+
+    // Phase 4 (Feature 17): forceComplete closes a transfer with shortfalls
+    // — every outstanding unit becomes an EXPLICIT discrepancy row, never a
+    // silent shrinkage.
+    if (input.forceComplete && !fullyReceived) {
+      for (const item of refreshed) {
+        const outstanding = item.quantityShipped - item.quantityReceived;
+        if (outstanding <= 0) continue;
+        await tx.insert(transferDiscrepancies).values({
+          businessId,
+          transferId,
+          itemId: item.id,
+          shippedQty: item.quantityShipped,
+          receivedQty: item.quantityReceived,
+          difference: outstanding,
+          reason: input.reasons?.[String(item.id)] ?? null,
+          recordedBy: userId,
+        });
+      }
+      fullyReceived = true;
+    }
 
     await tx
       .update(stockTransfers)

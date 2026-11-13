@@ -359,6 +359,8 @@ async function insertVariant(
       // legacy free-form codes the detector cannot classify.
       barcodeFormat: barcode ? detectBarcodeFormat(barcode) : null,
       sellingPrice: variant.sellingPrice,
+      // Phase 4 (Feature 10): weight-selling flag (schema passthrough).
+      soldByWeight: (variant as { soldByWeight?: boolean }).soldByWeight ?? false,
       alertQuantity: variant.alertQuantity,
       isDefault: variant.isDefault,
       status: variant.status,

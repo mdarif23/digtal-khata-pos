@@ -1,4 +1,5 @@
 import {
+  numeric,
   foreignKey,
   index,
   integer,
@@ -21,8 +22,15 @@ export const inventoryStock = pgTable(
       .references(() => productVariants.id)
       .notNull(),
     locationId: integer("location_id").references(() => locations.id),
-    quantity: integer().default(0),
-    reservedQuantity: integer("reserved_quantity").default(0),
+    /** Phase 4: numeric(14,4) — weight variants hold fractional stock. */
+    quantity: numeric("quantity", { precision: 14, scale: 4, mode: "number" })
+      .default(0),
+    reservedQuantity: numeric("reserved_quantity", {
+      precision: 14,
+      scale: 4,
+      mode: "number",
+    })
+      .default(0),
   },
   (table) => [
     index("inventory_stock_business_id_idx").on(table.businessId),

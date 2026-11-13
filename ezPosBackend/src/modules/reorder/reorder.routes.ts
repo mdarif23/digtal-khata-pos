@@ -35,6 +35,19 @@ router.get(
   requirePermission("products.view"),
   reorderController.getReorderConfig,
 );
+// Phase 4 (Feature 14): supplier lead times for forecasting.
+router.get(
+  "/api/reorder/lead-times",
+  ...read,
+  requirePermission("products.view"),
+  reorderController.getLeadTimes,
+);
+router.put(
+  "/api/reorder/lead-times",
+  ...write,
+  requirePermission("products.edit"),
+  reorderController.setLeadTime,
+);
 router.patch(
   "/api/variants/:variantId/reorder-config",
   ...write,

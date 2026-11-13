@@ -273,3 +273,51 @@ export async function getVariantReorderConfig(
   if (!variant) throw new NotFoundError("Variant not found.");
   return variant;
 }
+
+/** Phase 4 (Feature 14): supplier lead-time CRUD per variant. */
+export async function setLeadTime(
+  businessId: number,
+  input: { variantId: number; supplierId: number; leadTimeDays: number },
+): Promise<void> {
+  if (input.leadTimeDays < 0 || input.leadTimeDays > 365) {
+    throw new BadRequestError("Lead time must be between 0 and 365 days.");
+  }
+  await db
+    .insert(supplierLeadTimes)
+    .values({
+      businessId,
+      supplierId: input.supplierId,
+      variantId: input.variantId,
+      leadTimeDays: input.leadTimeDays,
+    })
+    .onConflictDoUpdate({
+      target: [
+        supplierLeadTimes.businessId,
+        supplierLeadTimes.supplierId,
+        supplierLeadTimes.variantId,
+      ],
+      set: {
+        leadTimeDays: input.leadTimeDays,
+        updatedAt: new Date(),
+      },
+    });
+}
+
+export async function getLeadTime(
+  businessId: number,
+  variantId: number,
+): Promise<{ supplierId: number; leadTimeDays: number }[]> {
+  const rows = await db
+    .select({
+      supplierId: supplierLeadTimes.supplierId,
+      leadTimeDays: supplierLeadTimes.leadTimeDays,
+    })
+    .from(supplierLeadTimes)
+    .where(
+      and(
+        eq(supplierLeadTimes.businessId, businessId),
+        eq(supplierLeadTimes.variantId, variantId),
+      ),
+    );
+  return rows;
+}

@@ -64,8 +64,17 @@ export const inventoryBatches = pgTable(
       sql`( (purchase_price + coalesce(additional_cost_per_unit, 0)) )`,
     ),
 
-    quantityReceived: integer("quantity_received").notNull(),
-    quantityRemaining: integer("quantity_remaining").notNull(),
+    /** Phase 4: numeric(14,4) — weight variants move fractional amounts. */
+    quantityReceived: numeric("quantity_received", {
+      precision: 14,
+      scale: 4,
+      mode: "number",
+    }).notNull(),
+    quantityRemaining: numeric("quantity_remaining", {
+      precision: 14,
+      scale: 4,
+      mode: "number",
+    }).notNull(),
 
     manufacturedDate: date("manufactured_date", { mode: "date" }),
     expiryDate: date("expiry_date", { mode: "date" }),

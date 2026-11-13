@@ -44,7 +44,8 @@ export const saleItemBatchConsumptions = pgTable(
     batchId: integer("batch_id").notNull(),
     variantId: integer("variant_id").notNull(),
 
-    quantity: integer("quantity").notNull(),
+    /** Phase 4: numeric(14,4) — weight batch draws are fractional. */
+    quantity: numeric("quantity", { precision: 14, scale: 4, mode: "number" }).notNull(),
     unitCostAtConsumption: numeric("unit_cost_at_consumption", {
       precision: 14,
       scale: 6,

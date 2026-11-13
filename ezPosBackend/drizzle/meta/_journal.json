@@ -503,6 +503,27 @@
       "when": 1794500020000,
       "tag": "0071_phase4_advanced_inventory",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1794500021000,
+      "tag": "0072_stock_precision",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1794500022000,
+      "tag": "0073_sale_movement_precision",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794500023000,
+      "tag": "0074_consumption_precision",
+      "breakpoints": true
     }
   ]
 }

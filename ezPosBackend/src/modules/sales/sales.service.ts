@@ -1322,6 +1322,82 @@ export async function createSale(
           quantity: u.quantity,
           unitCost: u.unitCost,
         }));
+      } else if (bomByVariant.has(item.variantId)) {
+        // Phase 4 (Feature 9): assemble-on-sale composite — the PARENT is
+        // not stocked; its COMPONENTS are consumed through the same FIFO
+        // machinery (waste-inclusive). Refunds restock the components via
+        // the persisted consumptions. Serial-tracked composites rejected.
+        const components = bomByVariant.get(item.variantId)!;
+        if (item.trackingType === "serial") {
+          throw new BadRequestError(
+            "Serial-tracked composite products are not supported.",
+          );
+        }
+        const consumedAll: BatchConsumption[] = [];
+        let componentTotalCost = 0;
+        for (const component of components) {
+          const required = roundMoney(
+            item.quantity * component.quantity * (1 + component.wastePercent / 100),
+          );
+          if (!options.allowNegativeStock) {
+            const [stock] = await tx
+              .select({ quantity: inventoryStock.quantity })
+              .from(inventoryStock)
+              .where(
+                and(
+                  eq(inventoryStock.businessId, businessId),
+                  eq(inventoryStock.variantId, component.componentVariantId),
+                  eq(inventoryStock.locationId, locationId),
+                ),
+              )
+              .for("update");
+            if (Number(stock?.quantity ?? 0) < required) {
+              throw new BadRequestError(
+                `Insufficient stock for component ${component.componentName}: need ${required}, have ${Number(stock?.quantity ?? 0)}.`,
+              );
+            }
+          }
+          const componentCost = await consumeStockFifo(
+            tx,
+            businessId,
+            locationId,
+            component.componentVariantId,
+            required,
+            { ...(options.allowNegativeStock ? { allowShortfall: true } : {}) },
+          );
+          if (
+            "shortfall" in componentCost &&
+            Number(componentCost.shortfall) > 0
+          ) {
+            batchShortfalls.push({
+              variantId: component.componentVariantId,
+              qty: Number(componentCost.shortfall),
+            });
+          }
+          componentTotalCost += componentCost.totalCost;
+          consumedAll.push(
+            ...componentCost.consumed.map((c) => ({
+              batchId: c.batchId,
+              quantity: c.quantity,
+              unitCost: c.unitCost,
+            })),
+          );
+          // Component movement (the parent itself is not stocked).
+          await tx.insert(inventoryMovements).values({
+            businessId,
+            variantId: component.componentVariantId,
+            locationId,
+            movementType: "sale",
+            quantity: -required,
+            referenceType: "bom_sale",
+            referenceId: saleId,
+          });
+        }
+        cost = {
+          totalCost: roundMoney(componentTotalCost),
+          costAtSale: roundMoney(componentTotalCost / item.quantity),
+          consumed: consumedAll,
+        };
       } else {
         cost = await consumeStockFifo(
           tx,
@@ -1434,11 +1510,35 @@ export async function createSale(
         }
       }
 
+      // Phase 4 (Feature 9): composite lines do NOT decrement the parent —
+      // their components were consumed in the BOM branch above; their stock
+      // rows are decremented here (atomic with the sale).
+      let updatedRows: { variantId: number; quantity: number | null }[] = [];
+      if (bomByVariant.has(item.variantId)) {
+        const components = bomByVariant.get(item.variantId)!;
+        for (const component of components) {
+          const required = roundMoney(
+            item.quantity * component.quantity * (1 + component.wastePercent / 100),
+          );
+          await tx
+            .update(inventoryStock)
+            .set({
+              quantity: sql`${inventoryStock.quantity} - ${required}`,
+            })
+            .where(
+              and(
+                eq(inventoryStock.variantId, component.componentVariantId),
+                eq(inventoryStock.businessId, businessId),
+                eq(inventoryStock.locationId, locationId),
+              ),
+            );
+        }
+      } else {
       // Online sales: the row was locked+validated, so a plain decrement
       // is safe. Offline-originated sales may reference a variant with NO
       // stock row at this location — the atomic upsert creates it at the
       // negative delta.
-      const updatedRows = options.allowNegativeStock
+      updatedRows = options.allowNegativeStock
         ? await tx
             .insert(inventoryStock)
             .values({
@@ -1483,8 +1583,11 @@ export async function createSale(
           `Failed to update stock for variant ${item.variantId}.`,
         );
       }
+      } // end non-composite decrement
 
       // Stock alerts (Module 14): deduped per variant+location per day.
+      // Phase 4: composite lines alert on the PARENT's stock (unchanged by
+      // the sale — components were consumed instead).
       {
         const [variantInfo] = await tx
           .select({
@@ -1496,25 +1599,44 @@ export async function createSale(
           .where(eq(productVariants.id, item.variantId))
           .limit(1);
         if (variantInfo) {
+          const alertQuantity = bomByVariant.has(item.variantId)
+            ? Number(
+                (
+                  await tx
+                    .select({ quantity: inventoryStock.quantity })
+                    .from(inventoryStock)
+                    .where(
+                      and(
+                        eq(inventoryStock.variantId, item.variantId),
+                        eq(inventoryStock.businessId, businessId),
+                        eq(inventoryStock.locationId, locationId),
+                      ),
+                    )
+                    .limit(1)
+                ).at(0)?.quantity ?? 0,
+              )
+            : Number(updatedRows[0]?.quantity ?? 0);
           await notifyStockLevel(tx, {
             businessId,
             variantId: item.variantId,
             productName: variantInfo.productName,
-            newQuantity: Number(updatedRows[0]?.quantity ?? 0),
+            newQuantity: alertQuantity,
             alertQuantity: Number(variantInfo.alertQuantity ?? 0),
             locationId,
           });
         }
       }
-      await tx.insert(inventoryMovements).values({
-        businessId,
-        variantId: item.variantId,
-        locationId,
-        movementType: "sale",
-        quantity: item.quantity,
-        referenceType: "sale",
-        referenceId: saleId,
-      });
+      if (!bomByVariant.has(item.variantId)) {
+        await tx.insert(inventoryMovements).values({
+          businessId,
+          variantId: item.variantId,
+          locationId,
+          movementType: "sale",
+          quantity: item.quantity,
+          referenceType: "sale",
+          referenceId: saleId,
+        });
+      }
 
       // Warranty generation input: the sale item id and the concrete sold
       // serials exist by this point. Products without an active warranty

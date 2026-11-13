@@ -1,4 +1,5 @@
 import {
+  numeric,
   foreignKey,
   index,
   pgTable,
@@ -44,7 +45,8 @@ export const inventoryMovements = pgTable(
     movementType: movementTypeEnum("movement_type").notNull(),
 
     // Can be positive (in) or negative (out)
-    quantity: integer("quantity").notNull(),
+    /** Phase 4: numeric(14,4) — weight movements are fractional. */
+    quantity: numeric("quantity", { precision: 14, scale: 4, mode: "number" }).notNull(),
 
     // Polymorphic Reference (Links to Purchase, Sale, or Adjustment)
     // e.g., referenceType = "purchase", referenceId = 15
