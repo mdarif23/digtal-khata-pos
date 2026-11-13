@@ -16,6 +16,9 @@ import {
   DatabaseBackup,
 } from "lucide-react";
 import { GiExpense } from "react-icons/gi";
+import { MdOutlineForum } from "react-icons/md";
+import { FaListCheck } from "react-icons/fa6";
+import { FaShieldHalved } from "react-icons/fa6";
 import { MdOutlinePointOfSale } from "react-icons/md";
 import { FcSalesPerformance } from "react-icons/fc";
 
@@ -107,6 +110,7 @@ export const navigation = [
       { title: "Units", url: "/units", permission: "products.view" },
       { title: "Variants", url: "/variants", permission: "products.manage_variants" },
       { title: "Stock Transfers", url: "/transfers", permission: "inventory.transfer" },
+      { title: "Production & BOM", url: "/production", permission: "products.view" },
       { title: "Stock Counts", url: "/stock-counts", permission: "inventory.adjust" },
     ],
   },
@@ -115,6 +119,12 @@ export const navigation = [
     url: "/sales",
     icon: FcSalesPerformance,
     permission: "sales.view",
+  },
+  {
+    title: "Quotations",
+    url: "/quotations",
+    icon: BadgePercent,
+    permission: "quotations.view",
   },
   {
     title: "Online Orders",
@@ -136,6 +146,24 @@ export const navigation = [
     url: "/expense",
     icon: GiExpense,
     permission: "expenses.view",
+  },
+  {
+    title: "Commissions",
+    url: "/commissions",
+    icon: FcSalesPerformance,
+    permission: "commission.view",
+  },
+  {
+    title: "Targets",
+    url: "/targets",
+    icon: FaListCheck,
+    permission: "commission.view",
+  },
+  {
+    title: "Messages",
+    url: "/comms-settings",
+    icon: MdOutlineForum,
+    anyPermission: ["comms.manage", "comms.view"],
   },
   {
     title: "Finance & Growth",
@@ -236,6 +264,12 @@ export const navigation = [
     url: "/tax-rates",
     icon: Percent,
     permission: "taxes.view",
+  },
+  {
+    title: "Audit Log",
+    url: "/audit-logs",
+    icon: FaShieldHalved,
+    permission: "audit.view",
   },
   {
     title: "Backup & Restore",
