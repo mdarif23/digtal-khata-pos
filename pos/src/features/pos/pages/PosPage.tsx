@@ -4,6 +4,7 @@ import { SpeedKeyGrid } from "@/features/pos/speedKeys/SpeedKeyGrid";
 import { CartHeader } from "@/features/pos/components/pos/CartHeader.js";
 import CartItems, {
   CartCalculation,
+  useCartTotals,
 } from "@/features/pos/components/pos/CartItems.js";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,7 +19,8 @@ import { PosHotkeyManager } from "../hotkeys/PosHotkeyManager";
 import { usePrintReceipt } from "../hooks/usePrintReceipt";
 import { CfdManageDialog } from "../cfd/CfdManageDialog";
 import { SalespersonSelect } from "../components/pos/SalespersonSelect";
-import { pushCfdPayloadApi, type CfdPushPayload } from "../cfd/cfd.api";
+import { pushCfdPayloadApi } from "../cfd/cfd.api";
+import { buildCfdCartPayload, buildCfdPaidPayload } from "../cfd/cfdPayload";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
 import {
   Card,
@@ -118,8 +120,13 @@ function Pos() {
   });
 
   // ---- Customer-facing display push (Phase 3) ----------------------------
+  // Totals come from the SAME useCartTotals instance the cart panel uses —
+  // server-quoted when available (tax rules, group pricing, promotions,
+  // coupon), local fallback otherwise. The display must never disagree with
+  // what checkout will charge.
   const cartValue = useCartStore((state) => state.cart);
   const cfdDisplayId = useCfdDisplayId();
+  const totals = useCartTotals(form);
   const cartKey = JSON.stringify(
     cartValue.map((item) => ({
       name: item.name,
@@ -128,40 +135,31 @@ function Pos() {
       discount: item.discount ?? null,
     })),
   );
+  // Money signature of the totals view: covers cart discount, group pricing,
+  // promotions, coupon and VAT — changes the display even when the items
+  // themselves did not change.
+  const totalsKey = [
+    totals.itemDiscount,
+    totals.cartDiscountAmount,
+    totals.group?.discountAmount ?? 0,
+    totals.promotions?.total ?? 0,
+    totals.coupon?.discountAmount ?? 0,
+    totals.vat,
+    totals.finalTotal,
+  ].join("|");
   useEffect(() => {
     if (cfdDisplayId === null) return;
+    // The completed sale pushes its own "paid" screen with the receipt's
+    // authoritative numbers — suppress the cart-clearing "idle" push while
+    // the success dialog is up so the thank-you is never overwritten.
+    if (isSuccessDialogOpen) return;
     const timer = setTimeout(() => {
-      const items = cartValue.map((item) => {
-        const unitPrice = Number(item.priceOverride?.unitPrice ?? item.unitPrice ?? 0);
-        const gross = roundMoney(Number(item.quantity) * unitPrice);
-        const lineDiscount =
-          item.discount?.type === "percentage"
-            ? roundMoney((gross * Math.min(item.discount.value, 100)) / 100)
-            : item.discount?.type === "fixed"
-              ? roundMoney(Math.min(item.discount.value, gross))
-              : 0;
-        return {
-          name: item.name,
-          variantName: (item.unitName ?? null) as string | null,
-          quantity: Number(item.quantity),
-          unitPrice,
-          lineTotal: roundMoney(gross - lineDiscount),
-        };
-      });
-      const gross = items.reduce((sum, i) => sum + i.lineTotal, 0);
-      const payload: CfdPushPayload = {
-        status: items.length === 0 ? "idle" : "cart",
-        items,
-        discountTotal: 0,
-        vatTotal: 0,
-        grandTotal: roundMoney(gross),
-        paidTotal: 0,
-        dueTotal: 0,
-      };
+      const payload = buildCfdCartPayload(cartValue, totals);
       void pushCfdPayloadApi(cfdDisplayId, payload).catch(() => undefined);
     }, 250);
     return () => clearTimeout(timer);
-  }, [cfdDisplayId, cartKey, cartValue]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- totalsKey stands in for the totals object (identity changes every render)
+  }, [cfdDisplayId, cartKey, cartValue, totalsKey, isSuccessDialogOpen]);
 
   async function onSubmit(data: CartSchemaType) {
     // Claim the checkout key before anything else: every retry of THIS
@@ -289,6 +287,16 @@ function Pos() {
         setLastReceipt(response.data.receipt);
         setIsSuccessDialogOpen(true);
       }
+
+      // Customer display: the authoritative post-payment screen (receipt
+      // numbers, not the cart's running estimate). Fire-and-forget — a
+      // display problem never touches the completed sale.
+      if (cfdDisplayId !== null && response?.data?.receipt) {
+        void pushCfdPayloadApi(
+          cfdDisplayId,
+          buildCfdPaidPayload(response.data.receipt.items, response.data.receipt),
+        ).catch(() => undefined);
+      }
     } catch (error) {
       // Connection dropped mid-checkout: cash/due sales fall back to the
       // outbox instead of losing the cart; everything else keeps the cart
@@ -373,6 +381,7 @@ function Pos() {
                   isPaymentDialogOpen={isPaymentDialogOpen}
                   setIsPaymentDialogOpen={setIsPaymentDialogOpen}
                   form={form}
+                  totals={totals}
                 />
               </div>
             </CardContent>
@@ -398,10 +407,6 @@ function Pos() {
 }
 
 export default Pos;
-
-function roundMoney(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
 
 /** Locally-persisted target display for the POS cart push (Phase 3). */
 function useCfdDisplayId(): number | null {

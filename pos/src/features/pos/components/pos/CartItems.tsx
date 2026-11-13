@@ -55,7 +55,7 @@ const tk = (n: number) => `৳${n.toFixed(2)}`;
 // fills the gap instantly and keeps working offline / on quote failure.
 
 /** View shape: local getCartTotals fields plus the quote-only coupon/group fields. */
-interface CartTotalsView {
+export interface CartTotalsView {
   itemsBase: number;
   itemDiscount: number;
   itemsTotal: number;
@@ -79,7 +79,12 @@ interface CartTotalsView {
   }[] | null;
 }
 
-function useCartTotals(form: ShowCustomerInfoProps["form"]): CartTotalsView {
+// Exported so PosPage owns ONE totals instance — the customer-facing
+// display push and the cart panel must never disagree (and two hook
+// instances would double-fetch the server quote on every cart change).
+export function useCartTotals(
+  form: ShowCustomerInfoProps["form"],
+): CartTotalsView {
   const cart = useCartStore((state) => state.cart);
   const discount = useWatch({ control: form.control, name: "discount" });
   const vatPercent =
@@ -518,15 +523,17 @@ function CartItemRow({ item }: { item: CartItem }) {
 }
 
 // ---------- totals + action buttons ----------
+// `totals` comes from PosPage (which owns the single useCartTotals instance
+// shared with the customer-facing display push).
 export function CartCalculation({
   form,
   isPaymentDialogOpen,
   setIsPaymentDialogOpen,
-}: ShowCustomerInfoProps) {
+  totals,
+}: ShowCustomerInfoProps & { totals: CartTotalsView }) {
 const [discountSignal, setDiscountSignal] = useState(0);
   // Phase 3 hotkey: F4 opens the discount dialog.
   useHotkeyAction("discount", () => setDiscountSignal((n) => n + 1));
-    const totals = useCartTotals(form);
 
   return (
     <div className="space-y-2">
