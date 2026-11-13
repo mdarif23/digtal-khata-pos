@@ -67,10 +67,20 @@ export type PaymentSchemaType = z.infer<typeof paymentSchema>;
 // 1. Define what a single cart item should look like when sent to the DB
 const cartItemPayloadSchema = z.object({
   variantId: z.number().int().positive("Variant ID is required"),
-  // Quantity in the SELECTED sell unit (2 = two boxes). Integer whole
-  // packages in v1; the server allows fractional UOM quantities when the
-  // base amount is whole.
-  quantity: z.number().int().positive("Quantity must be at least 1"),
+  // Quantity in the SELECTED sell unit (2 = two boxes; 0.5 = half a kg on a
+  // sold-by-weight variant). Fractional amounts are legal up to 3 decimals —
+  // scale scans and the weight quantity input only produce them for
+  // sold-by-weight lines, and the server re-enforces the per-variant rule
+  // (identity lines must be whole UNLESS the variant is sold by weight).
+  quantity: z
+    .number()
+    .positive("Quantity must be at least 1")
+    .refine(
+      // Round-trip compare — a plain `Math.round(v*1000) === v*1000` falsely
+      // rejects legal decimals like 1.005 (float representation).
+      (v) => Math.round(v * 1000) / 1000 === v,
+      "Quantity supports up to 3 decimals.",
+    ),
   // Advisory per-selected-unit price — the server re-resolves trusted prices.
   unitPrice: z.number().nonnegative("Unit price cannot be negative"),
   discount: z

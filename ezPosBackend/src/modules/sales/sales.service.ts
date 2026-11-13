@@ -2062,12 +2062,17 @@ async function applySaleRefund(
   for (const item of items) {
     const remaining = item.quantity - (returnedByItem.get(item.id) ?? 0);
     const requested = requestedQuantityByItemId.get(item.id) ?? remaining;
-    if (!Number.isInteger(requested) || requested <= 0) {
+    // Fractional returns are legal for sold-by-weight lines (P0 fix): the
+    // sale schema caps inputs at 3 decimals; here only positivity and the
+    // remaining-quantity guard apply. Serial lines stay effectively whole —
+    // the partial-serial selection below demands exactly one serial per
+    // returned unit.
+    if (!Number.isFinite(requested) || requested <= 0) {
       throw new BadRequestError(
         `Invalid return quantity for sale item ${item.id}.`,
       );
     }
-    if (requested > remaining) {
+    if (requested > remaining + 1e-9) {
       throw new ConflictError(
         `Cannot return ${requested} of sale item ${item.id}; only ${Math.max(remaining, 0)} unit(s) remain returnable.`,
       );

@@ -289,6 +289,11 @@ function CartItemRow({ item }: { item: CartItem }) {
   const variant = item.variants[0];
   if (!variant || variant.id === undefined) return null;
   const variantId = variant.id;
+  // Sold-by-weight lines carry fractional base-unit quantities (kg) — scale
+  // scans and the quantity input write decimals; the server re-enforces the
+  // per-variant rule at checkout.
+  const isWeightLine =
+    (variant as { soldByWeight?: boolean }).soldByWeight === true;
   const cartSerials =
     useCartStore(
       (state) =>
@@ -437,8 +442,25 @@ function CartItemRow({ item }: { item: CartItem }) {
               <button
                 type="button"
                 aria-label="Decrease quantity"
-                disabled={quantity <= 1}
+                disabled={!isWeightLine && quantity <= 1}
                 onClick={() => {
+                  // Weight lines: −1 kg with exact pool adjustment; below the
+                  // minimum weight the line comes off the cart entirely.
+                  if (isWeightLine) {
+                    const next =
+                      Math.round((quantity - 1) * 1000) / 1000;
+                    if (next < 0.001) {
+                      returnVariantStock(variantId, quantity * conversionFactor);
+                      removeCartItem(variantId, lineUnit);
+                    } else {
+                      returnVariantStock(
+                        variantId,
+                        (quantity - next) * conversionFactor,
+                      );
+                      addCustomCartQuantity(variantId, next, lineUnit);
+                    }
+                    return;
+                  }
                   // Steps in ENTERED units (±1 box); the pool moves in base.
                   returnVariantStock(variantId, conversionFactor);
                   removeCartQuantity(variantId, lineUnit);
@@ -452,6 +474,7 @@ function CartItemRow({ item }: { item: CartItem }) {
                 itemId={variantId}
                 uomConversionId={lineUnit}
                 quantity={quantity}
+                allowDecimals={isWeightLine}
                 addCustomCartQuantity={(id, newQty) => {
                   const deltaBase = (newQty - quantity) * conversionFactor;
                   if (deltaBase > 0) {
@@ -849,6 +872,9 @@ interface CartQuantityInputProps {
    *  can have a Box line and a Pcs line with the same id. */
   uomConversionId?: number | null;
   quantity: number; // from the cart store
+  /** Sold-by-weight lines accept fractional quantities (up to 3 decimals —
+   *  grams); everything else stays integer whole units. */
+  allowDecimals?: boolean;
   addCustomCartQuantity: (id: number, qty: number) => void;
 }
 
@@ -856,6 +882,7 @@ export function CartQuantityInput({
   itemId,
   uomConversionId = null,
   quantity,
+  allowDecimals = false,
   addCustomCartQuantity,
 }: CartQuantityInputProps) {
   const [inputValue, setInputValue] = useState(String(quantity));
@@ -866,12 +893,27 @@ export function CartQuantityInput({
   }, [quantity]);
 
   const commitChange = (val: string) => {
-    const parsed = Math.floor(Number(val));
-    // empty, 0, negative or invalid -> go back to the current quantity
-    const newQty = Number.isFinite(parsed) && parsed >= 1 ? parsed : quantity;
+    // Weight lines: keep up to 3 decimals (scale precision); empty, 0,
+    // negative, sub-gram or invalid input falls back to the current quantity.
+    if (allowDecimals) {
+      const parsed = Number(val);
+      const rounded =
+        Number.isFinite(parsed) && parsed > 0
+          ? Math.round(parsed * 1000) / 1000
+          : 0;
+      const newQty = rounded >= 0.001 ? rounded : quantity;
 
-    if (newQty !== quantity) {
-      addCustomCartQuantity(itemId, newQty);
+      if (newQty !== quantity) {
+        addCustomCartQuantity(itemId, newQty);
+      }
+    } else {
+      const parsed = Math.floor(Number(val));
+      // empty, 0, negative or invalid -> go back to the current quantity
+      const newQty = Number.isFinite(parsed) && parsed >= 1 ? parsed : quantity;
+
+      if (newQty !== quantity) {
+        addCustomCartQuantity(itemId, newQty);
+      }
     }
 
     // Show what the store really holds (it may clamp to available stock).
@@ -892,8 +934,8 @@ export function CartQuantityInput({
     <Input
       className="h-8 w-15 text-center"
       type="number"
-      min={1}
-      step={1}
+      min={allowDecimals ? 0.001 : 1}
+      step={allowDecimals ? 0.001 : 1}
       value={inputValue}
       aria-label="Quantity"
       onChange={(e) => setInputValue(e.target.value)}

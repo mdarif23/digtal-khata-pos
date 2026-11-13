@@ -22,8 +22,16 @@ const cartItemPayloadSchema = z
     variantId: z.number().int().positive("Variant ID is required"),
     // Quantity in the ENTERED selling unit (base when uomConversionId is
     // absent). UOM lines may be fractional at the entered level (1.5 Box);
-    // the server converts to whole base units authoritatively.
-    quantity: z.number().positive("Quantity must be at least 1"),
+    // the server converts to whole base units authoritatively. Sold-by-weight
+    // lines are fractional too — capped at 3 decimals (scale precision,
+    // round-trip compare so legal decimals like 1.005 are not rejected).
+    quantity: z
+      .number()
+      .positive("Quantity must be at least 1")
+      .refine(
+        (v) => Math.round(v * 1000) / 1000 === v,
+        "Quantity supports up to 3 decimals.",
+      ),
     unitPrice: z.number().nonnegative("Unit price cannot be negative"),
     discount: z
       .object({
@@ -120,13 +128,18 @@ export const saleRefundRequestSchema = z.object({
    * Per-line partial returns (UOM Phase 5, migration 0062): quantities are
    * BASE units (e.g. 3 pcs out of a Box-of-12 line). Absent = the full
    * remaining quantity of every listed line (legacy behavior). The engine
-   * validates against received − previously returned.
+   * validates against received − previously returned. Fractional amounts
+   * (0.25 kg of a sold-by-weight line) are legal — the engine caps them at
+   * 3 decimals and the remaining-quantity math guards the rest.
    */
   quantities: z
     .array(
       z.object({
         saleItemId: z.number().int().positive(),
-        quantity: z.number().int().positive(),
+        quantity: z.number().positive().refine(
+          (v) => Math.round(v * 1000) === v * 1000,
+          "Quantity supports up to 3 decimals.",
+        ),
       }),
     )
     .max(200)

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -137,8 +138,9 @@ export const customerWarranties = pgTable(
     serialNumber: varchar("serial_number", { length: 100 }),
     /** Units covered by this row (1 for serial-scoped rows). */
     quantity: integer("quantity").notNull().default(1),
-    /** Units already returned under partial refunds (0 initially). */
-    returnedQuantity: integer("returned_quantity").notNull().default(0),
+    /** Units already returned under partial refunds (0 initially). 0078:
+     * double precision — fractional sold-by-weight returns must not round. */
+    returnedQuantity: doublePrecision("returned_quantity").notNull().default(0),
     // --- warranty terms snapshot (never re-read from product config) ---
     provider: varchar("provider", { length: 30 }).notNull(),
     warrantyType: varchar("warranty_type", { length: 30 }).notNull(),

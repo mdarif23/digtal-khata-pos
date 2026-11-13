@@ -545,6 +545,13 @@
       "when": 1794500026000,
       "tag": "0077_commission_reversal_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794500027000,
+      "tag": "0078_refund_quantity_precision",
+      "breakpoints": true
     }
   ]
 }

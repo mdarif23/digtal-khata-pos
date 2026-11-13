@@ -1,4 +1,5 @@
 import {
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -22,7 +23,9 @@ export const saleRefundItems = pgTable(
     refundId: integer("refund_id"),
     saleItemId: integer("sale_item_id"),
     productId: integer("product_id"),
-    quantity: integer(),
+    // 0078: double precision — fractional sold-by-weight returns must land
+    // in the ledger exactly (an integer column rounded 0.75→1 silently).
+    quantity: doublePrecision(),
     refundPrice: numeric("refund_price", { mode: "number" }),
     refundTotal: numeric("refund_total", { mode: "number" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
