@@ -17,7 +17,8 @@ import { useCustomerStore } from "@/store/useCustomerStore";
 import { Controller, UseFormReturn, useWatch } from "react-hook-form";
 import { CartSchemaType, PaymentSchemaType } from "../../schemas/cart.schema";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import axios from "../../../../api/axios.js";
 
 // Bangla QR destination: runtime config (public/config.js) → env → legacy
 // default. Was hardcoded; shops have different merchant numbers.
@@ -68,10 +69,133 @@ function getMode(payments: PaymentSchemaType[] = []) {
   return payments.length > 1 ? "split" : payments[0]?.method;
 }
 
+// ---------- balance tenders (store credit / loyalty points) ----------
+// The backend is authoritative: it re-checks the customer, the caps and the
+// row-locked balance inside the sale transaction. These checks exist so the
+// Confirm button reflects reality BEFORE the cashier commits — a rejected
+// redemption aborts the whole sale.
+
+interface LoyaltyPosConfig {
+  redeemValue: number;
+  earnRate: number;
+  minRedemptionPoints: number;
+  maxRedemptionPointsPerSale: number | null;
+}
+
+interface TenderBalances {
+  /** Currency balance, null = unknown (loading / fetch failed). */
+  storeCredit: number | null;
+  /** Points balance, null = unknown (loading / fetch failed). */
+  loyaltyBalance: number | null;
+  /** POS redemption config, null = program inactive / not readable. */
+  loyaltyConfig: LoyaltyPosConfig | null;
+}
+
+const EMPTY_TENDER: TenderBalances = {
+  storeCredit: null,
+  loyaltyBalance: null,
+  loyaltyConfig: null,
+};
+
+/** Balance-tender data for the selected customer (fetched while open). */
+function useTenderBalances(
+  customerId: number | null,
+  open: boolean,
+): TenderBalances {
+  const [tender, setTender] = useState<TenderBalances>(EMPTY_TENDER);
+
+  useEffect(() => {
+    if (!open || customerId == null || customerId <= 0) {
+      setTender(EMPTY_TENDER);
+      return;
+    }
+    let ignore = false;
+    const apply = (patch: Partial<TenderBalances>) =>
+      setTender((current) => ({ ...current, ...patch }));
+    // Balance unknown while loading — the Confirm button stays disabled
+    // until the real numbers arrive (never guess a balance).
+    axios
+      .get(`/customers/${customerId}/store-credit`)
+      .then((res) => {
+        if (!ignore)
+          apply({ storeCredit: Number(res.data?.data?.balance ?? 0) });
+      })
+      .catch(() => {
+        if (!ignore) apply({ storeCredit: null });
+      });
+    axios
+      .get(`/customers/${customerId}/loyalty`)
+      .then((res) => {
+        if (!ignore)
+          apply({ loyaltyBalance: Number(res.data?.data?.balance ?? 0) });
+      })
+      .catch(() => {
+        if (!ignore) apply({ loyaltyBalance: null });
+      });
+    axios
+      .get("/loyalty/config")
+      .then((res) => {
+        if (!ignore) apply({ loyaltyConfig: res.data?.data ?? null });
+      })
+      .catch(() => {
+        if (!ignore) apply({ loyaltyConfig: null });
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [customerId, open]);
+
+  return tender;
+}
+
+/** Why the store-credit tender cannot be confirmed right now (null = valid). */
+function storeCreditIssue(
+  amount: number,
+  customerId: number | null,
+  tender: TenderBalances,
+): string | null {
+  if (customerId == null || customerId <= 0)
+    return "Select a customer to pay with store credit.";
+  if (!(amount > 0)) return "Nothing to pay.";
+  if (tender.storeCredit === null)
+    return "Store credit balance unavailable — check the connection.";
+  if (amount > tender.storeCredit + 0.005)
+    return `Insufficient store credit — ৳${(amount - tender.storeCredit).toFixed(2)} short.`;
+  return null;
+}
+
+/** Why the loyalty tender cannot be confirmed right now (null = valid). */
+function loyaltyIssue(
+  amount: number,
+  customerId: number | null,
+  tender: TenderBalances,
+): string | null {
+  if (customerId == null || customerId <= 0)
+    return "Select a customer to pay with points.";
+  const config = tender.loyaltyConfig;
+  if (!config || !(config.redeemValue > 0))
+    return "Loyalty redemption is not available for this business.";
+  const points = money(amount / config.redeemValue);
+  if (points <= 0) return "This total converts to zero points.";
+  if (
+    config.maxRedemptionPointsPerSale !== null &&
+    points > config.maxRedemptionPointsPerSale
+  )
+    return `Capped at ${config.maxRedemptionPointsPerSale} points per sale (needs ${points.toFixed(2)}).`;
+  if (config.minRedemptionPoints > 0 && points < config.minRedemptionPoints)
+    return `Redemption needs at least ${config.minRedemptionPoints} points (this is ${points.toFixed(2)}).`;
+  if (tender.loyaltyBalance === null)
+    return "Points balance unavailable — check the connection.";
+  if (points > tender.loyaltyBalance + 0.01)
+    return `Insufficient points — balance ${tender.loyaltyBalance.toFixed(2)}, needs ${points.toFixed(2)}.`;
+  return null;
+}
+
 function isPaymentValid(
   payments: PaymentSchemaType[],
   finalTotal: number,
   customerId: number | null,
+  tender: TenderBalances,
 ) {
   const mode = getMode(payments);
   const p0 = payments?.[0];
@@ -84,6 +208,12 @@ function isPaymentValid(
   if (mode === "gift_card") return (p0?.reference ?? "").trim().length >= 8;
 
   if (mode === "due") return customerId != null;
+
+  if (mode === "store_credit")
+    return storeCreditIssue(money(p0?.amount ?? 0), customerId, tender) === null;
+
+  if (mode === "loyalty_points")
+    return loyaltyIssue(money(p0?.amount ?? 0), customerId, tender) === null;
 
   if (mode === "split") {
     const [cash, digital, due] = payments;
@@ -125,8 +255,11 @@ export function PaymentModal({
   const payments = useWatch({ control: form.control, name: "payments" });
   const customerId = useWatch({ control: form.control, name: "customerId" });
 
+  // Balance tenders need the customer's live store-credit / loyalty numbers.
+  const tender = useTenderBalances(customerId, isPaymentDialogOpen);
+
   const mode = getMode(payments);
-  const valid = isPaymentValid(payments ?? [], finalTotal, customerId);
+  const valid = isPaymentValid(payments ?? [], finalTotal, customerId, tender);
   const isSubmitting = form.formState.isSubmitting;
   return (
     <Dialog
@@ -188,6 +321,20 @@ export function PaymentModal({
                 finalTotal={finalTotal}
                 form={form}
                 paymentInstruction="Enter the customer's gift card code"
+              />
+            )}
+            {mode === "store_credit" && (
+              <StoreCreditPayment
+                finalTotal={finalTotal}
+                customerId={customerId}
+                tender={tender}
+              />
+            )}
+            {mode === "loyalty_points" && (
+              <LoyaltyPointsPayment
+                finalTotal={finalTotal}
+                customerId={customerId}
+                tender={tender}
               />
             )}
             {mode === "split" && (
@@ -404,6 +551,81 @@ function DigitalCashPayment({
         </CardContent>
       </Card>
     </>
+  );
+}
+
+// ---------- store credit ----------
+function StoreCreditPayment({
+  finalTotal,
+  customerId,
+  tender,
+}: {
+  finalTotal: number;
+  customerId: number | null;
+  tender: TenderBalances;
+}) {
+  const issue = storeCreditIssue(finalTotal, customerId, tender);
+  const available = tender.storeCredit;
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-1">
+        <span>Store credit</span>
+        <span>
+          Available:{" "}
+          {available === null ? "checking…" : `৳${available.toFixed(2)}`}
+        </span>
+        <span>Amount applied: ৳{finalTotal.toFixed(2)}</span>
+        {issue && (
+          <span className="text-sm text-red-500">{issue}</span>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------- loyalty points ----------
+function LoyaltyPointsPayment({
+  finalTotal,
+  customerId,
+  tender,
+}: {
+  finalTotal: number;
+  customerId: number | null;
+  tender: TenderBalances;
+}) {
+  const config = tender.loyaltyConfig;
+  const points =
+    config && config.redeemValue > 0
+      ? money(finalTotal / config.redeemValue)
+      : null;
+  const balance = tender.loyaltyBalance;
+  const issue = loyaltyIssue(finalTotal, customerId, tender);
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-1">
+        <span>Loyalty points</span>
+        <span>
+          Balance:{" "}
+          {balance === null ? "checking…" : `${balance.toFixed(2)} points`}
+        </span>
+        {points !== null && (
+          <span>
+            Redeems ৳{finalTotal.toFixed(2)} for {points.toFixed(2)} points
+            {config ? ` (৳${config.redeemValue} per point)` : ""}
+          </span>
+        )}
+        {config && config.maxRedemptionPointsPerSale !== null && (
+          <span className="text-xs text-muted-foreground">
+            Max {config.maxRedemptionPointsPerSale} points per sale
+          </span>
+        )}
+        {issue && (
+          <span className="text-sm text-red-500">{issue}</span>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
