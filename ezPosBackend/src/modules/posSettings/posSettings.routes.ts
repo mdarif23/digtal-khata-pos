@@ -30,13 +30,40 @@ const manage = [
   requirePermission("settings.edit"),
 ] as const;
 
+const approvalRequiredSchema = z
+  .object({
+    sale_refund: z.boolean().optional(),
+    cash_movement: z.boolean().optional(),
+    below_minimum_price: z.boolean().optional(),
+  })
+  .strict();
+
+const embeddedBarcodeSchema = z
+  .object({
+    prefixes: z.array(z.string().regex(/^\d{1,3}$/)).min(1).max(5),
+    pluLength: z.number().int().min(1).max(12),
+    valueLength: z.number().int().min(1).max(12),
+    decimals: z.number().int().min(0).max(6),
+    mode: z.enum(["weight", "price"]),
+    hasCheckDigit: z.boolean(),
+  })
+  .strict();
+
 const patchSchema = z
   .object({
     requireTerminal: z.boolean().optional(),
     allowMultipleDrawerSessions: z.boolean().optional(),
+    requireOpenDrawer: z.boolean().optional(),
+    approvalRequired: approvalRequiredSchema.optional(),
+    embeddedBarcode: embeddedBarcodeSchema.nullable().optional(),
   })
   .refine(
-    (v) => v.requireTerminal !== undefined || v.allowMultipleDrawerSessions !== undefined,
+    (v) =>
+      v.requireTerminal !== undefined ||
+      v.allowMultipleDrawerSessions !== undefined ||
+      v.requireOpenDrawer !== undefined ||
+      v.approvalRequired !== undefined ||
+      v.embeddedBarcode !== undefined,
     { message: "Nothing to update." },
   );
 

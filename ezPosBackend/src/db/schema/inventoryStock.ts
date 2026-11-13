@@ -1,4 +1,6 @@
 import {
+  doublePrecision,
+  numeric,
   foreignKey,
   index,
   integer,
@@ -21,8 +23,9 @@ export const inventoryStock = pgTable(
       .references(() => productVariants.id)
       .notNull(),
     locationId: integer("location_id").references(() => locations.id),
-    quantity: integer().default(0),
-    reservedQuantity: integer("reserved_quantity").default(0),
+    /** Phase 4: float8 — weight variants hold fractional stock. */
+    quantity: doublePrecision("quantity").default(0),
+    reservedQuantity: doublePrecision("reserved_quantity").default(0),
   },
   (table) => [
     index("inventory_stock_business_id_idx").on(table.businessId),

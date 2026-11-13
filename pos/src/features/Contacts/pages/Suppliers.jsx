@@ -10,6 +10,7 @@ import {
 import { SupplierDialog } from "../components/suppliers/SuppliersDialog";
 import { SuppliersTable } from "../components/suppliers/SuppliersTable";
 import { ContactListLayout } from "../components/ContactListLayout";
+import { ContactImportExportButtons } from "../components/ContactImportExportButtons";
 import { useContactStore } from "../useContactStore";
 
 export function Suppliers() {
@@ -44,7 +45,12 @@ export function Suppliers() {
     <ContactListLayout
       title="Suppliers"
       description="Keep supplier details organized and ready for your next purchase."
-      action={<SupplierDialog />}
+      action={
+        <div className="flex gap-2">
+          <ContactImportExportButtons entity="suppliers" />
+          <SupplierDialog />
+        </div>
+      }
       metrics={[
         {
           label: "Total suppliers",

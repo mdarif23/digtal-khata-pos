@@ -7,6 +7,7 @@ import {
   createTransfer,
   getTransferDetail,
   listTransfers,
+  authorizeTransfer,
   receiveTransfer,
   shipTransfer,
 } from "./stockTransfers.service.js";
@@ -88,6 +89,28 @@ export async function postTransfer(req: Request, res: Response) {
     return res.status(201).json({ success: true, data });
   } catch (err: unknown) {
     return sendSafeError(res, err, "Unable to create the transfer.");
+  }
+}
+
+/** Phase 4 (Feature 17): explicit authorization step on a draft transfer. */
+export async function postTransferAuthorize(req: Request, res: Response) {
+  try {
+    const transferId = Number(req.params.transferId);
+    if (!Number.isInteger(transferId) || transferId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid transfer ID." });
+    }
+    const { userId, callerIsOwner } = actor(req);
+    const data = await authorizeTransfer(
+      getBusinessId(req),
+      userId,
+      callerIsOwner,
+      transferId,
+    );
+    return res.status(200).json({ success: true, data });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to authorize the transfer.");
   }
 }
 

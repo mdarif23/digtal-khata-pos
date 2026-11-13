@@ -48,13 +48,16 @@ const cartItemPayloadSchema = z
       .nullish(),
   })
   .superRefine((data, ctx) => {
-    // Identity lines stay integer (legacy contract); UOM lines convert to
-    // whole base units in the service (INTEGER stock invariant).
-    if (data.uomConversionId == null && !Number.isInteger(data.quantity)) {
+    // Phase 4 (Feature 10): fractional quantities are allowed here and the
+    // SERVICE enforces the per-variant rule (identity lines must be whole
+    // UNLESS the variant is sold by weight — sold_by_weight). UOM lines
+    // still convert to whole base units in the service (INTEGER stock
+    // invariant for allocated packaging).
+    if (!Number.isFinite(data.quantity) || data.quantity <= 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["quantity"],
-        message: "Quantity must be a whole number.",
+        message: "Quantity must be a positive number.",
       });
     }
   });
@@ -84,6 +87,15 @@ export const createSalePayloadSchema = z.object({
   // pricing.below_minimum_override (Phase 6): the approval reason recorded on
   // the affected sale lines and in the audit log.
   belowMinimumReason: z.string().trim().max(300).optional(),
+
+  // Phase 1: one-time manager approval token (from POST /api/manager-approval/
+  // verify) required when pos_settings.approval_required gates the operation
+  // (below-minimum pricing today; refund requests carry their own field).
+  approvalToken: z.string().max(120).optional(),
+
+  // Phase 5 (Feature 13): the SALESPERSON on this invoice (nullable =
+  // unattributed; defaults to cashier for reporting fallback).
+  salespersonUserId: z.number().int().positive().nullable().optional(),
 
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),
@@ -141,6 +153,12 @@ export const saleRefundRequestSchema = z.object({
    * retryable; provider_refund_id stays NULL until it succeeds).
    */
   refundMethod: z.enum(["cash", "original_payment", "store_credit"]).optional(),
+  /**
+   * Phase 1: one-time manager approval token, required when
+   * pos_settings.approval_required.sale_refund is on. Consumed inside the
+   * refund transaction.
+   */
+  approvalToken: z.string().max(120).optional(),
 });
 
 // 3. Export the TypeScript type for your payload

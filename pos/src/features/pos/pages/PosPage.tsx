@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ProductList } from "@/features/pos/components/pos/ProductList.js";
+import { SpeedKeyGrid } from "@/features/pos/speedKeys/SpeedKeyGrid";
 import { CartHeader } from "@/features/pos/components/pos/CartHeader.js";
 import CartItems, {
   CartCalculation,
@@ -12,6 +13,12 @@ import {
   CreateSalePayload,
   createSalePayloadSchema,
 } from "../schemas/cart.schema.js";
+import { useHotkeyAction } from "../hotkeys/hotkeyBus";
+import { PosHotkeyManager } from "../hotkeys/PosHotkeyManager";
+import { usePrintReceipt } from "../hooks/usePrintReceipt";
+import { CfdManageDialog } from "../cfd/CfdManageDialog";
+import { SalespersonSelect } from "../components/pos/SalespersonSelect";
+import { pushCfdPayloadApi, type CfdPushPayload } from "../cfd/cfd.api";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
 import {
   Card,
@@ -76,11 +83,19 @@ function Pos() {
     }
   }, [holdsRevision]);
 
+  // Phase 5 (Feature 13): the salesperson attributed to new sales — a
+  // business member chosen per register (persisted locally).
+  const [salespersonUserId, setSalespersonUserId] = useState<number | null>(() => {
+    const stored = localStorage.getItem("ezpos.pos.salespersonUserId");
+    return stored ? Number(stored) : null;
+  });
+
   const form = useForm<CartSchemaType>({
     resolver: zodResolver(cartSchema),
     defaultValues: {
       saleDate: new Date(),
       customerId: null,
+      salespersonUserId: salespersonUserId ?? null,
       payments: [],
       discount: null,
       vatPercent: null,
@@ -88,6 +103,65 @@ function Pos() {
     },
   });
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+
+  // Phase 3 hotkeys: F6 payment, F7 reprint last receipt, F5 customer
+  // search focus. The manager component renders the ? cheatsheet.
+  useHotkeyAction("payment", () => setIsPaymentDialogOpen(true));
+  useHotkeyAction("customer", () => {
+    document
+      .querySelector<HTMLElement>('[data-hotkey-target="customer-search"]')
+      ?.focus();
+  });
+  const { printReceipt } = usePrintReceipt();
+  useHotkeyAction("print-receipt", () => {
+    if (lastReceipt) void printReceipt(lastReceipt);
+  });
+
+  // ---- Customer-facing display push (Phase 3) ----------------------------
+  const cartValue = useCartStore((state) => state.cart);
+  const cfdDisplayId = useCfdDisplayId();
+  const cartKey = JSON.stringify(
+    cartValue.map((item) => ({
+      name: item.name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      discount: item.discount ?? null,
+    })),
+  );
+  useEffect(() => {
+    if (cfdDisplayId === null) return;
+    const timer = setTimeout(() => {
+      const items = cartValue.map((item) => {
+        const unitPrice = Number(item.priceOverride?.unitPrice ?? item.unitPrice ?? 0);
+        const gross = roundMoney(Number(item.quantity) * unitPrice);
+        const lineDiscount =
+          item.discount?.type === "percentage"
+            ? roundMoney((gross * Math.min(item.discount.value, 100)) / 100)
+            : item.discount?.type === "fixed"
+              ? roundMoney(Math.min(item.discount.value, gross))
+              : 0;
+        return {
+          name: item.name,
+          variantName: (item.unitName ?? null) as string | null,
+          quantity: Number(item.quantity),
+          unitPrice,
+          lineTotal: roundMoney(gross - lineDiscount),
+        };
+      });
+      const gross = items.reduce((sum, i) => sum + i.lineTotal, 0);
+      const payload: CfdPushPayload = {
+        status: items.length === 0 ? "idle" : "cart",
+        items,
+        discountTotal: 0,
+        vatTotal: 0,
+        grandTotal: roundMoney(gross),
+        paidTotal: 0,
+        dueTotal: 0,
+      };
+      void pushCfdPayloadApi(cfdDisplayId, payload).catch(() => undefined);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [cfdDisplayId, cartKey, cartValue]);
 
   async function onSubmit(data: CartSchemaType) {
     // Claim the checkout key before anything else: every retry of THIS
@@ -112,6 +186,8 @@ function Pos() {
         uomConversionId: item.uomConversionId ?? null,
         priceOverride: item.priceOverride ?? null,
       })),
+      // Phase 5 (Feature 13): salesperson attribution on the invoice.
+      salespersonUserId: salespersonUserId,
     };
 
     const result = createSalePayloadSchema.safeParse(rawPayload);
@@ -227,6 +303,21 @@ function Pos() {
         return;
       }
       console.error("Sale submission error:", error);
+      // Phase 1: surface server rejections (e.g. require_open_drawer 409,
+      // payment validation) — previously this was console-only.
+      const serverMessage =
+        typeof error === "object" &&
+        error !== null &&
+        "response" in error &&
+        typeof (error as { response?: { data?: { message?: string } } }).response
+          ?.data?.message === "string"
+          ? (error as { response: { data: { message: string } } }).response.data
+              .message
+          : null;
+      toast.add({
+        title: serverMessage ?? "The sale could not be completed.",
+        type: "error",
+      });
     }
   }
 
@@ -239,11 +330,26 @@ function Pos() {
             <NotificationBell revision={notificationRevision} />
             <SyncStatusIndicator />
             <RegisterDialog />
+            <SalespersonSelect
+              value={salespersonUserId}
+              onChange={(userId) => {
+                setSalespersonUserId(userId);
+                form.setValue("salespersonUserId", userId);
+                if (userId === null) {
+                  localStorage.removeItem("ezpos.pos.salespersonUserId");
+                } else {
+                  localStorage.setItem("ezpos.pos.salespersonUserId", String(userId));
+                }
+              }}
+            />
+            <PosHotkeyManager />
+            <CfdManageDialog />
           </div>
         </div>
         <section className="flex h-[60dvh] min-h-[420px] shrink-0 flex-col overflow-hidden rounded-xl border bg-background shadow-sm lg:h-full lg:min-h-0 lg:shrink">
           {/* Page-scoped wedge capture pauses while checkout/receipt dialogs
               are up — scans must never edit the cart mid-payment. */}
+          <SpeedKeyGrid />
           <ProductList
             scannerEnabled={!isPaymentDialogOpen && !isSuccessDialogOpen}
           />
@@ -292,3 +398,24 @@ function Pos() {
 }
 
 export default Pos;
+
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/** Locally-persisted target display for the POS cart push (Phase 3). */
+function useCfdDisplayId(): number | null {
+  const [displayId, setDisplayId] = useState<number | null>(null);
+  useEffect(() => {
+    const stored = localStorage.getItem("ezpos.cfd.pushDisplayId");
+    setDisplayId(stored ? Number(stored) : null);
+    const onChange = (event: StorageEvent) => {
+      if (event.key === "ezpos.cfd.pushDisplayId") {
+        setDisplayId(event.newValue ? Number(event.newValue) : null);
+      }
+    };
+    window.addEventListener("storage", onChange);
+    return () => window.removeEventListener("storage", onChange);
+  }, []);
+  return displayId;
+}

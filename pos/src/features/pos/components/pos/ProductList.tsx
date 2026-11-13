@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PackageSearch } from "lucide-react";
 import { buildVariantName } from "@/lib/variantDisplay";
 import { ProductHeader } from "./ProductHeader";
+import api from "../../../../api/axios.js";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
 import useProductStore from "@/features/products/useProductStore";
 import { ProductCard } from "../../../../components/common/ProductCard";
@@ -21,6 +22,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
+import {
+  parseEmbeddedBarcode,
+  DEFAULT_EMBEDDED_CONFIG,
+} from "@/features/barcodes/scanning/embeddedBarcode";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
 import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
 import {
@@ -126,6 +131,30 @@ export function ProductList({
       // its barcode is not the piece barcode.
       const scannedUnit = getScannedUnit(match);
       const baseUnitsPerScan = scannedUnit?.conversionFactor ?? 1;
+      // Phase 4 (Feature 10-A): embedded WEIGHT — the parsed value is the
+      // quantity in base units for weight-sold variants.
+      const weightQuantity =
+        scannedUnit == null &&
+        (variant as { soldByWeight?: boolean }).soldByWeight === true
+          ? (embeddedWeightRef.current ?? 0)
+          : null;
+      if (weightQuantity !== null && weightQuantity > 0) {
+        addToCart(
+          {
+            ...product,
+            name: buildVariantName(product.name, variant.options),
+            variants: [variant],
+          },
+          undefined,
+          weightQuantity,
+        );
+        embeddedWeightRef.current = null;
+        setSearchProducts("");
+        toast.add({
+          description: `${buildVariantName(product.name, variant.options)} × ${weightQuantity} added.`,
+        });
+        return;
+      }
       if (variant.quantity < baseUnitsPerScan) {
         throw new Error(`${product.name} is out of stock.`);
       }
@@ -173,10 +202,49 @@ export function ProductList({
     [],
   );
 
+  // Phase 4 (Feature 10-B): embedded price/weight barcodes — parse first,
+  // fall back to normal identification when the shape doesn't match. The
+  // parsed weight travels to handleResolved via a side channel (lookup
+  // responses are typed without it).
+  const embeddedWeightRef = useRef<number | null>(null);
+  // Business-configurable embedded barcode shape (pos-settings), falling
+  // back to the default while it loads.
+  const [embeddedConfig, setEmbeddedConfig] = useState(DEFAULT_EMBEDDED_CONFIG);
+  useEffect(() => {
+    api
+      .get<{ data: { embeddedBarcode: Record<string, unknown> | null } }>("/pos-settings")
+      .then((res) => {
+        const config = res.data.data.embeddedBarcode;
+        if (!config) return;
+        setEmbeddedConfig({
+          prefixes: config.prefixes as string[],
+          pluLength: Number(config.pluLength),
+          valueLength: Number(config.valueLength),
+          decimals: Number(config.decimals),
+          mode: config.mode as "weight" | "price",
+          hasCheckDigit: config.hasCheckDigit === true,
+        });
+      })
+      .catch(() => undefined);
+  }, []);
+  const resolveScan = useCallback(
+    async (barcode: string) => {
+      const embedded = parseEmbeddedBarcode(barcode, DEFAULT_EMBEDDED_CONFIG);
+      if (embedded) {
+        const match = await lookup(embedded.lookupBarcode);
+        embeddedWeightRef.current = embedded.value;
+        return match;
+      }
+      embeddedWeightRef.current = null;
+      return lookup(barcode);
+    },
+    [lookup, embeddedConfig],
+  );
+
   const scanner = useBarcodeScanner({
     capture: "window",
     enabled: scannerEnabled,
-    lookup,
+    lookup: resolveScan,
     onResolve: handleResolved,
   });
 

@@ -1,5 +1,7 @@
+import { z } from "zod";
 import type { Request, Response } from "express";
 import * as customersService from "./customers.service.js";
+import { recordAudit } from "../../services/audit.js";
 import { getBusinessId } from "../../middleware/business.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
@@ -61,5 +63,65 @@ export async function getStoreCredit(req: Request, res: Response) {
     return res.status(200).json({ success: true, data: { balance } });
   } catch (err) {
     return sendSafeError(res, err, "Unable to read the store credit balance.");
+  }
+}
+
+/**
+ * Phase 2C: consent toggles only — scoped update endpoint (no general
+ * customer editing exists yet). Requires customers.edit; audited.
+ */
+export async function patchCustomerConsent(req: Request, res: Response) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid customer ID." });
+    }
+    const schema = z.object({
+      marketingOptIn: z.boolean().optional(),
+      transactionalOptOut: z.boolean().optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (
+      !parsed.success ||
+      (parsed.data.marketingOptIn === undefined &&
+        parsed.data.transactionalOptOut === undefined)
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Nothing to update." });
+    }
+    const { db } = await import("../../db/schema/index.js");
+    const { customers } = await import("../../db/schema/customers.js");
+    const { eq, and } = await import("drizzle-orm");
+    const [updated] = await db
+      .update(customers)
+      .set({
+        ...(parsed.data.marketingOptIn !== undefined
+          ? { marketingOptIn: parsed.data.marketingOptIn }
+          : {}),
+        ...(parsed.data.transactionalOptOut !== undefined
+          ? { transactionalOptOut: parsed.data.transactionalOptOut }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(customers.id, id), eq(customers.businessId, getBusinessId(req))))
+      .returning({ id: customers.id, marketingOptIn: customers.marketingOptIn, transactionalOptOut: customers.transactionalOptOut });
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Customer not found." });
+    }
+    recordAudit({
+      businessId: getBusinessId(req),
+      actorUserId: req.user?.id ?? null,
+      action: "customer.consent_updated",
+      entityType: "customer",
+      entityId: id,
+      afterState: {
+        marketingOptIn: updated.marketingOptIn,
+        transactionalOptOut: updated.transactionalOptOut,
+      },
+    });
+    return res.status(200).json({ success: true, data: updated });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to update the consent settings.");
   }
 }

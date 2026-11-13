@@ -42,7 +42,11 @@ export async function postRole(req: Request, res: Response) {
         errors: result.error.flatten(),
       });
     }
-    const data = await createRole(getBusinessId(req), result.data);
+    const data = await createRole(
+      getBusinessId(req),
+      result.data,
+      req.user?.id ?? null,
+    );
     return res.status(201).json({ success: true, data });
   } catch (err: unknown) {
     return sendSafeError(res, err, "Unable to create the role.");

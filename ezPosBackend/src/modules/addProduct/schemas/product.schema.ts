@@ -5,6 +5,8 @@ const serialNumberSchema = z.object({
 });
 const variantSchema = z.object({
   id: z.number().int().optional(),
+  /** Phase 4 (Feature 10): weight-selling flag. */
+  soldByWeight: z.boolean().optional(),
   options: z
     .array(
       z.object({
@@ -43,7 +45,7 @@ const variantSchema = z.object({
   imageFile: z.instanceof(File).nullable(),
   batchNumber: z.string().max(100),
   purchasePrice: z.coerce.number().min(0),
-  quantity: z.coerce.number().int().min(0),
+  quantity: z.coerce.number().min(0),
   weight: z.coerce.number().min(0).nullable().optional(),
   weightUnit: z.enum(["kg", "g", "lb", "oz"]).nullish(),
   expiryDate: z.date().nullable(),

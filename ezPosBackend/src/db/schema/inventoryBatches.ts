@@ -1,4 +1,5 @@
 import {
+  doublePrecision,
   foreignKey,
   index,
   pgTable,
@@ -64,8 +65,9 @@ export const inventoryBatches = pgTable(
       sql`( (purchase_price + coalesce(additional_cost_per_unit, 0)) )`,
     ),
 
-    quantityReceived: integer("quantity_received").notNull(),
-    quantityRemaining: integer("quantity_remaining").notNull(),
+    /** Phase 4: float8 — weight variants move fractional amounts. */
+    quantityReceived: doublePrecision("quantity_received").notNull(),
+    quantityRemaining: doublePrecision("quantity_remaining").notNull(),
 
     manufacturedDate: date("manufactured_date", { mode: "date" }),
     expiryDate: date("expiry_date", { mode: "date" }),

@@ -43,6 +43,8 @@ export const productVariants = pgTable(
      * still applies). Checkout: below floor → warn; block unless the caller
      * holds pricing.below_minimum_override (override recorded with reason).
      */
+    /** Phase 4 (Feature 10): sold by weight — fractional quantities allowed. */
+    soldByWeight: boolean("sold_by_weight").notNull().default(false),
     minSellingPrice: numeric("min_selling_price", {
       precision: 12,
       scale: 2,

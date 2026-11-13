@@ -61,6 +61,22 @@ export function PromotionsPage() {
   const [maxDiscountAmount, setMaxDiscountAmount] = useState("");
   const [stackGroup, setStackGroup] = useState(false);
   const [stackCoupons, setStackCoupons] = useState(false);
+  // ---- Phase 3 (Feature 8) ----
+  const [promoKind, setPromoKind] = useState<
+    "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier"
+  >("discount");
+  const [ruleBuyQty, setRuleBuyQty] = useState("1");
+  const [ruleGetQty, setRuleGetQty] = useState("1");
+  const [ruleComboSize, setRuleComboSize] = useState("2");
+  const [ruleDiscountPercent, setRuleDiscountPercent] = useState("20");
+  const [ruleTierMinQty, setRuleTierMinQty] = useState("3");
+  const [ruleTierPercent, setRuleTierPercent] = useState("10");
+  const [flashDays, setFlashDays] = useState<number[]>([]);
+  const [flashStart, setFlashStart] = useState("");
+  const [flashEnd, setFlashEnd] = useState("");
+  const [usageLimit, setUsageLimit] = useState("");
+  const [perCustomerLimit, setPerCustomerLimit] = useState("");
+  const [priority, setPriority] = useState("0");
   const [isActive, setIsActive] = useState(true);
 
   async function openCreate() {
@@ -143,6 +159,31 @@ export function PromotionsPage() {
       maxDiscountAmount: maxDiscountAmount === "" ? null : Number(maxDiscountAmount),
       canStackWithGroupDiscount: stackGroup,
       canStackWithCoupons: stackCoupons,
+      promoKind,
+      rule:
+        promoKind === "bogo"
+          ? { buyQty: Number(ruleBuyQty) || 1, getQty: Number(ruleGetQty) || 1 }
+          : promoKind === "mix_match"
+            ? {
+                comboSize: Number(ruleComboSize) || 2,
+                discountPercent: Number(ruleDiscountPercent) || 0,
+              }
+            : promoKind === "quantity_tier"
+              ? {
+                  tiers: [
+                    {
+                      minQty: Number(ruleTierMinQty) || 3,
+                      discountPercent: Number(ruleTierPercent) || 0,
+                    },
+                  ],
+                }
+              : null,
+      daysOfWeek: flashDays.length > 0 ? flashDays : null,
+      startTime: flashStart === "" ? null : flashStart,
+      endTime: flashEnd === "" ? null : flashEnd,
+      usageLimit: usageLimit === "" ? null : Number(usageLimit),
+      perCustomerLimit: perCustomerLimit === "" ? null : Number(perCustomerLimit),
+      priority: Number(priority) || 0,
       isActive,
     };
     try {
@@ -404,6 +445,109 @@ export function PromotionsPage() {
             <div className="flex items-center justify-between rounded-md border p-2">
               <span className="text-sm">Active</span>
               <Switch checked={isActive} onCheckedChange={setIsActive} />
+            </div>
+
+            {/* ---- Phase 3: promo kind + rule + windows + limits ---- */}
+            <div className="grid gap-1.5">
+              <span className="text-sm font-medium">Promotion type</span>
+              <select
+                className="rounded-md border bg-background p-2 text-sm"
+                value={promoKind}
+                onChange={(e) =>
+                  setPromoKind(
+                    e.target.value as
+                      | "discount"
+                      | "bogo"
+                      | "buy_x_get_y"
+                      | "mix_match"
+                      | "quantity_tier",
+                  )
+                }
+              >
+                <option value="discount">Percentage / fixed discount</option>
+                <option value="bogo">BOGO (buy X get Y free, same item)</option>
+                <option value="buy_x_get_y">Buy X get Y free (across items)</option>
+                <option value="mix_match">Mix &amp; match (N units, % off)</option>
+                <option value="quantity_tier">Quantity tier discount</option>
+              </select>
+            </div>
+            {promoKind === "bogo" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">Buy (qty)</span>
+                  <Input type="number" min={1} value={ruleBuyQty} onChange={(e) => setRuleBuyQty(e.target.value)} />
+                </div>
+                <div className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">Get free (qty)</span>
+                  <Input type="number" min={1} value={ruleGetQty} onChange={(e) => setRuleGetQty(e.target.value)} />
+                </div>
+              </div>
+            ) : null}
+            {promoKind === "mix_match" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">Combo size (units)</span>
+                  <Input type="number" min={2} value={ruleComboSize} onChange={(e) => setRuleComboSize(e.target.value)} />
+                </div>
+                <div className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">Discount %</span>
+                  <Input type="number" min={1} max={100} value={ruleDiscountPercent} onChange={(e) => setRuleDiscountPercent(e.target.value)} />
+                </div>
+              </div>
+            ) : null}
+            {promoKind === "quantity_tier" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">Min quantity</span>
+                  <Input type="number" min={2} value={ruleTierMinQty} onChange={(e) => setRuleTierMinQty(e.target.value)} />
+                </div>
+                <div className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">Discount %</span>
+                  <Input type="number" min={1} max={100} value={ruleTierPercent} onChange={(e) => setRuleTierPercent(e.target.value)} />
+                </div>
+              </div>
+            ) : null}
+            <div className="grid gap-1.5 rounded-md border border-dashed p-2">
+              <span className="text-xs font-medium text-muted-foreground">
+                Flash window (Asia/Dhaka time)
+              </span>
+              <div className="flex flex-wrap gap-1">
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day, idx) => (
+                  <Button
+                    key={day}
+                    type="button"
+                    size="sm"
+                    variant={flashDays.includes(idx) ? "default" : "outline"}
+                    onClick={() =>
+                      setFlashDays(
+                        flashDays.includes(idx)
+                          ? flashDays.filter((d) => d !== idx)
+                          : [...flashDays, idx].sort((a, b) => a - b),
+                      )
+                    }
+                  >
+                    {day}
+                  </Button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input type="time" value={flashStart} onChange={(e) => setFlashStart(e.target.value)} />
+                <Input type="time" value={flashEnd} onChange={(e) => setFlashEnd(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="grid gap-1">
+                <span className="text-xs text-muted-foreground">Total usage limit</span>
+                <Input type="number" min={1} placeholder="∞" value={usageLimit} onChange={(e) => setUsageLimit(e.target.value)} />
+              </div>
+              <div className="grid gap-1">
+                <span className="text-xs text-muted-foreground">Per customer</span>
+                <Input type="number" min={1} placeholder="∞" value={perCustomerLimit} onChange={(e) => setPerCustomerLimit(e.target.value)} />
+              </div>
+              <div className="grid gap-1">
+                <span className="text-xs text-muted-foreground">Priority</span>
+                <Input type="number" min={0} value={priority} onChange={(e) => setPriority(e.target.value)} />
+              </div>
             </div>
           </div>
           <DialogFooter>

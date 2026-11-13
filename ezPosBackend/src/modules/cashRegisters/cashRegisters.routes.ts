@@ -19,7 +19,10 @@ const locationRead = [
 ] as const;
 // Writes resolve the optional X-Terminal-Id header — opening a session from
 // a bound terminal records that terminal on the drawer session (and a
-// revoked terminal cannot open one at all).
+// revoked terminal cannot open one at all). requireFullAccess is the
+// SUBSCRIPTION gate; the requirePermission calls are the RBAC authority
+// checks (Phase 1: previously these routes had NO permission check — any
+// full-access member could open/close/move cash regardless of role).
 const locationWrite = [
   ...locationRead,
   requireTerminalContext(),
@@ -27,30 +30,82 @@ const locationWrite = [
 ] as const;
 const manage = [
   ...locationWrite,
-  requirePermission("settings.edit"),
+  requirePermission("cash_register.manage"),
 ] as const;
 
 router.get("/api/registers", ...locationRead, cashRegistersController.getRegisters);
 router.post("/api/registers", ...manage, cashRegistersController.postRegister);
 router.patch("/api/registers/:registerId", ...manage, cashRegistersController.patchRegister);
-router.post("/api/registers/:registerId/open", ...locationWrite, cashRegistersController.postRegisterOpen);
+router.post(
+  "/api/registers/:registerId/open",
+  ...locationWrite,
+  requirePermission("cash_register.open"),
+  cashRegistersController.postRegisterOpen,
+);
+
+// Denomination sheet: cashiers read the config to count with; changing it is
+// register management.
+router.get(
+  "/api/registers/denominations",
+  ...locationRead,
+  requirePermission("cash_register.view"),
+  cashRegistersController.getDenominations,
+);
+router.put(
+  "/api/registers/denominations",
+  ...manage,
+  cashRegistersController.putDenominations,
+);
 
 // Session routes are user-scoped (no X-Location-Id requirement): the
 // service enforces that only the session owner (or the owner account)
-// operates a session.
-const sessionRead = [requireAuth, requireBusinessContext()] as const;
+// operates a session. Reads require the register-view authority.
+const sessionRead = [
+  requireAuth,
+  requireBusinessContext(),
+  requirePermission("cash_register.view"),
+] as const;
 const sessionWrite = [...sessionRead, requireFullAccess] as const;
 
 router.get("/api/sessions/current", ...sessionRead, cashRegistersController.getCurrentSessionHandler);
 // Register summaries feed the reports hub — financial report scope.
 router.get(
   "/api/reports/registers",
-  ...sessionRead,
+  requireAuth,
+  requireBusinessContext(),
   requirePermission("reports.financial.view"),
   cashRegistersController.getRegisterSessionReportHandler,
 );
 router.get("/api/sessions/:sessionId", ...sessionRead, cashRegistersController.getSessionHandler);
-router.post("/api/sessions/:sessionId/cash-movement", ...sessionWrite, cashRegistersController.postCashMovement);
-router.post("/api/sessions/:sessionId/close", ...sessionWrite, cashRegistersController.postCloseSession);
+router.post(
+  "/api/sessions/:sessionId/cash-movement",
+  ...sessionWrite,
+  requirePermission("cash_movement.create"),
+  cashRegistersController.postCashMovement,
+);
+router.post(
+  "/api/sessions/:sessionId/close",
+  ...sessionWrite,
+  requirePermission("cash_register.close"),
+  cashRegistersController.postCloseSession,
+);
+router.post(
+  "/api/sessions/:sessionId/reconcile",
+  ...sessionWrite,
+  requirePermission("cash_register.close"),
+  cashRegistersController.postReconcile,
+);
+router.post(
+  "/api/sessions/:sessionId/reopen",
+  ...sessionWrite,
+  requirePermission("cash_register.close"),
+  cashRegistersController.postReopen,
+);
+router.post(
+  "/api/sessions/:sessionId/transactions/:transactionId/confirm-drop",
+  ...sessionWrite,
+  requirePermission("cash_register.manage"),
+  cashRegistersController.postConfirmDrop,
+);
 
 export default router;

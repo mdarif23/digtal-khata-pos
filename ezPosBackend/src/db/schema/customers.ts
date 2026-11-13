@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   pgTable,
@@ -36,6 +37,14 @@ export const customers = pgTable(
      * exactly one cloud row. NULL for cloud-native customers.
      */
     clientUuid: uuid("client_uuid"),
+    /**
+     * Phase 2C consent: marketing sends REQUIRE this; transactional sends
+     * are skipped when transactional_opt_out is set.
+     */
+    marketingOptIn: boolean("marketing_opt_in").notNull().default(false),
+    transactionalOptOut: boolean("transactional_opt_out")
+      .notNull()
+      .default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()

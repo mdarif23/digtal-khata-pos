@@ -64,6 +64,7 @@ export async function validateVariants(
       productId: productVariants.productId,
       sellingPrice: productVariants.sellingPrice,
       minSellingPrice: productVariants.minSellingPrice,
+      soldByWeight: productVariants.soldByWeight,
       trackingType: products.trackingType,
     })
     .from(productVariants)
@@ -90,8 +91,9 @@ export async function validateStock(
   locationId: number,
   variantIds: number[],
   items: Items[],
-  opts: { allowNegative?: boolean } = {},
+  opts: { allowNegative?: boolean; skipVariants?: number[] } = {},
 ) {
+  const skip = new Set(opts.skipVariants ?? []);
   const stockRows = await tx
     .select({
       variantId: inventoryStock.variantId,
@@ -119,6 +121,7 @@ export async function validateStock(
     );
   }
   for (const [variantId, quantity] of demandByVariant) {
+    if (skip.has(variantId)) continue; // composite parent — components checked separately
     const available = stockMap.get(variantId);
     if (available === undefined) {
       // Offline-originated sales may reference variants never stocked at

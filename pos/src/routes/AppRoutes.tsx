@@ -46,6 +46,14 @@ import { PriceCheckPage } from "@/features/procurement/pages/PriceCheckPage";
 import { SupplierDetailsPage } from "@/features/procurement/pages/SupplierDetailsPage";
 import { ReorderDashboardPage } from "@/features/procurement/pages/ReorderDashboardPage";
 import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
+import { AuditLogsPage } from "@/features/audit/AuditLogsPage";
+import { LoyaltySettingsPage } from "@/features/loyalty/LoyaltySettingsPage";
+import { QuotationsPage } from "@/features/quotations/QuotationsPage";
+import { CommsSettingsPage } from "@/features/comms/CommsSettingsPage";
+import { CfdDisplayPage } from "@/features/pos/cfd/CfdDisplayPage";
+import { CommissionPage } from "@/features/commission/CommissionPage";
+import { TargetsPage } from "@/features/commission/TargetsPage";
+import { ProductionPage } from "@/features/products/pages/ProductionPage";
 import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
@@ -96,6 +104,12 @@ const router = createBrowserRouter([
     // tran_id; verification happens server-side before anything is recorded.
     path: "/payment/return",
     element: <PaymentIntentReturn />,
+  },
+  {
+    // Customer-facing display (Phase 3): READ-ONLY second screen with its
+    // own pairing/token auth — deliberately OUTSIDE the authed layout.
+    path: "/cfd",
+    element: <CfdDisplayPage />,
   },
   {
     path: "/",
@@ -411,6 +425,62 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="promotions.view">
             <CouponsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/loyalty-settings",
+        element: (
+          <RequirePermission permission="loyalty.manage">
+            <LoyaltySettingsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/quotations",
+        element: (
+          <RequirePermission permission="quotations.view">
+            <QuotationsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/comms-settings",
+        element: (
+          <RequirePermission permission="comms.manage">
+            <CommsSettingsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/production",
+        element: (
+          <RequirePermission permission="products.view">
+            <ProductionPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/commissions",
+        element: (
+          <RequirePermission permission="commission.view">
+            <CommissionPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/targets",
+        element: (
+          <RequirePermission permission="commission.view">
+            <TargetsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/audit-logs",
+        element: (
+          <RequirePermission permission="audit.view">
+            <AuditLogsPage />
           </RequirePermission>
         ),
       },

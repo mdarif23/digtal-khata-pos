@@ -9,11 +9,13 @@ import { variantOptions } from "../../db/schema/variantOptions.js";
 import { variantValues } from "../../db/schema/variantValues.js";
 import { stockTransferItems } from "../../db/schema/stockTransfers.js";
 import { stockTransfers } from "../../db/schema/stockTransfers.js";
+import { transferDiscrepancies } from "../../db/schema/stockTransfers.js";
 import {
   foldVariantOptionRows,
   variantNameFromMap,
   variantOptionsFromMap,
 } from "../../utils/variantDisplay.js";
+import { recordAuditInTx } from "../../services/audit.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 import { nextDocumentNumber } from "../../utils/documentSequence.js";
 import {
@@ -205,6 +207,8 @@ async function getTransferDetailInTx(
       notes: stockTransfers.notes,
       shippedAt: stockTransfers.shippedAt,
       receivedAt: stockTransfers.receivedAt,
+      authorizedBy: stockTransfers.authorizedBy,
+      authorizedAt: stockTransfers.authorizedAt,
       createdAt: stockTransfers.createdAt,
     })
     .from(stockTransfers)
@@ -303,6 +307,51 @@ async function listTransferItemsInTx(
  * shipped quantity is the in-transit balance. Row locks (FOR UPDATE) on the
  * stock rows prevent two concurrent ships from overselling the same stock.
  */
+/**
+ * Phase 4 (Feature 17): explicit authorization step on a draft transfer.
+ * Shipping still auto-authorizes when skipped — existing flows keep working.
+ */
+export async function authorizeTransfer(
+  businessId: number,
+  userId: number,
+  callerIsOwner: boolean,
+  transferId: number,
+): Promise<TransferDetail> {
+  return db.transaction(async (tx) => {
+    const [transfer] = await tx
+      .select()
+      .from(stockTransfers)
+      .where(
+        and(
+          eq(stockTransfers.id, transferId),
+          eq(stockTransfers.businessId, businessId),
+        ),
+      )
+      .for("update");
+    if (!transfer) {
+      throw new NotFoundError("Transfer not found.");
+    }
+    if (transfer.status !== "draft") {
+      throw new ConflictError("Only draft transfers can be authorized.");
+    }
+    await assertCallerAccessesLocations(businessId, userId, callerIsOwner, [
+      transfer.fromLocationId,
+    ]);
+    await tx
+      .update(stockTransfers)
+      .set({ authorizedBy: userId, authorizedAt: new Date(), updatedAt: new Date() })
+      .where(eq(stockTransfers.id, transferId));
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId: userId,
+      action: "stock_transfer.authorized",
+      entityType: "stock_transfer",
+      entityId: transferId,
+    });
+    return getTransferDetailInTx(tx, businessId, transferId);
+  });
+}
+
 export async function shipTransfer(
   businessId: number,
   userId: number,
@@ -326,6 +375,14 @@ export async function shipTransfer(
     if (transfer.status !== "draft") {
       throw new ConflictError("Only draft transfers can be shipped.");
     }
+    // Phase 4: shipping implies authorization when the step was skipped.
+    await tx
+      .update(stockTransfers)
+      .set({
+        authorizedBy: transfer.authorizedBy ?? userId,
+        authorizedAt: transfer.authorizedAt ?? new Date(),
+      })
+      .where(eq(stockTransfers.id, transferId));
     await assertCallerAccessesLocations(businessId, userId, callerIsOwner, [
       transfer.fromLocationId,
     ]);
@@ -369,6 +426,7 @@ export async function shipTransfer(
         referenceType: "stock_transfer",
         referenceId: transfer.id,
       });
+
     }
 
     await tx
@@ -588,10 +646,28 @@ export async function receiveTransfer(
         .update(stockTransferItems)
         .set({ quantityReceived: item.quantityReceived + receiveNow })
         .where(eq(stockTransferItems.id, item.id));
+
+      // Phase 4 (Feature 17): record any SHORTFALL as an explicit
+      // discrepancy row (reason per item when provided). Final receive of a
+      // short line writes the remaining gap.
+      const isFinalReceive = item.quantityReceived + receiveNow >= item.quantityShipped;
+      if (isFinalReceive && receiveNow < outstanding) {
+        await tx.insert(transferDiscrepancies).values({
+          businessId,
+          transferId,
+          itemId: item.id,
+          shippedQty: item.quantityShipped,
+          receivedQty: item.quantityReceived + receiveNow,
+          difference: outstanding - receiveNow,
+          reason: input.reasons?.[item.id] ?? null,
+          recordedBy: userId,
+        });
+      }
     }
 
     const refreshed = await tx
       .select({
+        id: stockTransferItems.id,
         quantity: stockTransferItems.quantity,
         quantityShipped: stockTransferItems.quantityShipped,
         quantityReceived: stockTransferItems.quantityReceived,
@@ -603,9 +679,30 @@ export async function receiveTransfer(
           eq(stockTransferItems.businessId, businessId),
         ),
       );
-    const fullyReceived = refreshed.every(
+    let fullyReceived = refreshed.every(
       (item) => item.quantityReceived >= item.quantityShipped && item.quantityShipped > 0,
     );
+
+    // Phase 4 (Feature 17): forceComplete closes a transfer with shortfalls
+    // — every outstanding unit becomes an EXPLICIT discrepancy row, never a
+    // silent shrinkage.
+    if (input.forceComplete && !fullyReceived) {
+      for (const item of refreshed) {
+        const outstanding = item.quantityShipped - item.quantityReceived;
+        if (outstanding <= 0) continue;
+        await tx.insert(transferDiscrepancies).values({
+          businessId,
+          transferId,
+          itemId: item.id,
+          shippedQty: item.quantityShipped,
+          receivedQty: item.quantityReceived,
+          difference: outstanding,
+          reason: input.reasons?.[String(item.id)] ?? null,
+          recordedBy: userId,
+        });
+      }
+      fullyReceived = true;
+    }
 
     await tx
       .update(stockTransfers)

@@ -32,7 +32,11 @@ export async function postUser(req: Request, res: Response) {
         errors: result.error.flatten(),
       });
     }
-    const data = await createStaffUser(getBusinessId(req), result.data);
+    const data = await createStaffUser(
+      getBusinessId(req),
+      result.data,
+      req.user?.id ?? null,
+    );
     return res.status(201).json({ success: true, data });
   } catch (err: unknown) {
     return sendSafeError(res, err, "Unable to create the user.");

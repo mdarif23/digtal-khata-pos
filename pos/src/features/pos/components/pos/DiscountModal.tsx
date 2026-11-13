@@ -39,10 +39,17 @@ export function calcDiscountAmount(
 export function DiscountModal({
   subTotal,
   form,
+  /** Phase 3 hotkey: increment to open (F4); the trigger button still works. */
+  openSignal = 0,
 }: {
   subTotal: number;
   form: UseFormReturn<CartSchemaType>;
+  openSignal?: number;
 }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true);
+  }, [openSignal]);
   const discount = useWatch({ control: form.control, name: "discount" });
   const vatPercent =
     useWatch({ control: form.control, name: "vatPercent" }) ?? 0;
@@ -103,10 +110,14 @@ export function DiscountModal({
     }
   }, [cartLength, form]);
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button type="button" className="w-full">
+          <Button
+            type="button"
+            className="w-full"
+            onClick={() => setOpen(true)}
+          >
             Discount
           </Button>
         }

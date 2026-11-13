@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useHotkeyAction } from "../../hotkeys/hotkeyBus";
 import { Link } from "react-router";
 import { ArrowUpRight, Barcode, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,10 @@ export function ProductHeader({
   onScan: (code: string) => void;
 }) {
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Phase 3 hotkeys: F1 (product search) and F8 (barcode focus) land here.
+  useHotkeyAction("product-search", () => searchRef.current?.focus());
+  useHotkeyAction("barcode-focus", () => searchRef.current?.focus());
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {

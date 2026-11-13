@@ -23,6 +23,13 @@ export const receiveTransferSchema = z.object({
       }),
     )
     .optional(),
+  /** Phase 4: shortfall reasons keyed by item id (discrepancy recording). */
+  reasons: z.record(z.string(), z.string().max(500)).optional(),
+  /**
+   * Phase 4: force the transfer to 'received' despite shortfalls — every
+   * outstanding unit becomes an explicit discrepancy row (never silent).
+   */
+  forceComplete: z.boolean().optional(),
 });
 
 export type CreateTransferInput = z.infer<typeof createTransferSchema>;

@@ -1,4 +1,5 @@
 import {
+  doublePrecision,
   check,
   foreignKey,
   index,
@@ -44,7 +45,8 @@ export const saleItemBatchConsumptions = pgTable(
     batchId: integer("batch_id").notNull(),
     variantId: integer("variant_id").notNull(),
 
-    quantity: integer("quantity").notNull(),
+    /** Phase 4: float8 — weight batch draws are fractional. */
+    quantity: doublePrecision("quantity").notNull(),
     unitCostAtConsumption: numeric("unit_cost_at_consumption", {
       precision: 14,
       scale: 6,

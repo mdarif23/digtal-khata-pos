@@ -24,6 +24,7 @@ import { salePayments } from "../../db/schema/salePayments.js";
 import {
   BadRequestError,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
 } from "../../utils/handleError.js";
 import { saleRefunds } from "../../db/schema/saleRefunds.js";
@@ -70,9 +71,20 @@ import {
   consumeStoreCreditInTx,
   grantStoreCreditInTx,
 } from "../../services/storeCredit.js";
+import { promotionUsage } from "../../db/schema/pricing.js";
+import { businessMemberships } from "../../db/schema/businessMemberships.js";
+import { getBomsForVariants } from "../bom/bom.service.js";
 import {
+  calculateCommissionsForSaleInTx,
+  reverseCommissionsForRefundInTx,
+} from "../commission/commission.service.js";
+import {
+  computeEligibleEarnBaseInTx,
   earnLoyaltyPointsInTx,
+  getEarnRule,
+  recordLoyaltySpendInTx,
   redeemLoyaltyPointsInTx,
+  restoreRedeemedPointsInTx,
   reverseLoyaltyPointsInTx,
 } from "../../services/loyalty.js";
 import { redeemGiftCardInTx } from "../../services/giftCards.js";
@@ -92,9 +104,15 @@ import {
 } from "./sales.validation.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 import {
+  assertOpenDrawerForCashInTx,
   recordCashRefundInTx,
   recordCashSaleInTx,
 } from "../cashRegisters/cashRegisters.service.js";
+import {
+  consumeApprovalInTx,
+  isApprovalRequired,
+} from "../../services/managerApproval.js";
+import { getRequireOpenDrawer } from "../posSettings/posSettings.service.js";
 import { units } from "../../db/schema/units.js";
 import { alias } from "drizzle-orm/pg-core";
 import { productUnitConversions } from "../../db/schema/productUnitConversions.js";
@@ -907,11 +925,18 @@ export async function createSale(
   options: CreateSaleOptions = {},
 ) {
   const { customerId, items, discount, vatPercent, payments, saleDate } = data;
+  // Phase 5 (Feature 13): salesperson attribution — validated at insert.
+  const salespersonUserId = data.salespersonUserId ?? null;
   const couponCode = data.couponCode?.trim() || null;
   const idempotencyKey = data.idempotencyKey?.trim() || null;
   // Binds the idempotency key to THIS payload so a replay with different
   // sale data cannot masquerade as a retry (see findSaleByIdempotencyKey).
-  const payloadHash = idempotencyKey ? sha256OfJson(data) : null;
+  // The approval token is excluded: a retry after a timeout may legitimately
+  // carry a freshly minted token — that must still resolve to the SAME sale,
+  // not a duplicate.
+  const { approvalToken: _approvalToken, ...idempotencyPayload } = data;
+  void _approvalToken;
+  const payloadHash = idempotencyKey ? sha256OfJson(idempotencyPayload) : null;
   const batchShortfalls: { variantId: number; qty: number }[] = [];
 
   const result = await db.transaction(async (tx) => {
@@ -952,8 +977,17 @@ export async function createSale(
     );
 
     // 3. Lock inventory rows and validate stock (aggregated base demand).
+    // Phase 4 (Feature 9): composite variants consume their BOM components
+    // (assemble-on-sale) — their OWN stock is not validated here; component
+    // availability is enforced in the consumption loop.
+    const bomByVariant = await getBomsForVariants(
+      businessId,
+      baseItems.map((i) => i.variantId),
+    );
+
     await validateStock(tx, businessId, locationId, variantIds, baseItems, {
       ...(options.allowNegativeStock ? { allowNegative: true } : {}),
+      skipVariants: [...bomByVariant.keys()],
     });
 
     // 2. Trusted prices and tracking types come from the database
@@ -976,6 +1010,21 @@ export async function createSale(
         };
       })
       .sort((a, b) => a.variantId - b.variantId); // same lock order for every cashier
+
+    // Phase 4 (Feature 10): identity (base-unit) lines must be whole
+    // numbers UNLESS the variant is sold by weight (scale/PLU selling).
+    for (const item of trustedItems) {
+      const variant = variantMap.get(item.variantId);
+      if (
+        !variant?.soldByWeight &&
+        item.uomSnapshot?.conversionId == null &&
+        !Number.isInteger(item.quantity)
+      ) {
+        throw new BadRequestError(
+          `Quantity must be a whole number for variant ${item.variantId} (not sold by weight).`,
+        );
+      }
+    }
 
     // 5. Calculate every total from the same trusted items. When any line's
     // product carries tax rules, VAT comes from those rules (server-side,
@@ -1009,6 +1058,7 @@ export async function createSale(
       trustedItems,
       groupPricing,
       Boolean(couponCode),
+      { locationId, customerId },
     );
     const promoInput = toCartPromotionInput(promoEvaluation);
     const totals = usesTaxRules
@@ -1041,6 +1091,7 @@ export async function createSale(
       lineCharges,
     );
     const payloadBelowMinimumReason = data.belowMinimumReason?.trim() || null;
+    let belowMinimumApprovedBy: number | null = null;
     if (floorViolations.length > 0) {
       if (!options.allowBelowMinimum) {
         throw new BadRequestError(
@@ -1057,6 +1108,20 @@ export async function createSale(
         throw new BadRequestError(
           "A reason is required for a sale that prices below the minimum.",
         );
+      }
+      // Phase 1: the business may additionally demand a one-time manager
+      // approval token for below-minimum pricing (pos_settings).
+      if (await isApprovalRequired(businessId, "pricing.below_minimum")) {
+        if (!data.approvalToken) {
+          throw new ForbiddenError(
+            "A manager approval is required for below-minimum pricing.",
+          );
+        }
+        const approval = await consumeApprovalInTx(tx, businessId, {
+          token: data.approvalToken,
+          opType: "pricing.below_minimum",
+        });
+        belowMinimumApprovedBy = approval.approverUserId;
       }
     }
     // Snapshot entries for overridden lines + below-minimum approvals,
@@ -1178,6 +1243,13 @@ export async function createSale(
         idempotencyPayloadHash: payloadHash,
         terminalId,
         cashierUserId,
+        ...(salespersonUserId !== null
+          ? {
+              salespersonUserId,
+              salespersonAssignedAt: new Date(),
+              salespersonAssignedBy: cashierUserId,
+            }
+          : {}),
       })
       .onConflictDoNothing({
         target: [sales.businessId, sales.idempotencyKey],
@@ -1264,6 +1336,82 @@ export async function createSale(
           quantity: u.quantity,
           unitCost: u.unitCost,
         }));
+      } else if (bomByVariant.has(item.variantId)) {
+        // Phase 4 (Feature 9): assemble-on-sale composite — the PARENT is
+        // not stocked; its COMPONENTS are consumed through the same FIFO
+        // machinery (waste-inclusive). Refunds restock the components via
+        // the persisted consumptions. Serial-tracked composites rejected.
+        const components = bomByVariant.get(item.variantId)!;
+        if (item.trackingType === "serial") {
+          throw new BadRequestError(
+            "Serial-tracked composite products are not supported.",
+          );
+        }
+        const consumedAll: BatchConsumption[] = [];
+        let componentTotalCost = 0;
+        for (const component of components) {
+          const required = roundMoney(
+            item.quantity * component.quantity * (1 + component.wastePercent / 100),
+          );
+          if (!options.allowNegativeStock) {
+            const [stock] = await tx
+              .select({ quantity: inventoryStock.quantity })
+              .from(inventoryStock)
+              .where(
+                and(
+                  eq(inventoryStock.businessId, businessId),
+                  eq(inventoryStock.variantId, component.componentVariantId),
+                  eq(inventoryStock.locationId, locationId),
+                ),
+              )
+              .for("update");
+            if (Number(stock?.quantity ?? 0) < required) {
+              throw new BadRequestError(
+                `Insufficient stock for component ${component.componentName}: need ${required}, have ${Number(stock?.quantity ?? 0)}.`,
+              );
+            }
+          }
+          const componentCost = await consumeStockFifo(
+            tx,
+            businessId,
+            locationId,
+            component.componentVariantId,
+            required,
+            { ...(options.allowNegativeStock ? { allowShortfall: true } : {}) },
+          );
+          if (
+            "shortfall" in componentCost &&
+            Number(componentCost.shortfall) > 0
+          ) {
+            batchShortfalls.push({
+              variantId: component.componentVariantId,
+              qty: Number(componentCost.shortfall),
+            });
+          }
+          componentTotalCost += componentCost.totalCost;
+          consumedAll.push(
+            ...componentCost.consumed.map((c) => ({
+              batchId: c.batchId,
+              quantity: c.quantity,
+              unitCost: c.unitCost,
+            })),
+          );
+          // Component movement (the parent itself is not stocked).
+          await tx.insert(inventoryMovements).values({
+            businessId,
+            variantId: component.componentVariantId,
+            locationId,
+            movementType: "sale",
+            quantity: -required,
+            referenceType: "bom_sale",
+            referenceId: saleId,
+          });
+        }
+        cost = {
+          totalCost: roundMoney(componentTotalCost),
+          costAtSale: roundMoney(componentTotalCost / item.quantity),
+          consumed: consumedAll,
+        };
       } else {
         cost = await consumeStockFifo(
           tx,
@@ -1376,11 +1524,35 @@ export async function createSale(
         }
       }
 
+      // Phase 4 (Feature 9): composite lines do NOT decrement the parent —
+      // their components were consumed in the BOM branch above; their stock
+      // rows are decremented here (atomic with the sale).
+      let updatedRows: { variantId: number; quantity: number | null }[] = [];
+      if (bomByVariant.has(item.variantId)) {
+        const components = bomByVariant.get(item.variantId)!;
+        for (const component of components) {
+          const required = roundMoney(
+            item.quantity * component.quantity * (1 + component.wastePercent / 100),
+          );
+          await tx
+            .update(inventoryStock)
+            .set({
+              quantity: sql`${inventoryStock.quantity} - ${required}`,
+            })
+            .where(
+              and(
+                eq(inventoryStock.variantId, component.componentVariantId),
+                eq(inventoryStock.businessId, businessId),
+                eq(inventoryStock.locationId, locationId),
+              ),
+            );
+        }
+      } else {
       // Online sales: the row was locked+validated, so a plain decrement
       // is safe. Offline-originated sales may reference a variant with NO
       // stock row at this location — the atomic upsert creates it at the
       // negative delta.
-      const updatedRows = options.allowNegativeStock
+      updatedRows = options.allowNegativeStock
         ? await tx
             .insert(inventoryStock)
             .values({
@@ -1425,8 +1597,11 @@ export async function createSale(
           `Failed to update stock for variant ${item.variantId}.`,
         );
       }
+      } // end non-composite decrement
 
       // Stock alerts (Module 14): deduped per variant+location per day.
+      // Phase 4: composite lines alert on the PARENT's stock (unchanged by
+      // the sale — components were consumed instead).
       {
         const [variantInfo] = await tx
           .select({
@@ -1438,25 +1613,44 @@ export async function createSale(
           .where(eq(productVariants.id, item.variantId))
           .limit(1);
         if (variantInfo) {
+          const alertQuantity = bomByVariant.has(item.variantId)
+            ? Number(
+                (
+                  await tx
+                    .select({ quantity: inventoryStock.quantity })
+                    .from(inventoryStock)
+                    .where(
+                      and(
+                        eq(inventoryStock.variantId, item.variantId),
+                        eq(inventoryStock.businessId, businessId),
+                        eq(inventoryStock.locationId, locationId),
+                      ),
+                    )
+                    .limit(1)
+                ).at(0)?.quantity ?? 0,
+              )
+            : Number(updatedRows[0]?.quantity ?? 0);
           await notifyStockLevel(tx, {
             businessId,
             variantId: item.variantId,
             productName: variantInfo.productName,
-            newQuantity: Number(updatedRows[0]?.quantity ?? 0),
+            newQuantity: alertQuantity,
             alertQuantity: Number(variantInfo.alertQuantity ?? 0),
             locationId,
           });
         }
       }
-      await tx.insert(inventoryMovements).values({
-        businessId,
-        variantId: item.variantId,
-        locationId,
-        movementType: "sale",
-        quantity: item.quantity,
-        referenceType: "sale",
-        referenceId: saleId,
-      });
+      if (!bomByVariant.has(item.variantId)) {
+        await tx.insert(inventoryMovements).values({
+          businessId,
+          variantId: item.variantId,
+          locationId,
+          movementType: "sale",
+          quantity: item.quantity,
+          referenceType: "sale",
+          referenceId: saleId,
+        });
+      }
 
       // Warranty generation input: the sale item id and the concrete sold
       // serials exist by this point. Products without an active warranty
@@ -1578,6 +1772,20 @@ export async function createSale(
         // A sale without a cashier (LAN replicas of legacy rows) records no
         // drawer movement — register_transactions.userId is NOT NULL.
         if (cashierUserId !== null) {
+          // Phase 1 gate: when require_open_drawer is on, cash cannot change
+          // hands without a drawer to land in (offline replays included).
+          if (
+            cashAmount > 0 &&
+            (await getRequireOpenDrawer(businessId))
+          ) {
+            await assertOpenDrawerForCashInTx(
+              tx,
+              businessId,
+              cashierUserId,
+              locationId,
+              terminalId,
+            );
+          }
           await recordCashSaleInTx(
             tx,
             businessId,
@@ -1610,8 +1818,35 @@ export async function createSale(
         dueAmount: Number(newSale.dueAmount),
         paymentStatus: newSale.paymentStatus,
         itemCount: items.length,
+        ...(belowMinimumApprovedBy !== null ? { belowMinimumApprovedBy } : {}),
       },
     });
+
+    // Phase 3: record promotion usage — idempotent per (sale, promotion) via
+    // the unique constraint; powers usage_limit / per_customer_limit.
+    const appliedPromoIds = [
+      ...new Set(
+        [
+          ...promoEvaluation.cartAmounts.map((a) => a.refId),
+          ...promoEvaluation.lineAdjustments.flatMap((a) =>
+            a && a.refId != null ? [a.refId] : [],
+          ),
+        ].filter((id): id is number => typeof id === "number"),
+      ),
+    ];
+    if (appliedPromoIds.length > 0) {
+      await tx
+        .insert(promotionUsage)
+        .values(
+          appliedPromoIds.map((promotionId) => ({
+            businessId,
+            promotionId,
+            saleId,
+            ...(customerId !== null ? { customerId } : {}),
+          })),
+        )
+        .onConflictDoNothing();
+    }
 
     // Coupon redemption recorded atomically with the sale (Module 6).
     if (couponEvaluation) {
@@ -1624,9 +1859,10 @@ export async function createSale(
       });
     }
 
-    // Loyalty earn on the cash-equivalent amount paid (Module 7): dues
-    // earn nothing, and points/store-credit-funded portions do not earn
-    // points on themselves.
+    // Loyalty earn (Phase 2A engine): dues earn nothing, points/store-
+    // credit/gift-card-funded portions do not earn on themselves, and the
+    // earning rule's excluded products/categories never earn. The base is
+    // capped by the amount actually paid, so dues still earn nothing.
     if (customerId !== null && paidAmount > 0) {
       const fundedByAccount = receivedPayments
         .filter(
@@ -1636,16 +1872,69 @@ export async function createSale(
             payment.method === "gift_card",
         )
         .reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
-      const earnBase = roundMoney(paidAmount - fundedByAccount);
+      const rule = await getEarnRule(businessId);
+      const eligibleLines = await computeEligibleEarnBaseInTx(tx, {
+        businessId,
+        saleId,
+        excludedProductIds: rule.excludedProductIds,
+        excludedCategoryIds: rule.excludedCategoryIds,
+      });
+      const earnBase = roundMoney(
+        Math.max(0, Math.min(eligibleLines, paidAmount) - fundedByAccount),
+      );
       if (earnBase > 0) {
         await earnLoyaltyPointsInTx(tx, {
           businessId,
           customerId,
-          paidAmount: earnBase,
+          eligibleBase: earnBase,
           sourceId: saleId,
           actorUserId: cashierUserId,
+          meetsMinimum: earnBase >= rule.minTransactionAmount,
         });
       }
+    }
+
+    // Phase 2A: every customer sale counts toward tier-qualifying spend
+    // (independent of whether points were earned on it).
+    if (customerId !== null) {
+      await recordLoyaltySpendInTx(tx, {
+        businessId,
+        customerId,
+        amount: Number(newSale.finalTotal ?? 0),
+      });
+    }
+
+    // Phase 5 (Feature 13): commission calculation — validated salesperson
+    // membership, entries per matching rule, committed with the sale.
+    if (salespersonUserId !== null) {
+      const [member] = await tx
+        .select({ id: businessMemberships.id })
+        .from(businessMemberships)
+        .where(
+          and(
+            eq(businessMemberships.businessId, businessId),
+            eq(businessMemberships.userId, salespersonUserId),
+          ),
+        )
+        .limit(1);
+      if (!member) {
+        throw new BadRequestError(
+          "Salesperson is not a member of this business.",
+        );
+      }
+      const costBasisRow = await tx
+        .select({
+          cost: sql<string>`COALESCE(SUM(${saleItems.costAtSale} * ${saleItems.quantity}), 0)`,
+        })
+        .from(saleItems)
+        .where(eq(saleItems.saleId, saleId));
+      await calculateCommissionsForSaleInTx(tx, {
+        businessId,
+        saleId,
+        salespersonUserId,
+        finalTotal: Number(newSale.finalTotal ?? 0),
+        costBasis: Number(costBasisRow[0]?.cost ?? 0),
+      });
     }
 
     // Finance & Growth: post the sale to the double-entry ledger (no-op
@@ -1861,7 +2150,29 @@ async function applySaleRefund(
       refundedAmount: refundTotal,
       sourceId: saleId,
     });
+    // Phase 2A: points REDEEMED on the refunded sale come back
+    // proportionally (never expiring) — each refund restores at most once
+    // because the sourceId is the refund id.
+    await restoreRedeemedPointsInTx(tx, {
+      businessId,
+      customerId: sale.customerId,
+      saleId,
+      refundId: refund.id,
+      refundTotal,
+      saleFinalTotal: Number(sale.finalTotal ?? 0),
+    });
   }
+
+  // Phase 5 (Feature 13): commission reversal — proportional negative
+  // entries; history preserved. Only PENDING entries reverse; approved+
+  // money is handled manually per policy.
+  await reverseCommissionsForRefundInTx(tx, {
+    businessId,
+    saleId,
+    refundId: refund.id,
+    refundTotal,
+    saleFinalTotal: Number(sale.finalTotal ?? 0),
+  });
 
   // Value returned to inventory (Finance & Growth ledger hook input):
   // restocked units re-enter at their original blended cost_at_sale.
@@ -2224,6 +2535,21 @@ export async function createSingleRefund(
     if (sale.status !== "completed") {
       throw new ConflictError("Only completed sales can be returned");
     }
+    // Phase 1: manager approval when the business requires it for refunds —
+    // consumed inside this transaction so a rollback un-burns the token.
+    if (await isApprovalRequired(businessId, "sale.refund")) {
+      if (!options.approvalToken) {
+        throw new ForbiddenError(
+          "A manager approval is required to refund this sale.",
+        );
+      }
+      await consumeApprovalInTx(tx, businessId, {
+        token: options.approvalToken,
+        opType: "sale.refund",
+        entityType: "sale",
+        entityId: saleItem.saleId,
+      });
+    }
     // Fully-returned lines are rejected inside applySaleRefund's returned
     // ledger (partial returns may still refund the remainder).
     const { refundId, refundTotal, restockedCost, locationId: refundLocationId } =
@@ -2312,6 +2638,22 @@ export async function createMultipleRefunds(
     if (!sale) throw new NotFoundError("Sale not found");
     if (sale.status !== "completed") {
       throw new ConflictError("Only completed sales can be returned");
+    }
+
+    // Phase 1: manager approval when the business requires it for refunds —
+    // consumed inside this transaction so a rollback un-burns the token.
+    if (await isApprovalRequired(businessId, "sale.refund")) {
+      if (!options.approvalToken) {
+        throw new ForbiddenError(
+          "A manager approval is required to refund this sale.",
+        );
+      }
+      await consumeApprovalInTx(tx, businessId, {
+        token: options.approvalToken,
+        opType: "sale.refund",
+        entityType: "sale",
+        entityId: id,
+      });
     }
 
     const items = await tx
@@ -3282,6 +3624,7 @@ export async function quoteSaleTotals(
       trustedItems,
       groupPricing,
       Boolean(payload.couponCode?.trim()),
+      { locationId, customerId: payload.customerId ?? null },
     );
     const promoInput = toCartPromotionInput(promoEvaluation);
     const groupBlock =
@@ -3294,15 +3637,20 @@ export async function quoteSaleTotals(
             },
           }
         : {};
-    const promotionsBlock =
-      promoEvaluation.applied.length > 0
+    const promotionsBlock = {
+      ...(promoEvaluation.applied.length > 0
         ? {
             promotions: {
               applied: promoEvaluation.applied,
               total: promoEvaluation.total,
             },
           }
-        : {};
+        : {}),
+      // Phase 3 offer discovery: promotions the cart almost qualifies for.
+      ...(promoEvaluation.nearMisses.length > 0
+        ? { nearMisses: promoEvaluation.nearMisses }
+        : {}),
+    };
     const totals = usesTaxRules
       ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant, groupInput, promoInput)
       : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0), groupInput, promoInput);

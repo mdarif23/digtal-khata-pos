@@ -12,7 +12,7 @@ import { auditLog } from "../db/schema/auditLog.js";
 export interface AuditEntry {
   /** null = platform-level event. */
   businessId: number | null;
-  /** null = performed by the system (jobs, gateway callbacks). */
+  /** null = performed by the system (jobs, gateway IPN callbacks). */
   actorUserId: number | null;
   /** Dot-namespaced verb, e.g. "sale.create", "sale.refund". */
   action: string;
@@ -20,12 +20,27 @@ export interface AuditEntry {
   entityId?: number | null;
   /** Shallow, non-sensitive details — amounts, statuses, ids. Never references or secrets. */
   metadata?: Record<string, unknown>;
+  /** Counter/location context when the event happened at a shop. */
+  locationId?: number | null;
+  /** The actor's role name at event time (denormalized — roles change). */
+  actorRole?: string | null;
+  /** Safe before snapshot — shallow fields only, never secrets. */
+  beforeState?: Record<string, unknown> | null;
+  /** Safe after snapshot — shallow fields only, never secrets. */
+  afterState?: Record<string, unknown> | null;
+  /** Correlation id for tracing one request across multiple audit rows. */
+  requestId?: string | null;
 }
 
 /** Transaction handle type for recordAuditInTx callers (shared). */
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export async function recordAuditInTx(tx: Tx, entry: AuditEntry): Promise<void> {
+/** recordAuditInTx only inserts — it accepts the root db handle too, so
+ * helpers typed with a db-or-tx union (e.g. register attribution) can call
+ * it without casts. */
+export type DbLike = typeof db | Tx;
+
+export async function recordAuditInTx(tx: DbLike, entry: AuditEntry): Promise<void> {
   await tx.insert(auditLog).values({
     businessId: entry.businessId,
     actorUserId: entry.actorUserId,
@@ -33,6 +48,11 @@ export async function recordAuditInTx(tx: Tx, entry: AuditEntry): Promise<void> 
     entityType: entry.entityType,
     entityId: entry.entityId ?? null,
     metadata: entry.metadata ?? {},
+    ...(entry.locationId != null ? { locationId: entry.locationId } : {}),
+    ...(entry.actorRole != null ? { actorRole: entry.actorRole } : {}),
+    ...(entry.beforeState != null ? { beforeState: entry.beforeState } : {}),
+    ...(entry.afterState != null ? { afterState: entry.afterState } : {}),
+    ...(entry.requestId != null ? { requestId: entry.requestId } : {}),
   });
 }
 
@@ -45,6 +65,11 @@ export async function recordAudit(entry: AuditEntry): Promise<void> {
       entityType: entry.entityType,
       entityId: entry.entityId ?? null,
       metadata: entry.metadata ?? {},
+      ...(entry.locationId != null ? { locationId: entry.locationId } : {}),
+      ...(entry.actorRole != null ? { actorRole: entry.actorRole } : {}),
+      ...(entry.beforeState != null ? { beforeState: entry.beforeState } : {}),
+      ...(entry.afterState != null ? { afterState: entry.afterState } : {}),
+      ...(entry.requestId != null ? { requestId: entry.requestId } : {}),
     });
   } catch {
     // Audit is observability, not a business rule — swallow. In-tx callers

@@ -1,4 +1,5 @@
 import {
+  doublePrecision,
   foreignKey,
   index,
   jsonb,
@@ -24,7 +25,8 @@ export const saleItems = pgTable(
       .references(() => businesses.id),
     saleId: integer("sale_id").notNull(),
     variantId: integer("variant_id").notNull(),
-    quantity: integer("quantity").notNull(),
+    /** Phase 4: float8 — weight variants record fractional sales. */
+    quantity: doublePrecision("quantity").notNull(),
     sellingPrice: numeric("selling_price", {
       precision: 14,
       scale: 6,

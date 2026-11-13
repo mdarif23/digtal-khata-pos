@@ -1,10 +1,17 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { publishRealtime } from "../realtime/realtime.service.js";
 import { notifyRegisterDiscrepancy } from "../../services/notifications.js";
+import { recordAuditInTx, recordAudit } from "../../services/audit.js";
+import { consumeApprovalInTx } from "../../services/managerApproval.js";
 import { db } from "../../db/schema/index.js";
 import { registerSessions } from "../../db/schema/registers.js";
 import { registerTransactions } from "../../db/schema/registers.js";
 import { registers } from "../../db/schema/registers.js";
+import {
+  registerDenominationConfigs,
+  registerReconciliations,
+  type DenominationCount,
+} from "../../db/schema/registers.js";
 import { locations } from "../../db/schema/locations.js";
 import { users } from "../../db/schema/users.js";
 import { posTerminals } from "../../db/schema/posTerminals.js";
@@ -32,6 +39,54 @@ export type ManualMovementType =
   | "safe_withdrawal"
   | "adjustment_in"
   | "adjustment_out";
+
+/** Default denomination sheet offered when a business has not configured one. */
+export const DEFAULT_DENOMINATIONS = [1000, 500, 200, 100, 50, 20, 10, 5, 2, 1];
+
+/**
+ * Validates a counted denomination sheet (Phase 1). The rendered total must
+ * equal the single-amount the user entered — the sheet documents the count,
+ * it never replaces it.
+ */
+export function validateDenominationSheet(
+  sheet: DenominationCount[] | null | undefined,
+  expectedTotal: number,
+): DenominationCount[] | null {
+  if (sheet === undefined || sheet === null) return null;
+  if (!Array.isArray(sheet) || sheet.length === 0 || sheet.length > 30) {
+    throw new BadRequestError(
+      "Denomination sheet must contain between 1 and 30 rows.",
+    );
+  }
+  const seen = new Set<number>();
+  let sum = 0;
+  for (const row of sheet) {
+    if (
+      !row ||
+      typeof row.value !== "number" ||
+      !Number.isFinite(row.value) ||
+      row.value <= 0
+    ) {
+      throw new BadRequestError("Denomination values must be positive numbers.");
+    }
+    if (!Number.isInteger(row.count) || row.count < 0) {
+      throw new BadRequestError("Denomination counts must be zero or more.");
+    }
+    if (seen.has(row.value)) {
+      throw new BadRequestError(
+        `Denomination ${row.value} appears more than once.`,
+      );
+    }
+    seen.add(row.value);
+    sum += row.value * row.count;
+  }
+  if (roundMoney(sum) !== roundMoney(expectedTotal)) {
+    throw new BadRequestError(
+      `The denomination sheet totals ৳${roundMoney(sum)} but ৳${roundMoney(expectedTotal)} was entered.`,
+    );
+  }
+  return sheet;
+}
 
 interface SessionSummary {
   id: number;
@@ -285,10 +340,19 @@ export async function openSession(
   openingCash: number,
   terminalId: number | null = null,
   allowMultipleSessions = false,
+  opts: {
+    openingDenominations?: DenominationCount[] | null;
+    actorRole?: string | null;
+    requestId?: string | null;
+  } = {},
 ): Promise<SessionSummary> {
   if (openingCash < 0) {
     throw new BadRequestError("Opening cash cannot be negative.");
   }
+  const openingDenominations = validateDenominationSheet(
+    opts.openingDenominations,
+    openingCash,
+  );
   const summary = await db.transaction(async (tx) => {
     const [register] = await tx
       .select()
@@ -361,11 +425,30 @@ export async function openSession(
         userId,
         openingCash: roundMoney(openingCash),
         terminalId,
+        ...(openingDenominations ? { openingDenominations } : {}),
       })
       .returning();
     if (!session) {
       throw new Error("Session insert returned no row.");
     }
+
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId: userId,
+      action: "register.opened",
+      entityType: "register_session",
+      entityId: session.id,
+      locationId: register.locationId,
+      actorRole: opts.actorRole ?? null,
+      requestId: opts.requestId ?? null,
+      metadata: {
+        registerId,
+        registerName: register.name,
+        openingCash: roundMoney(openingCash),
+        countedByDenominations: openingDenominations !== null,
+        terminalId,
+      },
+    });
 
     const [row] = await tx
       .select(sessionSelect)
@@ -441,9 +524,23 @@ export async function addCashMovement(
   type: ManualMovementType,
   amount: number,
   note?: string,
+  opts: {
+    recipientUserId?: number | null;
+    referenceNo?: string | null;
+    approvalToken?: string | null;
+    actorRole?: string | null;
+    requestId?: string | null;
+  } = {},
 ): Promise<SessionSummary> {
   if (amount <= 0) {
     throw new BadRequestError("Amount must be greater than zero.");
+  }
+  // Drop metadata only belongs to a drawer→safe deposit; other movement
+  // types reject it so the fields never carry silent meanings.
+  if (type !== "safe_deposit" && (opts.recipientUserId != null || opts.referenceNo)) {
+    throw new BadRequestError(
+      "Recipient and reference number only apply to cash drops (safe deposit).",
+    );
   }
   return db.transaction(async (tx) => {
     const [session] = await tx
@@ -461,6 +558,16 @@ export async function addCashMovement(
     }
     assertSessionMayBeOperated(session, callerUserId, callerIsOwner);
 
+    // Manager approval when the business requires it for cash movements —
+    // consumed inside this transaction so a rollback un-burns the token.
+    if (opts.approvalToken) {
+      await consumeApprovalInTx(tx, businessId, {
+        token: opts.approvalToken,
+        opType: "cash_movement",
+        payload: { type, amount: roundMoney(amount) },
+      });
+    }
+
     await tx.insert(registerTransactions).values({
       businessId,
       sessionId,
@@ -469,6 +576,28 @@ export async function addCashMovement(
       amount: roundMoney(amount),
       referenceType: "manual",
       note: note ?? null,
+      ...(type === "safe_deposit" && opts.recipientUserId != null
+        ? { recipientUserId: opts.recipientUserId }
+        : {}),
+      ...(type === "safe_deposit" && opts.referenceNo
+        ? { referenceNo: opts.referenceNo }
+        : {}),
+    });
+
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId: callerUserId,
+      action: "cash.movement",
+      entityType: "register_session",
+      entityId: sessionId,
+      actorRole: opts.actorRole ?? null,
+      requestId: opts.requestId ?? null,
+      metadata: {
+        movementType: type,
+        amount: roundMoney(amount),
+        isDrop: type === "safe_deposit",
+        note: note ?? null,
+      },
     });
 
     const expected = await computeExpectedCash(tx, sessionId, Number(session.openingCash));
@@ -502,6 +631,13 @@ export interface RegisterTransactionView {
   note: string | null;
   userName: string;
   createdAt: Date | null;
+  /** Cash-drop metadata (safe_deposit only). */
+  recipientUserId: number | null;
+  recipientName: string | null;
+  referenceNo: string | null;
+  confirmedBy: number | null;
+  confirmedByName: string | null;
+  confirmedAt: Date | null;
 }
 
 export async function getSessionDetail(
@@ -542,11 +678,30 @@ export async function getSessionDetail(
       note: registerTransactions.note,
       userName: users.fullName,
       createdAt: registerTransactions.createdAt,
+      recipientUserId: registerTransactions.recipientUserId,
+      referenceNo: registerTransactions.referenceNo,
+      confirmedBy: registerTransactions.confirmedBy,
+      confirmedAt: registerTransactions.confirmedAt,
     })
     .from(registerTransactions)
     .innerJoin(users, eq(users.id, registerTransactions.userId))
     .where(eq(registerTransactions.sessionId, sessionId))
     .orderBy(desc(registerTransactions.id));
+
+  // Names for drop recipient / confirmer (single query, then map).
+  const nameIds = new Set<number>();
+  for (const t of transactions) {
+    if (t.recipientUserId) nameIds.add(t.recipientUserId);
+    if (t.confirmedBy) nameIds.add(t.confirmedBy);
+  }
+  const nameById = new Map<number, string>();
+  if (nameIds.size > 0) {
+    const nameRows = await db
+      .select({ id: users.id, fullName: users.fullName })
+      .from(users)
+      .where(sql`${users.id} IN (${sql.join([...nameIds].map((id) => sql`${id}`), sql`, `)})`);
+    for (const r of nameRows) nameById.set(r.id, r.fullName);
+  }
 
   const expected =
     row.status === "open"
@@ -558,6 +713,8 @@ export async function getSessionDetail(
     transactions: transactions.map((t) => ({
       ...t,
       amount: Number(t.amount),
+      recipientName: t.recipientUserId ? nameById.get(t.recipientUserId) ?? null : null,
+      confirmedByName: t.confirmedBy ? nameById.get(t.confirmedBy) ?? null : null,
     })),
   };
 }
@@ -570,10 +727,19 @@ export async function closeSession(
   sessionId: number,
   countedCash: number,
   notes?: string,
+  opts: {
+    countedDenominations?: DenominationCount[] | null;
+    actorRole?: string | null;
+    requestId?: string | null;
+  } = {},
 ): Promise<SessionSummary> {
   if (countedCash < 0) {
     throw new BadRequestError("Counted cash cannot be negative.");
   }
+  const countedDenominations = validateDenominationSheet(
+    opts.countedDenominations,
+    countedCash,
+  );
   return db.transaction(async (tx) => {
     const [session] = await tx
       .select()
@@ -607,8 +773,26 @@ export async function closeSession(
         difference,
         notes: notes ?? session.notes,
         closedAt: new Date(),
+        ...(countedDenominations ? { countedDenominations } : {}),
       })
       .where(eq(registerSessions.id, sessionId));
+
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId: callerUserId,
+      action: "register.closed",
+      entityType: "register_session",
+      entityId: sessionId,
+      actorRole: opts.actorRole ?? null,
+      requestId: opts.requestId ?? null,
+      metadata: {
+        registerId: session.registerId,
+        expectedCash: expected,
+        countedCash: counted,
+        difference,
+        countedByDenominations: countedDenominations !== null,
+      },
+    });
 
     const [row] = await tx
       .select(sessionSelect)
@@ -655,6 +839,411 @@ export async function closeSession(
 }
 
 /**
+ * Mid-shift blind count (Phase 1). Records an interim expected-vs-counted
+ * variance WITHOUT changing the session's expected cash — a count event,
+ * never a movement. Large variances alert the same notification channel the
+ * close path uses, so a drifting drawer is caught before shift end.
+ */
+export async function reconcileSession(
+  businessId: number,
+  callerUserId: number,
+  callerIsOwner: boolean,
+  sessionId: number,
+  countedCash: number,
+  countedDenominations?: DenominationCount[] | null,
+  notes?: string,
+  auditCtx: { actorRole?: string | null; requestId?: string | null } = {},
+): Promise<{ session: SessionSummary; reconciliationId: number; expected: number; difference: number }> {
+  if (countedCash < 0) {
+    throw new BadRequestError("Counted cash cannot be negative.");
+  }
+  const denominations = validateDenominationSheet(countedDenominations, countedCash);
+  return db.transaction(async (tx) => {
+    const [session] = await tx
+      .select()
+      .from(registerSessions)
+      .where(
+        and(
+          eq(registerSessions.id, sessionId),
+          eq(registerSessions.businessId, businessId),
+        ),
+      )
+      .for("update");
+    if (!session) {
+      throw new NotFoundError("Session not found.");
+    }
+    assertSessionMayBeOperated(session, callerUserId, callerIsOwner);
+
+    const expected = await computeExpectedCash(
+      tx,
+      sessionId,
+      Number(session.openingCash),
+    );
+    const counted = roundMoney(countedCash);
+    const difference = roundMoney(counted - expected);
+
+    const [reconciliation] = await tx
+      .insert(registerReconciliations)
+      .values({
+        businessId,
+        sessionId,
+        expectedCash: expected,
+        countedCash: counted,
+        difference,
+        ...(denominations ? { countedDenominations: denominations } : {}),
+        notes: notes ?? null,
+        createdBy: callerUserId,
+      })
+      .returning({ id: registerReconciliations.id });
+    if (!reconciliation) {
+      throw new Error("Reconciliation insert returned no row.");
+    }
+
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId: callerUserId,
+      action: "register.reconciled",
+      entityType: "register_session",
+      entityId: sessionId,
+      actorRole: auditCtx.actorRole ?? null,
+      requestId: auditCtx.requestId ?? null,
+      metadata: {
+        reconciliationId: reconciliation.id,
+        expectedCash: expected,
+        countedCash: counted,
+        difference,
+      },
+    });
+
+    if (Math.abs(difference) > 0.01) {
+      await notifyRegisterDiscrepancy(tx, {
+        businessId,
+        sessionId,
+        registerName: `Register ${session.registerId}`,
+        difference,
+      });
+    }
+
+    return {
+      session: {
+        id: session.id,
+        registerId: session.registerId,
+        registerName: "",
+        locationId: 0,
+        locationName: "",
+        userName: "",
+        terminalId: session.terminalId,
+        terminalName: null,
+        status: session.status,
+        openingCash: Number(session.openingCash),
+        expectedCash: expected,
+        countedCash: null,
+        difference: null,
+        notes: session.notes,
+        openedAt: session.openedAt,
+        closedAt: session.closedAt,
+      },
+      reconciliationId: reconciliation.id,
+      expected,
+      difference,
+    };
+  });
+}
+
+/**
+ * Controlled reopen of a closed session (Phase 1). ALWAYS requires a manager
+ * approval token (op register.reopen) consumed inside the transaction. The
+ * counted cash at close becomes the reopened session's opening float — the
+ * money is still physically in the drawer — and the close variance survives
+ * in the audit trail (before/after snapshots), not in mutable columns.
+ */
+export async function reopenSession(
+  businessId: number,
+  callerUserId: number,
+  sessionId: number,
+  approvalToken: string,
+  reason?: string,
+  auditCtx: { actorRole?: string | null; requestId?: string | null } = {},
+): Promise<SessionSummary> {
+  return db.transaction(async (tx) => {
+    const [session] = await tx
+      .select()
+      .from(registerSessions)
+      .where(
+        and(
+          eq(registerSessions.id, sessionId),
+          eq(registerSessions.businessId, businessId),
+        ),
+      )
+      .for("update");
+    if (!session) {
+      throw new NotFoundError("Session not found.");
+    }
+    if (session.status !== "closed") {
+      throw new ConflictError("Only a closed session can be reopened.");
+    }
+    const before = {
+      status: session.status,
+      openingCash: Number(session.openingCash),
+      expectedCash: Number(session.expectedCash ?? 0),
+      countedCash: Number(session.countedCash ?? 0),
+      difference: Number(session.difference ?? 0),
+      closedAt: session.closedAt,
+    };
+
+    const approval = await consumeApprovalInTx(tx, businessId, {
+      token: approvalToken,
+      opType: "register.reopen",
+      entityType: "register_session",
+      entityId: sessionId,
+    });
+
+    // The register must not have another open session, and must be active.
+    const [register] = await tx
+      .select()
+      .from(registers)
+      .where(
+        and(eq(registers.id, session.registerId), eq(registers.businessId, businessId)),
+      )
+      .for("update");
+    if (!register) {
+      throw new NotFoundError("Register not found.");
+    }
+    if (register.status !== "active") {
+      throw new BadRequestError("This register is deactivated.");
+    }
+    const [registerOpen] = await tx
+      .select({ id: registerSessions.id })
+      .from(registerSessions)
+      .where(
+        and(
+          eq(registerSessions.registerId, session.registerId),
+          eq(registerSessions.status, "open"),
+        ),
+      )
+      .for("update", { of: registerSessions });
+    if (registerOpen) {
+      throw new ConflictError(
+        "This register already has an open session. Close it first.",
+      );
+    }
+
+    const reopenCash = Number(session.countedCash ?? session.openingCash);
+    await tx
+      .update(registerSessions)
+      .set({
+        status: "open",
+        openingCash: roundMoney(reopenCash),
+        // The counted sheet at close IS the physical float going forward.
+        ...(session.countedDenominations
+          ? { openingDenominations: session.countedDenominations }
+          : {}),
+        countedDenominations: null,
+        expectedCash: null,
+        countedCash: null,
+        difference: null,
+        closedAt: null,
+      })
+      .where(eq(registerSessions.id, sessionId));
+
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId: callerUserId,
+      action: "register.reopened",
+      entityType: "register_session",
+      entityId: sessionId,
+      actorRole: auditCtx.actorRole ?? null,
+      requestId: auditCtx.requestId ?? null,
+      beforeState: before,
+      afterState: { status: "open", openingCash: roundMoney(reopenCash) },
+      metadata: {
+        approvedBy: approval.approverUserId,
+        approvalReason: approval.reason,
+        callerReason: reason ?? null,
+      },
+    });
+
+    return {
+      id: session.id,
+      registerId: session.registerId,
+      registerName: register.name,
+      locationId: register.locationId,
+      locationName: "",
+      userName: "",
+      terminalId: session.terminalId,
+      terminalName: null,
+      status: "open",
+      openingCash: roundMoney(reopenCash),
+      expectedCash: roundMoney(reopenCash),
+      countedCash: null,
+      difference: null,
+      notes: session.notes,
+      openedAt: session.openedAt,
+      closedAt: null,
+    };
+  });
+}
+
+/**
+ * Manager confirmation of a cash drop (Phase 1): attests the money reached
+ * the safe. Requires cash_register.manage (route); the drop's drawer movement
+ * itself was already recorded — this only completes its paper trail.
+ */
+export async function confirmCashDrop(
+  businessId: number,
+  confirmedByUserId: number,
+  sessionId: number,
+  transactionId: number,
+  auditCtx: { actorRole?: string | null; requestId?: string | null } = {},
+): Promise<{ id: number; confirmedAt: Date }> {
+  return db.transaction(async (tx) => {
+    const [session] = await tx
+      .select({ id: registerSessions.id })
+      .from(registerSessions)
+      .where(
+        and(
+          eq(registerSessions.id, sessionId),
+          eq(registerSessions.businessId, businessId),
+        ),
+      )
+      .for("update");
+    if (!session) {
+      throw new NotFoundError("Session not found.");
+    }
+    const [tx2] = await tx
+      .select()
+      .from(registerTransactions)
+      .where(
+        and(
+          eq(registerTransactions.id, transactionId),
+          eq(registerTransactions.sessionId, sessionId),
+          eq(registerTransactions.businessId, businessId),
+        ),
+      )
+      .for("update");
+    if (!tx2) {
+      throw new NotFoundError("Cash movement not found in this session.");
+    }
+    if (tx2.type !== "safe_deposit") {
+      throw new BadRequestError("Only cash drops (safe deposits) can be confirmed.");
+    }
+    if (tx2.confirmedAt) {
+      throw new ConflictError("This drop is already confirmed.");
+    }
+    const confirmedAt = new Date();
+    await tx
+      .update(registerTransactions)
+      .set({ confirmedBy: confirmedByUserId, confirmedAt })
+      .where(eq(registerTransactions.id, transactionId));
+
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId: confirmedByUserId,
+      action: "cash.drop_confirmed",
+      entityType: "register_transaction",
+      entityId: transactionId,
+      actorRole: auditCtx.actorRole ?? null,
+      requestId: auditCtx.requestId ?? null,
+      metadata: {
+        sessionId,
+        amount: Number(tx2.amount),
+        referenceNo: tx2.referenceNo,
+        recipientUserId: tx2.recipientUserId,
+      },
+    });
+    return { id: transactionId, confirmedAt };
+  });
+}
+
+/** The business's denomination sheet, or the default set when unconfigured. */
+export async function getDenominationConfig(
+  businessId: number,
+): Promise<number[]> {
+  const [row] = await db
+    .select({ denominations: registerDenominationConfigs.denominations })
+    .from(registerDenominationConfigs)
+    .where(eq(registerDenominationConfigs.businessId, businessId))
+    .limit(1);
+  return row?.denominations ?? [...DEFAULT_DENOMINATIONS];
+}
+
+/** Replaces the business's denomination sheet (validated) and audits it. */
+export async function setDenominationConfig(
+  businessId: number,
+  userId: number,
+  denominations: number[],
+  auditCtx: { actorRole?: string | null; requestId?: string | null } = {},
+): Promise<number[]> {
+  if (
+    !Array.isArray(denominations) ||
+    denominations.length === 0 ||
+    denominations.length > 15
+  ) {
+    throw new BadRequestError(
+      "Provide between 1 and 15 denomination values.",
+    );
+  }
+  const seen = new Set<number>();
+  for (const value of denominations) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 1_000_000) {
+      throw new BadRequestError(
+        "Denomination values must be positive numbers up to 1,000,000.",
+      );
+    }
+    if (seen.has(value)) {
+      throw new BadRequestError(`Denomination ${value} appears more than once.`);
+    }
+    seen.add(value);
+  }
+  const sorted = [...denominations].sort((a, b) => b - a);
+  await db
+    .insert(registerDenominationConfigs)
+    .values({ businessId, denominations: sorted })
+    .onConflictDoUpdate({
+      target: registerDenominationConfigs.businessId,
+      set: { denominations: sorted, updatedAt: new Date() },
+    });
+  await recordAudit({
+    businessId,
+    actorUserId: userId,
+    action: "register.denominations_updated",
+    entityType: "register_denomination_config",
+    entityId: businessId,
+    actorRole: auditCtx.actorRole ?? null,
+    requestId: auditCtx.requestId ?? null,
+    afterState: { denominations: sorted },
+  });
+  return sorted;
+}
+
+/**
+ * Phase 1 gate: when pos_settings.require_open_drawer is on, a cash sale is
+ * rejected unless the seller (or their terminal) has an open register
+ * session at this location. Uses the same attribution lookup as the movement
+ * recorder, so "open" means exactly "this cash would land somewhere".
+ */
+export async function assertOpenDrawerForCashInTx(
+  tx: Tx,
+  businessId: number,
+  userId: number,
+  locationId: number,
+  terminalId: number | null = null,
+): Promise<void> {
+  const session = await findOpenSessionForAttribution(
+    tx,
+    businessId,
+    userId,
+    locationId,
+    terminalId,
+  );
+  if (!session) {
+    throw new ConflictError(
+      "This business requires an open register session before accepting cash. Open your drawer first.",
+    );
+  }
+}
+
+/**
  * Auto-records the cash portion of a sale into an open register session
  * (same transaction as the sale — atomic). Attribution preference: the
  * session bound to the sale's TERMINAL (the drawer the money physically
@@ -678,7 +1267,26 @@ export async function recordCashSaleInTx(
     locationId,
     terminalId,
   );
-  if (!session) return;
+  if (!session) {
+    // Phase 1 (audit finding): cash changed hands with no open drawer — the
+    // movement cannot be recorded, so leave an honest audit row instead of
+    // silently dropping it. require_open_drawer (pos_settings) can reject
+    // this situation outright for businesses that opt in.
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId: userId,
+      action: "cash.unattributed",
+      entityType: "sale",
+      entityId: saleId,
+      locationId,
+      metadata: {
+        cashAmount: roundMoney(cashAmount),
+        terminalId,
+        reason: "no_open_register_session",
+      },
+    });
+    return;
+  }
   await tx.insert(registerTransactions).values({
     businessId,
     sessionId: session.id,

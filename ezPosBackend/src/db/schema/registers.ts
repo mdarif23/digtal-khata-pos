@@ -4,6 +4,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   numeric,
   pgEnum,
   pgTable,
@@ -20,6 +21,12 @@ import { locations } from "./locations.js";
 import { users } from "./users.js";
 import { posTerminals } from "./posTerminals.js";
 import { paymentAccounts } from "./paymentAccounts.js";
+
+/** One row of a counted cash sheet — value of the note/coin and its count. */
+export interface DenominationCount {
+  value: number;
+  count: number;
+}
 
 export const registerStatusEnum = pgEnum("register_status", [
   "active",
@@ -149,6 +156,17 @@ export const registerSessions = pgTable(
      * makes replays of a queued open a no-op.
      */
     clientSessionId: uuid("client_session_id"),
+    /**
+     * Phase 1 denomination snapshot taken at open —
+     * [{ value: 500, count: 4 }, ...]. The rendered total must equal
+     * opening_cash (service-validated); history never depends on the
+     * current denomination configuration.
+     */
+    openingDenominations: jsonb("opening_denominations")
+      .$type<DenominationCount[]>(),
+    /** Phase 1 denomination snapshot taken at close (same shape). */
+    countedDenominations: jsonb("counted_denominations")
+      .$type<DenominationCount[]>(),
   },
   (table) => [
     // Candidate key for the composite FK from register_transactions.
@@ -218,6 +236,18 @@ export const registerTransactions = pgTable(
      */
     clientOpId: varchar("client_op_id", { length: 120 }),
     note: text(),
+    /**
+     * Phase 1 cash-drop metadata (safe_deposit): who physically received the
+     * money, a reference slip number, and a separate manager confirmation.
+     */
+    recipientUserId: integer("recipient_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    referenceNo: varchar("reference_no", { length: 60 }),
+    confirmedBy: integer("confirmed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
@@ -239,6 +269,79 @@ export const registerTransactions = pgTable(
     check(
       "register_transactions_amount_check",
       sql`${table.amount} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Per-business denomination sheet configuration (Phase 1): the note/coin
+ * values cashiers count with, e.g. [1000, 500, 200, 100, 50, 20, 10, 5, 2, 1].
+ * Singleton row per business; absent row = the service offers a default set.
+ * Values are service-validated (positive, unique, max 15 entries).
+ */
+export const registerDenominationConfigs = pgTable("register_denomination_configs", {
+  businessId: integer("business_id")
+    .primaryKey()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  denominations: jsonb("denominations").$type<number[]>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+/**
+ * Mid-shift blind count (Phase 1). A reconciliation is a COUNT EVENT, not a
+ * movement — it never changes expected cash; it records the interim variance
+ * so a drawer drifting during a long shift is caught before close.
+ * Composite FK to register_sessions(id, business_id) enforces tenancy.
+ */
+export const registerReconciliations = pgTable(
+  "register_reconciliations",
+  {
+    id: serial("id").primaryKey().notNull(),
+    businessId: integer("business_id")
+      .notNull()
+      .references(() => businesses.id, { onDelete: "cascade" }),
+    sessionId: integer("session_id").notNull(),
+    expectedCash: numeric("expected_cash", {
+      precision: 10,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    countedCash: numeric("counted_cash", {
+      precision: 10,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    difference: numeric("difference", {
+      precision: 10,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    countedDenominations: jsonb("counted_denominations")
+      .$type<DenominationCount[]>(),
+    notes: text(),
+    createdBy: integer("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("register_reconciliations_business_created_idx").on(
+      table.businessId,
+      table.createdAt,
+    ),
+    index("register_reconciliations_session_idx").on(table.sessionId),
+    foreignKey({
+      columns: [table.sessionId, table.businessId],
+      foreignColumns: [registerSessions.id, registerSessions.businessId],
+      name: "register_reconciliations_session_business_fkey",
+    }),
+    check(
+      "register_reconciliations_amount_check",
+      sql`${table.expectedCash} >= 0 AND ${table.countedCash} >= 0`,
     ),
   ],
 );

@@ -47,7 +47,11 @@ export function CartHeader({
         </div>
       </div>
       <div className="flex gap-2">
-        <div className="min-w-0 flex-1">
+        <div
+          className="min-w-0 flex-1"
+          data-hotkey-target="customer-search"
+          tabIndex={-1}
+        >
           <CustomerInputAndSearch form={form} />
         </div>
         {/* Same dialog the /customer page uses — one form, one validation. */}

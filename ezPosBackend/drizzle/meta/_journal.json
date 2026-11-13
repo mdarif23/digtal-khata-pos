@@ -454,6 +454,97 @@
       "when": 1794500013000,
       "tag": "0064_warranty_management",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794500014000,
+      "tag": "0065_phase1_operational_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794500015000,
+      "tag": "0066_import_entity_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794500016000,
+      "tag": "0067_loyalty_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794500017000,
+      "tag": "0068_quotations",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794500018000,
+      "tag": "0069_comms_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1794500019000,
+      "tag": "0070_phase3_checkout_speed",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1794500020000,
+      "tag": "0071_phase4_advanced_inventory",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1794500021000,
+      "tag": "0072_stock_precision",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1794500022000,
+      "tag": "0073_sale_movement_precision",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794500023000,
+      "tag": "0074_consumption_precision",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794500024000,
+      "tag": "0075_stock_precision_float",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794500025000,
+      "tag": "0076_sales_team_bi",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1794500026000,
+      "tag": "0077_commission_reversal_unique",
+      "breakpoints": true
     }
   ]
 }

@@ -99,3 +99,41 @@ export async function convertToPurchase(req: Request, res: Response) {
     return sendSafeError(res, err, "Unable to create the purchase order.");
   }
 }
+
+/** Phase 4 (Feature 14): lead-time upsert per variant+supplier. */
+export async function setLeadTime(req: Request, res: Response) {
+  try {
+    const schema = z.object({
+      variantId: z.number().int().positive(),
+      supplierId: z.number().int().positive(),
+      leadTimeDays: z.number().int().min(0).max(365),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid lead time.",
+        errors: parsed.error.flatten(),
+      });
+    }
+    await reorderService.setLeadTime(getBusinessId(req), parsed.data);
+    return res.status(200).json({ success: true });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to save the lead time.");
+  }
+}
+
+export async function getLeadTimes(req: Request, res: Response) {
+  try {
+    const variantId = Number(req.query.variantId);
+    if (!Number.isInteger(variantId) || variantId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid variant ID." });
+    }
+    const data = await reorderService.getLeadTime(getBusinessId(req), variantId);
+    return res.status(200).json({ success: true, data });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to load lead times.");
+  }
+}

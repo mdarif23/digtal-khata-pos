@@ -212,6 +212,8 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "warranty.supplier.manage", module: "warranty", description: "Create and manage supplier warranties and supplier claims" },
   { key: "warranty.reports.view", module: "warranty", description: "View warranty reports and statistics" },
   { key: "warranty.config.manage", module: "warranty", description: "Manage product and variant warranty configuration" },
+  { key: "audit.view", module: "audit", description: "View the business audit log (search, filters, event detail)" },
+  { key: "audit.export", module: "audit", description: "Export the business audit log to CSV" },
 ];
 
 export const ALL_PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((p) => p.key);
@@ -333,6 +335,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "warranty.supplier.manage",
     "warranty.reports.view",
     "warranty.config.manage",
+    // Phase 1: managers are the audit audience (view + export).
+    "audit.view",
+    "audit.export",
   ],
 
   cashier: [

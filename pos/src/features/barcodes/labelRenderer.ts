@@ -90,6 +90,15 @@ function labelCellHtml(item: LabelItem, config: LabelConfig, svg: string | null,
   const barcodeBlock = svg
     ? `<div class="ez-label-barcode">${svg}</div>`
     : `<div class="ez-label-barcode-error">Barcode could not be rendered — fix the code before printing.</div>`;
+  // Phase 4 (Feature 15): batch number / expiry date lines.
+  const batchLine =
+    config.includeBatchNumber && item.batchNumber
+      ? `<div class="ez-label-batch">Batch: ${escapeHtml(item.batchNumber)}</div>`
+      : "";
+  const expiryLine =
+    config.includeExpiryDate && item.expiryDate
+      ? `<div class="ez-label-expiry">Exp: ${escapeHtml(item.expiryDate)}</div>`
+      : "";
   return `
     <div class="ez-label-cell">
       ${logo}
@@ -97,6 +106,8 @@ function labelCellHtml(item: LabelItem, config: LabelConfig, svg: string | null,
       ${nameLines}
       ${barcodeBlock}
       ${price}
+      ${batchLine}
+      ${expiryLine}
     </div>`;
 }
 
