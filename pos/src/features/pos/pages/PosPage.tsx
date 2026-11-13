@@ -17,6 +17,7 @@ import { useHotkeyAction } from "../hotkeys/hotkeyBus";
 import { PosHotkeyManager } from "../hotkeys/PosHotkeyManager";
 import { usePrintReceipt } from "../hooks/usePrintReceipt";
 import { CfdManageDialog } from "../cfd/CfdManageDialog";
+import { SalespersonSelect } from "../components/pos/SalespersonSelect";
 import { pushCfdPayloadApi, type CfdPushPayload } from "../cfd/cfd.api";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
 import {
@@ -82,11 +83,19 @@ function Pos() {
     }
   }, [holdsRevision]);
 
+  // Phase 5 (Feature 13): the salesperson attributed to new sales — a
+  // business member chosen per register (persisted locally).
+  const [salespersonUserId, setSalespersonUserId] = useState<number | null>(() => {
+    const stored = localStorage.getItem("ezpos.pos.salespersonUserId");
+    return stored ? Number(stored) : null;
+  });
+
   const form = useForm<CartSchemaType>({
     resolver: zodResolver(cartSchema),
     defaultValues: {
       saleDate: new Date(),
       customerId: null,
+      salespersonUserId: salespersonUserId ?? null,
       payments: [],
       discount: null,
       vatPercent: null,
@@ -177,6 +186,8 @@ function Pos() {
         uomConversionId: item.uomConversionId ?? null,
         priceOverride: item.priceOverride ?? null,
       })),
+      // Phase 5 (Feature 13): salesperson attribution on the invoice.
+      salespersonUserId: salespersonUserId,
     };
 
     const result = createSalePayloadSchema.safeParse(rawPayload);
@@ -319,6 +330,18 @@ function Pos() {
             <NotificationBell revision={notificationRevision} />
             <SyncStatusIndicator />
             <RegisterDialog />
+            <SalespersonSelect
+              value={salespersonUserId}
+              onChange={(userId) => {
+                setSalespersonUserId(userId);
+                form.setValue("salespersonUserId", userId);
+                if (userId === null) {
+                  localStorage.removeItem("ezpos.pos.salespersonUserId");
+                } else {
+                  localStorage.setItem("ezpos.pos.salespersonUserId", String(userId));
+                }
+              }}
+            />
             <PosHotkeyManager />
             <CfdManageDialog />
           </div>

@@ -51,6 +51,8 @@ import { LoyaltySettingsPage } from "@/features/loyalty/LoyaltySettingsPage";
 import { QuotationsPage } from "@/features/quotations/QuotationsPage";
 import { CommsSettingsPage } from "@/features/comms/CommsSettingsPage";
 import { CfdDisplayPage } from "@/features/pos/cfd/CfdDisplayPage";
+import { CommissionPage } from "@/features/commission/CommissionPage";
+import { TargetsPage } from "@/features/commission/TargetsPage";
 import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
@@ -446,6 +448,22 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="comms.manage">
             <CommsSettingsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/commissions",
+        element: (
+          <RequirePermission permission="commission.view">
+            <CommissionPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/targets",
+        element: (
+          <RequirePermission permission="commission.view">
+            <TargetsPage />
           </RequirePermission>
         ),
       },

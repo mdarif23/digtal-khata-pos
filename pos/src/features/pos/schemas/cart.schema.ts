@@ -21,6 +21,8 @@ export const cartSchema = z
   .object({
     saleDate: z.date({ message: "Sale date is required" }),
     customerId: z.number().nullable(),
+    /** Phase 5 (Feature 13): salesperson attribution (null = cashier fallback). */
+    salespersonUserId: z.number().nullable().optional(),
     payments: z.array(paymentSchema).min(1, "Select a payment method"),
     discount: z
       .object({
@@ -94,6 +96,8 @@ const cartItemPayloadSchema = z.object({
 export const createSalePayloadSchema = z.object({
   saleDate: z.date(),
   customerId: z.number().nullable(),
+  /** Phase 5 (Feature 13): the attributed salesperson (null = cashier fallback). */
+  salespersonUserId: z.number().nullable().optional(),
   payments: z.array(paymentSchema).min(1, "Select a payment method"),
   discount: z
     .object({

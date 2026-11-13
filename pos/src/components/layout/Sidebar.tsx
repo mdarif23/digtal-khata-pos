@@ -44,6 +44,18 @@ const MENU_ITEMS: MenuItem[] = [
     anyPermission: ["quotations.view"],
   },
   {
+    label: "Commissions",
+    icon: RiMoneyDollarBoxFill,
+    path: "/commissions",
+    anyPermission: ["commission.view"],
+  },
+  {
+    label: "Targets",
+    icon: RiMoneyDollarBoxFill,
+    path: "/targets",
+    anyPermission: ["commission.view"],
+  },
+  {
     label: "Audit Log",
     icon: RiFileList2Fill,
     path: "/audit-logs",
