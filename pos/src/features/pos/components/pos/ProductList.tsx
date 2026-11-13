@@ -21,6 +21,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
+import {
+  parseEmbeddedBarcode,
+  DEFAULT_EMBEDDED_CONFIG,
+} from "@/features/barcodes/scanning/embeddedBarcode";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
 import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
 import {
@@ -126,6 +130,30 @@ export function ProductList({
       // its barcode is not the piece barcode.
       const scannedUnit = getScannedUnit(match);
       const baseUnitsPerScan = scannedUnit?.conversionFactor ?? 1;
+      // Phase 4 (Feature 10-A): embedded WEIGHT — the parsed value is the
+      // quantity in base units for weight-sold variants.
+      const weightQuantity =
+        scannedUnit == null &&
+        (variant as { soldByWeight?: boolean }).soldByWeight === true
+          ? (embeddedWeightRef.current ?? 0)
+          : null;
+      if (weightQuantity !== null && weightQuantity > 0) {
+        addToCart(
+          {
+            ...product,
+            name: buildVariantName(product.name, variant.options),
+            variants: [variant],
+          },
+          undefined,
+          weightQuantity,
+        );
+        embeddedWeightRef.current = null;
+        setSearchProducts("");
+        toast.add({
+          description: `${buildVariantName(product.name, variant.options)} × ${weightQuantity} added.`,
+        });
+        return;
+      }
       if (variant.quantity < baseUnitsPerScan) {
         throw new Error(`${product.name} is out of stock.`);
       }
@@ -173,10 +201,29 @@ export function ProductList({
     [],
   );
 
+  // Phase 4 (Feature 10-B): embedded price/weight barcodes — parse first,
+  // fall back to normal identification when the shape doesn't match. The
+  // parsed weight travels to handleResolved via a side channel (lookup
+  // responses are typed without it).
+  const embeddedWeightRef = useRef<number | null>(null);
+  const resolveScan = useCallback(
+    async (barcode: string) => {
+      const embedded = parseEmbeddedBarcode(barcode, DEFAULT_EMBEDDED_CONFIG);
+      if (embedded) {
+        const match = await lookup(embedded.lookupBarcode);
+        embeddedWeightRef.current = embedded.value;
+        return match;
+      }
+      embeddedWeightRef.current = null;
+      return lookup(barcode);
+    },
+    [lookup],
+  );
+
   const scanner = useBarcodeScanner({
     capture: "window",
     enabled: scannerEnabled,
-    lookup,
+    lookup: resolveScan,
     onResolve: handleResolved,
   });
 

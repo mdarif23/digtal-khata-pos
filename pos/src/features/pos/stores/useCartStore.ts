@@ -125,7 +125,7 @@ export const useCartStore = create<CartStore>((set, get) => ({
     return key;
   },
   clearCheckoutIdempotency: () => set({ checkoutIdempotencyKey: null }),
-  addToCart: (product, unit) =>
+  addToCart: (product, unit, quantity) =>
     set((state) => {
       const variant = product.variants[0];
       if (!variant) {
@@ -141,14 +141,18 @@ export const useCartStore = create<CartStore>((set, get) => ({
           lineUnitId(p) === unitId,
       );
 
+      // Phase 4 (Feature 10-A): an explicit quantity (embedded weight) sets
+      // the line amount instead of incrementing by one.
+      const step = quantity ?? 1;
+
       if (exists) {
         return {
           cart: state.cart.map((item) =>
             item === exists
               ? {
                   ...item,
-                  quantity: item.quantity + 1,
-                  enteredQuantity: item.quantity + 1,
+                  quantity: item.quantity + step,
+                  enteredQuantity: item.quantity + step,
                 }
               : item,
           ),
@@ -161,8 +165,8 @@ export const useCartStore = create<CartStore>((set, get) => ({
           {
             ...product,
             variants: [variant],
-            quantity: 1,
-            enteredQuantity: 1,
+            quantity: step,
+            enteredQuantity: step,
             ...unitFieldsFor(unit, Number(variant.sellingPrice)),
           },
         ],

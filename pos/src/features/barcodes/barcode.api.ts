@@ -49,6 +49,8 @@ export interface LookupMatch {
   barcodeFormat: string | null;
   sellingPrice: number;
   hasVariants: boolean;
+  /** Phase 4 (Feature 10-A): parsed embedded weight for scale barcodes. */
+  quantity?: number | undefined;
   /** products.status — modules decide what an inactive product means. */
   productStatus: string | null;
   variantStatus: string | null;

@@ -87,7 +87,12 @@ export interface CartStore {
    * omit it for the base unit (single-unit products never pass one).
    * Lines are keyed by (variant, unit): 1 Box and 3 Pcs are separate lines.
    */
-  addToCart: (product: ProductType, unit?: SellUnitRef) => void;
+  addToCart: (
+    product: ProductType,
+    unit?: SellUnitRef,
+    /** Phase 4 (Feature 10-A): parsed embedded weight (base units). */
+    quantity?: number,
+  ) => void;
   /** `uomConversionId` scopes the action to one unit line (null = base). */
   removeCartItem: (id: number, uomConversionId?: number | null) => void;
   addCartQuantity: (id: number, uomConversionId?: number | null) => void;

@@ -43,6 +43,9 @@ export interface LabelConfig {
   includePrice: boolean;
   includeShopName: boolean;
   includeLogo: boolean;
+  /** Phase 4 (Feature 15): batch number / expiry date lines. */
+  includeBatchNumber: boolean;
+  includeExpiryDate: boolean;
 }
 
 export interface LabelItem {
@@ -60,6 +63,9 @@ export interface LabelItem {
    * Absent/null keeps the default layout untouched.
    */
   packageUnitLine?: string | null;
+  /** Phase 4 (Feature 15): batch/expiry printed when enabled. */
+  batchNumber?: string | null;
+  expiryDate?: string | null;
 }
 
 export const LABEL_SIZES: LabelSize[] = [
@@ -81,6 +87,8 @@ export const LABEL_SIZES: LabelSize[] = [
       includePrice: true,
       includeShopName: false,
       includeLogo: false,
+      includeBatchNumber: false,
+      includeExpiryDate: false,
     },
   },
   {
@@ -101,6 +109,8 @@ export const LABEL_SIZES: LabelSize[] = [
       includePrice: true,
       includeShopName: false,
       includeLogo: false,
+      includeBatchNumber: false,
+      includeExpiryDate: false,
     },
   },
   {
@@ -121,6 +131,8 @@ export const LABEL_SIZES: LabelSize[] = [
       includePrice: true,
       includeShopName: true,
       includeLogo: true,
+      includeBatchNumber: false,
+      includeExpiryDate: false,
     },
   },
   {
@@ -145,6 +157,8 @@ export const LABEL_SIZES: LabelSize[] = [
       includePrice: true,
       includeShopName: false,
       includeLogo: false,
+      includeBatchNumber: false,
+      includeExpiryDate: false,
     },
   },
 ];
