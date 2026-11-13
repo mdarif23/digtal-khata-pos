@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input.js";
 import { toast } from "@/components/ui/toast.js";
 import { createExchangeApi } from "../../sales.api.js";
 import { quoteSaleApi } from "../../quote.api.js";
-import { useSalesStore } from "../../stores/useSalesStore.js";
+import { useSalesStore, refreshStockAfterTransaction } from "../../stores/useSalesStore.js";
 import useProductStore from "@/features/products/useProductStore.js";
 import type {
   AllSoldProduct,
@@ -52,7 +52,9 @@ export function ExchangeDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const products = useProductStore((s) => s.products);
-  const getSales = useSalesStore((s) => s.getSalesData);
+  // The store exposes getSales (NOT getSalesData — selecting a missing field
+  // used to crash the post-exchange refresh behind a generic error toast).
+  const getSales = useSalesStore((s) => s.getSales);
   const [selectedReturnIds, setSelectedReturnIds] = useState<number[]>([]);
   const [replacements, setReplacements] = useState<
     { variantId: number; name: string; quantity: number; unitPrice: number }[]
@@ -233,7 +235,15 @@ export function ExchangeDialog({
         description: `Exchange recorded: ${result.sale.invoiceNumber} (difference ${tk(result.difference)})`,
         priority: "high",
       });
-      await getSales();
+      // The exchange is COMMITTED at this point — refresh failures must never
+      // present it as failed. getSales catches internally (error lands on the
+      // store), and the stock refresh is best-effort by design.
+      try {
+        await getSales();
+        await refreshStockAfterTransaction();
+      } catch {
+        // Swallow: the sales list / grid refetch on their next trigger.
+      }
       onOpenChange(false);
       setSelectedReturnIds([]);
       setReplacements([]);
