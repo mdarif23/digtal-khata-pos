@@ -70,6 +70,7 @@ import commsRouter from "./modules/comms/comms.routes.js";
 import speedKeysRouter from "./modules/speedKeys/speedKeys.routes.js";
 import cfdRouter from "./modules/cfd/cfd.routes.js";
 import bomRouter from "./modules/bom/bom.routes.js";
+import commissionRouter from "./modules/commission/commission.routes.js";
 import pricingRouter from "./modules/pricing/pricing.routes.js";
 import customerGroupsRouter from "./modules/customerGroups/customerGroups.routes.js";
 import promotionsApiRouter from "./modules/pricing/promotions.routes.js";
@@ -210,6 +211,7 @@ export function buildApp() {
   app.use("/", speedKeysRouter);
   app.use("/", cfdRouter);
   app.use("/", bomRouter);
+  app.use("/", commissionRouter);
   app.use("/", pricingRouter);
   app.use("/", customerGroupsRouter);
   app.use("/", promotionsApiRouter);

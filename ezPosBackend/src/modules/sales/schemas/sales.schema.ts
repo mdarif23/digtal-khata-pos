@@ -93,6 +93,10 @@ export const createSalePayloadSchema = z.object({
   // (below-minimum pricing today; refund requests carry their own field).
   approvalToken: z.string().max(120).optional(),
 
+  // Phase 5 (Feature 13): the SALESPERSON on this invoice (nullable =
+  // unattributed; defaults to cashier for reporting fallback).
+  salespersonUserId: z.number().int().positive().nullable().optional(),
+
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),
 });

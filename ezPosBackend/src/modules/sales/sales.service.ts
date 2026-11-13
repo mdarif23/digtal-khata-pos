@@ -72,7 +72,12 @@ import {
   grantStoreCreditInTx,
 } from "../../services/storeCredit.js";
 import { promotionUsage } from "../../db/schema/pricing.js";
+import { businessMemberships } from "../../db/schema/businessMemberships.js";
 import { getBomsForVariants } from "../bom/bom.service.js";
+import {
+  calculateCommissionsForSaleInTx,
+  reverseCommissionsForRefundInTx,
+} from "../commission/commission.service.js";
 import {
   computeEligibleEarnBaseInTx,
   earnLoyaltyPointsInTx,
@@ -920,6 +925,8 @@ export async function createSale(
   options: CreateSaleOptions = {},
 ) {
   const { customerId, items, discount, vatPercent, payments, saleDate } = data;
+  // Phase 5 (Feature 13): salesperson attribution — validated at insert.
+  const salespersonUserId = data.salespersonUserId ?? null;
   const couponCode = data.couponCode?.trim() || null;
   const idempotencyKey = data.idempotencyKey?.trim() || null;
   // Binds the idempotency key to THIS payload so a replay with different
@@ -1236,6 +1243,13 @@ export async function createSale(
         idempotencyPayloadHash: payloadHash,
         terminalId,
         cashierUserId,
+        ...(salespersonUserId !== null
+          ? {
+              salespersonUserId,
+              salespersonAssignedAt: new Date(),
+              salespersonAssignedBy: cashierUserId,
+            }
+          : {}),
       })
       .onConflictDoNothing({
         target: [sales.businessId, sales.idempotencyKey],
@@ -1890,6 +1904,39 @@ export async function createSale(
       });
     }
 
+    // Phase 5 (Feature 13): commission calculation — validated salesperson
+    // membership, entries per matching rule, committed with the sale.
+    if (salespersonUserId !== null) {
+      const [member] = await tx
+        .select({ id: businessMemberships.id })
+        .from(businessMemberships)
+        .where(
+          and(
+            eq(businessMemberships.businessId, businessId),
+            eq(businessMemberships.userId, salespersonUserId),
+          ),
+        )
+        .limit(1);
+      if (!member) {
+        throw new BadRequestError(
+          "Salesperson is not a member of this business.",
+        );
+      }
+      const costBasisRow = await tx
+        .select({
+          cost: sql<string>`COALESCE(SUM(${saleItems.costAtSale} * ${saleItems.quantity}), 0)`,
+        })
+        .from(saleItems)
+        .where(eq(saleItems.saleId, saleId));
+      await calculateCommissionsForSaleInTx(tx, {
+        businessId,
+        saleId,
+        salespersonUserId,
+        finalTotal: Number(newSale.finalTotal ?? 0),
+        costBasis: Number(costBasisRow[0]?.cost ?? 0),
+      });
+    }
+
     // Finance & Growth: post the sale to the double-entry ledger (no-op
     // before activation; idempotent per sale; atomic with the sale).
     await postSaleLedgerEntry(tx, {
@@ -2115,6 +2162,17 @@ async function applySaleRefund(
       saleFinalTotal: Number(sale.finalTotal ?? 0),
     });
   }
+
+  // Phase 5 (Feature 13): commission reversal — proportional negative
+  // entries; history preserved. Only PENDING entries reverse; approved+
+  // money is handled manually per policy.
+  await reverseCommissionsForRefundInTx(tx, {
+    businessId,
+    saleId,
+    refundId: refund.id,
+    refundTotal,
+    saleFinalTotal: Number(sale.finalTotal ?? 0),
+  });
 
   // Value returned to inventory (Finance & Growth ledger hook input):
   // restocked units re-enter at their original blended cost_at_sale.

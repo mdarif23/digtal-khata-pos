@@ -98,6 +98,16 @@ export const sales = pgTable(
     exchangeOfSaleId: integer("exchange_of_sale_id"),
     /** Register attribution for staff performance (Module 15). */
     cashierUserId: integer("cashier_user_id").references(() => users.id),
+    /** Phase 5 (Feature 13): the attributed salesperson (snapshot). */
+    salespersonUserId: integer("salesperson_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    salespersonAssignedAt: timestamp("salesperson_assigned_at", {
+      withTimezone: true,
+    }),
+    salespersonAssignedBy: integer("salesperson_assigned_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
     /**
      * Customer group AT SALE TIME (pricing, migration 0063) for group
      * profitability reporting. Snapshot — deliberately NO foreign key:
