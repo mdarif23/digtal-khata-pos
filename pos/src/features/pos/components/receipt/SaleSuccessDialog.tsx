@@ -8,11 +8,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog.js";
 import { Button } from "@/components/ui/button.js";
-import { CheckCircle2, Printer, Eye, PlusCircle, Check, Copy, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Printer, Eye, PlusCircle, Check, Copy, ShieldCheck, Send } from "lucide-react";
 import type { SaleReceiptData } from "../../types/receipt.types.js";
 import { resolveReceiptConfig, usePrintReceipt } from "../../hooks/usePrintReceipt.js";
 import { ReceiptPrintDialog } from "./ReceiptPrintDialog.js";
 import { printWarrantyCertificate } from "@/features/warranty/renderers/warrantyCertificateHtml.js";
+import { usePermissions } from "@/hooks/usePermissions.js";
+import { sendSaleReceiptApi, type CommChannel, type SendReceiptOutcome } from "@/features/comms/comms.api.js";
+import { toast } from "@/components/ui/toast.js";
 
 interface SaleSuccessDialogProps {
   receipt: SaleReceiptData | null;
@@ -30,6 +33,8 @@ export function SaleSuccessDialog({
   const { printReceipt } = usePrintReceipt();
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const { hasPermission } = usePermissions();
+  const canSendComms = hasPermission("comms.manage");
 
   // Auto-print is driven by the business's SAVED receipt template — carried
   // on the receipt payload itself (falls back to local settings for
@@ -211,6 +216,10 @@ export function SaleSuccessDialog({
                   Print Warranty Certificate
                 </Button>
               )}
+
+              {canSendComms && receipt.customer?.phone && (
+                <SendReceiptButton receipt={receipt} />
+              )}
             </div>
 
             <Button
@@ -235,6 +244,152 @@ export function SaleSuccessDialog({
         open={isPreviewOpen}
         onOpenChange={setIsPreviewOpen}
       />
+    </>
+  );
+}
+
+// ---------- manual e-receipt send (comms.manage) ----------
+// Transactional receipt through the business's configured provider — the
+// endpoint records the delivery on the comm_messages log and enforces the
+// customer's transactional opt-out server-side.
+function SendReceiptButton({ receipt }: { receipt: SaleReceiptData }) {
+  const [open, setOpen] = useState(false);
+  const [channel, setChannel] = useState<CommChannel>("sms");
+  const [sending, setSending] = useState(false);
+  const [outcome, setOutcome] = useState<SendReceiptOutcome | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  const phone = receipt.customer?.phone ?? null;
+  const customerId = receipt.customer?.id ?? null;
+
+  const send = async () => {
+    if (!phone || customerId == null || sending) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      const result = await sendSaleReceiptApi({
+        saleId: receipt.saleId,
+        channel,
+        customerId,
+        recipient: phone,
+        variables: {
+          invoiceNumber: receipt.invoiceNumber,
+          total: receipt.finalTotal,
+          paid: receipt.paidAmount,
+          due: receipt.dueAmount,
+        },
+      });
+      setOutcome(result);
+      if (result.status === "sent") {
+        toast.add({
+          description: `Receipt sent to ${phone} via ${channel === "sms" ? "SMS" : "WhatsApp"}.`,
+        });
+      }
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Sending failed.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!phone || customerId == null) return null;
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full gap-2"
+        onClick={() => {
+          setOutcome(null);
+          setSendError(null);
+          setOpen(true);
+        }}
+      >
+        <Send className="size-4" />
+        Send Receipt
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Send e-receipt</DialogTitle>
+            <DialogDescription>
+              Delivers the receipt through the business's configured messaging
+              provider. The customer's transactional opt-out is enforced.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <span className="text-sm font-medium">Channel</span>
+              <div className="flex gap-2">
+                {(["sms", "whatsapp"] as CommChannel[]).map((c) => (
+                  <Button
+                    key={c}
+                    type="button"
+                    size="sm"
+                    variant={channel === c ? "default" : "outline"}
+                    onClick={() => setChannel(c)}
+                  >
+                    {c === "sms" ? "SMS" : "WhatsApp"}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="text-sm">
+              <span className="text-muted-foreground">To: </span>
+              <span className="font-mono">{phone}</span>
+            </div>
+
+            {outcome && (
+              <div
+                className={`rounded-md border p-2 text-sm ${
+                  outcome.status === "sent"
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                    : outcome.status === "skipped"
+                      ? "border-amber-300 bg-amber-50 text-amber-900"
+                      : "border-red-300 bg-red-50 text-red-800"
+                }`}
+              >
+                {outcome.status === "sent"
+                  ? "Sent."
+                  : outcome.status === "skipped"
+                    ? `Not sent: ${outcome.reason ?? "blocked"}.`
+                    : `Delivery failed${outcome.reason ? `: ${outcome.reason}` : ""}.`}
+              </div>
+            )}
+            {sendError && (
+              <div className="rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-800">
+                {sendError}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpen(false)}
+            >
+              Close
+            </Button>
+            <Button
+              type="button"
+              onClick={send}
+              disabled={sending || outcome?.status === "sent"}
+            >
+              {sending
+                ? "Sending…"
+                : outcome?.status === "sent"
+                  ? "Sent"
+                  : outcome?.status === "failed"
+                    ? "Retry"
+                    : "Send"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

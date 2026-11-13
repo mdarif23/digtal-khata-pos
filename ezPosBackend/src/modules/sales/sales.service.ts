@@ -93,6 +93,7 @@ import {
   recordCouponRedemptionInTx,
 } from "../../services/coupons.js";
 import { notifyStockLevel } from "../../services/notifications.js";
+import { sendSaleReceiptAfterSale } from "../../services/comms.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
 import { sha256OfJson } from "../../utils/canonicalJson.js";
 import {
@@ -1968,6 +1969,15 @@ export async function createSale(
     locationId,
     saleId: result.sale.id,
   });
+  // Phase 2C auto-receipt: when the business enabled it, the customer gets
+  // the e-receipt (WhatsApp/SMS/email via the configured provider). Fire-
+  // and-forget AFTER the commit — a delivery problem never touches the
+  // completed sale. The idempotent replay short-circuits INSIDE the
+  // transaction above, so this fires exactly once per sale; the comms
+  // service additionally dedupes on (sale, receipt) and enforces consent.
+  void sendSaleReceiptAfterSale(businessId, result.sale.id).catch(
+    () => undefined,
+  );
   return {
     ...result,
     receipt,

@@ -657,6 +657,22 @@ export async function sendSaleReceiptAfterSale(
 ): Promise<void> {
   const settings = await getCommSettingsWithDefaults(businessId);
   if (!settings.autoReceiptEnabled) return;
+  // One e-receipt per sale, ever: retries, wiring changes and replayed
+  // syncs must not double-message the customer. queueAndSend skips BEFORE
+  // inserting on consent/cap violations, so a missing row means "not sent".
+  const [existing] = await db
+    .select({ id: commMessages.id })
+    .from(commMessages)
+    .where(
+      and(
+        eq(commMessages.businessId, businessId),
+        eq(commMessages.entityType, "sale"),
+        eq(commMessages.entityId, saleId),
+        eq(commMessages.templateKey, "sale_receipt"),
+      ),
+    )
+    .limit(1);
+  if (existing) return;
   const [sale] = await db
     .select({
       customerId: sales.customerId,

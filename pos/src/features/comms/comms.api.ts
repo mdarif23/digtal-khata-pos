@@ -119,3 +119,40 @@ export async function getWebhookSecretApi(): Promise<string> {
   );
   return res.data.data.secret;
 }
+
+/** Outcome of a manual send — mirrors the backend SendOutcome. */
+export interface SendReceiptOutcome {
+  status: "sent" | "failed" | "skipped";
+  reason?: string;
+  messageId?: number;
+}
+
+/**
+ * Sends the sale_receipt template for a completed sale through the manual
+ * comms endpoint (comms.manage). The recipient comes from the customer's
+ * record; delivery is recorded on the comm_messages log with the provider
+ * status. Requires comms.manage on the caller — the UI gates the action.
+ */
+export async function sendSaleReceiptApi(input: {
+  saleId: number;
+  channel: CommChannel;
+  customerId: number;
+  recipient: string;
+  variables: { invoiceNumber: string; total: number; paid: number; due: number };
+}): Promise<SendReceiptOutcome> {
+  const res = await api.post<{ success: boolean; data: SendReceiptOutcome }>(
+    "/comms/send",
+    {
+      channel: input.channel,
+      customerId: input.customerId,
+      recipient: input.recipient,
+      templateKey: "sale_receipt",
+      messageClass: "transactional",
+      entityType: "sale",
+      entityId: input.saleId,
+      variables: input.variables,
+      reason: "pos_receipt_send",
+    },
+  );
+  return res.data.data;
+}

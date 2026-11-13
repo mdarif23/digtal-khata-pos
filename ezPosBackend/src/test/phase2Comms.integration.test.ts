@@ -446,4 +446,97 @@ describe("phase2 comms", { skip: !runIntegration }, () => {
     const second = await runDueReminderSweep();
     assert.equal(second.sent, 0, "no duplicate reminders the same day");
   });
+
+  // P0 fix #6: sendSaleReceiptAfterSale existed but had no caller — the
+  // sale path now fires it post-commit when the business enables it.
+  it("auto-sends the sale receipt when enabled — once, consent-aware, off by default", async () => {
+    const cust = await api(owner, "POST", "/api/customers", {
+      name: `C2 Auto Receipt ${stamp}`,
+      phone: `015${String(stamp).slice(-8)}`,
+      email: `c2-auto-${stamp}@example.test`,
+      address: "",
+    });
+    assert.equal(cust.status, 201);
+    const custBody = cust.body as { data?: { id?: number }; id?: number };
+    const autoCustomerId = (custBody.data?.id ?? custBody.id)!;
+    const list = await api(owner, "GET", "/api/products");
+    const variantId = (
+      list.body as { variants: { id: number }[] }[]
+    )[0]!.variants[0]!.id;
+    const saleBody = {
+      saleDate: new Date().toISOString(),
+      customerId: autoCustomerId,
+      payments: [{ method: "cash", amount: 500, tendered: 500 }],
+      discount: null,
+      vatPercent: 0,
+      items: [{ variantId, quantity: 1, unitPrice: 500, discount: null }],
+    };
+
+    async function receiptCount(saleId: number): Promise<number> {
+      const { default: pg } = await import("pg");
+      const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+      await client.connect();
+      const row = await client.query(
+        `SELECT COUNT(*)::int AS n FROM comm_messages
+         WHERE business_id = $1 AND entity_type = 'sale' AND entity_id = $2
+           AND template_key = 'sale_receipt'`,
+        [owner.businessId, saleId],
+      );
+      await client.end();
+      return Number(row.rows[0].n);
+    }
+
+    // Off by default: no receipt message.
+    await api(owner, "PUT", "/api/comms/settings", { autoReceiptEnabled: false });
+    const saleOff = await api(owner, "POST", "/api/sales", saleBody);
+    assert.equal(saleOff.status, 201, JSON.stringify(saleOff.body));
+    const saleOffId = payload<{ data: { sale: { id: number } } }>(saleOff).data.sale.id;
+    assert.equal(await receiptCount(saleOffId), 0, "no receipt while disabled");
+
+    // Enabled: the receipt goes out (console SMS provider from earlier tests).
+    await api(owner, "PUT", "/api/comms/settings", { autoReceiptEnabled: true });
+    const saleOn = await api(owner, "POST", "/api/sales", saleBody);
+    assert.equal(saleOn.status, 201, JSON.stringify(saleOn.body));
+    const saleOnId = payload<{ data: { sale: { id: number } } }>(saleOn).data.sale.id;
+    assert.equal(await receiptCount(saleOnId), 1, "exactly one receipt");
+
+    const { default: pg } = await import("pg");
+    const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    const row = await client.query(
+      `SELECT status, message_class, recipient FROM comm_messages
+       WHERE business_id = $1 AND entity_type = 'sale' AND entity_id = $2
+         AND template_key = 'sale_receipt'`,
+      [owner.businessId, saleOnId],
+    );
+    await client.end();
+    assert.equal(row.rows[0].status, "sent");
+    assert.equal(row.rows[0].message_class, "transactional");
+    assert.equal(row.rows[0].recipient, `015${String(stamp).slice(-8)}`);
+
+    // Re-invoking the sender for the same sale must not double-send.
+    const { sendSaleReceiptAfterSale } = await import("../services/comms.js");
+    await sendSaleReceiptAfterSale(owner.businessId, saleOnId);
+    await sendSaleReceiptAfterSale(owner.businessId, saleOnId);
+    assert.equal(await receiptCount(saleOnId), 1, "deduped per sale");
+
+    // Idempotent sale replay (same key) must not re-fire the receipt either.
+    const replay = await api(owner, "POST", "/api/sales", {
+      ...saleBody,
+      idempotencyKey: `p0c6-${stamp}-replay-000001`,
+    });
+    assert.equal(replay.status, 201, JSON.stringify(replay.body));
+    const replayId = payload<{ data: { sale: { id: number } } }>(replay).data.sale.id;
+    const replayAgain = await api(owner, "POST", "/api/sales", {
+      ...saleBody,
+      idempotencyKey: `p0c6-${stamp}-replay-000001`,
+    });
+    assert.equal(replayAgain.status, 201);
+    assert.equal(
+      payload<{ data: { sale: { id: number } } }>(replayAgain).data.sale.id,
+      replayId,
+      "replay returns the original sale",
+    );
+    assert.equal(await receiptCount(replayId), 1, "replay sends no extra receipt");
+  });
 });
