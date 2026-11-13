@@ -276,7 +276,7 @@ const METRICS_SELECT = sql`
     m.suggested::float8 AS "suggestedQuantity",
     m.last_unit_cost::float8 AS "lastUnitCost",
     CASE WHEN m.suggested IS NOT NULL AND m.last_unit_cost IS NOT NULL
-         THEN ROUND(m.suggested * m.last_unit_cost, 2)::float8
+         THEN ROUND((m.suggested * m.last_unit_cost)::numeric, 2)::float8
          ELSE NULL END AS "estimatedValue",
     m.last_supplier_id AS "lastSupplierId",
     m.last_supplier_name AS "lastSupplierName"
@@ -357,7 +357,7 @@ export async function getReorderDashboard(
           COUNT(*) FILTER (WHERE m.status <> 'healthy' AND m.last_supplier_id IS NULL)::int AS "noSupplierCount",
           COUNT(*) FILTER (WHERE m.status <> 'healthy' AND (m.last_unit_cost IS NULL OR m.last_unit_cost = 0))::int AS "missingPriceCount",
           COALESCE(SUM(CASE WHEN m.status <> 'healthy'
-            THEN ROUND(m.suggested * m.last_unit_cost, 2) END), 0)::float8 AS "totalEstimatedValue",
+            THEN ROUND((m.suggested * m.last_unit_cost)::numeric, 2) END), 0)::float8 AS "totalEstimatedValue",
           COUNT(DISTINCT CASE WHEN m.status <> 'healthy' THEN m.last_supplier_id END)::int AS "supplierCount"
         FROM metrics m
       `),
@@ -368,7 +368,7 @@ export async function getReorderDashboard(
           s.name AS "supplierName",
           COUNT(*)::int AS "itemCount",
           COALESCE(SUM(m.suggested), 0)::float8 AS "totalQuantity",
-          COALESCE(SUM(ROUND(m.suggested * m.last_unit_cost, 2)), 0)::float8 AS "estimatedValue",
+          COALESCE(SUM(ROUND((m.suggested * m.last_unit_cost)::numeric, 2)), 0)::float8 AS "estimatedValue",
           s.minimum_order_value::float8 AS "minimumOrderValue",
           s.target_order_value::float8 AS "targetOrderValue"
         FROM metrics m

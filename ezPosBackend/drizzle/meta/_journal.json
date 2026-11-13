@@ -524,6 +524,13 @@
       "when": 1794500023000,
       "tag": "0074_consumption_precision",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794500024000,
+      "tag": "0075_stock_precision_float",
+      "breakpoints": true
     }
   ]
 }

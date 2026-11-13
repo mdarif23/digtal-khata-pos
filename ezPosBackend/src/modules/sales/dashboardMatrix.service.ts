@@ -369,9 +369,9 @@ export function getSalesSummary(businessId: number, period: DashboardPeriod, loc
       CASE
         WHEN previous_sales - previous_return = 0 THEN 0
         ELSE ROUND(
-          ((current_sales - current_return) -
+          (((current_sales - current_return) -
             (previous_sales - previous_return)) /
-            (previous_sales - previous_return) * 100,
+            (previous_sales - previous_return) * 100)::numeric,
           2
         )
       END AS sales_growth,
@@ -379,7 +379,7 @@ export function getSalesSummary(businessId: number, period: DashboardPeriod, loc
       CASE
         WHEN previous_return = 0 THEN 0
         ELSE ROUND(
-          (current_return - previous_return) / previous_return * 100,
+          ((current_return - previous_return) / previous_return * 100)::numeric,
           2
         )
       END AS return_growth
@@ -513,7 +513,7 @@ export function getNetProfit(businessId: number, period: DashboardPeriod, locati
       CASE
         WHEN previous_net_profit = 0 THEN NULL
         ELSE ROUND(
-          (current_net_profit - previous_net_profit) / previous_net_profit * 100,
+          ((current_net_profit - previous_net_profit) / previous_net_profit * 100)::numeric,
           2
         )
       END AS profit_growth
@@ -556,7 +556,7 @@ export function getExpensesSummary(businessId: number, period: DashboardPeriod, 
       CASE
         WHEN previous_expenses = 0 THEN NULL
         ELSE ROUND(
-          (current_expenses - previous_expenses) / previous_expenses * 100,
+          ((current_expenses - previous_expenses) / previous_expenses * 100)::numeric,
           2
         )
       END AS expenses_growth
@@ -585,7 +585,7 @@ export function getPurchasesSummary(businessId: number, period: DashboardPeriod,
       CASE
         WHEN previous_purchases = 0 THEN NULL
         ELSE ROUND(
-          (current_purchases - previous_purchases) / previous_purchases * 100,
+          ((current_purchases - previous_purchases) / previous_purchases * 100)::numeric,
           2
         )
       END AS purchases_growth
@@ -615,7 +615,7 @@ export function getReturnSummary(businessId: number, period: DashboardPeriod, lo
         WHEN previous_returns = 0 AND current_returns = 0 THEN 0
         WHEN previous_returns = 0 THEN NULL
         ELSE ROUND(
-          (current_returns - previous_returns) / previous_returns * 100,
+          ((current_returns - previous_returns) / previous_returns * 100)::numeric,
           2
         )
       END AS return_growth_pct

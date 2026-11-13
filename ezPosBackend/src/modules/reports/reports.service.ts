@@ -357,7 +357,7 @@ export async function getProductSalesReport(businessId: number, params: DateRang
         - COALESCE(SUM(rf.refunded_money - si.cost_at_sale * COALESCE(rf.refunded_qty, 0)), 0)::numeric AS "grossProfit",
       CASE
         WHEN COALESCE(SUM(si.line_total), 0) > 0
-        THEN ROUND(COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0) / SUM(si.line_total) * 100, 2)
+        THEN ROUND((COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0) / SUM(si.line_total) * 100)::numeric, 2)
         ELSE 0
       END AS "profitMargin"
     FROM sale_items si
@@ -551,7 +551,7 @@ export async function getProfitReport(businessId: number, params: DateRangeQuery
       COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0)::numeric AS "grossProfit",
       CASE 
         WHEN COALESCE(SUM(si.line_total), 0) > 0 
-        THEN ROUND(COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0) / SUM(si.line_total) * 100, 2)
+        THEN ROUND((COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0) / SUM(si.line_total) * 100)::numeric, 2)
         ELSE 0 
       END AS "profitMargin"
     FROM sale_items si
@@ -610,7 +610,7 @@ export async function getProfitReport(businessId: number, params: DateRangeQuery
       COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0)::numeric AS "totalGrossProfit",
       CASE 
         WHEN COALESCE(SUM(si.line_total), 0) > 0 
-        THEN ROUND(COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0) / SUM(si.line_total) * 100, 2)
+        THEN ROUND((COALESCE(SUM((si.selling_price - si.cost_at_sale) * si.quantity), 0) / SUM(si.line_total) * 100)::numeric, 2)
         ELSE 0 
       END AS "overallMargin"
     FROM sale_items si
