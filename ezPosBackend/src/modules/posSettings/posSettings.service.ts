@@ -5,6 +5,15 @@ import {
   type ApprovalRequiredConfig,
 } from "../../db/schema/posSettings.js";
 
+export interface EmbeddedBarcodeConfig {
+  prefixes: string[];
+  pluLength: number;
+  valueLength: number;
+  decimals: number;
+  mode: "weight" | "price";
+  hasCheckDigit: boolean;
+}
+
 export interface PosSettingsView {
   requireTerminal: boolean;
   allowMultipleDrawerSessions: boolean;
@@ -12,6 +21,8 @@ export interface PosSettingsView {
   requireOpenDrawer: boolean;
   /** Phase 1: which sensitive ops demand a manager approval token. */
   approvalRequired: ApprovalRequiredConfig;
+  /** Phase 4 (Feature 10-B): embedded barcode parse config (null = default). */
+  embeddedBarcode: EmbeddedBarcodeConfig | null;
 }
 
 const DEFAULTS: PosSettingsView = {
@@ -19,7 +30,42 @@ const DEFAULTS: PosSettingsView = {
   allowMultipleDrawerSessions: false,
   requireOpenDrawer: false,
   approvalRequired: {},
+  embeddedBarcode: null,
 };
+
+function sanitizeEmbeddedConfig(
+  value: unknown,
+): EmbeddedBarcodeConfig | null {
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  if (!Array.isArray(source.prefixes) || source.prefixes.length === 0) return null;
+  const prefixes = (source.prefixes as unknown[]).filter(
+    (p): p is string => typeof p === "string" && /^\d{1,3}$/.test(p),
+  );
+  const pluLength = typeof source.pluLength === "number" ? source.pluLength : 0;
+  const valueLength =
+    typeof source.valueLength === "number" ? source.valueLength : 0;
+  const decimals = typeof source.decimals === "number" ? source.decimals : 0;
+  const mode = source.mode === "price" ? "price" : "weight";
+  if (
+    prefixes.length === 0 ||
+    pluLength <= 0 ||
+    valueLength <= 0 ||
+    decimals < 0 ||
+    decimals > 6
+  ) {
+    return null;
+  }
+  return {
+    prefixes,
+    pluLength,
+    valueLength,
+    decimals,
+    mode,
+    hasCheckDigit: source.hasCheckDigit === true,
+  };
+}
 
 const APPROVAL_KEYS = [
   "sale_refund",
@@ -56,12 +102,17 @@ export async function getPosSettings(
       allowMultipleDrawerSessions: posSettings.allowMultipleDrawerSessions,
       requireOpenDrawer: posSettings.requireOpenDrawer,
       approvalRequired: posSettings.approvalRequired,
+      embeddedBarcode: posSettings.embeddedBarcode,
     })
     .from(posSettings)
     .where(eq(posSettings.businessId, businessId))
     .limit(1);
   return row
-    ? { ...row, approvalRequired: sanitizeApprovalConfig(row.approvalRequired) }
+    ? {
+        ...row,
+        approvalRequired: sanitizeApprovalConfig(row.approvalRequired),
+        embeddedBarcode: sanitizeEmbeddedConfig(row.embeddedBarcode),
+      }
     : { ...DEFAULTS };
 }
 
@@ -73,12 +124,17 @@ export async function updatePosSettings(
     requireOpenDrawer?: boolean | undefined;
     /** Raw client value — sanitized against the known keys before storing. */
     approvalRequired?: Record<string, unknown> | undefined;
+    embeddedBarcode?: Record<string, unknown> | null | undefined;
   },
 ): Promise<PosSettingsView> {
   const current = await getPosSettings(businessId);
   const approvalRequired = patch.approvalRequired
     ? { ...current.approvalRequired, ...sanitizeApprovalConfig(patch.approvalRequired) }
     : current.approvalRequired;
+  const embeddedBarcode =
+    patch.embeddedBarcode !== undefined
+      ? sanitizeEmbeddedConfig(patch.embeddedBarcode)
+      : current.embeddedBarcode;
   const [row] = await db
     .insert(posSettings)
     .values({
@@ -88,6 +144,20 @@ export async function updatePosSettings(
         patch.allowMultipleDrawerSessions ?? current.allowMultipleDrawerSessions,
       requireOpenDrawer: patch.requireOpenDrawer ?? current.requireOpenDrawer,
       approvalRequired,
+      ...(patch.embeddedBarcode !== undefined
+        ? {
+            embeddedBarcode: sanitizeEmbeddedConfig(
+              patch.embeddedBarcode,
+            ) as unknown as {
+              prefixes: string[];
+              pluLength: number;
+              valueLength: number;
+              decimals: number;
+              mode: "weight" | "price";
+              hasCheckDigit: boolean;
+            } | null,
+          }
+        : {}),
     })
     .onConflictDoUpdate({
       target: posSettings.businessId,
@@ -104,6 +174,9 @@ export async function updatePosSettings(
         ...(patch.approvalRequired !== undefined
           ? { approvalRequired }
           : {}),
+        ...(patch.embeddedBarcode !== undefined
+          ? { embeddedBarcode: sanitizeEmbeddedConfig(patch.embeddedBarcode) }
+          : {}),
         updatedAt: new Date(),
       },
     })
@@ -112,11 +185,16 @@ export async function updatePosSettings(
       allowMultipleDrawerSessions: posSettings.allowMultipleDrawerSessions,
       requireOpenDrawer: posSettings.requireOpenDrawer,
       approvalRequired: posSettings.approvalRequired,
+      embeddedBarcode: posSettings.embeddedBarcode,
     });
   if (!row) {
     throw new Error("POS settings update returned no row.");
   }
-  return { ...row, approvalRequired: sanitizeApprovalConfig(row.approvalRequired) };
+  return {
+    ...row,
+    approvalRequired: sanitizeApprovalConfig(row.approvalRequired),
+    embeddedBarcode: sanitizeEmbeddedConfig(row.embeddedBarcode),
+  };
 }
 
 export async function getAllowMultipleDrawerSessions(

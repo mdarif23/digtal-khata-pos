@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCcw } from "lucide-react";
+import api from "@/api/axios.js";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +8,15 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   type CommissionTotals,
+  createRuleApi,
   listEntriesApi,
   listRulesApi,
   transitionEntryApi,
@@ -43,6 +52,7 @@ export function CommissionPage() {
   const [totals, setTotals] = useState<CommissionTotals | null>(null);
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>("all");
   const [acting, setActing] = useState(false);
+  const [users, setUsers] = useState<{ id: number; fullName: string }[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -55,6 +65,10 @@ export function CommissionPage() {
       setRules(r);
       setRows(e.rows);
       setTotals(e.totals);
+      api
+        .get<{ success: boolean; data: { id: number; fullName: string }[] }>("/users")
+        .then((res) => setUsers((res.data.data ?? []).filter((u: { id: number; fullName: string; isActive?: boolean }) => u.isActive !== false)))
+        .catch(() => setUsers([]));
     } catch (error) {
       toast.add({ title: extractError(error, "Unable to load commissions."), type: "error" });
       setRules([]);
@@ -74,6 +88,35 @@ export function CommissionPage() {
       void load();
     } catch (error) {
       toast.add({ title: extractError(error, "Unable to update the entry."), type: "error" });
+    } finally {
+      setActing(false);
+    }
+  }
+
+  const [ruleFormOpen, setRuleFormOpen] = useState(false);
+  const [ruleForm, setRuleForm] = useState({
+    name: "",
+    calcMethod: "percentage_of_sales",
+    rate: "5",
+    userId: "",
+  });
+
+  async function createRule() {
+    setActing(true);
+    try {
+      await createRuleApi({
+        name: ruleForm.name.trim(),
+        calcMethod: ruleForm.calcMethod,
+        rate: Number(ruleForm.rate) || 0,
+        userId: ruleForm.userId === "" ? null : Number(ruleForm.userId),
+        isActive: true,
+      });
+      setRules(await listRulesApi());
+      setRuleFormOpen(false);
+      setRuleForm({ name: "", calcMethod: "percentage_of_sales", rate: "5", userId: "" });
+      toast.add({ title: "Rule created.", type: "success" });
+    } catch (error) {
+      toast.add({ title: extractError(error, "Unable to create the rule."), type: "error" });
     } finally {
       setActing(false);
     }
@@ -126,7 +169,12 @@ export function CommissionPage() {
       ) : null}
 
       <section className="grid gap-2">
-        <h2 className="font-medium">Rules</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium">Rules</h2>
+          <Button size="sm" onClick={() => setRuleFormOpen(true)}>
+            New rule
+          </Button>
+        </div>
         {rules === null ? (
           <Skeleton className="h-20 w-full" />
         ) : rules.length === 0 ? (
@@ -176,6 +224,73 @@ export function CommissionPage() {
           </div>
         )}
       </section>
+
+      <Dialog open={ruleFormOpen} onOpenChange={setRuleFormOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New commission rule</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="rule-name">Name</Label>
+              <Input
+                id="rule-name"
+                value={ruleForm.name}
+                onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="rule-method">Method</Label>
+              <select
+                id="rule-method"
+                className="rounded-md border bg-background p-2 text-sm"
+                value={ruleForm.calcMethod}
+                onChange={(e) => setRuleForm({ ...ruleForm, calcMethod: e.target.value })}
+              >
+                <option value="percentage_of_sales">% of sales</option>
+                <option value="percentage_of_profit">% of profit (line total − cost)</option>
+                <option value="fixed_per_sale">Fixed per sale</option>
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="rule-rate">
+                {ruleForm.calcMethod === "fixed_per_sale" ? "Flat amount (৳)" : "Rate (%)"}
+              </Label>
+              <Input
+                id="rule-rate"
+                type="number"
+                min={0}
+                value={ruleForm.rate}
+                onChange={(e) => setRuleForm({ ...ruleForm, rate: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="rule-user">Salesperson (empty = everyone)</Label>
+              <select
+                id="rule-user"
+                className="rounded-md border bg-background p-2 text-sm"
+                value={ruleForm.userId}
+                onChange={(e) => setRuleForm({ ...ruleForm, userId: e.target.value })}
+              >
+                <option value="">All salespeople</option>
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.fullName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => void createRule()}
+              disabled={acting || ruleForm.name.trim() === ""}
+            >
+              {acting ? "Creating…" : "Create rule"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <section className="grid gap-2">
         <div className="flex flex-wrap items-center gap-2">

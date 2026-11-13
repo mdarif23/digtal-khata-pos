@@ -53,6 +53,7 @@ import { CommsSettingsPage } from "@/features/comms/CommsSettingsPage";
 import { CfdDisplayPage } from "@/features/pos/cfd/CfdDisplayPage";
 import { CommissionPage } from "@/features/commission/CommissionPage";
 import { TargetsPage } from "@/features/commission/TargetsPage";
+import { ProductionPage } from "@/features/products/pages/ProductionPage";
 import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
 import { AttendancePage } from "@/features/pos/pages/AttendancePage";
 import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
@@ -448,6 +449,14 @@ const router = createBrowserRouter([
         element: (
           <RequirePermission permission="comms.manage">
             <CommsSettingsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/production",
+        element: (
+          <RequirePermission permission="products.view">
+            <ProductionPage />
           </RequirePermission>
         ),
       },

@@ -65,6 +65,18 @@ export const posSettings = pgTable("pos_settings", {
     .$type<ApprovalRequiredConfig>()
     .default({})
     .notNull(),
+  /**
+   * Phase 4 (Feature 10-B): embedded price/weight barcode parse config —
+   * { prefixes, pluLength, valueLength, decimals, mode, hasCheckDigit }.
+   */
+  embeddedBarcode: jsonb("embedded_barcode").$type<{
+    prefixes: string[];
+    pluLength: number;
+    valueLength: number;
+    decimals: number;
+    mode: "weight" | "price";
+    hasCheckDigit: boolean;
+  } | null>(),
   /** Phase 3 CFD: idle-screen copy shown when the customer display has no cart. */
   cfdIdleMessage: varchar("cfd_idle_message", { length: 200 }),
   /** Phase 3 CFD: promotional banner copy on the idle screen. */

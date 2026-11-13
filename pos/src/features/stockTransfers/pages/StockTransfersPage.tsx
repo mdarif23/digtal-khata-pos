@@ -36,6 +36,7 @@ import {
   getTransfersApi,
   getVariantOptionsApi,
   receiveTransferApi,
+  authorizeTransferApi,
   shipTransferApi,
   type TransferDetail,
   type TransferListItem,
@@ -95,6 +96,10 @@ export function StockTransfersPage() {
   const [receiveQuantities, setReceiveQuantities] = useState<
     Record<number, string>
   >({});
+
+  // Phase 4 (Feature 17): per-item shortfall reasons + explicit close-short.
+  const [shortfallReasons, setShortfallReasons] = useState<Record<number, string>>({});
+  const [showShortfallReasons, setShowShortfallReasons] = useState(false);
   const [acting, setActing] = useState(false);
 
   const load = useCallback(async () => {
@@ -283,9 +288,11 @@ export function StockTransfersPage() {
     }
   }
 
-  async function handleReceive() {
+  async function handleReceive(forceComplete = false) {
     if (!detail) return;
     const payload: { itemId: number; quantity: number }[] = [];
+    const reasons: Record<string, string> = {};
+    let hasShortfall = false;
     for (const item of detail.items) {
       const outstanding = item.quantityShipped - item.quantityReceived;
       if (outstanding <= 0) continue;
@@ -299,11 +306,35 @@ export function StockTransfersPage() {
         return;
       }
       if (quantity > 0) payload.push({ itemId: item.id, quantity });
+      // Phase 4 (Feature 17): shortfall reason captured per item — recorded
+      // as an explicit discrepancy when the transfer closes short.
+      const shortfall = outstanding - quantity;
+      if (shortfall > 0) {
+        hasShortfall = true;
+        const reason = shortfallReasons[item.id]?.trim();
+        if (reason) reasons[String(item.id)] = reason;
+      }
+    }
+    if (hasShortfall && !forceComplete) {
+      toast.add({
+        title:
+          "Received less than shipped — fill shortfall reasons and confirm “Close with shortfalls” to finish with discrepancies.",
+        type: "error",
+        priority: "high",
+      });
+      return;
     }
     await act(
-      () => receiveTransferApi(detail.id, payload),
-      "Transfer received",
+      () =>
+        receiveTransferApi(detail.id, payload, {
+          ...(hasShortfall ? { reasons } : {}),
+          forceComplete,
+        }),
+      hasShortfall
+        ? "Transfer received with recorded discrepancies"
+        : "Transfer received",
     );
+    setShowShortfallReasons(false);
   }
 
   const activeLocations = useMemo(
@@ -640,6 +671,45 @@ export function StockTransfersPage() {
                 </TableBody>
               </Table>
 
+              {showShortfallReasons &&
+              (detail.status === "shipped" ||
+                detail.status === "partially_received") ? (
+                <div className="grid gap-2 rounded-md border border-dashed p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Receiving less than shipped records explicit discrepancies.
+                    Add a reason per short line, then “Close with shortfalls”.
+                  </p>
+                  {detail.items
+                    .filter((item) => item.quantityShipped - item.quantityReceived > 0)
+                    .map((item) => (
+                      <div key={item.id} className="grid gap-1">
+                        <Label className="text-xs">
+                          {item.variantName ?? `Item ${item.id}`} — short by{" "}
+                          {item.quantityShipped - item.quantityReceived}
+                        </Label>
+                        <Input
+                          className="h-8"
+                          placeholder="Reason (optional)"
+                          value={shortfallReasons[item.id] ?? ""}
+                          onChange={(e) =>
+                            setShortfallReasons((previous) => ({
+                              ...previous,
+                              [item.id]: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    ))}
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={acting}
+                    onClick={() => void handleReceive(true)}
+                  >
+                    {acting ? "Closing…" : "Close with shortfalls"}
+                  </Button>
+                </div>
+              ) : null}
               <DialogFooter className="gap-2">
                 {detail.status === "draft" ? (
                   <>
@@ -656,6 +726,18 @@ export function StockTransfersPage() {
                       Cancel draft
                     </Button>
                     <Button
+                      variant="outline"
+                      disabled={acting}
+                      onClick={() =>
+                        void act(
+                          () => authorizeTransferApi(detail.id),
+                          "Transfer authorized",
+                        )
+                      }
+                    >
+                      Authorize
+                    </Button>
+                    <Button
                       disabled={acting}
                       onClick={() =>
                         void act(
@@ -670,18 +752,39 @@ export function StockTransfersPage() {
                 ) : null}
                 {detail.status === "shipped" ||
                 detail.status === "partially_received" ? (
-                  <Button
-                    disabled={acting}
-                    onClick={() => void handleReceive()}
-                  >
-                    {acting ? "Receiving…" : "Receive"}
-                  </Button>
+                  <>
+                    <Button
+                      disabled={acting}
+                      onClick={() => void handleReceive(false)}
+                    >
+                      {acting ? "Receiving…" : "Receive"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={acting}
+                      onClick={() => setShowShortfallReasons((v) => !v)}
+                    >
+                      Close with shortfalls…
+                    </Button>
+                  </>
                 ) : null}
                 {detail.status === "received" ||
                 detail.status === "cancelled" ? (
                   <span className="text-sm text-muted-foreground">
                     Nothing further to do.
                   </span>
+                ) : null}
+                {detail.discrepancies && detail.discrepancies.length > 0 ? (
+                  <div className="grid gap-1 rounded-md border border-red-200 bg-red-50 p-2 text-xs dark:border-red-900 dark:bg-red-950">
+                    <span className="font-medium text-red-700 dark:text-red-400">
+                      Recorded discrepancies
+                    </span>
+                    {detail.discrepancies.map((row) => (
+                      <div key={row.id}>
+                        {`Item ${row.itemId}: shipped ${row.shippedQty}, received ${row.receivedQty} (short ${row.difference})${row.reason ? ` — ${row.reason}` : ""}`}
+                      </div>
+                    ))}
+                  </div>
                 ) : null}
               </DialogFooter>
             </>
