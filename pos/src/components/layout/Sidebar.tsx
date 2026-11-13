@@ -49,6 +49,12 @@ const MENU_ITEMS: MenuItem[] = [
     path: "/production",
   },
   {
+    label: "Messages",
+    icon: RiMoneyDollarBoxFill,
+    path: "/comms-settings",
+    anyPermission: ["comms.manage", "comms.view"],
+  },
+  {
     label: "Commissions",
     icon: RiMoneyDollarBoxFill,
     path: "/commissions",
