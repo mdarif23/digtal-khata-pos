@@ -26,6 +26,18 @@ export const createCustomerApi = async (customerInfo: InputValue) => {
   return normalizeCustomer(data);
 };
 
+// E1-004: correct a customer's contact details (customers.edit; audited).
+export const updateCustomerApi = async (
+  id: number,
+  customerInfo: InputValue,
+) => {
+  const { data } = await axios.patch<CustomerApiRecord>(
+    `/customers/${id}`,
+    customerInfo,
+  );
+  return normalizeCustomer(data);
+};
+
 export const getCustomerDueSummaryApi = async () => {
   const { data } = await axios.get<CustomerDue[]>("/due_by_customers");
   return data;

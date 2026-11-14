@@ -21,4 +21,9 @@ export interface ContactStoreType {
   createSupplier: (
     data: SupplierSchemaTypeOutput,
   ) => Promise<CreateSupplierResponse>;
+  /** D1-05: correct a supplier's contact details / status. */
+  updateSupplier: (
+    id: number,
+    data: SupplierSchemaTypeOutput,
+  ) => Promise<void>;
 }

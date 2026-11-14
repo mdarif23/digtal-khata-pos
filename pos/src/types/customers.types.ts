@@ -27,6 +27,8 @@ export interface CustomerStore {
   handleAddCustomer: () => Promise<void>;
   getCustomers: () => Promise<void>;
   addCustomer: (customerInfo: InputValue) => Promise<InputValue>;
+  /** E1-004: correct a customer's contact details. */
+  updateCustomer: (id: number, customerInfo: InputValue) => Promise<InputValue>;
 }
 export type PeerFocusInputProps = {
   placeholder: string;

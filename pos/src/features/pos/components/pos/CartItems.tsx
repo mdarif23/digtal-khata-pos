@@ -32,6 +32,7 @@ import { Label } from "@/components/ui/label.js";
 import { getCartTotals, getLinePricing, money } from "../../cartPricing.js";
 import { quoteSaleApi, type QuoteTotals } from "../../quote.api.js";
 import { SerialPickerDialog } from "./SerialPickerDialog.js";
+import { SaveQuotationDialog } from "./SaveQuotationDialog.js";
 import { toast } from "@/components/ui/toast.js";
 import { Button } from "@/components/ui/button.js";
 import { ShoppingCart } from "lucide-react";
@@ -531,6 +532,8 @@ export function CartCalculation({
   totals,
 }: ShowCustomerInfoProps & { totals: CartTotalsView }) {
 const [discountSignal, setDiscountSignal] = useState(0);
+  const [quoteOpen, setQuoteOpen] = useState(false);
+  const { hasPermission } = usePermissions();
   // Phase 3 hotkey: F4 opens the discount dialog.
   useHotkeyAction("discount", () => setDiscountSignal((n) => n + 1));
 
@@ -548,6 +551,21 @@ const [discountSignal, setDiscountSignal] = useState(0);
           {/* discount is applied on the amount after item discounts */}
           <DiscountModal form={form} subTotal={totals.itemsTotal} openSignal={discountSignal} />
         </div>
+        {hasPermission("quotations.create") && (
+          <div className="col-span-2">
+            {/* E1-002: capture the cart as a quotation draft */}
+            <SaveQuotationDialog open={quoteOpen} onOpenChange={setQuoteOpen} totals={totals} />
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 w-full"
+              disabled={cart.length === 0}
+              onClick={() => setQuoteOpen(true)}
+            >
+              Save as quotation
+            </Button>
+          </div>
+        )}
         {/* full-width row: a 1/6 cell clipped the placeholder text */}
         <div className="col-span-6">
           <CouponInput form={form} />

@@ -39,6 +39,65 @@ export async function createCustomer(req: Request, res: Response) {
     sendSafeError(res, err, "Unable to create the customer.");
   }
 }
+
+/**
+ * E1-004: customer contact details were permanently uncorrectable — typos
+ * and duplicates could never be fixed from the app. Scoped update
+ * (customers.edit), audited, and publishes customer.changed so the POS
+ * combobox refreshes.
+ */
+export async function updateCustomer(req: Request, res: Response) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid customer ID." });
+    }
+    const schema = z.object({
+      name: z.string().trim().min(1).max(255),
+      phone: z.string().trim().min(1).max(20),
+      email: z
+        .string()
+        .trim()
+        .max(255)
+        .email()
+        .or(z.literal(""))
+        .nullable()
+        .optional(),
+      address: z.string().trim().max(2000).nullable().optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer data.",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const customer = await customersService.updateCustomer(
+      getBusinessId(req),
+      id,
+      {
+        name: parsed.data.name,
+        phone: parsed.data.phone,
+        email:
+          parsed.data.email && parsed.data.email.trim() !== ""
+            ? parsed.data.email.trim().toLowerCase()
+            : null,
+        address: parsed.data.address ?? null,
+      },
+      req.user?.id ?? null,
+    );
+    publishRealtime(getBusinessId(req), null, {
+      kind: "customer.changed",
+      locationId: null,
+    });
+    return res.status(200).json(customer);
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to update the customer.");
+  }
+}
 export async function getCustomerDueSummary(req: Request, res: Response) {
   try {
     const result = await customersService.getCustomerDueSummary(

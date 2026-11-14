@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Save } from "lucide-react";
+import { Pencil, Plus, Save } from "lucide-react";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
 import { useCustomerStore } from "@/store/useCustomerStore";
 
@@ -25,21 +25,53 @@ const customerFormSchema = z.object({
 
 const initialForm = { name: "", phone: "", address: "" };
 
+/** Customer snapshot for the edit path (E1-004). */
+export interface EditableCustomer {
+  id: number;
+  name: string;
+  phone: string;
+  address: string;
+}
+
 /**
- * Add-customer dialog (same one the /customer page uses). `trigger` swaps
- * the default labeled button — e.g. POS renders an icon-only button.
+ * Add/EDIT customer dialog (same one the /customer page uses). `trigger`
+ * swaps the default labeled button — e.g. POS renders an icon-only button.
+ * With `editCustomer` the dialog prefills and PATCHes the customer instead
+ * of creating one (E1-004: details were permanently uncorrectable).
  */
-export function CustomerDialog({ trigger }: { trigger?: ReactElement }) {
+export function CustomerDialog({
+  trigger,
+  editCustomer,
+}: {
+  trigger?: ReactElement;
+  editCustomer?: EditableCustomer;
+}) {
+  const isEdit = editCustomer !== undefined;
   const [open, setOpen] = useState(false);
-  const [formData, setFormData] = useState(initialForm);
+  const [formData, setFormData] = useState({
+    name: editCustomer?.name ?? "",
+    phone: editCustomer?.phone ?? "",
+    address: editCustomer?.address ?? "",
+  });
   const [formError, setFormError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const addCustomer = useCustomerStore((state) => state.addCustomer);
+  const updateCustomer = useCustomerStore((state) => state.updateCustomer);
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen);
     setFormError("");
-    if (!nextOpen && !isSubmitting) setFormData(initialForm);
+    if (!nextOpen && !isSubmitting) {
+      setFormData(
+        isEdit
+          ? {
+              name: editCustomer.name,
+              phone: editCustomer.phone,
+              address: editCustomer.address,
+            }
+          : initialForm,
+      );
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -54,9 +86,12 @@ export function CustomerDialog({ trigger }: { trigger?: ReactElement }) {
     setIsSubmitting(true);
     try {
       await createEntityPromiseToast({
-        data: { id: 0, ...result.data },
-        apiCall: addCustomer,
-        entityName: "Customer",
+        data: { id: isEdit ? editCustomer.id : 0, ...result.data },
+        apiCall: isEdit
+          ? (payload: { id: number; name: string; phone: string; address: string }) =>
+              updateCustomer(payload.id, payload)
+          : addCustomer,
+        entityName: isEdit ? "Customer updated" : "Customer",
         displayName: result.data.name,
       });
       setFormData(initialForm);
@@ -74,20 +109,30 @@ export function CustomerDialog({ trigger }: { trigger?: ReactElement }) {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
-          trigger ?? (
+          trigger ??
+          (isEdit ? (
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
+              <Pencil />
+              Edit
+            </Button>
+          ) : (
             <Button>
               <Plus />
               Add customer
             </Button>
-          )
+          ))
         }
       />
       <DialogContent>
         <form className="space-y-5" onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>Add customer</DialogTitle>
+            <DialogTitle>
+              {isEdit ? "Edit customer" : "Add customer"}
+            </DialogTitle>
             <DialogDescription>
-              Add contact information to your customer directory.
+              {isEdit
+                ? "Correct the customer's contact information."
+                : "Add contact information to your customer directory."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

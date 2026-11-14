@@ -81,3 +81,30 @@ export async function convertQuotationApi(
   }>(`/quotations/${id}/convert`, { payments });
   return res.data.data;
 }
+
+// E1-002: the POS saves carts as quotations — the backend create endpoint
+// existed since the module shipped, but nothing in the UI ever called it.
+export interface CreateQuotationPayload {
+  customerId: number | null;
+  customerNameSnapshot?: string | null;
+  items: {
+    variantId: number;
+    quantity: number;
+    unitPrice: number;
+    discount?: number;
+  }[];
+  vatPercent: number;
+  notes?: string | null;
+  terms?: string | null;
+  validUntil?: string | null;
+}
+
+export async function createQuotationApi(
+  payload: CreateQuotationPayload,
+): Promise<{ id: number; quoteNumber: string }> {
+  const res = await api.post<{
+    success: boolean;
+    data: { id: number; quoteNumber: string };
+  }>("/quotations", payload);
+  return res.data.data;
+}

@@ -30,4 +30,11 @@ router.post(
   requirePermission("suppliers.create"),
   contactController.createSupplier,
 );
+// D1-05: supplier contact details were permanently uncorrectable.
+router.put(
+  "/api/contacts/supplier/:supplierId",
+  ...write,
+  requirePermission("suppliers.edit"),
+  contactController.updateSupplier,
+);
 export default router;

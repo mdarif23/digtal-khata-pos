@@ -30,6 +30,13 @@ router.post(
   requirePermission("customers.create"),
   customersController.createCustomer,
 );
+// E1-004: correct a customer's contact details (customers.edit; audited).
+router.patch(
+  "/api/customers/:id",
+  ...write,
+  requirePermission("customers.edit"),
+  customersController.updateCustomer,
+);
 // Phase 2C: communication consent toggles (scoped; customers.edit).
 router.patch(
   "/api/customers/:id/consent",
