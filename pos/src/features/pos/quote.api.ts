@@ -28,6 +28,9 @@ export interface QuoteTotals {
   afterDiscount: number;
   vatPercent: number;
   vat: number;
+  /** P3 Phase 1 (F1): named sale-level charges echo + total. */
+  charges?: { label: string; amount: number }[];
+  chargesTotal?: number;
   finalTotal: number;
   usesTaxRules: boolean;
   perLine: QuoteLineTax[];
@@ -66,6 +69,8 @@ export async function quoteSaleApi(payload: {
   vatPercent: number | null;
   couponCode?: string | null;
   customerId?: number | null;
+  /** P3 Phase 1 (F1): priced identically to checkout. */
+  charges?: { label: string; amount: number }[];
 }): Promise<QuoteTotals> {
   const res = await axios.post<{ data: QuoteTotals }>("/sales/quote", payload);
   return res.data.data;

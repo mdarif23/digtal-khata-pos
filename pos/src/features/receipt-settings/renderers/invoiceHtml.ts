@@ -205,6 +205,14 @@ export function renderInvoiceHtml(input: InvoiceRenderInput): InvoiceHtml {
     </table>`;
 
   // ---- totals ---------------------------------------------------------
+  // P3 Phase 1 (F1): named sale-level charges as their own rows between VAT
+  // and the grand total (post-VAT additive; inside finalTotal).
+  const chargeRows = (receipt.charges ?? [])
+    .filter((c) => Number(c.amount) > 0)
+    .map(
+      (c) =>
+        `<tr><td>${escapeHtml(c.label)}</td><td class="text-right">${money(Number(c.amount))}</td></tr>`,
+    );
   const totalsRows = [
     v.subtotal
       ? `<tr><td>Subtotal</td><td class="text-right">${money(receipt.subtotal)}</td></tr>`
@@ -215,6 +223,7 @@ export function renderInvoiceHtml(input: InvoiceRenderInput): InvoiceHtml {
     v.vat && receipt.vat > 0
       ? `<tr><td>VAT / Tax</td><td class="text-right">${money(receipt.vat)}</td></tr>`
       : "",
+    ...chargeRows,
     v.grandTotal
       ? `<tr class="grand"><td>Grand Total</td><td class="text-right">${money(receipt.finalTotal)}</td></tr>`
       : "",

@@ -21,6 +21,7 @@ import { variantOptions } from "../../db/schema/variantOptions.js";
 import { variantValues } from "../../db/schema/variantValues.js";
 import type { saleDataInput } from "../../types/sales-types.js";
 import { salePayments } from "../../db/schema/salePayments.js";
+import { saleCharges } from "../../db/schema/saleCharges.js";
 import {
   BadRequestError,
   ConflictError,
@@ -58,6 +59,7 @@ import type { CreateSalePayload } from "./schemas/sales.schema.js";
 import { normalizeSaleItemsToBase } from "./sales.uom.js";
 import type { SaleRefundRequest } from "./schemas/sales.schema.js";
 import { customers } from "../../db/schema/customers.js";
+import { getCustomerOutstandingInTx } from "../customers/customers.service.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
 import { recordOrderEventInTx } from "../commerce/orderTimeline.service.js";
 import { salePaymentIntents } from "../../db/schema/salePaymentIntents.js";
@@ -113,7 +115,7 @@ import {
   consumeApprovalInTx,
   isApprovalRequired,
 } from "../../services/managerApproval.js";
-import { getRequireOpenDrawer } from "../posSettings/posSettings.service.js";
+import { getRequireOpenDrawer, getStoreCreditExpiryMonths } from "../posSettings/posSettings.service.js";
 import { units } from "../../db/schema/units.js";
 import { alias } from "drizzle-orm/pg-core";
 import { productUnitConversions } from "../../db/schema/productUnitConversions.js";
@@ -560,6 +562,47 @@ function getPaymentStatus(paid: number, due: number) {
   return "unpaid";
 }
 
+/**
+ * P3 Phase 1 (F2): customer credit-limit gate. Runs inside the sale
+ * transaction with the customer row FOR UPDATE so concurrent due purchases
+ * serialize — two cashiers cannot collectively push a customer past the
+ * limit. The outstanding figure is the due-management recomputation
+ * (final_total − payments − refunds over completed sales), the authoritative
+ * number the business sees on the due screens; the denormalized
+ * sales.due_amount is a dual truth, never the credit authority.
+ * NULL limit = unlimited (pre-existing customers — no behavior change);
+ * limit 0 blocks any due; the check is backend-only (frontend balances are
+ * display context, never trusted).
+ */
+async function assertCustomerCreditWithinLimit(
+  tx: DbTransaction,
+  businessId: number,
+  customerId: number | null,
+  dueAmount: number,
+): Promise<void> {
+  if (customerId === null || dueAmount <= 0) return;
+  const [customer] = await tx
+    .select({ creditLimit: customers.creditLimit, name: customers.name })
+    .from(customers)
+    .where(
+      and(eq(customers.id, customerId), eq(customers.businessId, businessId)),
+    )
+    .for("update");
+  if (!customer) return; // customerValidation already rejected foreign ids
+  if (customer.creditLimit == null) return;
+  const limit = Number(customer.creditLimit);
+  const outstanding = await getCustomerOutstandingInTx(
+    tx,
+    businessId,
+    customerId,
+  );
+  if (outstanding + dueAmount > limit + 0.005) {
+    throw new ConflictError(
+      `Credit limit exceeded for ${customer.name}: limit ৳${limit.toFixed(2)}, already outstanding ৳${outstanding.toFixed(2)}, this sale would add ৳${roundMoney(dueAmount).toFixed(2)}. Collect a due or raise the limit.`,
+    );
+  }
+}
+
 /** Per-line warranty summary embedded in the receipt payload. */
 interface WarrantyReceiptSummary {
   warrantyNumber: string;
@@ -691,6 +734,26 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
     return max;
   }, 0);
 
+  // P3 Phase 1 (F1): named sale-level charges ride along for the receipt /
+  // invoice renderers and the CFD paid screen.
+  const chargeRows = await db
+    .select({
+      id: saleCharges.id,
+      label: saleCharges.label,
+      amount: saleCharges.amount,
+    })
+    .from(saleCharges)
+    .where(
+      and(
+        eq(saleCharges.saleId, saleId),
+        eq(saleCharges.businessId, businessId),
+      ),
+    )
+    .orderBy(asc(saleCharges.sortOrder), asc(saleCharges.id));
+  const chargesTotal = roundMoney(
+    chargeRows.reduce((sum, c) => sum + Number(c.amount), 0),
+  );
+
   // Document branding + active templates ride along with every receipt, so
   // the printed output always matches the business's saved customization.
   // Financial values above stay sourced from the immutable sale rows.
@@ -778,6 +841,12 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
     subtotal: Number(sale.subtotal ?? 0),
     discount: Number(sale.discount ?? 0),
     vat: Number(sale.vat ?? 0),
+    charges: chargeRows.map((c) => ({
+      id: c.id,
+      label: c.label,
+      amount: Number(c.amount),
+    })),
+    chargesTotal,
     finalTotal: Number(sale.finalTotal ?? 0),
     dueAmount: Number(sale.dueAmount ?? 0),
     paidAmount: Number(totalPaid),
@@ -947,6 +1016,17 @@ export async function createSale(
   // Phase 5 (Feature 13): salesperson attribution — validated at insert.
   const salespersonUserId = data.salespersonUserId ?? null;
   const couponCode = data.couponCode?.trim() || null;
+  // P3 Phase 1 (F1): named sale-level charges. The server re-derives the
+  // total from the labels/amounts; nothing money-shaped is trusted from the
+  // client beyond the declared charge rows themselves.
+  const chargesInput = (data.charges ?? []).map((c, idx) => ({
+    label: c.label,
+    amount: roundMoney(c.amount),
+    sortOrder: idx,
+  }));
+  const chargesTotal = roundMoney(
+    chargesInput.reduce((sum, c) => sum + c.amount, 0),
+  );
   const idempotencyKey = data.idempotencyKey?.trim() || null;
   // Binds the idempotency key to THIS payload so a replay with different
   // sale data cannot masquerade as a retry (see findSaleByIdempotencyKey).
@@ -1081,8 +1161,8 @@ export async function createSale(
     );
     const promoInput = toCartPromotionInput(promoEvaluation);
     const totals = usesTaxRules
-      ? getCartTotalsWithTaxRules(trustedItems, discount, taxRulesByVariant, groupInput, promoInput)
-      : getCartTotals(trustedItems, discount, Number(vatPercent ?? 0), groupInput, promoInput);
+      ? getCartTotalsWithTaxRules(trustedItems, discount, taxRulesByVariant, groupInput, promoInput, chargesTotal)
+      : getCartTotals(trustedItems, discount, Number(vatPercent ?? 0), groupInput, promoInput, chargesTotal);
     const lineTaxes = "perLine" in totals ? totals.perLine : null;
     // Self-describing snapshots: promotion names by id for price_adjustments.
     const promoNameById = new Map(
@@ -1203,8 +1283,12 @@ export async function createSale(
       });
     }
     const couponDiscount = couponEvaluation?.discountAmount ?? 0;
+    // Charges are coupon-immune (D1): the coupon reduces the product portion
+    // only; the charge total rides on top unchanged, so quote and checkout
+    // agree bit for bit.
     const finalTotalWithCoupon = roundMoney(
-      Math.max(0, totals.finalTotal - couponDiscount),
+      Math.max(0, roundMoney(totals.finalTotal - chargesTotal) - couponDiscount) +
+        chargesTotal,
     );
 
     // Header discount keeps its conflated meaning (line + manual cart) and
@@ -1228,6 +1312,12 @@ export async function createSale(
     );
 
     const paymentStatus = getPaymentStatus(paidAmount, dueAmount);
+
+    // P3 Phase 1 (F2): credit-limit gate on the due this sale would create.
+    // Runs BEFORE the invoice number is drawn and before any insert, inside
+    // the same transaction (customer row locked → concurrent purchases
+    // serialize on it).
+    await assertCustomerCreditWithinLimit(tx, businessId, customerId, dueAmount);
 
     // 7. Per-business invoice number from the business's own
     // document_sequences counter inside this transaction (rollback-safe).
@@ -1301,6 +1391,20 @@ export async function createSale(
     }
 
     const saleId = newSale.id;
+
+    // P3 Phase 1 (F1): persist the named charges as first-class child rows —
+    // receipt rendering, refund pro-rata context and audit all read them.
+    if (chargesInput.length > 0) {
+      await tx.insert(saleCharges).values(
+        chargesInput.map((c) => ({
+          businessId,
+          saleId,
+          label: c.label,
+          amount: c.amount,
+          sortOrder: c.sortOrder,
+        })),
+      );
+    }
 
     // Phase 6 audit trail: permission-gated price overrides and approved
     // below-minimum lines land in the audit log with the sale (in-tx, so it
@@ -1837,6 +1941,7 @@ export async function createSale(
         dueAmount: Number(newSale.dueAmount),
         paymentStatus: newSale.paymentStatus,
         itemCount: items.length,
+        ...(chargesInput.length > 0 ? { chargesTotal } : {}),
         ...(belowMinimumApprovedBy !== null ? { belowMinimumApprovedBy } : {}),
       },
     });
@@ -2162,7 +2267,19 @@ async function applySaleRefund(
   // Store credit settlement: the refund value becomes spendable customer
   // balance, recorded transactionally in the ledger (balances reconcile by
   // construction). Exchanges net out against replacement value upstream.
+  // P3 Phase 1 (F4): refund-granted credit follows the business's expiry
+  // policy — months from the pos_settings policy stamped on the grant row
+  // (NULL policy = never expires, today's behavior).
   if (options.refundMethod === "store_credit") {
+    const expiryMonths = await getStoreCreditExpiryMonths(businessId);
+    const expiresAt =
+      expiryMonths != null
+        ? (() => {
+            const d = new Date();
+            d.setMonth(d.getMonth() + expiryMonths);
+            return d;
+          })()
+        : null;
     await grantStoreCreditInTx(tx, {
       businessId,
       customerId: sale.customerId!,
@@ -2170,6 +2287,7 @@ async function applySaleRefund(
       sourceType: "refund",
       sourceId: refund.id,
       note: `Refund credit (sale #${saleId})`,
+      expiresAt,
     });
   }
 
@@ -3564,6 +3682,8 @@ export interface SaleQuotePayload {
   vatPercent?: number | null | undefined;
   couponCode?: string | null | undefined;
   customerId?: number | null | undefined;
+  /** P3 Phase 1 (F1): sale-level charges priced identically to checkout. */
+  charges?: { label: string; amount: number }[] | null | undefined;
 }
 
 export async function quoteSaleTotals(
@@ -3574,6 +3694,16 @@ export async function quoteSaleTotals(
   if (payload.items.length === 0) {
     throw new BadRequestError("A quote requires at least one item.");
   }
+  // P3 Phase 1 (F1): sale-level charges — normalized exactly like createSale
+  // so the quoted total matches the checkout total bit for bit.
+  const chargesInput = (payload.charges ?? []).map((c, idx) => ({
+    label: c.label,
+    amount: roundMoney(c.amount),
+    sortOrder: idx,
+  }));
+  const chargesTotal = roundMoney(
+    chargesInput.reduce((sum, c) => sum + c.amount, 0),
+  );
   return db.transaction(async (tx) => {
     const variantIds = [...new Set(payload.items.map((i) => i.variantId))];
     const variants = await tx
@@ -3685,8 +3815,8 @@ export async function quoteSaleTotals(
         : {}),
     };
     const totals = usesTaxRules
-      ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant, groupInput, promoInput)
-      : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0), groupInput, promoInput);
+      ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant, groupInput, promoInput, chargesTotal)
+      : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0), groupInput, promoInput, chargesTotal);
 
     // Minimum-price protection (Phase 6): the quote WARNS always (block or
     // approve happens at createSale, permission-gated there).
@@ -3732,6 +3862,8 @@ export async function quoteSaleTotals(
         afterDiscount: totals.afterDiscount,
         vatPercent: "vatPercent" in totals ? totals.vatPercent : 0,
         vat: totals.vat,
+        charges: chargesInput,
+        chargesTotal,
         finalTotal: totals.finalTotal,
         usesTaxRules,
         perLine: "perLine" in totals ? totals.perLine : [],
@@ -3764,6 +3896,8 @@ export async function quoteSaleTotals(
           afterDiscount: totals.afterDiscount,
           vatPercent: "vatPercent" in totals ? totals.vatPercent : 0,
           vat: totals.vat,
+          charges: chargesInput,
+          chargesTotal,
           finalTotal: totals.finalTotal,
           usesTaxRules,
           perLine: "perLine" in totals ? totals.perLine : [],
@@ -3785,7 +3919,14 @@ export async function quoteSaleTotals(
       afterDiscount: totals.afterDiscount,
       vatPercent: "vatPercent" in totals ? totals.vatPercent : 0,
       vat: totals.vat,
-      finalTotal: roundMoney(Math.max(0, totals.finalTotal - couponDiscount)),
+      charges: chargesInput,
+      chargesTotal,
+      // Charges are coupon-immune (D1): the coupon reduces the product
+      // portion only — identical math to createSale.
+      finalTotal: roundMoney(
+        Math.max(0, roundMoney(totals.finalTotal - chargesTotal) - couponDiscount) +
+          chargesTotal,
+      ),
       usesTaxRules,
       perLine,
       ...groupBlock,

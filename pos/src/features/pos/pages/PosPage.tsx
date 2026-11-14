@@ -102,6 +102,8 @@ function Pos() {
       discount: null,
       vatPercent: null,
       couponCode: undefined,
+      // P3 Phase 1 (F1): named sale-level charges (post-VAT additive).
+      charges: [],
     },
   });
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
@@ -145,6 +147,7 @@ function Pos() {
     totals.promotions?.total ?? 0,
     totals.coupon?.discountAmount ?? 0,
     totals.vat,
+    totals.chargesTotal ?? 0,
     totals.finalTotal,
   ].join("|");
   useEffect(() => {

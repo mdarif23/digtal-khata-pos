@@ -168,6 +168,8 @@ export interface CfdPayload {
   grandTotal: number;
   paidTotal: number;
   dueTotal: number;
+  /** P3 Phase 1 (F1): named sale-level charges, part of grandTotal. */
+  chargesTotal?: number;
 }
 
 export async function pushPayload(

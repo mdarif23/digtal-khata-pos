@@ -23,6 +23,11 @@ export interface PosSettingsView {
   approvalRequired: ApprovalRequiredConfig;
   /** Phase 4 (Feature 10-B): embedded barcode parse config (null = default). */
   embeddedBarcode: EmbeddedBarcodeConfig | null;
+  /**
+   * P3 Phase 1 (F4): months until newly granted store credit expires
+   * (null = no expiry — every existing business keeps today's behavior).
+   */
+  storeCreditExpiryMonths: number | null;
 }
 
 const DEFAULTS: PosSettingsView = {
@@ -31,6 +36,7 @@ const DEFAULTS: PosSettingsView = {
   requireOpenDrawer: false,
   approvalRequired: {},
   embeddedBarcode: null,
+  storeCreditExpiryMonths: null,
 };
 
 function sanitizeEmbeddedConfig(
@@ -103,6 +109,7 @@ export async function getPosSettings(
       requireOpenDrawer: posSettings.requireOpenDrawer,
       approvalRequired: posSettings.approvalRequired,
       embeddedBarcode: posSettings.embeddedBarcode,
+      storeCreditExpiryMonths: posSettings.storeCreditExpiryMonths,
     })
     .from(posSettings)
     .where(eq(posSettings.businessId, businessId))
@@ -112,6 +119,7 @@ export async function getPosSettings(
         ...row,
         approvalRequired: sanitizeApprovalConfig(row.approvalRequired),
         embeddedBarcode: sanitizeEmbeddedConfig(row.embeddedBarcode),
+        storeCreditExpiryMonths: row.storeCreditExpiryMonths ?? null,
       }
     : { ...DEFAULTS };
 }
@@ -125,6 +133,8 @@ export async function updatePosSettings(
     /** Raw client value — sanitized against the known keys before storing. */
     approvalRequired?: Record<string, unknown> | undefined;
     embeddedBarcode?: Record<string, unknown> | null | undefined;
+    /** P3 Phase 1 (F4): null clears the policy (no expiry). */
+    storeCreditExpiryMonths?: number | null | undefined;
   },
 ): Promise<PosSettingsView> {
   const current = await getPosSettings(businessId);
@@ -158,6 +168,9 @@ export async function updatePosSettings(
             } | null,
           }
         : {}),
+      ...(patch.storeCreditExpiryMonths !== undefined
+        ? { storeCreditExpiryMonths: patch.storeCreditExpiryMonths }
+        : {}),
     })
     .onConflictDoUpdate({
       target: posSettings.businessId,
@@ -177,6 +190,9 @@ export async function updatePosSettings(
         ...(patch.embeddedBarcode !== undefined
           ? { embeddedBarcode: sanitizeEmbeddedConfig(patch.embeddedBarcode) }
           : {}),
+        ...(patch.storeCreditExpiryMonths !== undefined
+          ? { storeCreditExpiryMonths: patch.storeCreditExpiryMonths }
+          : {}),
         updatedAt: new Date(),
       },
     })
@@ -186,6 +202,7 @@ export async function updatePosSettings(
       requireOpenDrawer: posSettings.requireOpenDrawer,
       approvalRequired: posSettings.approvalRequired,
       embeddedBarcode: posSettings.embeddedBarcode,
+      storeCreditExpiryMonths: posSettings.storeCreditExpiryMonths,
     });
   if (!row) {
     throw new Error("POS settings update returned no row.");
@@ -194,6 +211,7 @@ export async function updatePosSettings(
     ...row,
     approvalRequired: sanitizeApprovalConfig(row.approvalRequired),
     embeddedBarcode: sanitizeEmbeddedConfig(row.embeddedBarcode),
+    storeCreditExpiryMonths: row.storeCreditExpiryMonths ?? null,
   };
 }
 
@@ -220,4 +238,16 @@ export async function getRequireOpenDrawer(
     .where(eq(posSettings.businessId, businessId))
     .limit(1);
   return row?.requireOpenDrawer ?? false;
+}
+
+/** P3 Phase 1 (F4): months until granted store credit expires; null = never. */
+export async function getStoreCreditExpiryMonths(
+  businessId: number,
+): Promise<number | null> {
+  const [row] = await db
+    .select({ months: posSettings.storeCreditExpiryMonths })
+    .from(posSettings)
+    .where(eq(posSettings.businessId, businessId))
+    .limit(1);
+  return row?.months ?? null;
 }

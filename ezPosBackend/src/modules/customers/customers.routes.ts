@@ -51,6 +51,13 @@ router.get(
   requirePermission("customers.view"),
   customersController.getStoreCredit,
 );
+// P3 Phase 1 (F2): credit limit / outstanding / available summary.
+router.get(
+  "/api/customers/:id/credit-summary",
+  ...read,
+  requirePermission("customers.view"),
+  customersController.getCreditSummary,
+);
 router.get(
   "/api/due_by_customers",
   ...read,

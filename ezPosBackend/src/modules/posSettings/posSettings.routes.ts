@@ -56,6 +56,15 @@ const patchSchema = z
     requireOpenDrawer: z.boolean().optional(),
     approvalRequired: approvalRequiredSchema.optional(),
     embeddedBarcode: embeddedBarcodeSchema.nullable().optional(),
+    // P3 Phase 1 (F4): months until granted store credit expires; null = no
+    // expiry. Positive whole months only.
+    storeCreditExpiryMonths: z
+      .number()
+      .int()
+      .min(1)
+      .max(240)
+      .nullable()
+      .optional(),
   })
   .refine(
     (v) =>
@@ -63,7 +72,8 @@ const patchSchema = z
       v.allowMultipleDrawerSessions !== undefined ||
       v.requireOpenDrawer !== undefined ||
       v.approvalRequired !== undefined ||
-      v.embeddedBarcode !== undefined,
+      v.embeddedBarcode !== undefined ||
+      v.storeCreditExpiryMonths !== undefined,
     { message: "Nothing to update." },
   );
 

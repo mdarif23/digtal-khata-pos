@@ -21,6 +21,21 @@ export async function createCustomer(req: Request, res: Response) {
         error: "Name and phone are required",
       });
     }
+    // P3 Phase 1 (F2): optional credit limit (NULL = unlimited).
+    const creditLimitSchema = z
+      .number()
+      .min(0)
+      .refine((v) => Math.round(v * 100) === v * 100, {
+        message: "Credit limit supports up to 2 decimals.",
+      });
+    const creditParsed = creditLimitSchema.safeParse(req.body?.creditLimit);
+    if (req.body?.creditLimit != null && !creditParsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid credit limit.",
+        errors: creditParsed.error.flatten(),
+      });
+    }
     const customer = await customersService.createCustomer(
       getBusinessId(req),
       name,
@@ -29,6 +44,7 @@ export async function createCustomer(req: Request, res: Response) {
       typeof email === "string" && email.trim() !== ""
         ? email.trim().toLowerCase()
         : null,
+      req.body?.creditLimit == null ? null : creditParsed.data,
     );
     publishRealtime(getBusinessId(req), null, {
       kind: "customer.changed",
@@ -66,6 +82,15 @@ export async function updateCustomer(req: Request, res: Response) {
         .nullable()
         .optional(),
       address: z.string().trim().max(2000).nullable().optional(),
+      // P3 Phase 1 (F2): NULL/absent = unlimited credit.
+      creditLimit: z
+        .number()
+        .min(0)
+        .refine((v) => Math.round(v * 100) === v * 100, {
+          message: "Credit limit supports up to 2 decimals.",
+        })
+        .nullable()
+        .optional(),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -86,6 +111,10 @@ export async function updateCustomer(req: Request, res: Response) {
             ? parsed.data.email.trim().toLowerCase()
             : null,
         address: parsed.data.address ?? null,
+        creditLimit:
+          parsed.data.creditLimit === undefined
+            ? null
+            : parsed.data.creditLimit,
       },
       req.user?.id ?? null,
     );
@@ -122,6 +151,30 @@ export async function getStoreCredit(req: Request, res: Response) {
     return res.status(200).json({ success: true, data: { balance } });
   } catch (err) {
     return sendSafeError(res, err, "Unable to read the store credit balance.");
+  }
+}
+
+/**
+ * P3 Phase 1 (F2): credit-limit summary for the customer profile and the
+ * POS due tender — { creditLimit, outstanding, available }. NULL limit =
+ * unlimited (available: null). Backend-computed; the frontend never supplies
+ * balances.
+ */
+export async function getCreditSummary(req: Request, res: Response) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid customer ID." });
+    }
+    const summary = await customersService.getCustomerCreditSummary(
+      getBusinessId(req),
+      id,
+    );
+    return res.status(200).json({ success: true, data: summary });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to read the credit summary.");
   }
 }
 

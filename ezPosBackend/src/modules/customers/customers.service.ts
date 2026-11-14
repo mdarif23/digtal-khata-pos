@@ -5,6 +5,8 @@ import { salePayments } from "../../db/schema/salePayments.js";
 import { sales } from "../../db/schema/sales.js";
 import { recordAudit } from "../../services/audit.js";
 import { NotFoundError } from "../../utils/handleError.js";
+import { roundMoney } from "../../utils/roundMoney.js";
+import type { DbTransaction } from "../purchases/purchase.types.js";
 
 // Every function takes the caller's server-verified businessId (from
 // requireBusinessContext) and scopes all reads and writes to it.
@@ -20,10 +22,11 @@ export async function createCustomer(
   phone: string,
   address: string,
   email: string | null = null,
+  creditLimit: number | null = null,
 ) {
   const [customer] = await db
     .insert(customers)
-    .values({ businessId, name, phone, address, email })
+    .values({ businessId, name, phone, address, email, creditLimit })
     .returning();
   return customer;
 }
@@ -37,6 +40,7 @@ export async function updateCustomer(
     phone: string;
     email: string | null;
     address: string | null;
+    creditLimit: number | null;
   },
   actorUserId: number | null,
 ) {
@@ -47,6 +51,7 @@ export async function updateCustomer(
       phone: data.phone,
       email: data.email,
       address: data.address,
+      creditLimit: data.creditLimit,
     })
     .where(
       and(eq(customers.id, customerId), eq(customers.businessId, businessId)),
@@ -61,9 +66,87 @@ export async function updateCustomer(
     action: "customer.update",
     entityType: "customer",
     entityId: customerId,
-    metadata: { name: updated.name, phone: updated.phone },
+    metadata: {
+      name: updated.name,
+      phone: updated.phone,
+      creditLimit:
+        updated.creditLimit == null ? null : Number(updated.creditLimit),
+    },
   });
   return updated;
+}
+
+/**
+ * P3 Phase 1 (F2): the customer's authoritative outstanding receivable —
+ * Σ(final_total − payments − refunds) over completed sales, the same
+ * recomputation the due-management screens display (the denormalized
+ * sales.due_amount is a dual truth, never the credit authority). Runs on the
+ * caller's transaction so the credit-limit guard in createSale sees a
+ * transaction-consistent figure under the customer row lock.
+ */
+export async function getCustomerOutstandingInTx(
+  tx: DbTransaction | typeof db,
+  businessId: number,
+  customerId: number,
+): Promise<number> {
+  // Correlated subqueries reference the outer FROM ("sales") with PLAIN
+  // table-qualified text — interpolating drizzle columns (${sales.id}) here
+  // renders as the UNQUALIFIED "id", which inside the subquery binds to
+  // sale_payments.id / sale_refunds.id and silently corrupts the sum.
+  const [row] = await tx
+    .select({
+      outstanding: sql<number>`COALESCE(SUM(
+        sales.final_total
+        - COALESCE((SELECT SUM(sp.amount) FROM sale_payments sp WHERE sp.sale_id = sales.id AND sp.business_id = sales.business_id), 0)
+        - COALESCE((SELECT SUM(sr.refund_total) FROM sale_refunds sr WHERE sr.sale_id = sales.id AND sr.business_id = sales.business_id), 0)
+      ), 0)`.as("outstanding"),
+    })
+    .from(sales)
+    .where(
+      and(
+        eq(sales.businessId, businessId),
+        eq(sales.customerId, customerId),
+        inArray(sales.status, ["completed", "refunded"]),
+      ),
+    );
+  return roundMoney(Number(row?.outstanding ?? 0));
+}
+
+/**
+ * P3 Phase 1 (F2): limit / outstanding / available for the customer profile
+ * and the POS due tender. NULL limit = unlimited (available: null).
+ */
+export async function getCustomerCreditSummary(
+  businessId: number,
+  customerId: number,
+): Promise<{
+  creditLimit: number | null;
+  outstanding: number;
+  available: number | null;
+}> {
+  const [customer] = await db
+    .select({ id: customers.id, creditLimit: customers.creditLimit })
+    .from(customers)
+    .where(
+      and(eq(customers.id, customerId), eq(customers.businessId, businessId)),
+    )
+    .limit(1);
+  if (!customer) {
+    throw new NotFoundError(`Customer with ID ${customerId} not found.`);
+  }
+  const outstanding = await getCustomerOutstandingInTx(
+    db,
+    businessId,
+    customerId,
+  );
+  const creditLimit =
+    customer.creditLimit == null ? null : Number(customer.creditLimit);
+  return {
+    creditLimit,
+    outstanding,
+    available:
+      creditLimit == null ? null : roundMoney(creditLimit - outstanding),
+  };
 }
 export async function getCustomerDueSummary(businessId: number) {
   const paymentSummaryCte = db.$with("payment_summary").as(

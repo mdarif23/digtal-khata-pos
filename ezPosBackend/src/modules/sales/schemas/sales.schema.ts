@@ -16,6 +16,21 @@ export const paymentSchema = z.object({
   reference: z.string().trim().optional(),
 });
 
+/**
+ * P3 Phase 1 (F1): named sale-level charges — delivery, service, packing.
+ * Post-VAT additive components of finalTotal (approved decision D1): never
+ * discounted, never taxed, never part of the per-line minimum-price floors.
+ * Stored on sale_charges (not fake sale items) so product profitability is
+ * unaffected by construction.
+ */
+export const saleChargeSchema = z.object({
+  label: z.string().trim().min(1).max(120),
+  amount: z.number().min(0).refine(
+    (v) => Math.round(v * 100) === v * 100,
+    "Charge amounts support up to 2 decimals.",
+  ),
+});
+
 // 1. Define what a single cart item should look like when sent to the DB
 const cartItemPayloadSchema = z
   .object({
@@ -105,6 +120,9 @@ export const createSalePayloadSchema = z.object({
   // unattributed; defaults to cashier for reporting fallback).
   salespersonUserId: z.number().int().positive().nullable().optional(),
 
+  // P3 Phase 1 (F1): named sale-level charges (see saleChargeSchema).
+  charges: z.array(saleChargeSchema).max(20).optional(),
+
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),
 });
@@ -177,3 +195,4 @@ export const saleRefundRequestSchema = z.object({
 // 3. Export the TypeScript type for your payload
 export type CreateSalePayload = z.infer<typeof createSalePayloadSchema>;
 export type SaleRefundRequest = z.infer<typeof saleRefundRequestSchema>;
+export type SaleChargeInput = z.infer<typeof saleChargeSchema>;

@@ -559,6 +559,41 @@
       "when": 1794500028000,
       "tag": "0079_serial_in_transit",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1794500030000,
+      "tag": "0080_sale_charges",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1794500031000,
+      "tag": "0081_customer_credit_limit",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1794500032000,
+      "tag": "0082_gift_card_reload",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1794500033000,
+      "tag": "0083_store_credit_expiry",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1794500034000,
+      "tag": "0084_pos_store_credit_expiry_setting",
+      "breakpoints": true
     }
   ]
 }

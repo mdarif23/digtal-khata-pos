@@ -1,0 +1,12 @@
+-- 0084: P3 Phase 1 — store-credit expiry policy setting (F4).
+--
+-- Per-business policy on pos_settings (the established per-business
+-- singleton with sanitizer conventions): months until newly granted store
+-- credit expires. NULL — the default — means no expiry, so migration changes
+-- no behavior on apply. Refund-granted credit stamps
+-- expires_at = granted_at + N months only when the policy is set.
+--
+-- Rollback: ALTER TABLE pos_settings DROP COLUMN store_credit_expiry_months
+-- (existing rows keep granted expires_at values; the sweep stops creating
+-- new ones only if 0083 is also reverted).
+ALTER TABLE pos_settings ADD COLUMN IF NOT EXISTS store_credit_expiry_months INTEGER;

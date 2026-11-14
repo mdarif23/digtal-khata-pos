@@ -62,6 +62,8 @@ export function buildCfdCartPayload(
     grandTotal: roundMoney(totals.finalTotal),
     paidTotal: 0,
     dueTotal: 0,
+    // P3 Phase 1 (F1): named sale-level charges — part of grandTotal.
+    chargesTotal: roundMoney(totals.chargesTotal ?? 0),
   };
 }
 

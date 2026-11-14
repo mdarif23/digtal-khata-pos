@@ -64,6 +64,9 @@ export interface CartTotalsView {
   afterDiscount: number;
   vatPercent: number;
   vat: number;
+  /** P3 Phase 1 (F1): named sale-level charges (post-VAT additive). */
+  charges: { label: string; amount: number }[];
+  chargesTotal: number;
   finalTotal: number;
   usesTaxRules?: boolean;
   coupon?: { code: string; discountAmount: number; description: string | null } | null;
@@ -91,6 +94,14 @@ export function useCartTotals(
   const vatPercent =
     useWatch({ control: form.control, name: "vatPercent" }) ?? 0;
   const couponCode = useWatch({ control: form.control, name: "couponCode" });
+  // P3 Phase 1 (F1): named sale-level charges ride on the quote so the
+  // displayed total is exactly what checkout will charge.
+  const charges =
+    useWatch({ control: form.control, name: "charges" }) ?? [];
+  const chargesTotal = charges.reduce(
+    (sum, c) => sum + (Number(c.amount) || 0),
+    0,
+  );
   // Walk-in has id 0 in the store — never send it to the server (the quote
   // endpoint requires a positive customer id, so 0 would 400 every quote and
   // silently break coupons + server totals).
@@ -101,8 +112,8 @@ export function useCartTotals(
     });
 
   const localTotals = useMemo(
-    () => getCartTotals(cart, discount, Number(vatPercent)),
-    [cart, discount, vatPercent],
+    () => getCartTotals(cart, discount, Number(vatPercent), chargesTotal),
+    [cart, discount, vatPercent, chargesTotal],
   );
 
   const [quoted, setQuoted] = useState<QuoteTotals | null>(null);
@@ -126,6 +137,7 @@ export function useCartTotals(
         vatPercent: vatPercent === null ? null : Number(vatPercent),
         couponCode: couponCode?.trim() || null,
         customerId,
+        charges,
       })
         .then((totals) => {
           if (!ignore) setQuoted(totals);
@@ -138,9 +150,14 @@ export function useCartTotals(
       ignore = true;
       clearTimeout(timer);
     };
-  }, [cart, discount, vatPercent, couponCode, customerId]);
+  }, [cart, discount, vatPercent, couponCode, customerId, charges]);
 
-  if (quoted === null) return localTotals;
+  if (quoted === null)
+    return {
+      ...localTotals,
+      charges,
+      chargesTotal: localTotals.chargesTotal,
+    };
   // Trust the server quote for every money field; keep the client shape.
   return {
     itemsBase: quoted.itemsBase,
@@ -150,6 +167,8 @@ export function useCartTotals(
     afterDiscount: quoted.afterDiscount,
     vatPercent: quoted.usesTaxRules ? 0 : quoted.vatPercent,
     vat: quoted.vat,
+    charges: quoted.charges ?? charges,
+    chargesTotal: quoted.chargesTotal ?? chargesTotal,
     finalTotal: quoted.finalTotal,
     usesTaxRules: quoted.usesTaxRules,
     coupon: quoted.coupon ?? null,
@@ -169,6 +188,11 @@ function CartCustomerInfo() {
 
   const [loyaltyBalance, setLoyaltyBalance] = useState<number | null>(null);
   const [storeCreditBalance, setStoreCreditBalance] = useState<number | null>(null);
+  const [creditSummary, setCreditSummary] = useState<{
+    creditLimit: number | null;
+    outstanding: number;
+    available: number | null;
+  } | null>(null);
 
   // reload when the customer changes, so the due is never stale
   useEffect(() => {
@@ -192,9 +216,18 @@ function CartCustomerInfo() {
           if (!ignore) setStoreCreditBalance(Number(res.data?.data?.balance ?? 0));
         })
         .catch(() => !ignore && setStoreCreditBalance(null));
+      // P3 Phase 1 (F2): credit limit context for due sales (display only —
+      // the backend re-checks authoritatively at checkout).
+      axios
+        .get(`/customers/${id}/credit-summary`)
+        .then((res) => {
+          if (!ignore) setCreditSummary(res.data?.data ?? null);
+        })
+        .catch(() => !ignore && setCreditSummary(null));
     } else {
       setLoyaltyBalance(null);
       setStoreCreditBalance(null);
+      setCreditSummary(null);
     }
     return () => {
       ignore = true;
@@ -262,6 +295,23 @@ function CartCustomerInfo() {
             </span>
           </div>
         )}
+        {creditSummary?.creditLimit != null && (
+          <div
+            className={`col-span-2 flex items-center justify-between text-xs ${
+              creditSummary.available != null && creditSummary.available <= 0
+                ? "text-destructive"
+                : "text-muted-foreground"
+            }`}
+          >
+            <span>Credit available</span>
+            <span className="font-medium tabular-nums">
+              {formatCurrency(Math.max(0, creditSummary.available ?? 0))}
+              <span className="ml-1 text-muted-foreground">
+                / {formatCurrency(creditSummary.creditLimit)}
+              </span>
+            </span>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -280,6 +330,137 @@ function CouponInput({ form }: { form: ShowCustomerInfoProps["form"] }) {
       }
       className="uppercase"
     />
+  );
+}
+
+// ---------- named sale charges (P3 Phase 1 F1) ----------
+// Post-VAT additive extras (delivery, service, packing) that the backend
+// prices identically on quote and checkout and stores on sale_charges.
+function ChargesEditor({ form }: { form: ShowCustomerInfoProps["form"] }) {
+  const charges = useWatch({ control: form.control, name: "charges" }) ?? [];
+  const cart = useCartStore((state) => state.cart);
+  const [open, setOpen] = useState(false);
+  const [label, setLabel] = useState("");
+  const [amount, setAmount] = useState("");
+  const chargesTotal = charges.reduce(
+    (sum, c) => sum + (Number(c.amount) || 0),
+    0,
+  );
+
+  const add = () => {
+    const trimmed = label.trim();
+    const value = Number(amount);
+    if (!trimmed) {
+      toast.add({ type: "error", description: "Enter a charge label." });
+      return;
+    }
+    if (!Number.isFinite(value) || value < 0) {
+      toast.add({ type: "error", description: "Enter a valid amount." });
+      return;
+    }
+    if (charges.length >= 20) {
+      toast.add({ type: "error", description: "Up to 20 charges per sale." });
+      return;
+    }
+    form.setValue("charges", [
+      ...charges,
+      { label: trimmed.slice(0, 120), amount: Math.round(value * 100) / 100 },
+    ]);
+    setLabel("");
+    setAmount("");
+  };
+
+  const remove = (index: number) => {
+    form.setValue(
+      "charges",
+      charges.filter((_, i) => i !== index),
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full"
+            disabled={cart.length === 0}
+          >
+            {charges.length > 0
+              ? `Charges (${charges.length}) · ${tk(chargesTotal)}`
+              : "Add charges"}
+          </Button>
+        }
+      />
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Sale charges</DialogTitle>
+          <DialogDescription>
+            Named extras added to the final total after VAT (e.g. delivery,
+            service). They are never discounted.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          {charges.length > 0 ? (
+            charges.map((c, i) => (
+              <div
+                key={`${c.label}-${i}`}
+                className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+              >
+                <span className="truncate font-medium">{c.label}</span>
+                <span className="flex items-center gap-3 tabular-nums">
+                  {tk(Number(c.amount) || 0)}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Remove ${c.label}`}
+                    onClick={() => remove(i)}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </span>
+              </div>
+            ))
+          ) : (
+            <p className="py-2 text-center text-sm text-muted-foreground">
+              No charges added.
+            </p>
+          )}
+        </div>
+        <div className="flex items-end gap-2">
+          <div className="min-w-0 flex-1 space-y-1">
+            <Label htmlFor="charge-label">Label</Label>
+            <Input
+              id="charge-label"
+              placeholder="Delivery"
+              maxLength={120}
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+          </div>
+          <div className="w-28 space-y-1">
+            <Label htmlFor="charge-amount">Amount</Label>
+            <Input
+              id="charge-amount"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </div>
+          <Button type="button" onClick={add}>
+            <Plus className="size-4" />
+          </Button>
+        </div>
+        <DialogFooter>
+          <Button type="button" onClick={() => setOpen(false)}>
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -620,6 +801,9 @@ export function CartCalculation({
           <CouponInput form={form} />
         </div>
         <div className="col-span-6">
+          <ChargesEditor form={form} />
+        </div>
+        <div className="col-span-6">
           {/* payment charges the authoritative quote total — it already
               includes the coupon discount and the inclusive/exclusive tax
               split; deriving it from afterDiscount + vat double-counts */}
@@ -725,6 +909,16 @@ function CartTextModal({
           <span>{tk(totals.vat)}</span>
         </div>
       )}
+      {/* P3 Phase 1 (F1): named sale-level charges (post-VAT additive). */}
+      {(totals.charges ?? []).map((charge, i) => (
+        <div
+          key={`${charge.label}-${i}`}
+          className="flex justify-between py-1.5 text-sm"
+        >
+          <span className="truncate pr-2">{charge.label}</span>
+          <span className="tabular-nums">{tk(Number(charge.amount) || 0)}</span>
+        </div>
+      ))}
       <div className="flex items-center justify-between border-t pt-2 font-semibold">
         <span>Total due</span>
         <span className="text-lg tracking-tight tabular-nums">

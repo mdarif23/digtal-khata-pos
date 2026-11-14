@@ -23,6 +23,8 @@ export interface CfdPushPayload {
   grandTotal: number;
   paidTotal: number;
   dueTotal: number;
+  /** P3 Phase 1 (F1): named sale-level charges (subset of grandTotal). */
+  chargesTotal?: number;
 }
 
 export async function pairCfdApi(): Promise<{ code: string; expiresAt: string }> {

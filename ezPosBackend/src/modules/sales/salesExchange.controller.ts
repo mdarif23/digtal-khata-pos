@@ -134,6 +134,17 @@ const quoteSchema = z.object({
   vatPercent: z.number().min(0).max(100).nullable().optional(),
   couponCode: z.string().trim().min(1).max(60).nullable().optional(),
   customerId: z.number().int().positive().nullable().optional(),
+  // P3 Phase 1 (F1): quote preview must price sale-level charges exactly
+  // like checkout — same shape, same post-VAT additive treatment (D1).
+  charges: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(120),
+        amount: z.number().min(0),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 
 export async function quote(req: Request, res: Response) {

@@ -117,6 +117,9 @@ export interface SaleReceiptData {
   subtotal: number;
   discount: number;
   vat: number;
+  /** P3 Phase 1 (F1): named sale-level charges + their total (inside finalTotal). */
+  charges?: { id: number; label: string; amount: number }[];
+  chargesTotal?: number;
   finalTotal: number;
   dueAmount: number;
   paidAmount: number;

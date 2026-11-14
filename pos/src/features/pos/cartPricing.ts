@@ -37,11 +37,15 @@ export function getLinePricing(
   return { base, discountAmount, total: money(base - discountAmount) };
 }
 
-// Order: item discounts -> cart discount -> VAT on the discounted amount
+// Order: item discounts -> cart discount -> VAT on the discounted amount ->
+// sale charges (P3 Phase 1 F1: post-VAT additive, mirrors the server
+// evaluator — the quote remains authoritative; this fallback only applies
+// when the quote is unavailable).
 export function getCartTotals(
   cart: PricedItem[],
   cartDiscount: DiscountInput,
   vatPercent: number,
+  chargesTotal = 0,
 ) {
   let itemsBase = 0;
   let itemDiscount = 0;
@@ -63,6 +67,7 @@ export function getCartTotals(
 
   const safeVatPercent = Math.min(Math.max(Number(vatPercent) || 0, 0), 100);
   const vat = money((afterDiscount * safeVatPercent) / 100);
+  const safeChargesTotal = money(Math.max(0, Number(chargesTotal) || 0));
 
   return {
     itemsBase,
@@ -72,6 +77,7 @@ export function getCartTotals(
     afterDiscount,
     vatPercent: safeVatPercent,
     vat,
-    finalTotal: money(afterDiscount + vat),
+    chargesTotal: safeChargesTotal,
+    finalTotal: money(afterDiscount + vat + safeChargesTotal),
   };
 }

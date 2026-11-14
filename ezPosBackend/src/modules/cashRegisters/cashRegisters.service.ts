@@ -1414,6 +1414,41 @@ export async function recordGiftCardIssueCashInTx(
 }
 
 /**
+ * P3 Phase 1 (F3): cash taken for a gift-card RELOAD lands in the seller's
+ * open register session — same attribution rules as paid issuance (no-op
+ * when no drawer is open; the GL entry still records the money). The source
+ * record is the reload's gift_card_transactions row (NOT the card id — the
+ * journal would collide with issuance's source key); the reference unique
+ * index makes retries idempotent.
+ */
+export async function recordGiftCardReloadCashInTx(
+  tx: Tx,
+  businessId: number,
+  userId: number | null,
+  locationId: number | null,
+  cashAmount: number,
+  reloadTransactionId: number,
+): Promise<void> {
+  if (cashAmount <= 0 || userId === null || locationId === null) return;
+  const session = await findOpenSessionForAttribution(
+    tx,
+    businessId,
+    userId,
+    locationId,
+  );
+  if (!session) return;
+  await tx.insert(registerTransactions).values({
+    businessId,
+    sessionId: session.id,
+    userId,
+    type: "cash_in",
+    amount: roundMoney(cashAmount),
+    referenceType: "gift_card_reload",
+    referenceId: reloadTransactionId,
+  });
+}
+
+/**
  * The actor's open session — or, when the request came from a bound
  * terminal, that terminal's open session (the drawer the cash physically
  * reached, regardless of which cashier opened it). Only sessions whose

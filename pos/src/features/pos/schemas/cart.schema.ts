@@ -17,6 +17,17 @@ export const paymentSchema = z.object({
   reference: z.string().trim().optional(),
 });
 
+/**
+ * P3 Phase 1 (F1): named sale-level charges — delivery, service, packing.
+ * Post-VAT additive components of finalTotal (mirrors the backend
+ * saleChargeSchema); the server re-validates and re-prices authoritatively.
+ */
+export const saleChargeSchema = z.object({
+  label: z.string().trim().min(1).max(120),
+  amount: z.number().min(0),
+});
+export type SaleCharge = z.infer<typeof saleChargeSchema>;
+
 export const cartSchema = z
   .object({
     saleDate: z.date({ message: "Sale date is required" }),
@@ -35,6 +46,8 @@ export const cartSchema = z
     // CouponInput writes — without it zod strips the field and createSale
     // never sees the code even though the quote preview showed it.
     couponCode: z.string().trim().max(60).optional(),
+    // P3 Phase 1 (F1): named sale-level charges edited on the cart.
+    charges: z.array(saleChargeSchema).max(20).optional(),
   })
   .superRefine((data, ctx) => {
     data.payments.forEach((p, i) => {
@@ -117,6 +130,9 @@ export const createSalePayloadSchema = z.object({
     .nullable(),
   vatPercent: z.number().nullable(),
   couponCode: z.string().trim().max(60).optional(),
+
+  // P3 Phase 1 (F1): named sale-level charges (server re-validates).
+  charges: z.array(saleChargeSchema).max(20).optional(),
 
   // Client-generated key making checkout retries idempotent (see useCartStore).
   idempotencyKey: z.string().min(8).max(120).optional(),

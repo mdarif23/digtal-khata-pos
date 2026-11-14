@@ -9,6 +9,7 @@ import { runBackupSweeps } from "../modules/backups/backups.service.js";
 import { runBudgetAlertSweeps } from "../modules/expenses/expenses.budgets.alerts.js";
 import { runAssetDepreciationSweeps } from "../modules/finance/finance.tools.service.js";
 import { runLoyaltyExpirySweep } from "../services/loyalty.js";
+import { runStoreCreditExpirySweep } from "../services/storeCredit.js";
 import { runQuotationExpirySweep } from "../modules/quotations/quotations.service.js";
 import { runDueReminderSweep } from "../services/comms.js";
 
@@ -40,6 +41,7 @@ export function startScheduler(): void {
       runBudgetAlertSweeps(),
       runAssetDepreciationSweeps(),
       runLoyaltyExpirySweep(null),
+      runStoreCreditExpirySweep(null),
       runQuotationExpirySweep(),
       runDueReminderSweep(),
     ])

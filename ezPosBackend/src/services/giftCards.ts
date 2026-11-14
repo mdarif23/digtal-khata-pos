@@ -6,7 +6,10 @@ import { BadRequestError, ConflictError, NotFoundError } from "../utils/handleEr
 import { roundMoney } from "../utils/roundMoney.js";
 import type { DbTransaction } from "../modules/purchases/purchase.types.js";
 import { postJournalEntry, isLedgerActivatedInTx, resolveCashAccountForMethod } from "./ledger.js";
-import { recordGiftCardIssueCashInTx } from "../modules/cashRegisters/cashRegisters.service.js";
+import {
+  recordGiftCardIssueCashInTx,
+  recordGiftCardReloadCashInTx,
+} from "../modules/cashRegisters/cashRegisters.service.js";
 
 /**
  * Gift cards (Module 7): issue → redeem (partially, at checkout) → track.
@@ -146,6 +149,152 @@ export async function issueGiftCard(input: {
     initialAmount: amount,
     expiresAt: expiresAt ? expiresAt.toISOString() : null,
   };
+}
+
+/**
+ * P3 Phase 1 (F3): reloads an ACTIVE, unexpired card with customer money.
+ * Follows the paid-issuance money side exactly (ledger-activation guard →
+ * resolveCashAccountForMethod → postJournalEntry DR cash/bank / CR 2040 →
+ * drawer cash_in when paid in cash) — one balance system, no parallel
+ * tracking.
+ *
+ * Idempotency anchor: the reload's gift_card_transactions row id keys BOTH
+ * the journal entry (sourceType 'gift_card_reload') and the drawer movement
+ * (referenceType 'gift_card_reload'). Paid issuance already occupies
+ * (business, 'gift_card_issue', cardId) — keying a reload on the card id
+ * would make postJournalEntry silently REUSE the issuance entry (posted-entry
+ * replay) and the money would never post; the per-reload row id gives every
+ * reload its own idempotent key. An optional client reference adds a second
+ * dedup layer via the 0082 partial unique index.
+ */
+export async function reloadGiftCard(input: {
+  businessId: number;
+  giftCardId: number;
+  actorUserId: number | null;
+  amount: number;
+  paymentMethod: "cash" | "bangla_qr" | "card";
+  reference?: string | null;
+  locationId?: number | null;
+}): Promise<{ giftCardId: number; codeLast4: string; amount: number; balance: number }> {
+  const amount = roundMoney(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new BadRequestError("The reload amount must be positive.");
+  }
+  const reference = input.reference?.trim() || null;
+
+  const result = await db.transaction(async (tx) => {
+    const [card] = await tx
+      .select({
+        id: giftCards.id,
+        status: giftCards.status,
+        expiresAt: giftCards.expiresAt,
+        codeLast4: giftCards.codeLast4,
+      })
+      .from(giftCards)
+      .where(
+        and(
+          eq(giftCards.id, input.giftCardId),
+          eq(giftCards.businessId, input.businessId),
+        ),
+      )
+      .for("update");
+    if (!card) throw new NotFoundError("Gift card not found.");
+    if (card.status !== "active") {
+      throw new ConflictError("This gift card has been deactivated.");
+    }
+    if (card.expiresAt !== null && card.expiresAt.getTime() < Date.now()) {
+      throw new ConflictError("This gift card has expired.");
+    }
+
+    // Duplicate-reference guard (0082 partial unique index backstops the
+    // race; this pre-check turns the collision into a clear 409).
+    if (reference) {
+      const [dupe] = await tx
+        .select({ id: giftCardTransactions.id })
+        .from(giftCardTransactions)
+        .where(
+          and(
+            eq(giftCardTransactions.businessId, input.businessId),
+            eq(giftCardTransactions.giftCardId, card.id),
+            eq(giftCardTransactions.reference, reference),
+          ),
+        )
+        .limit(1);
+      if (dupe) {
+        throw new ConflictError(
+          "This reload reference has already been used for this gift card.",
+        );
+      }
+    }
+
+    const [reloadRow] = await tx
+      .insert(giftCardTransactions)
+      .values({
+        businessId: input.businessId,
+        giftCardId: card.id,
+        amount,
+        sourceType: "reload",
+        reference,
+        actorUserId: input.actorUserId ?? null,
+        note: `Reloaded (card ••${card.codeLast4})`,
+      })
+      .returning({ id: giftCardTransactions.id });
+    if (!reloadRow) throw new Error("Gift card reload insert returned no row.");
+
+    // Money side — mirrors paid issuance exactly (gift_card_issue flow).
+    if (await isLedgerActivatedInTx(tx, input.businessId)) {
+      const { account } = await resolveCashAccountForMethod(
+        tx,
+        input.businessId,
+        input.paymentMethod,
+      );
+      const description = `Gift card reload — ····${card.codeLast4}`;
+      await postJournalEntry(tx, {
+        businessId: input.businessId,
+        memo: description,
+        sourceType: "gift_card_reload",
+        sourceId: reloadRow.id,
+        cashFlowCategory: "operating",
+        actorUserId: input.actorUserId,
+        lines: [
+          {
+            accountId: account.id,
+            debit: amount,
+            locationId: input.locationId ?? null,
+            description,
+          },
+          { accountCode: "2040", credit: amount, description },
+        ],
+      });
+    }
+    if (input.paymentMethod === "cash") {
+      await recordGiftCardReloadCashInTx(
+        tx,
+        input.businessId,
+        input.actorUserId,
+        input.locationId ?? null,
+        amount,
+        reloadRow.id,
+      );
+    }
+
+    const rows = await tx
+      .select({ amount: giftCardTransactions.amount })
+      .from(giftCardTransactions)
+      .where(eq(giftCardTransactions.giftCardId, card.id))
+      .for("update");
+    const balance = roundMoney(
+      rows.reduce((sum, row) => sum + Number(row.amount), 0),
+    );
+    return {
+      giftCardId: card.id,
+      codeLast4: card.codeLast4,
+      amount,
+      balance,
+    };
+  });
+
+  return result;
 }
 
 export interface GiftCardRedeemTarget {

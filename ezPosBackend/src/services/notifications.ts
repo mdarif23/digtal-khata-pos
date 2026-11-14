@@ -29,6 +29,7 @@ export type NotificationKind =
   | "integration_failure"
   | "price_increase"
   | "budget_alert"
+  | "store_credit_expired"
   | "system"
   | "backup"
   | "restore";

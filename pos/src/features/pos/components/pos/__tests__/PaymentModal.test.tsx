@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -28,6 +28,8 @@ function mockBalances({
     minRedemptionPoints: 0,
     maxRedemptionPointsPerSale: null,
   },
+  creditLimit = null,
+  creditAvailable = null,
 }: {
   storeCredit?: number | null;
   loyaltyBalance?: number | null;
@@ -39,6 +41,8 @@ function mockBalances({
         maxRedemptionPointsPerSale: number | null;
       }
     | null;
+  creditLimit?: number | null;
+  creditAvailable?: number | null;
 } = {}) {
   mockedGet.mockImplementation(async (url: string) => {
     if (url.includes("/store-credit"))
@@ -47,6 +51,10 @@ function mockBalances({
       return { data: { data: loyaltyConfig } };
     if (url.includes("/loyalty"))
       return { data: { data: { balance: loyaltyBalance } } };
+    if (url.includes("/credit-summary"))
+      return {
+        data: { data: { creditLimit, outstanding: 0, available: creditAvailable } },
+      };
     throw new Error(`Unexpected GET ${url}`);
   });
 }
@@ -148,11 +156,15 @@ describe("PaymentModal", () => {
     await user.click(screen.getByRole("button", { name: "Split" }));
     expect(confirm()).toBeDisabled();
 
-    await user.type(screen.getByLabelText("Cash Part"), "40");
-    // 60 remains — Fill Due puts the remainder on the customer's account.
-    await user.click(screen.getByRole("button", { name: "Fill due" }));
+    // P3 Phase 1 (F5): the split builder is an arbitrary row list — the old
+    // fixed cash/bangla_qr/due trio is gone. Split seeds cash + Bangla QR:
+    // fill the cash row, switch row 2 to Due, and fill the remainder onto
+    // the customer's account.
+    await user.type(screen.getByLabelText("Cash amount"), "40");
+    await user.selectOptions(screen.getByLabelText("Tender method 2"), "due");
+    const fillButtons = screen.getAllByRole("button", { name: "Fill" });
+    await user.click(fillButtons[fillButtons.length - 1]!);
     expect(screen.getByText("Remaining")).toBeInTheDocument();
-    expect(screen.getAllByText("৳0.00").length).toBeGreaterThan(0);
     expect(confirm()).toBeEnabled();
 
     const payments = (
@@ -161,16 +173,38 @@ describe("PaymentModal", () => {
       }
     ).getValues("payments");
     expect(payments[0]).toMatchObject({ method: "cash", amount: 40 });
-    expect(payments[2]).toMatchObject({ method: "due", amount: 60 });
+    expect(payments[1]).toMatchObject({ method: "due", amount: 60 });
   });
 
-  it("disables the due part entirely for a walk-in (no customer)", async () => {
+  it("splits cash + store credit against the live balance (F5 generalization)", async () => {
+    const user = userEvent.setup();
+    mockBalances({ storeCredit: 60 });
+    render(<Harness finalTotal={100} customerId={5} />);
+
+    await user.click(screen.getByRole("button", { name: "Split" }));
+    // The seeded Bangla QR row becomes a store-credit row — a tender the old
+    // positional split builder could not express.
+    await user.selectOptions(
+      screen.getByLabelText("Tender method 2"),
+      "store_credit",
+    );
+    await user.type(screen.getByLabelText("Cash amount"), "40");
+    await user.type(screen.getByLabelText("Store credit amount"), "60");
+    // The store-credit balance fetch must land before Confirm unlocks.
+    await waitFor(() => expect(confirm()).toBeEnabled());
+  });
+
+  it("a walk-in (no customer) cannot add a due row in split payment", async () => {
     const user = userEvent.setup();
     render(<Harness finalTotal={100} customerId={null} />);
 
     await user.click(screen.getByRole("button", { name: "Split" }));
-    expect(screen.getByLabelText("Due part")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Fill due" })).toBeDisabled();
+    // Add a row and try to switch it to Due — the option is disabled without
+    // a customer (the backend also rejects customerless dues).
+    await user.click(screen.getByRole("button", { name: "+ Add payment method" }));
+    const rowSelect = screen.getByLabelText("Tender method 2");
+    const dueOption = within(rowSelect).getByRole("option", { name: "Due" });
+    expect(dueOption).toBeDisabled();
   });
 
   it("blocks due and store-credit methods without a customer", async () => {

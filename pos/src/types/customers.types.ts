@@ -6,6 +6,8 @@ export type InputValue = {
   name: string;
   phone: string;
   address: string;
+  /** P3 Phase 1 (F2): max outstanding receivable; null/undefined = unlimited. */
+  creditLimit?: number | null;
 };
 export interface CustomerStore {
   customers: InputValue[];

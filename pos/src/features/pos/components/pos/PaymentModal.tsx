@@ -28,6 +28,7 @@ import {
   Gift,
   Layers,
   QrCode,
+  Trash2,
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -66,11 +67,14 @@ function buildPayments(
       return [{ method: "gift_card", amount: finalTotal, reference: "" }];
     case "due":
       return [{ method: "due", amount: finalTotal }];
+    // P3 Phase 1 (F5): split is now an arbitrary ordered list of tender rows
+    // over ALL backend methods — the old fixed cash+bangla_qr+due trio is
+    // gone. Seeded with cash + Bangla QR; rows are added/removed/switched in
+    // the builder.
     case "split":
       return [
         { method: "cash", amount: undefined },
         { method: "bangla_qr", amount: undefined, reference: "" },
-        { method: "due", amount: undefined },
       ];
     default:
       return [];
@@ -102,12 +106,17 @@ interface TenderBalances {
   loyaltyBalance: number | null;
   /** POS redemption config, null = program inactive / not readable. */
   loyaltyConfig: LoyaltyPosConfig | null;
+  /** P3 Phase 1 (F2): credit-limit context (null limit = unlimited). */
+  creditLimit: number | null;
+  creditAvailable: number | null;
 }
 
 const EMPTY_TENDER: TenderBalances = {
   storeCredit: null,
   loyaltyBalance: null,
   loyaltyConfig: null,
+  creditLimit: null,
+  creditAvailable: null,
 };
 
 /** Balance-tender data for the selected customer (fetched while open). */
@@ -152,6 +161,20 @@ function useTenderBalances(
       })
       .catch(() => {
         if (!ignore) apply({ loyaltyConfig: null });
+      });
+    // P3 Phase 1 (F2): credit-limit context for the due tender (display only
+    // — the backend re-checks authoritatively inside the sale transaction).
+    axios
+      .get(`/customers/${customerId}/credit-summary`)
+      .then((res) => {
+        if (!ignore)
+          apply({
+            creditLimit: res.data?.data?.creditLimit ?? null,
+            creditAvailable: res.data?.data?.available ?? null,
+          });
+      })
+      .catch(() => {
+        if (!ignore) apply({ creditLimit: null, creditAvailable: null });
       });
     return () => {
       ignore = true;
@@ -229,16 +252,38 @@ function isPaymentValid(
     return loyaltyIssue(money(p0?.amount ?? 0), customerId, tender) === null;
 
   if (mode === "split") {
-    const [cash, digital, due] = payments;
-    const sum =
-      money(cash?.amount) + money(digital?.amount) + money(due?.amount);
+    // P3 Phase 1 (F5): arbitrary tender rows — every row must be individually
+    // valid and the rows must sum to exactly the quoted total. Distinct
+    // methods stay enforced (UI prevents duplicates; the backend rejects
+    // them authoritatively).
+    const sum = money(
+      payments.reduce((acc, p) => acc + money(p?.amount), 0),
+    );
     if (money(sum) !== money(finalTotal)) return false;
-    if (
-      money(digital?.amount) > 0 &&
-      (digital?.reference ?? "").trim().length < 6
-    )
-      return false;
-    if (money(due?.amount) > 0 && customerId == null) return false;
+    for (const p of payments) {
+      const amount = money(p?.amount);
+      if (
+        (p?.method === "bangla_qr" || p?.method === "card") &&
+        amount > 0 &&
+        (p?.reference ?? "").trim().length < 6
+      )
+        return false;
+      if (p?.method === "gift_card" && amount > 0 && (p?.reference ?? "").trim().length < 8)
+        return false;
+      if (p?.method === "due" && amount > 0 && customerId == null) return false;
+      if (
+        p?.method === "store_credit" &&
+        amount > 0 &&
+        storeCreditIssue(amount, customerId, tender) !== null
+      )
+        return false;
+      if (
+        p?.method === "loyalty_points" &&
+        amount > 0 &&
+        loyaltyIssue(amount, customerId, tender) !== null
+      )
+        return false;
+    }
     return true;
   }
   return false;
@@ -360,9 +405,12 @@ export function PaymentModal({
                 finalTotal={finalTotal}
                 form={form}
                 customerId={customerId}
+                tender={tender}
               />
             )}
-            {mode === "due" && <Due form={form} finalTotal={finalTotal} />}
+            {mode === "due" && (
+              <Due form={form} finalTotal={finalTotal} tender={tender} />
+            )}
           </div>
         </div>
 
@@ -678,28 +726,104 @@ function LoyaltyPointsPayment({
 }
 
 // ---------- split ----------
-// payments.0 = cash, payments.1 = digital, payments.2 = due
+// P3 Phase 1 (F5): an arbitrary ordered list of tender rows over ALL backend
+// methods. The old positional cash/digital/due builder is gone — rows are
+// added, switched, filled and removed individually; the backend's
+// distinct-method constraint is preserved by the row picker (no duplicates).
+const SPLIT_METHODS: { value: PaymentSchemaType["method"]; label: string }[] = [
+  { value: "cash", label: "Cash" },
+  { value: "bangla_qr", label: "Bangla QR" },
+  { value: "card", label: "Card" },
+  { value: "store_credit", label: "Store credit" },
+  { value: "loyalty_points", label: "Loyalty points" },
+  { value: "gift_card", label: "Gift card" },
+  { value: "due", label: "Due" },
+];
+
+function methodLabel(method: string | undefined): string {
+  return SPLIT_METHODS.find((m) => m.value === method)?.label ?? method ?? "";
+}
+
 function SplitPayment({
   form,
   finalTotal,
   customerId,
+  tender,
 }: {
   form: UseFormReturn<CartSchemaType>;
   finalTotal: number;
   customerId: number | null;
+  tender: TenderBalances;
 }) {
-  const payments = useWatch({ control: form.control, name: "payments" });
-  const cash = money(payments?.[0]?.amount);
-  const digital = money(payments?.[1]?.amount);
-  const due = money(payments?.[2]?.amount);
-  const remaining = money(finalTotal - cash - digital - due);
+  const payments = useWatch({ control: form.control, name: "payments" }) ?? [];
+  const allocated = money(
+    payments.reduce((acc, p) => acc + money(p?.amount), 0),
+  );
+  const remaining = money(finalTotal - allocated);
 
   // Put whatever is still unpaid into the given row
   const fill = (index: number) => {
-    const current = money(payments?.[index]?.amount);
-    const value = Math.max(0, money(current + remaining));
-    form.setValue(`payments.${index}.amount`, value);
+    const current = money(payments[index]?.amount);
+    form.setValue(`payments.${index}.amount`, Math.max(0, money(current + remaining)));
   };
+
+  // Next unused method (due/store_credit/loyalty need a customer).
+  const addRow = () => {
+    if (payments.length >= SPLIT_METHODS.length) return;
+    const used = new Set(payments.map((p) => p.method));
+    const next =
+      SPLIT_METHODS.find(
+        (m) =>
+          !used.has(m.value) &&
+          (customerId != null || (m.value !== "due" && m.value !== "store_credit" && m.value !== "loyalty_points")),
+      )?.value ?? "cash";
+    form.setValue("payments", [
+      ...payments,
+      {
+        method: next,
+        amount: undefined,
+        ...(next === "bangla_qr" || next === "card" || next === "gift_card"
+          ? { reference: "" }
+          : {}),
+      },
+    ]);
+  };
+
+  const removeRow = (index: number) => {
+    if (payments.length <= 1) return;
+    form.setValue(
+      "payments",
+      payments.filter((_, i) => i !== index),
+    );
+  };
+
+  const changeRowMethod = (index: number, method: PaymentSchemaType["method"]) => {
+    const rows = payments.map((p, i) =>
+      i === index
+        ? {
+            method,
+            amount: p.amount,
+            ...(method === "bangla_qr" || method === "card" || method === "gift_card"
+              ? { reference: "" }
+              : {}),
+          }
+        : p,
+    );
+    form.setValue("payments", rows);
+  };
+
+  // Due rows over the available credit (display-only warning; the backend
+  // authoritatively rejects a sale that exceeds the limit).
+  const dueAmount = money(
+    payments
+      .filter((p) => p.method === "due")
+      .reduce((acc, p) => acc + money(p.amount), 0),
+  );
+  const creditShort =
+    dueAmount > 0 &&
+    tender.creditLimit != null &&
+    tender.creditAvailable != null &&
+    dueAmount > tender.creditAvailable + 0.005;
 
   return (
     <>
@@ -728,143 +852,136 @@ function SplitPayment({
         </CardContent>
       </Card>
 
-      {/* Cash part */}
-      <Controller
-        name="payments.0.amount"
-        control={form.control}
-        render={({ field }) => (
-          <Field>
-            <FieldLabel htmlFor={field.name}>Cash Part</FieldLabel>
-            <Input
-              id={field.name}
-              type="number"
-              {...field}
-              value={field.value ?? ""}
-              onChange={(e) => field.onChange(toNum(e))}
-              placeholder="0.00"
-            />
-          </Field>
-        )}
-      />
-
-      {/* Digital method */}
-      <div className="flex flex-col gap-3">
-        <span>Digital method</span>
-        <Controller
-          name="payments.1.method"
-          control={form.control}
-          render={({ field }) => (
-            <ToggleGroup
-              value={field.value ? [field.value] : []}
-              onValueChange={(value: string[]) => {
-                if (value[0]) field.onChange(value[0]); // keep one always selected
-              }}
-              size="lg"
-              variant="outline"
-              className="grid grid-cols-2 max-h-50"
-            >
-              <ToggleGroupItem value="bangla_qr">Bangla QR</ToggleGroupItem>
-              <ToggleGroupItem value="card">Card</ToggleGroupItem>
-            </ToggleGroup>
-          )}
-        />
-      </div>
-
-      {/* Digital part */}
-      <Controller
-        name="payments.1.amount"
-        control={form.control}
-        render={({ field }) => (
-          <Field>
-            <FieldLabel htmlFor={field.name}>Digital part</FieldLabel>
-            <div className="flex items-center gap-3">
-              <Input
-                id={field.name}
-                type="number"
-                {...field}
-                value={field.value ?? ""}
-                onChange={(e) => field.onChange(toNum(e))}
-                placeholder="0.00"
-              />
-              <Button type="button" variant="outline" onClick={() => fill(1)}>
-                Fill digital
+      {payments.map((payment, index) => {
+        const needsReference =
+          payment.method === "bangla_qr" ||
+          payment.method === "card" ||
+          payment.method === "gift_card";
+        const isDue = payment.method === "due";
+        return (
+          <div key={index} className="rounded-lg border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <select
+                aria-label={`Tender method ${index + 1}`}
+                className="min-w-0 flex-1 rounded-md border bg-background p-2 text-sm"
+                value={payment.method}
+                onChange={(e) =>
+                  changeRowMethod(
+                    index,
+                    e.target.value as PaymentSchemaType["method"],
+                  )
+                }
+              >
+                {SPLIT_METHODS.map((m) => (
+                  <option
+                    key={m.value}
+                    value={m.value}
+                    disabled={
+                      // distinct methods (backend constraint) + customer-gated tenders
+                      (m.value !== payment.method &&
+                        payments.some((p) => p.method === m.value)) ||
+                      (customerId == null &&
+                        (m.value === "due" ||
+                          m.value === "store_credit" ||
+                          m.value === "loyalty_points"))
+                    }
+                  >
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`Remove ${methodLabel(payment.method)} row`}
+                disabled={payments.length <= 1}
+                onClick={() => removeRow(index)}
+              >
+                <Trash2 className="size-4" />
               </Button>
             </div>
-          </Field>
-        )}
-      />
-
-      <Controller
-        name="payments.1.reference"
-        control={form.control}
-        render={({ field }) => (
-          <Field>
-            <FieldLabel htmlFor={field.name}>
-              Transaction ID (required if digital part)
-            </FieldLabel>
-            <Input
-              {...field}
-              id={field.name}
-              value={field.value ?? ""}
-              type="text"
-              placeholder="for the digital part"
-            />
-          </Field>
-        )}
-      />
-
-      {/* Due part (only with a customer) */}
-      <Controller
-        name="payments.2.amount"
-        control={form.control}
-        render={({ field }) => (
-          <Field>
-            <FieldLabel htmlFor={field.name}>Due part</FieldLabel>
-            <div className="flex items-center gap-3">
-              <Input
-                id={field.name}
-                type="number"
-                {...field}
-                value={field.value ?? ""}
-                disabled={customerId == null}
-                onChange={(e) => field.onChange(toNum(e))}
-                placeholder="0.00"
+            <div className="mt-2 flex items-center gap-3">
+              <Controller
+                name={`payments.${index}.amount`}
+                control={form.control}
+                render={({ field }) => (
+                  <Input
+                    id={field.name}
+                    type="number"
+                    aria-label={`${methodLabel(payment.method)} amount`}
+                    {...field}
+                    value={field.value ?? ""}
+                    disabled={isDue && customerId == null}
+                    onChange={(e) => field.onChange(toNum(e))}
+                    placeholder="0.00"
+                  />
+                )}
               />
               <Button
                 type="button"
                 variant="outline"
-                disabled={customerId == null}
-                onClick={() => fill(2)}
+                disabled={isDue && customerId == null}
+                onClick={() => fill(index)}
               >
-                Fill due
+                Fill
               </Button>
             </div>
-          </Field>
-        )}
-      />
+            {needsReference && (
+              <Controller
+                name={`payments.${index}.reference`}
+                control={form.control}
+                render={({ field }) => (
+                  <Input
+                    {...field}
+                    className="mt-2"
+                    id={field.name}
+                    value={field.value ?? ""}
+                    type="text"
+                    placeholder={
+                      payment.method === "gift_card"
+                        ? "Full gift card code"
+                        : "Transaction ID (6+ chars)"
+                    }
+                  />
+                )}
+              />
+            )}
+          </div>
+        );
+      })}
+
+      <Button
+        type="button"
+        variant="outline"
+        onClick={addRow}
+        disabled={payments.length >= SPLIT_METHODS.length}
+      >
+        + Add payment method
+      </Button>
+
+      {creditShort && (
+        <span className="text-sm text-destructive">
+          Due ৳{dueAmount.toFixed(2)} exceeds the customer's available credit
+          {tender.creditAvailable != null
+            ? ` (৳${tender.creditAvailable.toFixed(2)})`
+            : ""}
+          .
+        </span>
+      )}
 
       <Card>
         <CardContent className="flex flex-col gap-1 py-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Cash</span>
-            <span className="font-medium tabular-nums">
-              {formatCurrency(cash)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              {payments?.[1]?.method === "card" ? "Card" : "Bangla QR"}
-            </span>
-            <span className="font-medium tabular-nums">
-              {formatCurrency(digital)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Due</span>
-            <span className="font-medium tabular-nums">
-              {formatCurrency(due)}
-            </span>
-          </div>
+          {payments.map((payment, index) => (
+            <div key={index} className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">
+                {methodLabel(payment.method)}
+              </span>
+              <span className="font-medium tabular-nums">
+                {formatCurrency(money(payment.amount))}
+              </span>
+            </div>
+          ))}
         </CardContent>
       </Card>
     </>
@@ -875,13 +992,21 @@ function SplitPayment({
 function Due({
   finalTotal,
   form,
+  tender,
 }: {
   finalTotal: number;
   form: UseFormReturn<CartSchemaType>;
+  tender: TenderBalances;
 }) {
   const customerId = useWatch({ control: form.control, name: "customerId" });
   const { customers } = useCustomerStore();
   const customer = customers.find((c) => c.id === customerId);
+  // P3 Phase 1 (F2): display-only credit context — the backend rejects a due
+  // over the limit with 409 and the message surfaces verbatim.
+  const overLimit =
+    tender.creditLimit != null &&
+    tender.creditAvailable != null &&
+    finalTotal > tender.creditAvailable + 0.005;
 
   return (
     <Card>
@@ -899,6 +1024,22 @@ function Due({
         <span className="text-sm text-muted-foreground">
           Phone: {customer?.phone ?? "N/A"}
         </span>
+        {tender.creditLimit != null && (
+          <span
+            className={cn(
+              "text-sm font-medium",
+              overLimit ? "text-destructive" : "text-success",
+            )}
+          >
+            Credit available: {formatCurrency(Math.max(0, tender.creditAvailable ?? 0))}{" "}
+            / {formatCurrency(tender.creditLimit)}
+          </span>
+        )}
+        {overLimit && (
+          <span className="text-sm text-destructive">
+            This due exceeds the customer's credit limit and will be rejected.
+          </span>
+        )}
       </CardContent>
     </Card>
   );

@@ -156,6 +156,8 @@ const pushSchema = z.object({
   grandTotal: z.number().nonnegative(),
   paidTotal: z.number().nonnegative(),
   dueTotal: z.number().nonnegative(),
+  // P3 Phase 1 (F1): named sale-level charges (subset of grandTotal).
+  chargesTotal: z.number().nonnegative().optional(),
 });
 
 /** The POS pushes the live cart — the display never computes anything. */
@@ -198,6 +200,9 @@ router.post("/api/cfd/push", ...read, async (req: Request, res: Response) => {
       grandTotal: parsed.data.grandTotal,
       paidTotal: parsed.data.paidTotal,
       dueTotal: parsed.data.dueTotal,
+      ...(parsed.data.chargesTotal !== undefined
+        ? { chargesTotal: parsed.data.chargesTotal }
+        : {}),
     };
     const result = await pushPayload(businessId, parsed.data.displayId, payload);
     return res.status(200).json({ success: true, data: result });

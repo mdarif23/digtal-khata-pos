@@ -79,6 +79,11 @@ export const posSettings = pgTable("pos_settings", {
   } | null>(),
   /** Phase 3 CFD: idle-screen copy shown when the customer display has no cart. */
   cfdIdleMessage: varchar("cfd_idle_message", { length: 200 }),
+  /**
+   * P3 Phase 1 (F4, migration 0084): months until newly granted store credit
+   * expires. NULL (default) = no expiry — existing behavior preserved.
+   */
+  storeCreditExpiryMonths: integer("store_credit_expiry_months"),
   /** Phase 3 CFD: promotional banner copy on the idle screen. */
   cfdPromoMessage: varchar("cfd_promo_message", { length: 200 }),
   createdAt: timestamp("created_at", { withTimezone: true })
