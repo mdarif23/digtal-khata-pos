@@ -24,6 +24,7 @@ import {
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
 import {
   parseEmbeddedBarcode,
+  validateCheckDigit,
   DEFAULT_EMBEDDED_CONFIG,
 } from "@/features/barcodes/scanning/embeddedBarcode";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
@@ -228,8 +229,27 @@ export function ProductList({
   }, []);
   const resolveScan = useCallback(
     async (barcode: string) => {
-      const embedded = parseEmbeddedBarcode(barcode, DEFAULT_EMBEDDED_CONFIG);
+      // N1-01: parse with the BUSINESS-CONFIGURED shape (pos-settings), not
+      // the built-in default — stores with different prefixes/lengths could
+      // never scan their scale labels at all. Throwing surfaces an error
+      // scan with the message.
+      const embedded = parseEmbeddedBarcode(barcode, embeddedConfig);
       if (embedded) {
+        if (embeddedConfig.mode === "price") {
+          // The value segment carries MONEY, not weight — ringing it as
+          // weight would charge the wrong amount. Refuse loudly instead of
+          // silently misringing.
+          embeddedWeightRef.current = null;
+          throw new Error(
+            "Price-embedded labels are not supported at the register yet — ring the item manually with a price override.",
+          );
+        }
+        if (embeddedConfig.hasCheckDigit && !validateCheckDigit(barcode)) {
+          embeddedWeightRef.current = null;
+          throw new Error(
+            "Scale barcode failed its check digit — rescan the label.",
+          );
+        }
         const match = await lookup(embedded.lookupBarcode);
         embeddedWeightRef.current = embedded.value;
         return match;
