@@ -56,12 +56,10 @@ function mockBalances({
 // references for digital methods, and a customer for the due part.
 
 function Harness({
-  subTotal = 100,
-  vat = 0,
+  finalTotal = 100,
   customerId = null,
 }: {
-  subTotal?: number;
-  vat?: number;
+  finalTotal?: number;
   customerId?: number | null;
 }) {
   const form = useForm<CartSchemaType>({
@@ -77,8 +75,7 @@ function Harness({
   (window as unknown as Record<string, unknown>).__cartForm = form;
   return (
     <PaymentModal
-      subTotal={subTotal}
-      vat={vat}
+      finalTotal={finalTotal}
       form={form}
       isPaymentDialogOpen
       setIsPaymentDialogOpen={() => {}}
@@ -91,7 +88,7 @@ const confirm = () => screen.getByRole("button", { name: "Confirm Payment" });
 describe("PaymentModal", () => {
   it("shows the total and enables Confirm only when cash covers it", async () => {
     const user = userEvent.setup();
-    render(<Harness subTotal={100} vat={0} />);
+    render(<Harness finalTotal={100} />);
 
     expect(screen.getByText("Total Due : 100.00")).toBeInTheDocument();
     expect(confirm()).toBeDisabled();
@@ -101,9 +98,22 @@ describe("PaymentModal", () => {
     expect(screen.getByText("Change to Give")).toBeInTheDocument();
   });
 
+  it("charges the quoted final total as-is (coupon/inclusive-tax safe)", async () => {
+    // A1-002/A1-003: the modal must charge the authoritative quote total —
+    // a coupon-discounted or inclusive-tax total cannot be re-derived from
+    // afterDiscount + vat (that double-counts tax and misses the coupon).
+    const user = userEvent.setup();
+    // Items total 100, coupon takes 15 → quote finalTotal 85.
+    render(<Harness finalTotal={85} />);
+
+    expect(screen.getByText("Total Due : 85.00")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Exact" }));
+    expect(confirm()).toBeEnabled();
+  });
+
   it("shows what is still owed when tendered falls short", async () => {
     const user = userEvent.setup();
-    render(<Harness subTotal={100} />);
+    render(<Harness finalTotal={100} />);
 
     await user.type(screen.getByLabelText("Cash Receive"), "50");
     expect(screen.getByText("Still owed")).toBeInTheDocument();
@@ -113,7 +123,7 @@ describe("PaymentModal", () => {
 
   it("requires a reference before a card payment can be confirmed", async () => {
     const user = userEvent.setup();
-    render(<Harness subTotal={100} />);
+    render(<Harness finalTotal={100} />);
 
     await user.click(screen.getByRole("button", { name: "Card" }));
     expect(confirm()).toBeDisabled();
@@ -133,7 +143,7 @@ describe("PaymentModal", () => {
 
   it("splits cash + due for a customer and fills the remainder", async () => {
     const user = userEvent.setup();
-    render(<Harness subTotal={100} customerId={5} />);
+    render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Split" }));
     expect(confirm()).toBeDisabled();
@@ -155,7 +165,7 @@ describe("PaymentModal", () => {
 
   it("disables the due part entirely for a walk-in (no customer)", async () => {
     const user = userEvent.setup();
-    render(<Harness subTotal={100} customerId={null} />);
+    render(<Harness finalTotal={100} customerId={null} />);
 
     await user.click(screen.getByRole("button", { name: "Split" }));
     expect(screen.getByLabelText("Due part")).toBeDisabled();
@@ -163,7 +173,7 @@ describe("PaymentModal", () => {
   });
 
   it("blocks due and store-credit methods without a customer", async () => {
-    render(<Harness subTotal={100} customerId={null} />);
+    render(<Harness finalTotal={100} customerId={null} />);
     expect(screen.getByRole("button", { name: "Due" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Store credit" })).toBeDisabled();
   });
@@ -177,7 +187,7 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
   it("enables store credit when the balance covers the total", async () => {
     const user = userEvent.setup();
     mockBalances({ storeCredit: 500 });
-    render(<Harness subTotal={100} customerId={5} />);
+    render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Store credit" }));
     await screen.findByText("Available: ৳500.00");
@@ -187,7 +197,7 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
   it("blocks store credit beyond the balance and shows the shortfall", async () => {
     const user = userEvent.setup();
     mockBalances({ storeCredit: 40 });
-    render(<Harness subTotal={100} customerId={5} />);
+    render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Store credit" }));
     await screen.findByText("Available: ৳40.00");
@@ -204,7 +214,7 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
         throw new Error("network down");
       return { data: { data: {} } };
     });
-    render(<Harness subTotal={100} customerId={5} />);
+    render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Store credit" }));
     await screen.findByText(/balance unavailable/);
@@ -214,7 +224,7 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
   it("enables loyalty points and shows the points conversion", async () => {
     const user = userEvent.setup();
     mockBalances({ loyaltyBalance: 2000, loyaltyConfig: { redeemValue: 10, earnRate: 1, minRedemptionPoints: 0, maxRedemptionPointsPerSale: null } });
-    render(<Harness subTotal={100} customerId={5} />);
+    render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Loyalty points" }));
     await screen.findByText(/10\.00 points/);
@@ -225,7 +235,7 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
   it("blocks loyalty points beyond the balance", async () => {
     const user = userEvent.setup();
     mockBalances({ loyaltyBalance: 5, loyaltyConfig: { redeemValue: 10, earnRate: 1, minRedemptionPoints: 0, maxRedemptionPointsPerSale: null } });
-    render(<Harness subTotal={100} customerId={5} />);
+    render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Loyalty points" }));
     await screen.findByText(/Insufficient points — balance 5\.00, needs 10\.00/);
@@ -235,7 +245,7 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
   it("blocks loyalty points under the per-sale redemption cap", async () => {
     const user = userEvent.setup();
     mockBalances({ loyaltyBalance: 2000, loyaltyConfig: { redeemValue: 10, earnRate: 1, minRedemptionPoints: 0, maxRedemptionPointsPerSale: 5 } });
-    render(<Harness subTotal={100} customerId={5} />);
+    render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Loyalty points" }));
     await screen.findByText(/Capped at 5 points per sale/);
@@ -245,7 +255,7 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
   it("blocks loyalty points under the minimum redemption", async () => {
     const user = userEvent.setup();
     mockBalances({ loyaltyBalance: 2000, loyaltyConfig: { redeemValue: 10, earnRate: 1, minRedemptionPoints: 50, maxRedemptionPointsPerSale: null } });
-    render(<Harness subTotal={100} customerId={5} />);
+    render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Loyalty points" }));
     await screen.findByText(/needs at least 50 points/);
@@ -255,7 +265,7 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
   it("blocks loyalty points when the program is not active", async () => {
     const user = userEvent.setup();
     mockBalances({ loyaltyConfig: null });
-    render(<Harness subTotal={100} customerId={5} />);
+    render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Loyalty points" }));
     await screen.findByText(/Loyalty redemption is not available/);

@@ -554,13 +554,14 @@ const [discountSignal, setDiscountSignal] = useState(0);
           <CouponInput form={form} />
         </div>
         <div className="col-span-6">
-          {/* payment gets the amount after discount, plus VAT */}
+          {/* payment charges the authoritative quote total — it already
+              includes the coupon discount and the inclusive/exclusive tax
+              split; deriving it from afterDiscount + vat double-counts */}
           <PaymentModal
             isPaymentDialogOpen={isPaymentDialogOpen}
             setIsPaymentDialogOpen={setIsPaymentDialogOpen}
             form={form}
-            subTotal={totals.afterDiscount}
-            vat={totals.vat}
+            finalTotal={totals.finalTotal}
           />
         </div>
       </div>
