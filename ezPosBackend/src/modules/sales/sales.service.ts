@@ -190,12 +190,14 @@ export async function getSalesData(
   // are not assigned to — the route checked ACCESS but never applied it to
   // the query. Null = unrestricted caller (owner wildcard) sees all
   // locations; an empty assignment list yields no rows, never all rows.
+  // `undefined` (not an empty fragment!) — and() skips undefined entries;
+  // an empty sql`` emits a dangling "and" and 500s the query.
   const locationScope =
     opts.accessibleLocationIds === undefined || opts.accessibleLocationIds === null
-      ? sql``
+      ? undefined
       : opts.accessibleLocationIds.length === 0
-        ? sql`AND 1 = 0`
-        : sql`AND ${sales.locationId} = ANY(${opts.accessibleLocationIds})`;
+        ? sql`1 = 0`
+        : inArray(sales.locationId, opts.accessibleLocationIds);
 
   const rows = await db
     .select({
