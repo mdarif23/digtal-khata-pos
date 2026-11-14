@@ -637,6 +637,9 @@ export const ReceiveItems = () => {
             </Button>
             <Button
               type="submit"
+              // Receiving stock is the positive completion of this flow; a
+              // payment-only submit stays a neutral primary action.
+              variant={hasItemsToReceive ? "success" : "default"}
               disabled={
                 form.formState.isSubmitting ||
                 receiveItems.length === 0 ||

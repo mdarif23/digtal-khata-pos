@@ -107,8 +107,8 @@ export function AppSidebar() {
     <Sidebar variant="inset">
       <SidebarHeader className="bg-sidebar-accent border-b border-sidebar-border rounded mb-2">
         <div className="flex items-center gap-2 px-4 py-3 justify-center">
-          {/* The Logo Box */}
-          <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+          {/* The Logo Box — brand mark stays ezPos green (primary is action-blue) */}
+          <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground shadow-sm">
             <Zap className="size-4" />
           </div>
           {/* The Text */}

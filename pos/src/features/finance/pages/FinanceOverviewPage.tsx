@@ -127,10 +127,10 @@ export function FinanceOverviewPage() {
       )}
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Profit &amp; Loss · {dateRange.startDate} → {dateRange.endDate}
         </h2>
-        <p className="-mt-2 mb-3 text-xs text-muted-foreground">
+        <p className="mb-4 text-xs text-muted-foreground">
           Figures come from the posted general ledger: revenue excludes VAT, owner
           investments/withdrawals are financing (never revenue or expense), and
           GL-only items such as shrinkage and depreciation are included — so
@@ -164,7 +164,7 @@ export function FinanceOverviewPage() {
       </section>
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Balance Sheet Position (all time)
         </h2>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

@@ -677,7 +677,7 @@ export function Sales() {
                   </Button>
                 </div>
                 <Button
-                  variant="destructive"
+                  variant="warning"
                   disabled={
                     busySaleId !== null ||
                     selectedSale.items.every(
@@ -887,7 +887,7 @@ export function Sales() {
                   Cancel
                 </Button>
                 <Button
-                  variant="destructive"
+                  variant="warning"
                   disabled={
                     !refundReason ||
                     !refundDisposition ||

@@ -754,6 +754,7 @@ export function StockTransfersPage() {
                 detail.status === "partially_received" ? (
                   <>
                     <Button
+                      variant="success"
                       disabled={acting}
                       onClick={() => void handleReceive(false)}
                     >

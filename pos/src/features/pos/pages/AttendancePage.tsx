@@ -162,7 +162,6 @@ export function AttendancePage() {
                       </Button>
                     )}
                     <Button
-                      variant="destructive"
                       disabled={busy}
                       onClick={() => void act("/attendance/clock-out", { note: null })}
                     >
@@ -245,7 +244,7 @@ export function AttendancePage() {
                         ) : record.clockOut ? (
                           <Button
                             size="sm"
-                            variant="outline"
+                            variant="success"
                             disabled={busy}
                             onClick={() =>
                               void act(`/attendance/${record.id}/approve`)

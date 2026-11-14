@@ -160,7 +160,6 @@ export function BulkUpdatePage() {
               Preview
             </Button>
             <Button
-              variant="destructive"
               disabled={applying || preview.length === 0 || changedCount === 0}
               onClick={() => void apply()}
             >

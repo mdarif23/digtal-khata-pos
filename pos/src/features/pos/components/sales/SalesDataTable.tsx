@@ -145,7 +145,7 @@ function createColumns(
             Details
           </Button>
           <Button
-            variant="destructive"
+            variant="warning"
             size="sm"
             disabled={
               busySaleId !== null ||

@@ -52,6 +52,7 @@
   --color-warning: var(--warning);
   --color-info-foreground: var(--info-foreground);
   --color-info: var(--info);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -86,9 +87,10 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  /* Brand: zuccini-700 — the ezPos green, used for primary actions. */
-  --primary: #16663d;
-  --primary-foreground: #f2f9f5;
+  /* Primary actions: professional blue. The brand mark (logo) stays green
+     via --sidebar-primary; green itself is the SUCCESS color. */
+  --primary: #1d4ed8;
+  --primary-foreground: #eff6ff;
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
@@ -96,16 +98,18 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: #fef2f2;
   /* Semantic status colors (shared language across every module). */
   --success: #1c7f4a;
   --success-foreground: #f2f9f5;
   --warning: #b45309;
   --warning-foreground: #fffaeb;
-  --info: #1d4ed8;
-  --info-foreground: #eff6ff;
+  /* Informational blue/cyan — distinct from the primary action blue. */
+  --info: #0369a1;
+  --info-foreground: #f0f9ff;
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: #2b9e5e;
+  --ring: #3b82f6;
   /* Chart palette: distinct, colorblind-friendly hues in brand order. */
   --chart-1: #1c7f4a;
   --chart-2: #2563eb;
@@ -115,6 +119,7 @@
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
+  /* Brand mark (logo, sidebar accents) keeps the ezPos green. */
   --sidebar-primary: #16663d;
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
@@ -130,9 +135,9 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  /* Dark theme lifts the brand green for contrast on dark surfaces. */
-  --primary: #4dba79;
-  --primary-foreground: #092519;
+  /* Dark theme lifts the action blue for contrast on dark surfaces. */
+  --primary: #60a5fa;
+  --primary-foreground: #0a1730;
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -140,15 +145,16 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: #26100a;
   --success: #4dba79;
   --success-foreground: #092519;
   --warning: #f59e0b;
   --warning-foreground: #26160a;
-  --info: #60a5fa;
-  --info-foreground: #0a1730;
+  --info: #38bdf8;
+  --info-foreground: #0a1c2b;
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: #4dba79;
+  --ring: #60a5fa;
   --chart-1: #4dba79;
   --chart-2: #60a5fa;
   --chart-3: #fbbf24;
