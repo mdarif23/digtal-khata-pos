@@ -139,7 +139,7 @@ export function SpeedKeyGrid() {
   const selectedIds = new Set(draft.map((t) => t.variantId));
 
   return (
-    <div className="grid gap-1.5">
+    <div className="grid gap-1.5 px-4 pt-3 sm:px-5">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">Speed keys</span>
         <Button
