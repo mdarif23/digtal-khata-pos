@@ -35,18 +35,18 @@ export function ReceivingCostSummary({
       <div className="flex flex-wrap justify-between gap-3 rounded-lg bg-muted/50 p-4 text-sm">
         <div>
           <p className="text-muted-foreground">Outstanding before payment</p>
-          <p className="mt-1 font-medium">৳ {formatCurrency(dueAmount)}</p>
+          <p className="mt-1 font-medium">{formatCurrency(dueAmount)}</p>
         </div>
         <div>
           <p className="text-muted-foreground">Paying now</p>
           <p className="mt-1 font-medium">
-            ৳ {formatCurrency(Number(paymentAmount) || 0)}
+            {formatCurrency(Number(paymentAmount) || 0)}
           </p>
         </div>
         <div>
           <p className="text-muted-foreground">Balance after payment</p>
           <p className="mt-1 text-lg font-semibold">
-            ৳ {formatCurrency(newBalance)}
+            {formatCurrency(newBalance)}
           </p>
         </div>
       </div>

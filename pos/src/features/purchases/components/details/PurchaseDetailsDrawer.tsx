@@ -40,7 +40,7 @@ function formatEnteredLine(
   ) {
     return null;
   }
-  return `${item.enteredQuantity} ${unit.unitName} @ ৳${formatCurrency(item.enteredUnitPrice)}/${unit.unitName}`;
+  return `${item.enteredQuantity} ${unit.unitName} @ ${formatCurrency(item.enteredUnitPrice)}/${unit.unitName}`;
 }
 
 /**
@@ -149,8 +149,8 @@ export function PurchaseDetailsDrawer({
                 label={RECEIVING_LABELS[purchase.status] ?? purchase.status}
                 className={
                   purchase.status === "received"
-                    ? "bg-emerald-100 text-emerald-800"
-                    : "bg-amber-100 text-amber-800"
+                    ? "bg-success/10 text-success"
+                    : "bg-warning/10 text-warning"
                 }
               />
               {purchase.returnStatus && (
@@ -163,7 +163,7 @@ export function PurchaseDetailsDrawer({
                 label={purchase.paymentStatus}
                 className={
                   purchase.paymentStatus === "paid"
-                    ? "bg-emerald-100 text-emerald-800"
+                    ? "bg-success/10 text-success"
                     : "bg-sky-100 text-sky-800"
                 }
               />
@@ -177,7 +177,7 @@ export function PurchaseDetailsDrawer({
                   className={
                     purchase.landedCostStatus === "pending"
                       ? "bg-orange-100 text-orange-800"
-                      : "bg-emerald-100 text-emerald-800"
+                      : "bg-success/10 text-success"
                   }
                 />
               )}
@@ -276,12 +276,12 @@ export function PurchaseDetailsDrawer({
                             {enteredLine ? (
                               <>
                                 <span data-testid="entered-unit-price">
-                                  ৳{formatCurrency(item.enteredUnitPrice!)}/{
+                                  {formatCurrency(item.enteredUnitPrice!)}/{
                                     unit!.unitName
                                   }
                                 </span>
                                 <span className="block text-xs text-muted-foreground">
-                                  ৳{formatCurrency(item.unitCost)}/{
+                                  {formatCurrency(item.unitCost)}/{
                                     baseUnitName
                                   }
                                 </span>

@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
-import { formatCurrency } from "../../utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 import { outstandingOf } from "../../utils/receiveQuantities";
 import { formatQty, roundQuantity } from "../../utils/uom";
 import type {
@@ -79,7 +79,7 @@ export function ResolveOutstandingDialog({ item }: { item: PurchasesItems }) {
         type: "success",
         description:
           cancelled > 0
-            ? `Outstanding resolved — payable reduced by ৳ ${formatCurrency(cancelled)}.`
+            ? `Outstanding resolved — payable reduced by ${formatCurrency(cancelled)}.`
             : "Outstanding resolution recorded.",
       });
       setOpen(false);

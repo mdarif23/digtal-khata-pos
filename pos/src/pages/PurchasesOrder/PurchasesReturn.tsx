@@ -7,7 +7,7 @@ import { createEntityPromiseToast } from "@/lib/toast-utils";
 import { PurchaseReturnSummary } from "@/features/purchases/components/return/PurchaseReturnSummary";
 import { ReturnItemsTable } from "@/features/purchases/components/return/ReturnItemsTable";
 import { SupplierCreditSummary } from "@/features/purchases/components/return/SupplierCreditSummary";
-import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 import {
   allocateScannedUnit,
   estimateReturnUnitPrice,
@@ -482,7 +482,7 @@ export const PurchaseViewItems = () => {
         apiCall: (values) => returnMutation.mutateAsync(values),
         entityName: "Purchase return",
         getSuccessMessage: (response) =>
-          `${response.message} Total: ৳ ${formatCurrency(response.data.totalAmount)}`,
+          `${response.message} Total: ${formatCurrency(response.data.totalAmount)}`,
       });
       // Store/query refreshes happen in usePurchaseReturn's onSuccess
       // (purchases, products, landed-cost, due-management). The detail
@@ -641,7 +641,7 @@ export const PurchaseViewItems = () => {
           <div className="rounded-lg border bg-background px-4 py-3">
             <p className="text-sm text-muted-foreground">Order total</p>
             <p className="text-xl font-semibold">
-              ৳ {formatCurrency(Number(purchaseOrder.totalAmount))}
+              {formatCurrency(Number(purchaseOrder.totalAmount))}
             </p>
           </div>
         </header>

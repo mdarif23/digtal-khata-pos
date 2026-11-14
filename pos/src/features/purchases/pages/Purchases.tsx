@@ -27,7 +27,7 @@ import { getVariantPurchaseCost } from "@/features/products/utils/getVariantPurc
 import type { PurchaseCart } from "../purchase.types";
 import { PurchaseTable } from "../components/purchases/PurchaseTable";
 import { usePurchasesStore } from "../usePurchaseStore";
-import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 import {
   fetchPurchaseUnits,
   pickDefaultPurchaseUnit,

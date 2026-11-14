@@ -15,7 +15,7 @@ import {
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 import { formatQty } from "../utils/uom";
 import {
   LandedCostAdjustmentNotice,
@@ -27,6 +27,7 @@ import {
   type PurchaseFilter,
 } from "../utils/purchaseListFilters";
 import { usePurchaseList } from "../hooks/usePurchaseList";
+import { StatusBadge, type StatusTone } from "@/components/common/StatusBadge";
 import { PurchaseDetailsDrawer } from "../components/details/PurchaseDetailsDrawer";
 import useProductStore from "@/features/products/useProductStore";
 import type { PurchaseListItem } from "../purchase.types";
@@ -277,7 +278,7 @@ export const PurchasesList = () => {
           />
           <SummaryCard
             title="Outstanding balance"
-            value={`৳ ${formatCurrency(summary?.outstandingBalance ?? 0)}`}
+            value={`${formatCurrency(summary?.outstandingBalance ?? 0)}`}
             icon={<Wallet />}
           />
         </section>
@@ -689,18 +690,18 @@ const PurchaseOrderRow = memo(function PurchaseOrderRow({
   purchase: PurchaseListItem;
   onOpenDetails: (purchaseId: number) => void;
 }) {
-  const receivingStyles: Record<
+  const receivingTone: Record<
     PurchaseListItem["receivingStatus"],
-    string
+    StatusTone
   > = {
-    ordered: "bg-sky-100 text-sky-800",
-    partially_received: "bg-amber-100 text-amber-800",
-    received: "bg-emerald-100 text-emerald-800",
+    ordered: "info",
+    partially_received: "warning",
+    received: "success",
   };
-  const paymentStyles: Record<PurchaseListItem["paymentStatus"], string> = {
-    unpaid: "bg-rose-100 text-rose-800",
-    partial: "bg-amber-100 text-amber-800",
-    paid: "bg-emerald-100 text-emerald-800",
+  const paymentTone: Record<PurchaseListItem["paymentStatus"], StatusTone> = {
+    unpaid: "danger",
+    partial: "warning",
+    paid: "success",
   };
 
   return (
@@ -737,33 +738,28 @@ const PurchaseOrderRow = memo(function PurchaseOrderRow({
         )}
       </td>
       <td className="whitespace-nowrap px-4 py-4 text-right font-medium">
-        ৳ {formatCurrency(purchase.totalAmount)}
+        {formatCurrency(purchase.totalAmount)}
       </td>
       <td className="whitespace-nowrap px-4 py-4 text-right">
-        ৳ {formatCurrency(purchase.paidAmount)}
+        {formatCurrency(purchase.paidAmount)}
       </td>
       <td className="whitespace-nowrap px-4 py-4 text-right">
-        ৳ {formatCurrency(purchase.dueAmount)}
+        {formatCurrency(purchase.dueAmount)}
+      </td>
+      <td className="px-4 py-4">
+        <StatusBadge tone={paymentTone[purchase.paymentStatus]} dot={false}>
+          {purchase.paymentStatus.replace("_", " ")}
+        </StatusBadge>
       </td>
       <td className="px-4 py-4">
         <StatusBadge
-          label={purchase.paymentStatus.replace("_", " ")}
-          className={paymentStyles[purchase.paymentStatus]}
-        />
-      </td>
-      <td className="px-4 py-4">
-        <StatusBadge
-          label={
-            purchase.fullyCancelled
-              ? "cancelled"
-              : purchase.receivingStatus.replace("_", " ")
-          }
-          className={
-            purchase.fullyCancelled
-              ? "bg-slate-200 text-slate-700"
-              : receivingStyles[purchase.receivingStatus]
-          }
-        />
+          tone={purchase.fullyCancelled ? "neutral" : receivingTone[purchase.receivingStatus]}
+          dot={false}
+        >
+          {purchase.fullyCancelled
+            ? "cancelled"
+            : purchase.receivingStatus.replace("_", " ")}
+        </StatusBadge>
         {/* Landed-cost indicator — only shown when a document exists and
             hasn't been fully reversed (backend sends null otherwise). */}
         {purchase.landedCostStatus && (
@@ -776,10 +772,9 @@ const PurchaseOrderRow = memo(function PurchaseOrderRow({
       </td>
       <td className="px-4 py-4">
         {purchase.returnStatus ? (
-          <StatusBadge
-            label={purchase.returnStatus}
-            className="bg-violet-100 text-violet-800"
-          />
+          <StatusBadge tone="primary" dot={false}>
+            {purchase.returnStatus}
+          </StatusBadge>
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
@@ -823,18 +818,4 @@ const PurchaseOrderRow = memo(function PurchaseOrderRow({
   );
 });
 
-function StatusBadge({
-  label,
-  className,
-}: {
-  label: string;
-  className: string;
-}) {
-  return (
-    <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize ${className}`}
-    >
-      {label}
-    </span>
-  );
-}
+

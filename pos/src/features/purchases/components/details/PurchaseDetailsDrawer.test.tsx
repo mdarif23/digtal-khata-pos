@@ -206,7 +206,7 @@ describe("PurchaseDetailsDrawer", () => {
     expect(screen.getByText(/Acme Traders/)).toBeInTheDocument();
     // Cost summary block: grand total + due.
     expect(screen.getByText("Purchase grand total")).toBeInTheDocument();
-    expect(screen.getByText("1,080.00")).toBeInTheDocument(); // cost summary (plain format)
+    expect(screen.getByText("৳1,080.00")).toBeInTheDocument(); // cost summary (canonical format)
     expect(screen.getByText(/680\.00/)).toBeInTheDocument();
     // Phase 3: the supplier credit balance is visible on the detail even
     // while the purchase still has an outstanding due.

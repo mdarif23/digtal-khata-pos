@@ -9,7 +9,7 @@ import {
   type PurchaseUnitOption,
 } from "../../hooks/usePurchaseUnits";
 import { unitOptionLabel, formatQty } from "../../utils/uom";
-import { formatCurrency } from "../../utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 import { SerialsDialog } from "./SerialsDialog";
 import { BatchesDialog } from "./BatchesDialog";
 import { WarrantyDialog } from "./WarrantyDialog";
