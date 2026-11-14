@@ -15,12 +15,14 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useWarrantiesList, useWarrantyOverview } from "../hooks/useWarranties";
 import { useWarrantyClaimsList } from "../hooks/useWarrantyClaims";
 import { ReportMetricCard } from "@/features/reports/components/ReportMetricCard";
-import { formatDate, formatDateTime } from "@/features/reports/utils/reportUtils";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { WarrantyStatusBadge } from "../components/WarrantyStatusBadge";
 import { OPEN_CLAIM_STATUSES } from "../lib/warranty-format";
 import type { WarrantyListRow, WarrantyClaimRow } from "../types/warranty.types";
@@ -45,7 +47,7 @@ function QuickListShell({
           <span>{title}</span>
           <Link
             to={viewAllTo}
-            className="text-xs font-medium text-emerald-700 hover:underline"
+            className="text-xs font-medium text-primary hover:underline"
           >
             {viewAllLabel}
           </Link>
@@ -58,7 +60,7 @@ function QuickListShell({
 
 function EmptyHint({ message }: { message: string }) {
   return (
-    <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
+    <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
       {message}
     </p>
   );
@@ -68,13 +70,13 @@ function ExpiringRow({ warranty }: { warranty: WarrantyListRow }) {
   return (
     <Link
       to={`/warranty/registry/${warranty.id}`}
-      className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2 transition hover:bg-slate-50"
+      className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 transition hover:bg-muted/50"
     >
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-slate-800">
+        <p className="truncate text-sm font-medium text-foreground">
           {warranty.productName}
         </p>
-        <p className="truncate text-xs text-slate-500">
+        <p className="truncate text-xs text-muted-foreground">
           {warranty.warrantyNumber} · {warranty.customerName ?? "Walk-in"} · ends{" "}
           {formatDate(warranty.expiryDate)}
         </p>
@@ -88,13 +90,13 @@ function OpenClaimRow({ claim }: { claim: WarrantyClaimRow }) {
   return (
     <Link
       to={`/warranty/claims/${claim.id}`}
-      className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2 transition hover:bg-slate-50"
+      className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 transition hover:bg-muted/50"
     >
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-slate-800">
+        <p className="truncate text-sm font-medium text-foreground">
           {claim.claimNumber} · {claim.productName}
         </p>
-        <p className="truncate text-xs text-slate-500">
+        <p className="truncate text-xs text-muted-foreground">
           {claim.customerName ?? "Walk-in"} · {formatDateTime(claim.createdAt)}
         </p>
       </div>
@@ -153,16 +155,11 @@ export function WarrantyOverviewPage() {
   const data = overview.data;
 
   return (
-    <div className="p-5 space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
-          Warranty Overview
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Customer coverage, the claim workshop, and supplier recovery at a
-          glance.
-        </p>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Warranty Overview"
+        description="Customer coverage, the claim workshop, and supplier recovery at a glance."
+      />
 
       {overview.isPending ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -178,7 +175,7 @@ export function WarrantyOverviewPage() {
             isCurrency={false}
             isCount
             icon={ShieldCheck}
-            accent="bg-emerald-50 text-emerald-700"
+            accent="bg-success/10 text-success"
           />
           <ReportMetricCard
             title="Expiring soon"
@@ -186,8 +183,8 @@ export function WarrantyOverviewPage() {
             isCurrency={false}
             isCount
             icon={CalendarClock}
-            accent="bg-amber-50 text-amber-700"
-            valueClassName="text-amber-600"
+            accent="bg-warning/10 text-warning"
+            valueClassName="text-warning"
           />
           <ReportMetricCard
             title="Expired"
@@ -195,8 +192,8 @@ export function WarrantyOverviewPage() {
             isCurrency={false}
             isCount
             icon={AlertTriangle}
-            accent="bg-rose-50 text-rose-700"
-            valueClassName="text-rose-600"
+            accent="bg-destructive/10 text-destructive"
+            valueClassName="text-destructive"
           />
           <ReportMetricCard
             title="Covered units"
@@ -204,7 +201,7 @@ export function WarrantyOverviewPage() {
             isCurrency={false}
             isCount
             icon={PackageCheck}
-            accent="bg-sky-50 text-sky-700"
+            accent="bg-info/10 text-info"
           />
           <ReportMetricCard
             title="Open claims"
@@ -212,7 +209,7 @@ export function WarrantyOverviewPage() {
             isCurrency={false}
             isCount
             icon={Clock}
-            accent="bg-indigo-50 text-indigo-700"
+            accent="bg-info/10 text-info"
           />
           <ReportMetricCard
             title="Pending inspections"
@@ -220,7 +217,7 @@ export function WarrantyOverviewPage() {
             isCurrency={false}
             isCount
             icon={ScanSearch}
-            accent="bg-slate-50 text-slate-700"
+            accent="bg-muted text-muted-foreground"
           />
           <ReportMetricCard
             title="In repair"
@@ -228,7 +225,7 @@ export function WarrantyOverviewPage() {
             isCurrency={false}
             isCount
             icon={Wrench}
-            accent="bg-amber-50 text-amber-700"
+            accent="bg-warning/10 text-warning"
           />
           <ReportMetricCard
             title="Ready for pickup"
@@ -236,14 +233,14 @@ export function WarrantyOverviewPage() {
             isCurrency={false}
             isCount
             icon={BadgeCheck}
-            accent="bg-teal-50 text-teal-700"
+            accent="bg-info/10 text-info"
           />
           <ReportMetricCard
             title="Total repair cost"
             value={data?.totalRepairCost}
             isCurrency
             icon={CircleDollarSign}
-            accent="bg-purple-50 text-purple-700"
+            accent="bg-primary/10 text-primary"
           />
           {canSeeSupplier && (
             <ReportMetricCard
@@ -252,7 +249,7 @@ export function WarrantyOverviewPage() {
               isCurrency={false}
               isCount
               icon={Truck}
-              accent="bg-blue-50 text-blue-700"
+              accent="bg-info/10 text-info"
             />
           )}
         </div>
@@ -297,6 +294,6 @@ export function WarrantyOverviewPage() {
           )}
         </QuickListShell>
       </div>
-    </div>
+    </PageContainer>
   );
 }

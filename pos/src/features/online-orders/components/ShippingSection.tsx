@@ -3,6 +3,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "@/components/ui/toast";
+import { Button } from "@/components/ui/button";
+import { formatCurrency } from "@/lib/format";
 import {
   useShipOrder,
   useUpdateShipment,
@@ -101,26 +103,26 @@ export function ShippingSection({
   });
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white">
-      <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+    <section className="rounded-lg border border-border bg-card">
+      <header className="flex items-center justify-between border-b border-border px-4 py-3">
         <div>
-          <h2 className="text-sm font-semibold text-slate-800">Shipping</h2>
+          <h2 className="text-sm font-semibold text-foreground">Shipping</h2>
           {shipment ? (
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-muted-foreground">
               {shipment.courierName ?? "—"}
               {shipment.courierService ? ` · ${shipment.courierService}` : ""} ·
               tracking {shipment.trackingNumber ?? "—"} ·{" "}
               <span className="capitalize">{shipment.status}</span>
             </p>
           ) : (
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-muted-foreground">
               No shipment recorded yet.
             </p>
           )}
         </div>
         {shipment?.shippingCost != null ? (
-          <p className="text-sm font-medium text-slate-700">
-            Courier cost ৳{Number(shipment.shippingCost).toFixed(2)}
+          <p className="text-sm font-medium tabular-nums text-foreground">
+            Courier cost {formatCurrency(shipment.shippingCost)}
           </p>
         ) : null}
       </header>
@@ -131,74 +133,74 @@ export function ShippingSection({
           className="space-y-3 px-4 py-3"
         >
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+            <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Courier company *
               <input
                 {...form.register("courierName")}
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
                 placeholder="Steadfast / Pathao / Sundarban"
               />
               {form.formState.errors.courierName ? (
-                <span className="text-xs text-rose-600">
+                <span className="text-xs text-destructive">
                   {form.formState.errors.courierName.message}
                 </span>
               ) : null}
             </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+            <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Service
               <input
                 {...form.register("courierService")}
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
                 placeholder="Same day / Standard"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+            <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Tracking / consignment *
               <input
                 {...form.register("trackingNumber")}
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
               />
               {form.formState.errors.trackingNumber ? (
-                <span className="text-xs text-rose-600">
+                <span className="text-xs text-destructive">
                   {form.formState.errors.trackingNumber.message}
                 </span>
               ) : null}
             </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+            <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Expected delivery
               <input
                 type="date"
                 {...form.register("expectedDeliveryDate")}
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+            <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Courier cost (৳)
               <input
                 type="number"
                 step="0.01"
                 {...form.register("shippingCost")}
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+            <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Receipt / reference URL
               <input
                 {...form.register("referenceUrl")}
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
               />
             </label>
           </div>
           <div className="flex items-center justify-between">
             <input
               {...form.register("notes")}
-              className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              className="flex-1 rounded-md border border-input bg-card px-2 py-1.5 text-sm"
               placeholder="Courier notes…"
             />
-            <button
+            <Button
               type="submit"
+              className="ml-3"
               disabled={shipOrder.isPending || updateShipment.isPending}
-              className="ml-3 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {alreadyShipped
                 ? updateShipment.isPending
@@ -207,7 +209,7 @@ export function ShippingSection({
                 : shipOrder.isPending
                   ? "Shipping…"
                   : "Mark as shipped"}
-            </button>
+            </Button>
           </div>
         </form>
       ) : null}

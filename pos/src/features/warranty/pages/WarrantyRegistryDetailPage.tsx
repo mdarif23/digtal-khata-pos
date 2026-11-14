@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
+import { PageContainer } from "@/components/common/PageContainer";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useWarrantyDetail } from "../hooks/useWarranties";
-import { formatCurrency, formatDate, formatDateTime } from "@/features/reports/utils/reportUtils";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { WarrantyDataTable } from "../components/table/WarrantyDataTable";
 import { WarrantyStatusBadge } from "../components/WarrantyStatusBadge";
 import { ClaimCreationDialog } from "../components/ClaimCreationDialog";
@@ -22,9 +23,9 @@ const columnHelper = createColumnHelper<WarrantyTableFeatures, WarrantyClaimRow>
 
 function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-1.5 last:border-0">
-      <span className="text-xs whitespace-nowrap text-slate-500">{label}</span>
-      <span className="text-right text-sm text-slate-800">{value}</span>
+    <div className="flex items-start justify-between gap-4 border-b border-border py-1.5 last:border-0">
+      <span className="text-xs whitespace-nowrap text-muted-foreground">{label}</span>
+      <span className="text-right text-sm text-foreground">{value}</span>
     </div>
   );
 }
@@ -58,7 +59,7 @@ export function WarrantyRegistryDetailPage() {
         cell: ({ row }) => (
           <Link
             to={`/warranty/claims/${row.original.id}`}
-            className="font-mono text-sm font-semibold text-emerald-700 hover:underline"
+            className="font-mono text-sm font-semibold text-primary hover:underline"
           >
             {row.original.claimNumber}
           </Link>
@@ -82,7 +83,7 @@ export function WarrantyRegistryDetailPage() {
         id: "problem",
         header: "Reported problem",
         cell: ({ row }) => (
-          <p className="max-w-md text-xs text-slate-600">
+          <p className="max-w-md text-xs text-muted-foreground">
             {row.original.reportedProblem}
           </p>
         ),
@@ -90,13 +91,17 @@ export function WarrantyRegistryDetailPage() {
       columnHelper.accessor("repairCost", {
         id: "repairCost",
         header: "Repair cost",
-        cell: ({ row }) => formatCurrency(row.original.repairCost),
+        cell: ({ row }) => (
+          <span className="block tabular-nums">
+            {formatCurrency(row.original.repairCost)}
+          </span>
+        ),
       }),
       columnHelper.accessor("createdAt", {
         id: "createdAt",
         header: "Filed",
         cell: ({ row }) => (
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-muted-foreground">
             {formatDateTime(row.original.createdAt)}
           </span>
         ),
@@ -107,32 +112,32 @@ export function WarrantyRegistryDetailPage() {
 
   if (query.isPending) {
     return (
-      <div className="space-y-4 p-5">
+      <PageContainer width="narrow">
         <Skeleton className="h-8 w-64" />
         <div className="grid gap-4 lg:grid-cols-2">
           <Skeleton className="h-64 rounded-xl" />
           <Skeleton className="h-64 rounded-xl" />
         </div>
         <Skeleton className="h-48 rounded-xl" />
-      </div>
+      </PageContainer>
     );
   }
 
   if (query.isError || !query.data) {
     return (
-      <div className="p-5">
+      <PageContainer width="narrow">
         <div
           role="alert"
-          className="flex flex-col items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 py-10 text-center"
+          className="flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 py-10 text-center"
         >
-          <p className="text-sm font-medium text-rose-700">
+          <p className="text-sm font-medium text-destructive">
             Unable to load this warranty.
           </p>
           <Button variant="outline" size="sm" onClick={() => void query.refetch()}>
             Try again
           </Button>
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
@@ -140,7 +145,7 @@ export function WarrantyRegistryDetailPage() {
   const warranty = detail.warranty;
 
   return (
-    <div className="space-y-5 p-5">
+    <PageContainer width="narrow">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <Button
@@ -152,10 +157,10 @@ export function WarrantyRegistryDetailPage() {
             <ArrowLeft aria-hidden="true" />
           </Button>
           <div className="min-w-0">
-            <h1 className="font-mono text-xl font-semibold text-slate-950">
+            <h1 className="font-mono text-xl font-semibold text-foreground">
               {warranty.warrantyNumber}
             </h1>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-muted-foreground">
               {warranty.productName}
               {warranty.variantOptionLabel ? ` · ${warranty.variantOptionLabel}` : ""}
             </p>
@@ -230,7 +235,7 @@ export function WarrantyRegistryDetailPage() {
             {warranty.voidReason ? (
               <Fact
                 label="Void reason"
-                value={<span className="text-xs text-rose-600">{warranty.voidReason}</span>}
+                value={<span className="text-xs text-destructive">{warranty.voidReason}</span>}
               />
             ) : null}
           </CardContent>
@@ -238,7 +243,7 @@ export function WarrantyRegistryDetailPage() {
       </div>
 
       <div>
-        <h2 className="mb-3 text-base font-semibold text-slate-900">
+        <h2 className="mb-3 text-base font-semibold text-foreground">
           Claims on this warranty
         </h2>
         <WarrantyDataTable
@@ -259,6 +264,6 @@ export function WarrantyRegistryDetailPage() {
         open={certificateOpen}
         onOpenChange={setCertificateOpen}
       />
-    </div>
+    </PageContainer>
   );
 }

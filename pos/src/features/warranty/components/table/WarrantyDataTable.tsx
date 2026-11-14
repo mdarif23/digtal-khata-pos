@@ -13,6 +13,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/common/EmptyState";
+import { formatNumber } from "@/lib/format";
 import { warrantyTableFeatures, type WarrantyTableFeatures } from "./warranty-table-features";
 
 interface WarrantyDataTableProps<TData extends RowData> {
@@ -62,18 +64,18 @@ export function WarrantyDataTable<TData extends RowData>({
 
   return (
     <div className="space-y-3">
-      <div className="overflow-x-auto rounded-xl border border-slate-200/90 bg-white shadow-xs">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-xs">
         <Table className="min-w-[860px]">
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow
                 key={headerGroup.id}
-                className="bg-slate-50/75 hover:bg-slate-50/75 border-b border-slate-200"
+                className="border-b border-border bg-muted/50 hover:bg-muted/50"
               >
                 {headerGroup.headers.map((header) => (
                   <TableHead
                     key={header.id}
-                    className="text-xs font-semibold uppercase tracking-wider text-slate-600"
+                    className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
                   >
                     {header.isPlaceholder ? null : (
                       <table.FlexRender header={header} />
@@ -86,10 +88,10 @@ export function WarrantyDataTable<TData extends RowData>({
           <TableBody>
             {loading ? (
               Array.from({ length: SKELETON_ROWS }).map((_, rowIndex) => (
-                <TableRow key={`skeleton-${rowIndex}`} className="border-b border-slate-100">
+                <TableRow key={`skeleton-${rowIndex}`} className="border-b border-border">
                   {columns.map((_, cellIndex) => (
                     <TableCell key={`skeleton-${rowIndex}-${cellIndex}`}>
-                      <div className="h-4 animate-pulse rounded bg-slate-100" />
+                      <div className="h-4 animate-pulse rounded bg-muted" />
                     </TableCell>
                   ))}
                 </TableRow>
@@ -98,10 +100,10 @@ export function WarrantyDataTable<TData extends RowData>({
               <TableRow>
                 <TableCell colSpan={totalColumns} className="py-12 text-center">
                   <div className="mx-auto max-w-md space-y-2" role="alert">
-                    <p className="text-sm font-medium text-rose-600">
+                    <p className="text-sm font-medium text-destructive">
                       Unable to load data.
                     </p>
-                    <p className="text-xs text-slate-500">{error}</p>
+                    <p className="text-xs text-muted-foreground">{error}</p>
                     {onRetry && (
                       <Button
                         type="button"
@@ -117,20 +119,18 @@ export function WarrantyDataTable<TData extends RowData>({
               </TableRow>
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={totalColumns} className="py-14 text-center">
-                  <p className="text-sm font-medium text-slate-400">
-                    {emptyMessage}
-                  </p>
+                <TableCell colSpan={totalColumns} className="py-6">
+                  <EmptyState title={emptyMessage} className="border-0 bg-transparent py-8" />
                 </TableCell>
               </TableRow>
             ) : (
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
-                  className="hover:bg-slate-50/50 transition-colors border-b border-slate-100 last:border-0"
+                  className="border-b border-border transition-colors last:border-0 hover:bg-muted/40"
                 >
                   {row.getAllCells().map((cell) => (
-                    <TableCell key={cell.id} className="text-sm text-slate-700">
+                    <TableCell key={cell.id} className="text-sm text-foreground">
                       <table.FlexRender cell={cell} />
                     </TableCell>
                   ))}
@@ -143,19 +143,19 @@ export function WarrantyDataTable<TData extends RowData>({
 
       {/* Server-side pagination bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted-foreground">
           {loading
             ? "Loading…"
-            : `${total.toLocaleString()} record${total === 1 ? "" : "s"} · page ${page} of ${totalPages}`}
+            : `${formatNumber(total)} record${total === 1 ? "" : "s"} · page ${page} of ${totalPages}`}
         </p>
         <div className="flex items-center gap-2">
           {onPageSizeChange && (
-            <label className="flex items-center gap-1.5 text-xs text-slate-500">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               Rows
               <select
                 value={String(pageSize)}
                 onChange={(event) => onPageSizeChange(Number(event.target.value))}
-                className="h-7 cursor-pointer rounded-md border border-slate-200 bg-white px-1.5 text-xs text-slate-700 outline-none"
+                className="h-7 cursor-pointer rounded-md border border-input bg-card px-1.5 text-xs text-foreground outline-none"
               >
                 {PAGE_SIZES.map((size) => (
                   <option key={size} value={size}>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, LineChart, NotebookPen } from "lucide-react";
+import { ArrowLeft, LineChart, NotebookPen, PackageSearch } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -10,8 +10,11 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { StatusBadge } from "@/components/common/StatusBadge";
 import {
   Select,
   SelectContent,
@@ -37,7 +40,7 @@ import {
   formatCurrency,
   formatDate,
   formatNumber,
-} from "@/features/reports/utils/reportUtils";
+} from "@/lib/format";
 import { PriceChangeBadge } from "../components/PriceChangeBadge";
 import {
   useSupplierDetail,
@@ -95,7 +98,7 @@ export function SupplierDetailsPage() {
 
   if (detail.isError) {
     return (
-      <div className="flex flex-col gap-4 p-4 md:p-6">
+      <PageContainer width="narrow">
         <BackButton />
         <div
           role="alert"
@@ -103,7 +106,7 @@ export function SupplierDetailsPage() {
         >
           Could not load the supplier. {getErrorMessage(detail.error)}
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
@@ -188,37 +191,39 @@ export function SupplierDetailsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6">
+    <PageContainer width="narrow">
       <BackButton />
 
+      <PageHeader
+        title={
+          detail.isLoading
+            ? "Supplier"
+            : (supplier?.name ?? "Supplier")
+        }
+        description={
+          supplier
+            ? [
+                supplier.phone,
+                supplier.email,
+                supplier.address ?? "No address on file",
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : undefined
+        }
+        actions={
+          detail.isLoading ? (
+            <Skeleton className="h-6 w-24" />
+          ) : (
+            <StatusBadge tone={supplier?.status === "active" ? "success" : "neutral"}>
+              {supplier?.status ?? "Unknown"}
+            </StatusBadge>
+          )
+        }
+      />
+
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl">
-            {detail.isLoading ? (
-              <Skeleton className="h-6 w-56" />
-            ) : (
-              <>
-                {supplier?.name}
-                <Badge
-                  variant="secondary"
-                  className={
-                    supplier?.status === "active"
-                      ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100"
-                      : ""
-                  }
-                >
-                  {supplier?.status ?? "Unknown"}
-                </Badge>
-              </>
-            )}
-          </CardTitle>
-          <CardDescription>
-            {supplier?.phone ? `${supplier.phone} · ` : ""}
-            {supplier?.email ? `${supplier.email} · ` : ""}
-            {supplier?.address ?? "No address on file"}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <CardContent className="grid grid-cols-2 gap-3 pt-6 md:grid-cols-4">
           <StatCard
             label="Received purchases"
             value={detail.isLoading ? null : formatNumber(stats?.purchaseCount ?? 0)}
@@ -264,7 +269,7 @@ export function SupplierDetailsPage() {
               {settingsEnabled ? "Tracking on" : "Tracking off"}
             </label>
             <div className="flex flex-col gap-1">
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-muted-foreground">
                 Supplier minimum order (৳)
               </span>
               <Input
@@ -280,7 +285,7 @@ export function SupplierDetailsPage() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-muted-foreground">
                 Your target order (৳)
               </span>
               <Input
@@ -313,7 +318,7 @@ export function SupplierDetailsPage() {
             onChange={(event) => setSettingsNotes(event.target.value)}
           />
           {!canEditSettings ? (
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-muted-foreground">
               Only users with supplier editing permission can change these
               settings.
             </p>
@@ -378,15 +383,13 @@ export function SupplierDetailsPage() {
                     : rows.length === 0
                       ? (
                           <TableRow>
-                            <TableCell colSpan={10}>
-                              <div className="flex flex-col items-center gap-1 py-10 text-center">
-                                <p className="text-sm font-medium text-slate-600">
-                                  No received purchases from this supplier yet
-                                </p>
-                                <p className="text-xs text-slate-400">
-                                  Prices appear once purchases are received.
-                                </p>
-                              </div>
+                            <TableCell colSpan={10} className="py-6">
+                              <EmptyState
+                                icon={PackageSearch}
+                                title="No received purchases from this supplier yet"
+                                description="Prices appear once purchases are received."
+                                className="border-0 bg-transparent"
+                              />
                             </TableCell>
                           </TableRow>
                         )
@@ -395,43 +398,43 @@ export function SupplierDetailsPage() {
                             <TableCell>
                               <div className="flex flex-col">
                                 <span className="font-medium">{row.productName}</span>
-                                <span className="text-xs text-slate-400">
+                                <span className="text-xs text-muted-foreground">
                                   {row.sku ?? "—"}
                                   {row.unitName ? ` · ${row.unitName}` : ""}
                                 </span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-right font-medium">
+                            <TableCell className="text-right font-medium tabular-nums">
                               {formatCurrency(row.latestPrice)}
                             </TableCell>
-                            <TableCell className="text-right text-slate-500">
+                            <TableCell className="text-right text-muted-foreground tabular-nums">
                               {row.latestQuotation !== null ? (
                                 <div className="flex flex-col">
                                   <span>{formatCurrency(row.latestQuotation)}</span>
-                                  <span className="text-xs text-slate-400">
+                                  <span className="text-xs text-muted-foreground">
                                     quoted {formatDate(row.lastObservationDate)}
                                   </span>
                                 </div>
                               ) : (
-                                <span className="text-slate-400">—</span>
+                                <span className="text-muted-foreground">—</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-right text-slate-500">
+                            <TableCell className="text-right text-muted-foreground tabular-nums">
                               {formatCurrency(row.previousPrice)}
                             </TableCell>
                             <TableCell className="text-center">
                               <PriceChangeBadge value={row.priceChangePercent} />
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right tabular-nums">
                               {formatCurrency(row.lowestPrice)}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right tabular-nums">
                               {formatCurrency(row.highestPrice)}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right tabular-nums">
                               {formatCurrency(row.averagePrice)}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right tabular-nums">
                               {formatNumber(row.purchaseCount)}
                             </TableCell>
                             <TableCell>{formatDate(row.lastPurchaseDate)}</TableCell>
@@ -441,7 +444,7 @@ export function SupplierDetailsPage() {
               </Table>
             </div>
           )}
-          <div className="flex items-center justify-end gap-2 text-sm text-slate-500">
+          <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
             <Button
               variant="outline"
               size="sm"
@@ -511,7 +514,7 @@ export function SupplierDetailsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -532,8 +535,8 @@ function BackButton() {
 function StatCard({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="flex flex-col gap-1 rounded-lg border p-3">
-      <span className="text-xs text-slate-500">{label}</span>
-      <span className="text-sm font-semibold">{value ?? "—"}</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-sm font-semibold tabular-nums">{value ?? "—"}</span>
     </div>
   );
 }

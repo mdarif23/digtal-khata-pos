@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { createColumnHelper } from "@tanstack/react-table";
 import { Link } from "react-router";
-import { Plus, Search } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -12,12 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { SearchInput } from "@/components/common/SearchInput";
 import { toast } from "@/components/ui/toast";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSupplierWarrantiesList } from "../hooks/useSupplierWarranties";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { formatDate } from "@/features/reports/utils/reportUtils";
+import { formatDate } from "@/lib/format";
 import { WarrantyDataTable } from "../components/table/WarrantyDataTable";
 import { WarrantyStatusBadge } from "../components/WarrantyStatusBadge";
 import { AddSupplierWarrantyDialog } from "../components/AddSupplierWarrantyDialog";
@@ -83,7 +85,7 @@ export function SupplierWarrantiesPage() {
         cell: ({ row }) => (
           <Link
             to={`/procurement/suppliers/${row.original.supplierId}`}
-            className="font-medium text-emerald-700 hover:underline"
+            className="font-medium text-primary hover:underline"
           >
             {row.original.supplierName}
           </Link>
@@ -94,11 +96,11 @@ export function SupplierWarrantiesPage() {
         header: "Product",
         cell: ({ row }) => (
           <div className="min-w-0">
-            <p className="truncate font-medium text-slate-900">
+            <p className="truncate font-medium text-foreground">
               {row.original.productName}
             </p>
             {row.original.variantOptionLabel ? (
-              <p className="truncate text-xs text-slate-500">
+              <p className="truncate text-xs text-muted-foreground">
                 {row.original.variantOptionLabel}
               </p>
             ) : null}
@@ -109,7 +111,7 @@ export function SupplierWarrantiesPage() {
         id: "purchase",
         header: "Purchase",
         cell: ({ row }) => (
-          <span className="font-mono text-xs text-slate-600">
+          <span className="font-mono text-xs text-muted-foreground">
             #{row.original.purchaseId} / line {row.original.purchaseItemId}
           </span>
         ),
@@ -119,10 +121,10 @@ export function SupplierWarrantiesPage() {
         header: "Coverage",
         cell: ({ row }) => (
           <div className="text-xs">
-            <p className="text-slate-700">
+            <p className="text-foreground">
               {durationLabel(row.original.duration, row.original.durationUnit)}
             </p>
-            <p className="text-slate-500">
+            <p className="text-muted-foreground">
               {formatDate(row.original.startDate)} → {formatDate(row.original.expiryDate)}
             </p>
           </div>
@@ -132,7 +134,7 @@ export function SupplierWarrantiesPage() {
         id: "quantity",
         header: "Claimed / total",
         cell: ({ row }) => (
-          <span className="text-slate-700">
+          <span className="tabular-nums text-foreground">
             {row.original.claimedQuantity} / {row.original.quantity}
           </span>
         ),
@@ -147,11 +149,11 @@ export function SupplierWarrantiesPage() {
         header: "Terms",
         cell: ({ row }) =>
           row.original.terms ? (
-            <p className="max-w-xs truncate text-xs text-slate-500" title={row.original.terms}>
+            <p className="max-w-xs truncate text-xs text-muted-foreground" title={row.original.terms}>
               {row.original.terms}
             </p>
           ) : (
-            <span className="text-slate-400">—</span>
+            <span className="text-muted-foreground">—</span>
           ),
       }),
     ]),
@@ -159,37 +161,30 @@ export function SupplierWarrantiesPage() {
   );
 
   return (
-    <div className="space-y-5 p-5">
+    <PageContainer>
+      <PageHeader
+        title="Supplier Warranties"
+        description="Warranty terms your suppliers committed to on purchased stock."
+        actions={
+          canManage ? (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus aria-hidden="true" />
+              Add supplier warranty
+            </Button>
+          ) : null
+        }
+      />
+
       <Card>
-        <CardHeader>
-          <CardTitle className="flex flex-col gap-3 text-xl sm:flex-row sm:items-center sm:justify-between">
-            <span>Supplier Warranties</span>
-            {canManage && (
-              <Button size="sm" onClick={() => setAddOpen(true)}>
-                <Plus aria-hidden="true" />
-                Add supplier warranty
-              </Button>
-            )}
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Warranty terms your suppliers committed to on purchased stock.
-          </p>
-        </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-            <div className="relative w-full lg:max-w-sm">
-              <Search
-                className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-slate-400"
-                aria-hidden="true"
-              />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search supplier, product…"
-                aria-label="Search supplier warranties"
-                className="pl-8"
-              />
-            </div>
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search supplier, product…"
+              ariaLabel="Search supplier warranties"
+              className="lg:max-w-sm"
+            />
             <Select value={status} onValueChange={(value) => setStatus(value ?? "all")}>
               <SelectTrigger className="lg:w-44" aria-label="Filter by status">
                 <SelectValue />
@@ -221,6 +216,6 @@ export function SupplierWarrantiesPage() {
       />
 
       <AddSupplierWarrantyDialog open={addOpen} onOpenChange={setAddOpen} />
-    </div>
+    </PageContainer>
   );
 }

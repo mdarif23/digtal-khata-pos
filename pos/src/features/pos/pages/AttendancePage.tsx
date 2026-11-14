@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card.js";
+import { PageHeader } from "@/components/common/PageHeader.js";
 import { Button } from "@/components/ui/button.js";
 import { Badge } from "@/components/ui/badge.js";
 import { Skeleton } from "@/components/ui/skeleton.js";

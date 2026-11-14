@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { createColumnHelper } from "@tanstack/react-table";
 import { Link } from "react-router";
-import { FileText, Plus, Search } from "lucide-react";
+import { FileText, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -12,12 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { SearchInput } from "@/components/common/SearchInput";
 import { toast } from "@/components/ui/toast";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useWarrantyClaimsList } from "../hooks/useWarrantyClaims";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { formatCurrency, formatDateTime } from "@/features/reports/utils/reportUtils";
+import { formatCurrency, formatDateTime } from "@/lib/format";
 import { WarrantyDataTable } from "../components/table/WarrantyDataTable";
 import { WarrantyStatusBadge } from "../components/WarrantyStatusBadge";
 import { ClaimCreationDialog } from "../components/ClaimCreationDialog";
@@ -78,7 +80,7 @@ export function WarrantyClaimsPage() {
         cell: ({ row }) => (
           <Link
             to={`/warranty/claims/${row.original.id}`}
-            className="font-mono text-sm font-semibold text-emerald-700 hover:underline"
+            className="font-mono text-sm font-semibold text-primary hover:underline"
           >
             {row.original.claimNumber}
           </Link>
@@ -103,11 +105,11 @@ export function WarrantyClaimsPage() {
         header: "Customer",
         cell: ({ row }) => (
           <div className="min-w-0">
-            <p className="truncate text-slate-800">
+            <p className="truncate text-foreground">
               {row.original.customerName ?? "Walk-in"}
             </p>
             {row.original.customerPhone ? (
-              <p className="truncate text-xs text-slate-500">
+              <p className="truncate text-xs text-muted-foreground">
                 {row.original.customerPhone}
               </p>
             ) : null}
@@ -119,16 +121,16 @@ export function WarrantyClaimsPage() {
         header: "Product",
         cell: ({ row }) => (
           <div className="min-w-0">
-            <p className="truncate font-medium text-slate-900">
+            <p className="truncate font-medium text-foreground">
               {row.original.productName}
             </p>
             {row.original.variantOptionLabel ? (
-              <p className="truncate text-xs text-slate-500">
+              <p className="truncate text-xs text-muted-foreground">
                 {row.original.variantOptionLabel}
               </p>
             ) : null}
             {row.original.serialNumber ? (
-              <p className="truncate font-mono text-xs text-slate-400">
+              <p className="truncate font-mono text-xs text-muted-foreground">
                 SN: {row.original.serialNumber}
               </p>
             ) : null}
@@ -141,7 +143,7 @@ export function WarrantyClaimsPage() {
         cell: ({ row }) => (
           <Link
             to={`/warranty/registry/${row.original.warrantyId}`}
-            className="font-mono text-xs text-slate-600 hover:underline"
+            className="font-mono text-xs text-muted-foreground hover:underline"
           >
             {row.original.warrantyNumber}
           </Link>
@@ -150,13 +152,17 @@ export function WarrantyClaimsPage() {
       columnHelper.accessor("repairCost", {
         id: "repairCost",
         header: "Repair cost",
-        cell: ({ row }) => formatCurrency(row.original.repairCost),
+        cell: ({ row }) => (
+          <span className="block tabular-nums">
+            {formatCurrency(row.original.repairCost)}
+          </span>
+        ),
       }),
       columnHelper.accessor("createdAt", {
         id: "createdAt",
         header: "Filed",
         cell: ({ row }) => (
-          <span className="text-xs whitespace-nowrap text-slate-500">
+          <span className="text-xs whitespace-nowrap text-muted-foreground">
             {formatDateTime(row.original.createdAt)}
           </span>
         ),
@@ -180,22 +186,21 @@ export function WarrantyClaimsPage() {
   );
 
   return (
-    <div className="space-y-5 p-5">
+    <PageContainer>
+      <PageHeader
+        title="Warranty Claims"
+        description="The workshop queue — inspect, approve, repair and hand back."
+        actions={
+          hasPermission("warranty.claim.create") ? (
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus aria-hidden="true" />
+              Create claim
+            </Button>
+          ) : null
+        }
+      />
+
       <Card>
-        <CardHeader>
-          <CardTitle className="flex flex-col gap-3 text-xl sm:flex-row sm:items-center sm:justify-between">
-            <span>Warranty Claims</span>
-            {hasPermission("warranty.claim.create") && (
-              <Button size="sm" onClick={() => setCreateOpen(true)}>
-                <Plus aria-hidden="true" />
-                Create claim
-              </Button>
-            )}
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            The workshop queue — inspect, approve, repair and hand back.
-          </p>
-        </CardHeader>
         <CardContent className="space-y-3">
           {/* Status filter tabs */}
           <div
@@ -214,8 +219,8 @@ export function WarrantyClaimsPage() {
                   onClick={() => setStatus(option.value)}
                   className={`inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
                     active
-                      ? "bg-slate-900 text-white shadow-xs"
-                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      ? "bg-primary text-primary-foreground shadow-xs"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   }`}
                 >
                   {option.label}
@@ -225,19 +230,13 @@ export function WarrantyClaimsPage() {
           </div>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-            <div className="relative w-full lg:max-w-sm">
-              <Search
-                className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-slate-400"
-                aria-hidden="true"
-              />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search claim, warranty, customer, product…"
-                aria-label="Search claims"
-                className="pl-8"
-              />
-            </div>
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search claim, warranty, customer, product…"
+              ariaLabel="Search claims"
+              className="lg:max-w-sm"
+            />
             <Select value={claimType} onValueChange={(value) => setClaimType(value ?? "all")}>
               <SelectTrigger className="lg:w-48" aria-label="Filter by claim type">
                 <SelectValue />
@@ -270,6 +269,6 @@ export function WarrantyClaimsPage() {
       />
 
       <ClaimCreationDialog open={createOpen} onOpenChange={setCreateOpen} />
-    </div>
+    </PageContainer>
   );
 }

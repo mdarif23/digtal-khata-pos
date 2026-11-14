@@ -2,10 +2,36 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { ArrowLeft, PackageOpen, Truck } from "lucide-react";
 import { toast } from "@/components/ui/toast";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
-import { StatusBadge } from "@/features/reports/components/StatusBadge";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { Skeleton } from "@/components/ui/skeleton";
 import { usePermissions } from "@/hooks/usePermissions";
-import { formatCurrency, formatDateTime } from "@/features/reports/utils/reportUtils";
+import { formatCurrency, formatDateTime } from "@/lib/format";
 import {
   useCancelOrder,
   useConfirmOrder,
@@ -17,7 +43,7 @@ import {
   useReadyToShip,
   useStartProcessing,
 } from "../hooks/useOnlineOrders";
-import { OrderStatusBadge } from "../components/OrderStatusBadge";
+import { OrderStateBadge, OrderStatusBadge } from "../components/OrderStatusBadge";
 import { OrderTimeline } from "../components/OrderTimeline";
 import { PackagingSection } from "../components/PackagingSection";
 import { ShippingSection } from "../components/ShippingSection";
@@ -26,8 +52,8 @@ import { CHANNEL_LABELS, type SalesChannel } from "../types/onlineOrders.types";
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-4 py-1 text-sm">
-      <span className="text-slate-500">{label}</span>
-      <span className="text-right font-medium text-slate-800">{value}</span>
+      <span className="text-muted-foreground">{label}</span>
+      <span className="text-right font-medium text-foreground">{value}</span>
     </div>
   );
 }
@@ -62,34 +88,36 @@ export function OnlineOrderDetailsPage() {
 
   if (orderQuery.isLoading) {
     return (
-      <div className="space-y-4 p-6">
-        <div className="h-8 w-64 animate-pulse rounded bg-slate-100" />
-        <div className="h-48 animate-pulse rounded-lg bg-slate-100" />
-        <div className="h-64 animate-pulse rounded-lg bg-slate-100" />
-      </div>
+      <PageContainer width="narrow">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-48 rounded-lg" />
+        <Skeleton className="h-64 rounded-lg" />
+      </PageContainer>
     );
   }
 
   if (orderQuery.isError || !order) {
     return (
-      <div className="p-6">
+      <PageContainer width="narrow">
         <div
           role="alert"
-          className="rounded-lg border border-rose-200 bg-rose-50 p-6 text-center"
+          className="rounded-lg border border-destructive/30 bg-destructive/10 p-6 text-center"
         >
-          <p className="font-medium text-rose-700">
+          <p className="font-medium text-destructive">
             {orderQuery.isError
               ? "Unable to load this order."
               : "Order not found."}
           </p>
-          <Link
-            to="/online-orders"
-            className="mt-3 inline-block rounded-md border border-rose-300 px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-100"
+          <Button
+            render={<Link to="/online-orders" />}
+            variant="outline"
+            size="sm"
+            className="mt-3"
           >
             Back to online orders
-          </Link>
+          </Button>
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
@@ -118,40 +146,43 @@ export function OnlineOrderDetailsPage() {
   };
 
   return (
-    <div className="space-y-5 p-6">
-      <Link
-        to="/online-orders"
-        className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+    <PageContainer>
+      <Button
+        render={<Link to="/online-orders" />}
+        variant="ghost"
+        size="sm"
+        className="w-fit"
       >
-        <ArrowLeft className="h-4 w-4" /> Online orders
-      </Link>
+        <ArrowLeft aria-hidden="true" className="size-4" />
+        Online orders
+      </Button>
 
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-800">
-            {order.invoiceNumber}
-          </h1>
-          <p className="text-sm text-slate-500">
+      <PageHeader
+        title={order.invoiceNumber}
+        description={
+          <>
             {CHANNEL_LABELS[order.channel as SalesChannel] ?? order.channel}
             {order.externalOrderNumber
               ? ` · external #${order.externalOrderNumber}`
               : ""}{" "}
             · {formatDateTime(order.createdAt)}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge status={status} />
-          <StatusBadge status={order.paymentStatus} />
-          <OrderStatusBadge status={fulfillment} />
-        </div>
-      </div>
+          </>
+        }
+        actions={
+          <>
+            <OrderStateBadge status={status} />
+            <OrderStateBadge status={order.paymentStatus} />
+            <OrderStatusBadge status={fulfillment} />
+          </>
+        }
+      />
 
       {/* Workflow actions */}
       {!isCancelled ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-4 py-3">
           {isPending && hasPermission("orders.confirm") ? (
-            <button
+            <Button
               type="button"
               disabled={confirmOrder.isPending}
               onClick={() =>
@@ -159,22 +190,21 @@ export function OnlineOrderDetailsPage() {
                   confirmOrder.mutateAsync(orderId),
                 )
               }
-              className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
             >
               Confirm order
-            </button>
+            </Button>
           ) : null}
           {isPending && hasPermission("orders.cancel") ? (
-            <button
+            <Button
               type="button"
+              variant="destructive"
               onClick={() => setCancelOpen(true)}
-              className="rounded-md border border-rose-300 px-3 py-1.5 text-sm text-rose-600 hover:bg-rose-50"
             >
               Cancel order
-            </button>
+            </Button>
           ) : null}
           {isCompleted && fulfillment === "confirmed" && hasPermission("orders.process") ? (
-            <button
+            <Button
               type="button"
               disabled={startProcessing.isPending}
               onClick={() =>
@@ -182,15 +212,15 @@ export function OnlineOrderDetailsPage() {
                   startProcessing.mutateAsync(orderId),
                 )
               }
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
-              <PackageOpen className="mr-1 inline h-4 w-4" /> Start processing
-            </button>
+              <PackageOpen aria-hidden="true" className="size-4" />
+              Start processing
+            </Button>
           ) : null}
           {isCompleted &&
           ["processing", "packed"].includes(fulfillment) &&
           hasPermission("orders.ready_to_ship") ? (
-            <button
+            <Button
               type="button"
               disabled={readyToShip.isPending || (snapshot?.packages.length ?? 0) === 0}
               title={
@@ -203,13 +233,12 @@ export function OnlineOrderDetailsPage() {
                   readyToShip.mutateAsync(orderId),
                 )
               }
-              className="rounded-md bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
             >
               Mark as ready to ship
-            </button>
+            </Button>
           ) : null}
           {isCompleted && fulfillment === "shipped" && hasPermission("orders.deliver") ? (
-            <button
+            <Button
               type="button"
               disabled={deliverOrder.isPending}
               onClick={() =>
@@ -222,13 +251,13 @@ export function OnlineOrderDetailsPage() {
                   }),
                 )
               }
-              className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
             >
-              <Truck className="mr-1 inline h-4 w-4" /> Mark delivered
-            </button>
+              <Truck aria-hidden="true" className="size-4" />
+              Mark delivered
+            </Button>
           ) : null}
           {unpaid && hasPermission("orders.mark_paid") ? (
-            <button
+            <Button
               type="button"
               disabled={markPaid.isPending}
               onClick={() => {
@@ -241,23 +270,22 @@ export function OnlineOrderDetailsPage() {
                   markPaid.mutateAsync({ orderId, payload: { method: "cash" } }),
                 );
               }}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
               Record payment collection
-            </button>
+            </Button>
           ) : null}
           {isCompleted && fulfillment === "shipped" && unpaid ? (
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={() => setCodOpen(true)}
-              className="rounded-md border border-emerald-300 px-3 py-1.5 text-sm text-emerald-700 hover:bg-emerald-50"
             >
               Collect COD on delivery
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+        <div className="rounded-lg border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
           This order is cancelled.
         </div>
       )}
@@ -265,8 +293,8 @@ export function OnlineOrderDetailsPage() {
       <div className="grid gap-5 lg:grid-cols-3">
         {/* Left column: overview, customer, items */}
         <div className="space-y-5 lg:col-span-2">
-          <section className="rounded-lg border border-slate-200 bg-white">
-            <h2 className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">
+          <section className="rounded-lg border border-border bg-card">
+            <h2 className="border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
               Order overview
             </h2>
             <div className="grid grid-cols-1 gap-x-8 px-4 py-3 md:grid-cols-2">
@@ -282,29 +310,38 @@ export function OnlineOrderDetailsPage() {
               <DetailRow label="Location" value={order.locationName ?? "—"} />
               <DetailRow
                 label="Subtotal"
-                value={formatCurrency(order.subtotal)}
+                value={<span className="tabular-nums">{formatCurrency(order.subtotal)}</span>}
               />
-              <DetailRow label="Discount" value={formatCurrency(order.discount)} />
-              <DetailRow label="VAT" value={formatCurrency(order.vat)} />
+              <DetailRow
+                label="Discount"
+                value={<span className="tabular-nums">{formatCurrency(order.discount)}</span>}
+              />
+              <DetailRow
+                label="VAT"
+                value={<span className="tabular-nums">{formatCurrency(order.vat)}</span>}
+              />
               <DetailRow
                 label="Delivery charge"
-                value={formatCurrency(order.deliveryFee)}
+                value={<span className="tabular-nums">{formatCurrency(order.deliveryFee)}</span>}
               />
               <DetailRow
                 label="Order total"
-                value={formatCurrency(order.finalTotal)}
+                value={<span className="tabular-nums">{formatCurrency(order.finalTotal)}</span>}
               />
-              <DetailRow label="Due" value={formatCurrency(order.dueAmount)} />
+              <DetailRow
+                label="Due"
+                value={<span className="tabular-nums">{formatCurrency(order.dueAmount)}</span>}
+              />
             </div>
             {order.note ? (
-              <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+              <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
                 Note: {order.note}
               </p>
             ) : null}
           </section>
 
-          <section className="rounded-lg border border-slate-200 bg-white">
-            <h2 className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">
+          <section className="rounded-lg border border-border bg-card">
+            <h2 className="border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
               Customer &amp; shipping address
             </h2>
             <div className="grid grid-cols-1 gap-x-8 px-4 py-3 md:grid-cols-2">
@@ -320,8 +357,8 @@ export function OnlineOrderDetailsPage() {
                 }
               />
               <div className="py-1 text-sm">
-                <span className="text-slate-500">Shipping address</span>
-                <p className="mt-0.5 font-medium text-slate-800">
+                <span className="text-muted-foreground">Shipping address</span>
+                <p className="mt-0.5 font-medium text-foreground">
                   {order.shippingAddress
                     ? [
                         order.shippingAddress,
@@ -334,66 +371,66 @@ export function OnlineOrderDetailsPage() {
                 </p>
               </div>
               <div className="py-1 text-sm">
-                <span className="text-slate-500">Delivery instructions</span>
-                <p className="mt-0.5 font-medium text-slate-800">
+                <span className="text-muted-foreground">Delivery instructions</span>
+                <p className="mt-0.5 font-medium text-foreground">
                   {order.deliveryInstructions ?? "—"}
                 </p>
               </div>
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-            <h2 className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">
+          <section className="overflow-hidden rounded-lg border border-border bg-card">
+            <h2 className="border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
               Ordered products
             </h2>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
-                  <th className="px-4 py-2">Product</th>
-                  <th className="px-4 py-2">SKU</th>
-                  <th className="px-4 py-2 text-center">Qty</th>
-                  <th className="px-4 py-2 text-right">Unit price</th>
-                  <th className="px-4 py-2 text-right">Line total</th>
-                  <th className="px-4 py-2 text-center">Stock here</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead className="px-4">Product</TableHead>
+                  <TableHead className="px-4">SKU</TableHead>
+                  <TableHead className="px-4 text-center">Qty</TableHead>
+                  <TableHead className="px-4 text-right">Unit price</TableHead>
+                  <TableHead className="px-4 text-right">Line total</TableHead>
+                  <TableHead className="px-4 text-center">Stock here</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {order.items.map((item) => {
                   const stock = snapshot?.items.find(
                     (i) => i.saleItemId === item.id,
                   )?.stockAtLocation;
                   return (
-                    <tr key={item.id} className="border-t border-slate-100">
-                      <td className="px-4 py-2 font-medium text-slate-800">
+                    <TableRow key={item.id}>
+                      <TableCell className="px-4 font-medium text-foreground">
                         {item.variantName || item.productName}
                         {item.variantOptions && item.variantName ? (
-                          <span className="block text-xs font-normal text-slate-500">
+                          <span className="block text-xs font-normal text-muted-foreground">
                             {item.productName} · {item.variantOptions}
                           </span>
                         ) : null}
-                      </td>
-                      <td className="px-4 py-2 text-slate-500">{item.sku}</td>
-                      <td className="px-4 py-2 text-center">{item.quantity}</td>
-                      <td className="px-4 py-2 text-right">
+                      </TableCell>
+                      <TableCell className="px-4 text-muted-foreground">{item.sku}</TableCell>
+                      <TableCell className="px-4 text-center tabular-nums">{item.quantity}</TableCell>
+                      <TableCell className="px-4 text-right tabular-nums">
                         {formatCurrency(item.sellingPrice)}
-                      </td>
-                      <td className="px-4 py-2 text-right">
+                      </TableCell>
+                      <TableCell className="px-4 text-right tabular-nums">
                         {formatCurrency(item.lineTotal)}
-                      </td>
-                      <td className="px-4 py-2 text-center">
+                      </TableCell>
+                      <TableCell className="px-4 text-center tabular-nums">
                         {stock == null ? (
-                          <span className="text-slate-400">—</span>
+                          <span className="text-muted-foreground">—</span>
                         ) : stock < item.quantity ? (
-                          <span className="font-medium text-rose-600">{stock}</span>
+                          <span className="font-medium text-destructive">{stock}</span>
                         ) : (
-                          <span className="text-emerald-600">{stock}</span>
+                          <span className="text-success">{stock}</span>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </section>
 
           <PackagingSection
@@ -413,8 +450,8 @@ export function OnlineOrderDetailsPage() {
 
         {/* Right column: timeline */}
         <div className="space-y-5">
-          <section className="rounded-lg border border-slate-200 bg-white">
-            <h2 className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">
+          <section className="rounded-lg border border-border bg-card">
+            <h2 className="border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
               Order timeline
             </h2>
             <div className="px-4 py-4">
@@ -446,88 +483,87 @@ export function OnlineOrderDetailsPage() {
       />
 
       {/* COD collection dialog */}
-      {codOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setCodOpen(false);
-          }}
-        >
-          <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl">
-            <h3 className="text-base font-semibold text-slate-800">
-              Collect cash on delivery
-            </h3>
-            <p className="mt-1 text-sm text-slate-500">
+      <Dialog
+        open={codOpen}
+        onOpenChange={(open) => {
+          if (!open) setCodOpen(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Collect cash on delivery</DialogTitle>
+            <DialogDescription>
               Due: {formatCurrency(order.dueAmount)}. Recording the collection
               writes a payment ledger row — it does not change the fulfillment
               state.
-            </p>
-            <label className="mt-4 flex flex-col gap-1 text-xs font-medium text-slate-500">
-              Collection method
-              <select
-                value={codMethod}
-                onChange={(e) =>
-                  setCodMethod(e.target.value as (typeof COD_METHODS)[number])
-                }
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-              >
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
+            Collection method
+            <Select
+              value={codMethod}
+              onValueChange={(value) =>
+                setCodMethod(value as (typeof COD_METHODS)[number])
+              }
+            >
+              <SelectTrigger aria-label="Collection method" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
                 {COD_METHODS.map((m) => (
-                  <option key={m} value={m}>
+                  <SelectItem key={m} value={m}>
                     {m}
-                  </option>
+                  </SelectItem>
                 ))}
-              </select>
-            </label>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setCodOpen(false)}
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={markPaid.isPending || deliverOrder.isPending}
-                onClick={async () => {
-                  setCodOpen(false);
-                  await onAction("COD payment collected", () =>
-                    deliverOrder.mutateAsync({
-                      orderId,
-                      payload: {
-                        codCollected: true,
-                        codMethod,
-                      },
-                    }),
-                  );
-                }}
-                className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-              >
-                Collect &amp; mark delivered
-              </button>
-              <button
-                type="button"
-                disabled={markPaid.isPending || deliverOrder.isPending}
-                onClick={async () => {
-                  setCodOpen(false);
-                  await onAction("Payment recorded", () =>
-                    markPaid.mutateAsync({
-                      orderId,
-                      payload: { method: codMethod },
-                    }),
-                  );
-                }}
-                className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                Record payment only
-              </button>
-            </div>
+              </SelectContent>
+            </Select>
           </div>
-        </div>
-      ) : null}
-    </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCodOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={markPaid.isPending || deliverOrder.isPending}
+              onClick={async () => {
+                setCodOpen(false);
+                await onAction("Payment recorded", () =>
+                  markPaid.mutateAsync({
+                    orderId,
+                    payload: { method: codMethod },
+                  }),
+                );
+              }}
+            >
+              Record payment only
+            </Button>
+            <Button
+              type="button"
+              disabled={markPaid.isPending || deliverOrder.isPending}
+              onClick={async () => {
+                setCodOpen(false);
+                await onAction("COD payment collected", () =>
+                  deliverOrder.mutateAsync({
+                    orderId,
+                    payload: {
+                      codCollected: true,
+                      codMethod,
+                    },
+                  }),
+                );
+              }}
+            >
+              Collect &amp; mark delivered
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </PageContainer>
   );
 }
 

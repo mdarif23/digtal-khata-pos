@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
 import { getErrorMessage } from "@/utils/getErrorMessage";
+import { formatDate } from "@/lib/format";
 import { useWarrantyCertificate } from "../hooks/useWarranties";
 import { printWarrantyCertificate } from "../lib/printWarrantyCertificate";
 import { durationLabel } from "../lib/warranty-format";
@@ -22,25 +23,13 @@ interface WarrantyCertificateDialogProps {
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-1.5 last:border-0">
-      <span className="text-xs text-slate-500">{label}</span>
-      <span className="text-right text-sm font-medium text-slate-800">
+    <div className="flex items-start justify-between gap-4 border-b border-border py-1.5 last:border-0">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-right text-sm font-medium text-foreground">
         {value}
       </span>
     </div>
   );
-}
-
-function toDateLabel(value: string | null | undefined): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : date.toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      });
 }
 
 /**
@@ -81,27 +70,27 @@ export function WarrantyCertificateDialog({
         </DialogHeader>
 
         {certificate.isLoading || !data || !warranty ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
-            <Loader2 className="size-5 animate-spin text-emerald-600" aria-hidden="true" />
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+            <Loader2 className="size-5 animate-spin text-primary" aria-hidden="true" />
             Loading certificate…
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="rounded-xl border-2 border-teal-700/60 p-4">
-              <div className="border-b-2 border-teal-700/60 pb-3 text-center">
-                <p className="text-lg font-semibold text-slate-900">
+            <div className="rounded-xl border-2 border-primary/60 p-4">
+              <div className="border-b-2 border-primary/60 pb-3 text-center">
+                <p className="text-lg font-semibold text-foreground">
                   {data.branding.name ?? "Warranty Certificate"}
                 </p>
                 {data.branding.tagline ? (
-                  <p className="text-xs text-slate-500 italic">
+                  <p className="text-xs text-muted-foreground italic">
                     {data.branding.tagline}
                   </p>
                 ) : null}
               </div>
-              <p className="mt-3 text-center text-xs font-semibold tracking-[0.3em] text-teal-700 uppercase">
+              <p className="mt-3 text-center text-xs font-semibold tracking-[0.3em] text-primary uppercase">
                 Warranty Certificate
               </p>
-              <p className="mt-1 text-center font-mono text-sm font-bold text-slate-900">
+              <p className="mt-1 text-center font-mono text-sm font-bold text-foreground">
                 {warranty.warrantyNumber}
               </p>
               <div className="mt-3">
@@ -128,8 +117,8 @@ export function WarrantyCertificateDialog({
                   value={`${durationLabel(warranty.duration, warranty.durationUnit)} · ${warranty.warrantyType}`}
                 />
                 <Fact label="Provider" value={warranty.provider ?? "Shop warranty"} />
-                <Fact label="Starts" value={toDateLabel(warranty.startDate)} />
-                <Fact label="Expires" value={toDateLabel(warranty.expiryDate)} />
+                <Fact label="Starts" value={formatDate(warranty.startDate)} />
+                <Fact label="Expires" value={formatDate(warranty.expiryDate)} />
                 <Fact
                   label="Covered quantity"
                   value={`${warranty.quantity}${warranty.returnedQuantity ? ` (returned ${warranty.returnedQuantity})` : ""}`}

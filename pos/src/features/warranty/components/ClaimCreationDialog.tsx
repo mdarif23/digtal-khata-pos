@@ -27,6 +27,7 @@ import { getErrorMessage } from "@/utils/getErrorMessage";
 import { useCreateWarrantyClaim } from "../hooks/useWarrantyClaims";
 import { useWarrantyLookup } from "../hooks/useWarranties";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { formatDate } from "@/lib/format";
 import { durationLabel } from "../lib/warranty-format";
 import type {
   WarrantyClaimRow,
@@ -77,25 +78,25 @@ function todayInputValue(): string {
 function EligibilityNotice({ warranty }: { warranty: WarrantyListRow }) {
   if (warranty.status === "expired") {
     return (
-      <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
         This warranty expired
-        {warranty.expiryDate ? ` on ${new Date(warranty.expiryDate).toLocaleDateString()}` : ""}.
+        {warranty.expiryDate ? ` on ${formatDate(warranty.expiryDate)}` : ""}.
         You can still file the claim — the shop decides whether to honour it.
       </p>
     );
   }
   if (BLOCKED_STATUSES.has(warranty.status)) {
     return (
-      <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+      <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
         This warranty is {warranty.status} — no new claims can be filed against it.
       </p>
     );
   }
   return (
-    <p className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+    <p className="flex items-center gap-1.5 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
       <ShieldCheck className="size-3.5" aria-hidden="true" />
       Warranty active — eligible for a claim
-      {warranty.expiryDate ? ` until ${new Date(warranty.expiryDate).toLocaleDateString()}` : ""}.
+      {warranty.expiryDate ? ` until ${formatDate(warranty.expiryDate)}` : ""}.
     </p>
   );
 }
@@ -177,7 +178,7 @@ export function ClaimCreationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Create warranty claim</DialogTitle>
           <DialogDescription>
@@ -208,7 +209,7 @@ export function ClaimCreationDialog({
               </Select>
               <div className="relative flex-1">
                 <Search
-                  className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-slate-400"
+                  className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
                   aria-hidden="true"
                 />
                 <Input
@@ -222,24 +223,24 @@ export function ClaimCreationDialog({
             </div>
 
             {query.trim().length > 0 && query.trim().length < 3 && (
-              <p className="text-xs text-slate-400">Type at least 3 characters…</p>
+              <p className="text-xs text-muted-foreground">Type at least 3 characters…</p>
             )}
             {lookup.isFetching && (
-              <p className="flex items-center gap-2 text-xs text-slate-500">
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
                 Searching warranties…
               </p>
             )}
             {lookup.isError && (
-              <p className="text-xs text-rose-600">{getErrorMessage(lookup.error)}</p>
+              <p className="text-xs text-destructive">{getErrorMessage(lookup.error)}</p>
             )}
             {lookup.data && lookup.data.length === 0 && debouncedQuery.length >= 3 && (
-              <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+              <p className="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
                 No warranties matched this {activeType.label.toLowerCase()}.
               </p>
             )}
             {lookup.data && lookup.data.length > 0 && (
-              <ul className="max-h-56 space-y-1.5 overflow-y-auto rounded-lg border border-slate-200 p-1.5">
+              <ul className="max-h-56 space-y-1.5 overflow-y-auto rounded-lg border border-border p-1.5">
                 {lookup.data.map((row) => (
                   <li key={row.id}>
                     <button
@@ -250,19 +251,19 @@ export function ClaimCreationDialog({
                       }}
                       className={`w-full rounded-md border px-3 py-2 text-left text-xs transition ${
                         selected?.id === row.id
-                          ? "border-emerald-300 bg-emerald-50"
-                          : "border-transparent hover:bg-slate-50"
+                          ? "border-success/40 bg-success/10"
+                          : "border-transparent hover:bg-muted"
                       }`}
                     >
                       <span className="flex items-center justify-between gap-2">
-                        <span className="font-mono font-semibold text-slate-900">
+                        <span className="font-mono font-semibold text-foreground">
                           {row.warrantyNumber}
                         </span>
-                        <span className="font-medium capitalize text-slate-600">
+                        <span className="font-medium capitalize text-muted-foreground">
                           {row.status}
                         </span>
                       </span>
-                      <span className="mt-0.5 block truncate text-slate-500">
+                      <span className="mt-0.5 block truncate text-muted-foreground">
                         {row.productName}
                         {row.variantOptionLabel ? ` · ${row.variantOptionLabel}` : ""}
                         {row.customerName ? ` · ${row.customerName}` : ""}
@@ -279,15 +280,15 @@ export function ClaimCreationDialog({
         {/* Step 2 — eligibility + claim details */}
         {activeWarranty && (
           <div className="space-y-3">
-            <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-xs">
-              <p className="font-mono text-sm font-semibold text-slate-900">
+            <div className="rounded-lg border border-border bg-muted/60 px-3 py-2.5 text-xs">
+              <p className="font-mono text-sm font-semibold text-foreground">
                 {activeWarranty.warrantyNumber}
               </p>
-              <p className="mt-0.5 text-slate-600">
+              <p className="mt-0.5 text-muted-foreground">
                 {activeWarranty.productName}
                 {activeWarranty.variantOptionLabel ? ` · ${activeWarranty.variantOptionLabel}` : ""}
               </p>
-              <p className="text-slate-500">
+              <p className="text-muted-foreground">
                 {activeWarranty.customerName ?? "Walk-in"} ·{" "}
                 {durationLabel(activeWarranty.duration, activeWarranty.durationUnit)} ·{" "}
                 Qty {activeWarranty.quantity}
@@ -353,7 +354,7 @@ export function ClaimCreationDialog({
               </div>
 
               {serverError && (
-                <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">
+                <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
                   {serverError}
                 </p>
               )}

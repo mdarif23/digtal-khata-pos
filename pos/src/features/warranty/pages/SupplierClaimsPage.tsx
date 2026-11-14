@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { createColumnHelper } from "@tanstack/react-table";
 import { Link } from "react-router";
-import { FileText, Search } from "lucide-react";
+import { FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -12,11 +11,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { SearchInput } from "@/components/common/SearchInput";
 import { toast } from "@/components/ui/toast";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { useSupplierClaimsList } from "../hooks/useSupplierWarranties";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { formatCurrency, formatDateTime } from "@/features/reports/utils/reportUtils";
+import { formatCurrency, formatDateTime } from "@/lib/format";
 import { WarrantyDataTable } from "../components/table/WarrantyDataTable";
 import { WarrantyStatusBadge } from "../components/WarrantyStatusBadge";
 import { SUPPLIER_CLAIM_STATUS_OPTIONS } from "../lib/warranty-format";
@@ -69,7 +71,7 @@ export function SupplierClaimsPage() {
         cell: ({ row }) => (
           <Link
             to={`/warranty/supplier-claims/${row.original.id}`}
-            className="font-mono text-sm font-semibold text-emerald-700 hover:underline"
+            className="font-mono text-sm font-semibold text-primary hover:underline"
           >
             {row.original.claimNumber}
           </Link>
@@ -84,7 +86,7 @@ export function SupplierClaimsPage() {
         id: "supplier",
         header: "Supplier",
         cell: ({ row }) => (
-          <span className="text-slate-800">{row.original.supplierName}</span>
+          <span className="text-foreground">{row.original.supplierName}</span>
         ),
       }),
       columnHelper.display({
@@ -92,11 +94,11 @@ export function SupplierClaimsPage() {
         header: "Product",
         cell: ({ row }) => (
           <div className="min-w-0">
-            <p className="truncate font-medium text-slate-900">
+            <p className="truncate font-medium text-foreground">
               {row.original.productName}
             </p>
             {row.original.variantOptionLabel ? (
-              <p className="truncate text-xs text-slate-500">
+              <p className="truncate text-xs text-muted-foreground">
                 {row.original.variantOptionLabel}
               </p>
             ) : null}
@@ -106,28 +108,36 @@ export function SupplierClaimsPage() {
       columnHelper.accessor("defectiveQuantity", {
         id: "defective",
         header: "Defective",
-        cell: ({ row }) => <span className="text-slate-700">{row.original.defectiveQuantity}</span>,
+        cell: ({ row }) => <span className="tabular-nums text-foreground">{row.original.defectiveQuantity}</span>,
       }),
       columnHelper.accessor("replacementQuantity", {
         id: "replacement",
         header: "Replaced",
-        cell: ({ row }) => <span className="text-slate-700">{row.original.replacementQuantity}</span>,
+        cell: ({ row }) => <span className="tabular-nums text-foreground">{row.original.replacementQuantity}</span>,
       }),
       columnHelper.accessor("recoveryAmount", {
         id: "recovery",
         header: "Recovered",
-        cell: ({ row }) => formatCurrency(row.original.recoveryAmount),
+        cell: ({ row }) => (
+          <span className="block tabular-nums">
+            {formatCurrency(row.original.recoveryAmount)}
+          </span>
+        ),
       }),
       columnHelper.accessor("costAmount", {
         id: "cost",
         header: "Shop cost",
-        cell: ({ row }) => formatCurrency(row.original.costAmount),
+        cell: ({ row }) => (
+          <span className="block tabular-nums">
+            {formatCurrency(row.original.costAmount)}
+          </span>
+        ),
       }),
       columnHelper.accessor("createdAt", {
         id: "createdAt",
         header: "Filed",
         cell: ({ row }) => (
-          <span className="text-xs whitespace-nowrap text-slate-500">
+          <span className="text-xs whitespace-nowrap text-muted-foreground">
             {formatDateTime(row.original.createdAt)}
           </span>
         ),
@@ -151,29 +161,22 @@ export function SupplierClaimsPage() {
   );
 
   return (
-    <div className="space-y-5 p-5">
+    <PageContainer>
+      <PageHeader
+        title="Supplier Claims"
+        description="Defect claims pushed back to your suppliers, and what they returned."
+      />
+
       <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">Supplier Claims</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Defect claims pushed back to your suppliers, and what they returned.
-          </p>
-        </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-            <div className="relative w-full lg:max-w-sm">
-              <Search
-                className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-slate-400"
-                aria-hidden="true"
-              />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search claim, supplier, product…"
-                aria-label="Search supplier claims"
-                className="pl-8"
-              />
-            </div>
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search claim, supplier, product…"
+              ariaLabel="Search supplier claims"
+              className="lg:max-w-sm"
+            />
             <Select value={status} onValueChange={(value) => setStatus(value ?? "all")}>
               <SelectTrigger className="lg:w-52" aria-label="Filter by status">
                 <SelectValue />
@@ -203,6 +206,6 @@ export function SupplierClaimsPage() {
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
       />
-    </div>
+    </PageContainer>
   );
 }

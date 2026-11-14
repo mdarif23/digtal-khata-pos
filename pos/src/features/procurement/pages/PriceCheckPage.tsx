@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
-import { Pencil, ScanSearch } from "lucide-react";
+import { PackageSearch, Pencil, ScanSearch, X } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -44,6 +44,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { SupplierDialog } from "@/features/Contacts/components/suppliers/SuppliersDialog";
 import useProductStore from "@/features/products/useProductStore";
 import { useContactStore } from "@/features/Contacts/useContactStore";
@@ -53,7 +56,7 @@ import { createEntityPromiseToast } from "@/lib/toast-utils";
 import {
   formatCurrency,
   formatDate,
-} from "@/features/reports/utils/reportUtils";
+} from "@/lib/format";
 import { perUnitPrice } from "../utils/priceMath";
 import {
   useCreateObservation,
@@ -282,7 +285,12 @@ export function PriceCheckPage() {
   const selectedVariantId = createForm.watch("variantId");
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6">
+    <PageContainer>
+      <PageHeader
+        title="Price Check"
+        description="Market quotations recorded by hand — never counted as purchases."
+      />
+
       {canManage ? (
         <Card>
           <CardHeader>
@@ -322,7 +330,7 @@ export function PriceCheckPage() {
                           </SelectTrigger>
                           <SelectContent>
                             {filteredVariantOptions.length === 0 ? (
-                              <div className="px-3 py-2 text-sm text-slate-400">
+                              <div className="px-3 py-2 text-sm text-muted-foreground">
                                 No matching variants
                               </div>
                             ) : (
@@ -341,7 +349,7 @@ export function PriceCheckPage() {
                     )}
                   />
                   {selectedVariantId ? (
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-muted-foreground">
                       Comparable unit: {unitNameFor(selectedVariantId) ?? "—"} —
                       packaged quotes are normalized per unit automatically.
                     </p>
@@ -369,7 +377,7 @@ export function PriceCheckPage() {
                             </SelectTrigger>
                             <SelectContent>
                               {suppliers.length === 0 ? (
-                                <div className="px-3 py-2 text-sm text-slate-400">
+                                <div className="px-3 py-2 text-sm text-muted-foreground">
                                   No suppliers yet
                                 </div>
                               ) : (
@@ -595,16 +603,13 @@ export function PriceCheckPage() {
                     : rows.length === 0
                       ? (
                           <TableRow>
-                            <TableCell colSpan={canManage ? 7 : 6}>
-                              <div className="flex flex-col items-center gap-1 py-10 text-center">
-                                <p className="text-sm font-medium text-slate-600">
-                                  No quotations recorded yet
-                                </p>
-                                <p className="text-xs text-slate-400">
-                                  Use Quick Price Check above after your next
-                                  market visit.
-                                </p>
-                              </div>
+                            <TableCell colSpan={canManage ? 7 : 6} className="py-6">
+                              <EmptyState
+                                icon={PackageSearch}
+                                title="No quotations recorded yet"
+                                description="Use Quick Price Check above after your next market visit."
+                                className="border-0 bg-transparent"
+                              />
                             </TableCell>
                           </TableRow>
                         )
@@ -614,7 +619,7 @@ export function PriceCheckPage() {
                             <TableCell>
                               <div className="flex flex-col">
                                 <span className="font-medium">{row.productName}</span>
-                                <span className="text-xs text-slate-400">
+                                <span className="text-xs text-muted-foreground">
                                   {row.sku ?? "—"}
                                   {row.unitName ? ` · ${row.unitName}` : ""}
                                 </span>
@@ -627,7 +632,7 @@ export function PriceCheckPage() {
                                   {formatCurrency(row.quotedPrice)}
                                 </span>
                                 {row.packageQuantity !== null ? (
-                                  <span className="text-xs text-slate-400">
+                                  <span className="text-xs text-muted-foreground">
                                     for {row.packageQuantity}
                                   </span>
                                 ) : null}
@@ -637,15 +642,15 @@ export function PriceCheckPage() {
                               {row.unitPrice !== null ? (
                                 <Badge
                                   variant="secondary"
-                                  className="bg-sky-100 text-sky-700 hover:bg-sky-100"
+                                  className="bg-info/10 text-info hover:bg-info/10"
                                 >
                                   {formatCurrency(row.unitPrice)}
                                 </Badge>
                               ) : (
-                                <span className="text-slate-400">—</span>
+                                <span className="text-muted-foreground">—</span>
                               )}
                             </TableCell>
-                            <TableCell className="max-w-48 truncate text-sm text-slate-500">
+                            <TableCell className="max-w-48 truncate text-sm text-muted-foreground">
                               {row.notes ?? "—"}
                             </TableCell>
                             {canManage ? (
@@ -666,7 +671,7 @@ export function PriceCheckPage() {
                                     aria-label={`Delete observation for ${row.productName}`}
                                     onClick={() => setDeleting(row)}
                                   >
-                                    ✕
+                                    <X aria-hidden className="size-4" />
                                   </Button>
                                 </div>
                               </TableCell>
@@ -678,7 +683,7 @@ export function PriceCheckPage() {
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 text-sm text-slate-500">
+          <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
             <Button
               variant="outline"
               size="sm"
@@ -708,7 +713,7 @@ export function PriceCheckPage() {
           if (!open) setEditing(null);
         }}
       >
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Edit price observation</DialogTitle>
           </DialogHeader>
@@ -845,6 +850,6 @@ export function PriceCheckPage() {
           setDeleting(null);
         }}
       />
-    </div>
+    </PageContainer>
   );
 }
