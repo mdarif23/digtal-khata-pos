@@ -55,6 +55,12 @@ const cartItemPayloadSchema = z
       })
       .nullable(),
     serialNumbers: z.array(z.string().trim().min(1)).optional(),
+    // P3 Phase 2 (F.2): explicit manual batch selection for batch-tracked
+    // lines. The server re-validates ownership (variant + business +
+    // location), availability and the expired-batch policy — the FEFO
+    // default applies when absent. Ignored for serial-tracked and composite
+    // lines.
+    batchId: z.number().int().positive().nullish(),
     // UOM (migration 0062): the selling unit for this line. The server
     // resolves the authoritative factor/price — client values advisory.
     uomConversionId: z.number().int().positive().nullish(),

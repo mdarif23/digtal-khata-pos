@@ -92,4 +92,13 @@ router.patch(
   requirePermission("sales.edit"),
   salesController.updateAvailableSerial,
 );
+// P3 Phase 2 (F.1): the POS batch picker — the serial endpoint's access
+// model applied to batches (pos.create_sale holders may read the AVAILABLE
+// batch list for add-to-cart; location-scoped; expiry-policy aware).
+router.get(
+  "/api/variants/:variantId/batches",
+  ...read,
+  requireAnyPermission(["pos.create_sale", "inventory.view"]),
+  salesController.getAvailableBatches,
+);
 export default router;

@@ -20,6 +20,13 @@ export type ApprovalRequiredConfig = {
   sale_cancel?: boolean;
   cash_movement?: boolean;
   below_minimum_price?: boolean;
+  /**
+   * P3 Phase 2: NOT the expired-batch gate — the approval for selling an
+   * expired batch is mandated by expired_batch_policy itself
+   * ('allow_with_approval'), not by this config. The op is registered in
+   * APPROVAL_OPS for the PIN-verify permission mapping only.
+   */
+  sale_expired_batch?: boolean;
 };
 
 /**
@@ -84,6 +91,19 @@ export const posSettings = pgTable("pos_settings", {
    * expires. NULL (default) = no expiry — existing behavior preserved.
    */
   storeCreditExpiryMonths: integer("store_credit_expiry_months"),
+  /**
+   * P3 Phase 2 (F4, migration 0085): expired-batch selling policy.
+   * 'block' (default) = expired batches can never be sold; FEFO excludes
+   * them and manual selection is rejected. 'allow_with_approval' = expired
+   * batches may be sold ONLY via explicit manual selection carrying a
+   * one-time manager approval (FEFO still never auto-selects expired).
+   */
+  expiredBatchPolicy: varchar("expired_batch_policy", { length: 20 })
+    .$type<"block" | "allow_with_approval">()
+    .default("block")
+    .notNull(),
+  /** P3 Phase 2 (F.5): near-expiry notification window in days (default 7). */
+  expiryWarningDays: integer("expiry_warning_days").default(7),
   /** Phase 3 CFD: promotional banner copy on the idle screen. */
   cfdPromoMessage: varchar("cfd_promo_message", { length: 200 }),
   createdAt: timestamp("created_at", { withTimezone: true })

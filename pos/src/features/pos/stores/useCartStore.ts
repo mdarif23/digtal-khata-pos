@@ -363,6 +363,19 @@ export const useCartStore = create<CartStore>((set, get) => ({
           : item,
       ),
     })),
+  /** P3 Phase 2 (F.1): attach / clear a manual batch selection on a line. */
+  setLineBatch: (variantId, batch) =>
+    set((state) => ({
+      cart: state.cart.map((item) =>
+        item.variants.some((v) => v.id === variantId)
+          ? {
+              ...item,
+              batchId: batch?.id ?? null,
+              batchNumber: batch?.batchNumber ?? null,
+            }
+          : item,
+      ),
+    })),
   setBelowMinimumReason: (reason) => set({ belowMinimumReason: reason }),
 }));
 
@@ -378,10 +391,13 @@ interface HoldCartStore {
 /** Slim, serializable hold snapshot sent to the server. */
 interface HeldItemPayload {
   variantId: number;
+  /** P3 Phase 2 (F.2): manual batch selection (null = FEFO default). */
+  batchId?: number | null;
   /** Quantity in the SELECTED unit (see enteredQuantity). */
   quantity: number;
   discount?: { type: "percentage" | "fixed"; value: number } | null;
   serialNumbers?: string[];
+  batchNumber?: string | null;
   productName: string;
   /** Packaging-unit selling: null = base unit. */
   uomConversionId?: number | null;
@@ -448,6 +464,7 @@ export const useHoldCartStore = create<HoldCartStore>()((set, get) => ({
         productName: item.name,
         uomConversionId: item.uomConversionId ?? null,
         enteredQuantity: item.enteredQuantity ?? item.quantity,
+        batchId: item.batchId ?? null,
       })),
     };
     try {
@@ -499,6 +516,7 @@ export async function resumeHeldItems(
     productName: string;
     uomConversionId?: number | null;
     enteredQuantity?: number;
+    batchId?: number | null;
   }[],
 ): Promise<{ lines: CartType[]; missing: string[] }> {
   const products = useProductStore.getState().products;
@@ -551,6 +569,7 @@ export async function resumeHeldItems(
         enteredQuantity,
         discount: item.discount ?? null,
         serialNumbers: item.serialNumbers ?? [],
+        batchId: item.batchId ?? null,
         uomConversionId: heldUnit.uomConversionId,
         unitName: heldUnit.unitName,
         unitAbbreviation: heldUnit.unitAbbreviation,
@@ -565,6 +584,7 @@ export async function resumeHeldItems(
         enteredQuantity,
         discount: item.discount ?? null,
         serialNumbers: item.serialNumbers ?? [],
+        batchId: item.batchId ?? null,
         uomConversionId: null,
         unitName: null,
         unitAbbreviation: null,

@@ -32,6 +32,9 @@ export interface CartType extends ProductType {
     value: number;
   } | null;
   serialNumbers?: string[];
+  /** P3 Phase 2 (F.2): manual batch selection (null = FEFO default). */
+  batchId?: number | null;
+  batchNumber?: string | null;
   // --- packaging-unit selling (all optional: legacy/persisted lines are
   // --- base-unit lines and must render exactly as before) ---
   /** null/undefined = base unit line. */
@@ -134,6 +137,15 @@ export interface CartStore {
     variantId: number,
     uomConversionId: number | null | undefined,
     override: { unitPrice: number; reason?: string } | null,
+  ) => void;
+  /**
+   * P3 Phase 2 (F.1): attaches/clears a manual batch selection on a line
+   * (null = FEFO default). The server re-validates ownership, availability
+   * and the expired-batch policy.
+   */
+  setLineBatch: (
+    variantId: number,
+    batch: { id: number; batchNumber: string } | null,
   ) => void;
   /** Mandatory approval reason when a line lands below its minimum floor. */
   belowMinimumReason: string;

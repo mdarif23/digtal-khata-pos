@@ -65,6 +65,10 @@ const patchSchema = z
       .max(240)
       .nullable()
       .optional(),
+    // P3 Phase 2 (D7): expired-batch selling policy.
+    expiredBatchPolicy: z.enum(["block", "allow_with_approval"]).optional(),
+    // P3 Phase 2 (F.5): near-expiry notification window in days.
+    expiryWarningDays: z.number().int().min(1).max(365).optional(),
   })
   .refine(
     (v) =>
@@ -73,7 +77,9 @@ const patchSchema = z
       v.requireOpenDrawer !== undefined ||
       v.approvalRequired !== undefined ||
       v.embeddedBarcode !== undefined ||
-      v.storeCreditExpiryMonths !== undefined,
+      v.storeCreditExpiryMonths !== undefined ||
+      v.expiredBatchPolicy !== undefined ||
+      v.expiryWarningDays !== undefined,
     { message: "Nothing to update." },
   );
 

@@ -2,6 +2,8 @@ import { useOfflineStore } from "./offlineStore.js";
 import {
   bindSessionScope,
   cacheCatalog,
+  idbGet,
+  idbPut,
   readCatalog,
   scopeKey,
   STORE_CUSTOMERS,
@@ -71,4 +73,48 @@ export async function loadCustomersWithCache<T>(
     if (cached === null) throw err;
     return { data: cached, fromCache: true };
   }
+}
+
+// ---------------------------------------------------------------------------
+// P3 Phase 2 (D10): batch snapshots for batch-tracked variants. Cached at
+// allowance-refresh time; offline add-to-cart for a batch product requires
+// cached batch rows (a batch line without batch truth is blocked, mirroring
+// the serial-tracked hard block) and the FEFO-first cached batch attaches to
+// the line automatically — the server re-validates everything at sync.
+// ---------------------------------------------------------------------------
+
+export interface CachedBatch {
+  id: number;
+  batchNumber: string;
+  quantityRemaining: number;
+  expiryDate: string | null;
+  expiryStatus: "valid" | "expiring_soon" | "expired" | "no_expiry";
+}
+
+interface BatchesBlob {
+  scope: string;
+  byVariant: Record<string, CachedBatch[]>;
+  savedAt: string;
+}
+
+export async function cacheVariantBatches(
+  entries: { variantId: number; batches: CachedBatch[] }[],
+): Promise<void> {
+  const byVariant: Record<string, CachedBatch[]> = {};
+  for (const entry of entries) {
+    byVariant[String(entry.variantId)] = entry.batches;
+  }
+  await idbPut(STORE_PRODUCTS, {
+    scope: scopeKey("batches"),
+    byVariant,
+    savedAt: new Date().toISOString(),
+  } satisfies BatchesBlob);
+}
+
+export async function readVariantBatches(
+  variantId: number,
+): Promise<CachedBatch[] | null> {
+  const blob = await idbGet<BatchesBlob>(STORE_PRODUCTS, scopeKey("batches"));
+  if (!blob) return null;
+  return blob.byVariant[String(variantId)] ?? null;
 }

@@ -53,6 +53,8 @@ export interface BaseSaleItem {
   unitPrice: number;
   discount: { type: "fixed" | "percentage"; value: number } | null;
   serialNumbers?: string[] | undefined;
+  /** P3 Phase 2 (F.2): manual batch selection, passthrough for the sale flow. */
+  batchId?: number | null | undefined;
   uomConversionId?: number | null | undefined;
   uomSnapshot: SaleUomSnapshot | null;
   /** Present when the line carried a permission-gated price override. */
@@ -102,6 +104,7 @@ export async function normalizeSaleItemsToBase(
     quantity: number;
     discount: { type: "fixed" | "percentage"; value: number } | null;
     serialNumbers?: string[] | undefined;
+    batchId?: number | null | undefined;
     uomConversionId?: number | null | undefined;
     priceOverride?: { unitPrice: number; reason?: string | undefined } | null | undefined;
   }[],
@@ -118,6 +121,7 @@ export async function normalizeSaleItemsToBase(
         unitPrice: 0,
         discount: item.discount,
         serialNumbers: item.serialNumbers,
+        batchId: item.batchId,
         uomConversionId: item.uomConversionId ?? null,
         uomSnapshot: null,
         overrideSnapshot: null,
@@ -137,6 +141,7 @@ export async function normalizeSaleItemsToBase(
             : listPrice,
         discount: item.discount,
         serialNumbers: item.serialNumbers,
+        batchId: item.batchId,
         uomConversionId: null,
         uomSnapshot: null,
         overrideSnapshot:
@@ -182,6 +187,7 @@ export async function normalizeSaleItemsToBase(
       unitPrice: overridePerBase ?? perBaseUnitPrice,
       discount: item.discount,
       serialNumbers: item.serialNumbers,
+      batchId: item.batchId,
       uomConversionId: ctx.conversion!.id,
       uomSnapshot: {
         conversionId: ctx.conversion!.id,

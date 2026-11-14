@@ -31,6 +31,7 @@ import { Label } from "@/components/ui/label.js";
 import { getCartTotals, getLinePricing, money } from "../../cartPricing.js";
 import { quoteSaleApi, type QuoteTotals } from "../../quote.api.js";
 import { SerialPickerDialog } from "./SerialPickerDialog.js";
+import { BatchPickerDialog, type BatchOption } from "./BatchPickerDialog.js";
 import { SaveQuotationDialog } from "./SaveQuotationDialog.js";
 import { toast } from "@/components/ui/toast.js";
 import { Button } from "@/components/ui/button.js";
@@ -132,6 +133,9 @@ export function useCartTotals(
           discount: item.discount ?? null,
           uomConversionId: item.uomConversionId ?? null,
           priceOverride: item.priceOverride ?? null,
+          // P3 Phase 2: batch selection never changes pricing; accepted for
+          // payload parity with checkout.
+          batchId: item.batchId ?? null,
         })),
         cartDiscount: discount,
         vatPercent: vatPercent === null ? null : Number(vatPercent),
@@ -545,7 +549,11 @@ function CartItemRow({ item }: { item: CartItem }) {
   const unitPrice = item.unitPrice ?? Number(variant.sellingPrice);
   const line = getLinePricing(unitPrice, quantity, item.discount);
   const isSerial = item.trackingType === "serial";
+  // P3 Phase 2 (F.1): manual batch selection surface for batch-tracked lines.
+  const isBatchLine = item.trackingType === "batch";
   const [isSerialOpen, setIsSerialOpen] = useState(false);
+  const [isBatchOpen, setIsBatchOpen] = useState(false);
+  const { setLineBatch } = useCartStore();
 
   // Sell units for the switcher chip — lazily fetched per cart line and
   // cached; single-unit products never render any of this UI.
@@ -622,7 +630,35 @@ function CartItemRow({ item }: { item: CartItem }) {
             <PriceOverrideDialog item={item} variantId={variantId} lineUnit={lineUnit} />
           </div>
 
-          {isSerial ? (
+          {isBatchLine ? (
+            <>
+              <BatchPickerDialog
+                dialogOpen={isBatchOpen}
+                setDialogOpen={setIsBatchOpen}
+                variantId={variantId}
+                selectedBatchId={item.batchId ?? null}
+                onConfirm={(batch) => {
+                  setLineBatch(variantId, batch);
+                  if (batch) {
+                    toast.add({
+                      description: `${item.name} ← batch ${batch.batchNumber}`,
+                    });
+                  }
+                }}
+              />
+              <div className="ml-auto flex w-full items-center justify-end gap-2 sm:w-auto">
+                <Button
+                  type="button"
+                  variant={item.batchId ? "default" : "outline"}
+                  onClick={() => {
+                    setIsBatchOpen(true);
+                  }}
+                >
+                  Batch: {item.batchNumber ?? "FEFO"}
+                </Button>
+              </div>
+            </>
+          ) : isSerial ? (
             <>
               <SerialPickerDialog
                 serialDialogOpen={isSerialOpen}

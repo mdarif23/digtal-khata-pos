@@ -184,6 +184,9 @@ function Pos() {
         discount: item.discount ?? null,
         serialNumbers:
           item.trackingType === "serial" ? item.serialNumbers : undefined,
+        // P3 Phase 2 (F.2): manual batch selection (null = FEFO default) —
+        // the server re-validates ownership, availability and expiry policy.
+        batchId: item.trackingType === "batch" ? item.batchId : undefined,
         uomConversionId: item.uomConversionId ?? null,
         priceOverride: item.priceOverride ?? null,
       })),

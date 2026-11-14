@@ -22,6 +22,7 @@ export type NotificationKind =
   | "low_stock"
   | "out_of_stock"
   | "expiring_inventory"
+  | "expired_inventory"
   | "warranty_expiring"
   | "warranty_claim"
   | "supplier_warranty_claim"
@@ -130,6 +131,35 @@ export async function notifyExpiringBatches(
       body: `${batch.quantity} unit(s) expire on ${batch.expiryDate}.`,
       payload: { batchId: batch.batchId },
       dedupeKey: `expiring:${batch.batchId}`,
+    });
+  }
+}
+
+/** P3 Phase 2 (F.5): batches already expired with stock left — swept daily. */
+export async function notifyExpiredBatches(
+  businessId: number,
+  batches: {
+    batchId: number;
+    productName: string;
+    expiryDate: string;
+    quantity: number;
+    variantId: number;
+    locationId: number;
+  }[],
+): Promise<void> {
+  for (const batch of batches) {
+    await notifyInTx(db, {
+      businessId,
+      kind: "expired_inventory",
+      severity: "critical",
+      title: `${batch.productName} has expired stock`,
+      body: `${batch.quantity} unit(s) expired on ${batch.expiryDate} — expired batches can no longer be sold. Adjust or write them off.`,
+      payload: {
+        batchId: batch.batchId,
+        variantId: batch.variantId,
+        locationId: batch.locationId,
+      },
+      dedupeKey: `expired:${batch.batchId}`,
     });
   }
 }

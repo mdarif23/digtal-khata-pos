@@ -105,6 +105,9 @@ const quoteSchema = z.object({
           .nullable()
           .optional(),
         uomConversionId: z.number().int().positive().nullish(),
+        // P3 Phase 2 (F.2): accepted for payload parity with checkout —
+        // batch selection affects inventory provenance, never pricing.
+        batchId: z.number().int().positive().nullish(),
         // Phase 6 preview: the quoted total reflects a permitted price
         // override before checkout (the createSale gate still applies).
         priceOverride: z

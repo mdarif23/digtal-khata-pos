@@ -25,6 +25,7 @@ import { saleCharges } from "../../db/schema/saleCharges.js";
 import {
   BadRequestError,
   ConflictError,
+  ExpiredBatchError,
   ForbiddenError,
   NotFoundError,
 } from "../../utils/handleError.js";
@@ -115,7 +116,11 @@ import {
   consumeApprovalInTx,
   isApprovalRequired,
 } from "../../services/managerApproval.js";
-import { getRequireOpenDrawer, getStoreCreditExpiryMonths } from "../posSettings/posSettings.service.js";
+import {
+  getExpiredBatchPolicy,
+  getRequireOpenDrawer,
+  getStoreCreditExpiryMonths,
+} from "../posSettings/posSettings.service.js";
 import { units } from "../../db/schema/units.js";
 import { alias } from "drizzle-orm/pg-core";
 import { productUnitConversions } from "../../db/schema/productUnitConversions.js";
@@ -369,13 +374,52 @@ export async function consumeStockFifo(
   locationId: number,
   variantId: number,
   quantity: number,
-  opts: { allowShortfall?: boolean } = {},
+  opts: {
+    allowShortfall?: boolean;
+    /** P3 Phase 2 (F.2): explicit manual batch selection (batch-tracked
+     * lines). Takes precedence over FEFO; partial coverage is REJECTED
+     * online (D9 — no silent FEFO top-up) and reported as a shortfall only
+     * for offline-originated sales, whose physically-happened truth flows
+     * through the existing batch_shortfall conflict machinery. */
+    manualBatchId?: number;
+    /** P3 Phase 2 (D7): an approval token for `sale.expired_batch` was
+     * consumed for this sale — manual selection may name an expired batch.
+     * FEFO NEVER auto-selects expired stock under either policy. */
+    allowExpiredBatch?: boolean;
+  } = {},
 ) {
-  // 1. Oldest batches first. .for("update") locks the rows, so two sales
-  //    at the same moment can't take the same stock. FIFO is per-location:
-  //    a sale only consumes batches stocked at its own location.
-  // Explicit columns: keeps FIFO stable regardless of new batch columns
-  // (landed cost) added to the schema.
+  // 1. FEFO — earliest valid expiry first, never-expiring batches last
+  //    (NULLS LAST), FIFO by insertion id as the tiebreak. Expired batches
+  //    are excluded from automatic consumption entirely: an expired batch
+  //    must never be silently sold (D7) under either policy. .for("update")
+  //    locks the rows, so two sales at the same moment can't take the same
+  //    stock. Per-location: a sale only consumes batches stocked at its own
+  //    location. Explicit columns keep ordering stable regardless of new
+  //    batch columns added to the schema.
+  //    Expiry comparisons are DB-side (CURRENT_DATE, session TZ pinned to
+  //    UTC like every report query) — a JS-local-midnight boundary shifts a
+  //    day when serialized and would admit yesterday's expired batches.
+  const manualBatchId = opts.manualBatchId;
+  const notExpired = sql`inventory_batches.expiry_date >= CURRENT_DATE`;
+  const candidateWhere = manualBatchId
+    ? and(
+        eq(inventoryBatches.id, manualBatchId),
+        eq(inventoryBatches.variantId, variantId),
+        eq(inventoryBatches.businessId, businessId),
+        eq(inventoryBatches.locationId, locationId),
+        gt(inventoryBatches.quantityRemaining, 0),
+        // Expired manual selections need the consumed approval (D7).
+        ...(opts.allowExpiredBatch
+          ? []
+          : [or(isNull(inventoryBatches.expiryDate), notExpired)]),
+      )
+    : and(
+        eq(inventoryBatches.variantId, variantId),
+        eq(inventoryBatches.businessId, businessId),
+        eq(inventoryBatches.locationId, locationId),
+        gt(inventoryBatches.quantityRemaining, 0),
+        or(isNull(inventoryBatches.expiryDate), notExpired),
+      );
   const batches = await tx
     .select({
       id: inventoryBatches.id,
@@ -392,16 +436,45 @@ export async function consumeStockFifo(
       expiryDate: inventoryBatches.expiryDate,
     })
     .from(inventoryBatches)
-    .where(
-      and(
-        eq(inventoryBatches.variantId, variantId),
-        eq(inventoryBatches.businessId, businessId),
-        eq(inventoryBatches.locationId, locationId),
-        gt(inventoryBatches.quantityRemaining, 0),
-      ),
+    .where(candidateWhere)
+    .orderBy(
+      manualBatchId
+        ? asc(inventoryBatches.id)
+        : sql`inventory_batches.expiry_date ASC NULLS LAST`,
+      asc(inventoryBatches.id),
     )
-    .orderBy(asc(inventoryBatches.id))
     .for("update");
+
+  // Manual selection misses are precise, client-actionable conflicts: the
+  // batch may be expired (policy), foreign (wrong variant/location/business)
+  // or simply gone. Distinguish expired so offline sync can flag it.
+  if (manualBatchId && batches.length === 0) {
+    const [anyBatch] = await tx
+      .select({
+        id: inventoryBatches.id,
+        batchNumber: inventoryBatches.batchNumber,
+        expiryDate: inventoryBatches.expiryDate,
+        quantityRemaining: inventoryBatches.quantityRemaining,
+      })
+      .from(inventoryBatches)
+      .where(eq(inventoryBatches.id, manualBatchId))
+      .limit(1);
+    if (anyBatch && anyBatch.expiryDate !== null) {
+      // Local-midnight dates on both sides — civil-date comparison.
+      const expiry = new Date(anyBatch.expiryDate);
+      expiry.setHours(0, 0, 0, 0);
+      const missToday = new Date();
+      missToday.setHours(0, 0, 0, 0);
+      if (expiry.getTime() < missToday.getTime()) {
+        throw new ExpiredBatchError(
+          `Expired batch ${anyBatch.batchNumber} cannot be sold${opts.allowExpiredBatch ? "" : " under the current expired-batch policy"}.`,
+        );
+      }
+    }
+    throw new ConflictError(
+      `Batch ${manualBatchId} is not available for variant ${variantId} at this location.`,
+    );
+  }
 
   let remaining = quantity;
   let totalCost = 0;
@@ -437,7 +510,16 @@ export async function consumeStockFifo(
   //    Offline-originated sales are different: the sale PHYSICALLY happened,
   //    so with allowShortfall the batches are consumed as far as possible and
   //    the gap is returned for a sync_conflicts row (never silently lost).
+  //    Manual selection online is REJECTED, never silently topped up from
+  //    other batches (D9) — the message names the batch so the cashier can
+  //    re-pick.
   if (remaining > 0 && !opts.allowShortfall) {
+    if (manualBatchId) {
+      const batchNumber = batches[0]?.batchNumber ?? `#${manualBatchId}`;
+      throw new ConflictError(
+        `Batch ${batchNumber} has ${quantity - remaining} of the ${quantity} unit(s) requested for variant ${variantId}.`,
+      );
+    }
     throw new ConflictError(
       `Insufficient stock for variant ${variantId}: short by ${remaining}`,
     );
@@ -1125,6 +1207,89 @@ export async function createSale(
       }
     }
 
+    // P3 Phase 2 (F.2/D7): manual batch selections. Validated against the DB
+    // (variant + business + location ownership — never trusted from the
+    // request) and the expired-batch policy. FEFO never auto-selects expired
+    // stock under either policy; manual selection of an expired batch is
+    // only possible under 'allow_with_approval' with a consumed
+    // sale.expired_batch approval token (approval rows are consumed
+    // in-tx, so a rolled-back sale does not burn it).
+    let expiredBatchApprovedBy: number | null = null;
+    const expiredBatchPolicy = await getExpiredBatchPolicy(businessId);
+    const manualBatchLines = trustedItems.filter((i) => i.batchId != null);
+    let allowExpiredBatch = false;
+    if (manualBatchLines.length > 0) {
+      const unsupported = manualBatchLines.find(
+        (i) =>
+          bomByVariant.has(i.variantId) ||
+          variantMap.get(i.variantId)?.trackingType === "serial",
+      );
+      if (unsupported) {
+        throw new BadRequestError(
+          "Batch selection is not supported for composite or serial-tracked lines.",
+        );
+      }
+      const manualBatchIds = [
+        ...new Set(manualBatchLines.map((i) => i.batchId!)),
+      ];
+      const selectedBatches = await tx
+        .select({
+          id: inventoryBatches.id,
+          variantId: inventoryBatches.variantId,
+          locationId: inventoryBatches.locationId,
+          expiryDate: inventoryBatches.expiryDate,
+          batchNumber: inventoryBatches.batchNumber,
+        })
+        .from(inventoryBatches)
+        .where(
+          and(
+            eq(inventoryBatches.businessId, businessId),
+            inArray(inventoryBatches.id, manualBatchIds),
+          ),
+        )
+        .for("update");
+      for (const line of manualBatchLines) {
+        const batch = selectedBatches.find((b) => b.id === line.batchId);
+        if (
+          !batch ||
+          batch.variantId !== line.variantId ||
+          batch.locationId !== locationId
+        ) {
+          throw new NotFoundError(
+            `Batch ${line.batchId} is not stocked for variant ${line.variantId} at this location.`,
+          );
+        }
+      }
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const expiredSelections = selectedBatches.filter(
+        (b) =>
+          b.expiryDate !== null &&
+          new Date(b.expiryDate).getTime() < today.getTime(),
+      );
+      if (expiredSelections.length > 0) {
+        if (expiredBatchPolicy !== "allow_with_approval") {
+          const names = expiredSelections
+            .map((b) => b.batchNumber)
+            .join(", ");
+          throw new ExpiredBatchError(
+            `Expired batch ${names} cannot be sold under the current expired-batch policy.`,
+          );
+        }
+        if (!data.approvalToken) {
+          throw new ForbiddenError(
+            "A manager approval is required to sell an expired batch.",
+          );
+        }
+        const approval = await consumeApprovalInTx(tx, businessId, {
+          token: data.approvalToken,
+          opType: "sale.expired_batch",
+        });
+        allowExpiredBatch = true;
+        expiredBatchApprovedBy = approval.approverUserId;
+      }
+    }
+
     // 5. Calculate every total from the same trusted items. When any line's
     // product carries tax rules, VAT comes from those rules (server-side,
     // snapshotted per line) and the legacy cart-wide vatPercent is not
@@ -1542,7 +1707,14 @@ export async function createSale(
           locationId,
           item.variantId,
           item.quantity,
-          { ...(options.allowNegativeStock ? { allowShortfall: true } : {}) },
+          {
+            ...(options.allowNegativeStock ? { allowShortfall: true } : {}),
+            // P3 Phase 2 (F.2): manual batch selection takes precedence over
+            // FEFO; validated + policy-gated above. Online partial coverage
+            // is rejected (D9); offline shortfall flows to batch_shortfall.
+            ...(item.batchId != null ? { manualBatchId: item.batchId } : {}),
+            ...(allowExpiredBatch ? { allowExpiredBatch: true } : {}),
+          },
         );
         if ("shortfall" in cost && Number(cost.shortfall) > 0) {
           batchShortfalls.push({
@@ -1943,6 +2115,9 @@ export async function createSale(
         itemCount: items.length,
         ...(chargesInput.length > 0 ? { chargesTotal } : {}),
         ...(belowMinimumApprovedBy !== null ? { belowMinimumApprovedBy } : {}),
+        ...(expiredBatchApprovedBy !== null
+          ? { expiredBatchApprovedBy }
+          : {}),
       },
     });
 
@@ -2494,24 +2669,79 @@ async function applySaleRefund(
         ),
       );
 
-    const [returnBatch] = await tx
-      .insert(inventoryBatches)
-      .values({
-        businessId,
-        variantId: item.variantId,
-        locationId: stock.locationId,
-        batchNumber: `RETURN-${refund.id}-${item.id}`,
-        purchasePrice: item.costAtSale,
-        quantityReceived: returnedQuantity,
-        quantityRemaining: returnedQuantity,
+    // P3 Phase 2 (F.6): restore the ORIGINAL batches the sale consumed
+    // (sale_item_batch_consumptions provenance; serials carry their own
+    // original batchId) instead of fabricating a RETURN- batch. A partial
+    // return must put stock back where it came from, and Phase 3 void will
+    // replay the same provenance. The RETURN- batch survives ONLY as the
+    // fallback when provenance is incomplete (legacy rows, a batch row that
+    // no longer exists) — the refund never fails on incomplete provenance.
+    //
+    // Across MULTIPLE partial refunds the allocation must respect what
+    // earlier refunds already restored per batch (prior 'return' movements
+    // of this sale), otherwise the largest lot would absorb every refund.
+    const restoredBatches: { batchId: number; quantity: number }[] = [];
+    let fallbackQuantity = 0;
+    let fallbackBatchId: number | null = null;
+    let orphanSerialIds: number[] = [];
+
+    const consumptionRows = await tx
+      .select({
+        batchId: saleItemBatchConsumptions.batchId,
+        quantity: saleItemBatchConsumptions.quantity,
       })
-      .returning({ id: inventoryBatches.id });
-    if (variant.trackingType === "serial" && returnBatch) {
-      // Full-line returns re-point every serial of the line; partial
-      // returns re-point exactly the serials selected above.
+      .from(saleItemBatchConsumptions)
+      .where(eq(saleItemBatchConsumptions.saleItemId, item.id));
+    const thisSaleRefundIds = (
       await tx
-        .update(serialNumbers)
-        .set({ batchId: returnBatch.id })
+        .select({ id: saleRefunds.id })
+        .from(saleRefunds)
+        .where(and(eq(saleRefunds.saleId, saleId), eq(saleRefunds.businessId, businessId)))
+    ).map((r) => r.id);
+    const priorRestored = new Map<number, number>();
+    if (thisSaleRefundIds.length > 0 && consumptionRows.length > 0) {
+      const rows = await tx
+        .select({
+          batchId: inventoryMovements.batchId,
+          qty: sql<string>`COALESCE(SUM(${inventoryMovements.quantity}), 0)`,
+        })
+        .from(inventoryMovements)
+        .where(
+          and(
+            eq(inventoryMovements.businessId, businessId),
+            eq(inventoryMovements.movementType, "return"),
+            eq(inventoryMovements.referenceType, "sale_refund"),
+            inArray(inventoryMovements.referenceId, thisSaleRefundIds),
+            inArray(
+              inventoryMovements.batchId,
+              consumptionRows.map((r) => r.batchId),
+            ),
+          ),
+        )
+        .groupBy(inventoryMovements.batchId);
+      for (const row of rows) {
+        if (row.batchId != null) priorRestored.set(row.batchId, Number(row.qty));
+      }
+    }
+    // Units of each consumed lot still out with the customer.
+    const remainingOut = new Map<number, number>();
+    for (const row of consumptionRows) {
+      const prior = priorRestored.get(row.batchId) ?? 0;
+      remainingOut.set(
+        row.batchId,
+        Math.max(0, roundMoney(Number(row.quantity) - prior)),
+      );
+    }
+
+    if (variant.trackingType === "serial") {
+      // Serial rows keep the batch they were sold from (consumeSerials never
+      // clears batchId) — group the RETURNED serials by it and give each
+      // batch its units back, capped by what is still out per batch (an
+      // already-returned serial of this line must not restore twice). No
+      // RETURN- re-pointing for healthy provenance.
+      const returnedSerials = await tx
+        .select({ id: serialNumbers.id, batchId: serialNumbers.batchId })
+        .from(serialNumbers)
         .where(
           and(
             eq(serialNumbers.saleItemId, item.id),
@@ -2525,21 +2755,133 @@ async function applySaleRefund(
               : undefined,
           ),
         );
+      const perBatch = new Map<number, number>();
+      for (const serial of returnedSerials) {
+        if (serial.batchId == null) {
+          orphanSerialIds.push(serial.id);
+          continue;
+        }
+        perBatch.set(serial.batchId, (perBatch.get(serial.batchId) ?? 0) + 1);
+      }
+      for (const [batchId, rawQty] of perBatch) {
+        const capped = Math.min(
+          rawQty,
+          remainingOut.get(batchId) ?? 0,
+        );
+        if (capped <= 0) continue;
+        await tx
+          .update(inventoryBatches)
+          .set({
+            quantityRemaining: sql`${inventoryBatches.quantityRemaining} + ${capped}`,
+          })
+          .where(
+            and(
+              eq(inventoryBatches.id, batchId),
+              eq(inventoryBatches.businessId, businessId),
+            ),
+          );
+        restoredBatches.push({ batchId, quantity: capped });
+        fallbackQuantity = roundMoney(fallbackQuantity + (rawQty - capped));
+      }
+      fallbackQuantity = roundMoney(fallbackQuantity + orphanSerialIds.length);
+    } else {
+      // Allocate across the lots with the most units still out first
+      // (deterministic, history-aware). Batches that no longer exist fall
+      // back to the RETURN- batch.
+      const orderedRows = [...consumptionRows]
+        .map((r) => ({ ...r, out: remainingOut.get(r.batchId) ?? 0 }))
+        .sort((a, b) => b.out - a.out || a.batchId - b.batchId);
+      let unallocated = returnedQuantity;
+      const allocations: { batchId: number; quantity: number }[] = [];
+      for (const row of orderedRows) {
+        if (unallocated <= 0) break;
+        if (row.out <= 0) continue;
+        const take = Math.min(row.out, unallocated);
+        allocations.push({ batchId: row.batchId, quantity: take });
+        unallocated = roundMoney(unallocated - take);
+      }
+      const existingBatches =
+        allocations.length > 0
+          ? await tx
+              .select({ id: inventoryBatches.id })
+              .from(inventoryBatches)
+              .where(
+                and(
+                  eq(inventoryBatches.businessId, businessId),
+                  inArray(
+                    inventoryBatches.id,
+                    allocations.map((a) => a.batchId),
+                  ),
+                ),
+              )
+              .for("update")
+          : [];
+      for (const alloc of allocations) {
+        const batch = existingBatches.find((b) => b.id === alloc.batchId);
+        if (!batch) {
+          fallbackQuantity = roundMoney(fallbackQuantity + alloc.quantity);
+          continue;
+        }
+        await tx
+          .update(inventoryBatches)
+          .set({
+            quantityRemaining: sql`${inventoryBatches.quantityRemaining} + ${alloc.quantity}`,
+          })
+          .where(
+            and(
+              eq(inventoryBatches.id, alloc.batchId),
+              eq(inventoryBatches.businessId, businessId),
+            ),
+          );
+        restoredBatches.push(alloc);
+      }
+      fallbackQuantity = roundMoney(fallbackQuantity + unallocated);
     }
 
-    await tx.insert(inventoryMovements).values({
-      businessId,
-      variantId: item.variantId,
-      locationId: stock.locationId,
-      batchId: returnBatch?.id ?? null,
-      movementType: "return",
-      // The ACTUAL restocked quantity — a partial return of 2 of 12 must not
-      // log a 12-unit movement (stock math is already exact; this is the
-      // movements ledger that reconciliation and reports read).
-      quantity: returnedQuantity,
-      referenceType: "sale_refund",
-      referenceId: refund.id,
-    });
+    if (fallbackQuantity > 0.0000001) {
+      const [returnBatch] = await tx
+        .insert(inventoryBatches)
+        .values({
+          businessId,
+          variantId: item.variantId,
+          locationId: stock.locationId,
+          batchNumber: `RETURN-${refund.id}-${item.id}`,
+          purchasePrice: item.costAtSale,
+          quantityReceived: fallbackQuantity,
+          quantityRemaining: fallbackQuantity,
+        })
+        .returning({ id: inventoryBatches.id });
+      fallbackBatchId = returnBatch?.id ?? null;
+      if (fallbackBatchId !== null) {
+        restoredBatches.push({ batchId: fallbackBatchId, quantity: fallbackQuantity });
+      }
+      if (variant.trackingType === "serial" && fallbackBatchId !== null) {
+        // Fallback only: orphaned serials (null batchId provenance) re-point
+        // to the RETURN- batch. Healthy serials keep their original batch.
+        if (orphanSerialIds.length > 0) {
+          await tx
+            .update(serialNumbers)
+            .set({ batchId: fallbackBatchId })
+            .where(inArray(serialNumbers.id, orphanSerialIds));
+        }
+      }
+    }
+
+    // Movements ledger: one row per restored batch (reconciliation reads
+    // per-batch quantities; the ACTUAL restored amount — a partial return
+    // of 2 of 12 must not log a 12-unit movement).
+    for (const restored of restoredBatches) {
+      await tx.insert(inventoryMovements).values({
+        businessId,
+        variantId: item.variantId,
+        locationId: stock.locationId,
+        batchId: restored.batchId,
+        movementType: "return",
+        quantity: restored.quantity,
+        referenceType: "sale_refund",
+        referenceId: refund.id,
+      });
+    }
   }
 
   // A refund returns value to the customer: on credit (unpaid/partial) sales
@@ -2990,6 +3332,89 @@ export async function getAvailableSerials(
     )
     .orderBy(asc(serialNumbers.id));
   return rows.map((r) => r.serialNumber);
+}
+
+/**
+ * P3 Phase 2 (F.1): eligible batches for the POS batch picker — the serial
+ * endpoint's access model (requireAnyPermission(["pos.create_sale",
+ * "inventory.view"])) applied to batches. Location-scoped (a batch stocked
+ * at another store is never exposed), FEFO-ordered (expiry ASC NULLS LAST,
+ * id tiebreak), and expiry-aware: expired batches are hidden under the
+ * 'block' policy and returned flagged under 'allow_with_approval' so the
+ * picker can mark them for the approval flow.
+ */
+export async function getAvailableBatches(
+  businessId: number,
+  locationId: number,
+  variantId: number,
+): Promise<
+  {
+    id: number;
+    batchNumber: string;
+    quantityRemaining: number;
+    expiryDate: string | null;
+    expiryStatus: "valid" | "expiring_soon" | "expired" | "no_expiry";
+  }[]
+> {
+  const [policyRow] = await Promise.all([
+    getExpiredBatchPolicy(businessId),
+  ]);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const soon = new Date(today);
+  soon.setDate(soon.getDate() + 30);
+  const rows = await db
+    .select({
+      id: inventoryBatches.id,
+      batchNumber: inventoryBatches.batchNumber,
+      quantityRemaining: inventoryBatches.quantityRemaining,
+      expiryDate: inventoryBatches.expiryDate,
+    })
+    .from(inventoryBatches)
+    .where(
+      and(
+        eq(inventoryBatches.businessId, businessId),
+        eq(inventoryBatches.variantId, variantId),
+        eq(inventoryBatches.locationId, locationId),
+        gt(inventoryBatches.quantityRemaining, 0),
+        // 'block' hides expired batches entirely; 'allow_with_approval'
+        // surfaces them flagged for the approval flow (D7). DB-side
+        // boundary — see consumeStockFifo's timezone note.
+        ...(policyRow === "allow_with_approval"
+          ? []
+          : [
+              or(
+                isNull(inventoryBatches.expiryDate),
+                sql`inventory_batches.expiry_date >= CURRENT_DATE`,
+              ),
+            ]),
+      ),
+    )
+    .orderBy(
+      sql`inventory_batches.expiry_date ASC NULLS LAST`,
+      asc(inventoryBatches.id),
+    );
+  return rows.map((row) => {
+    const expiry =
+      row.expiryDate !== null ? new Date(row.expiryDate) : null;
+    const expiryStatus: "valid" | "expiring_soon" | "expired" | "no_expiry" =
+      expiry === null
+        ? "no_expiry"
+        : expiry.getTime() < today.getTime()
+          ? "expired"
+          : expiry.getTime() <= soon.getTime()
+            ? "expiring_soon"
+            : "valid";
+    return {
+      id: row.id,
+      batchNumber: row.batchNumber,
+      quantityRemaining: Number(row.quantityRemaining),
+      expiryDate: expiry
+        ? expiry.toISOString().slice(0, 10)
+        : null,
+      expiryStatus,
+    };
+  });
 }
 
 export async function updateAvailableSerial(

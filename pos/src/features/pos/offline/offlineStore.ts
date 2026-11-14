@@ -295,6 +295,40 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
           .filter(Boolean);
         if (variantIds.length === 0) return;
         await prepareOffline(variantIds);
+        // P3 Phase 2 (D10): cache batch snapshots for batch-tracked variants
+        // so offline batch selling carries real batch selection (sync
+        // re-validates; a stale pick becomes a reviewable conflict).
+        const batchVariantIds = products
+          .filter((p) => p.trackingType === "batch")
+          .flatMap((p) => p.variants.map((v) => v.id))
+          .filter((id): id is number => typeof id === "number" && Number.isInteger(id) && id > 0)
+          .slice(0, 500);
+        if (batchVariantIds.length > 0) {
+          const { cacheVariantBatches } = await import("./catalog.js");
+          type BatchList = {
+            variantId: number;
+            batches: {
+              id: number;
+              batchNumber: string;
+              quantityRemaining: number;
+              expiryDate: string | null;
+              expiryStatus: "valid" | "expiring_soon" | "expired" | "no_expiry";
+            }[];
+          };
+          const lists = await Promise.allSettled(
+            batchVariantIds.map((variantId: number) =>
+              axios
+                .get<{
+                  data: BatchList["batches"];
+                }>(`variants/${variantId}/batches`)
+                .then((res) => ({ variantId, batches: res.data.data ?? [] })),
+            ),
+          );
+          const entries: BatchList[] = lists
+            .filter((r): r is PromiseFulfilledResult<BatchList> => r.status === "fulfilled")
+            .map((r) => r.value);
+          if (entries.length > 0) await cacheVariantBatches(entries);
+        }
         await appendSyncLog({
           at: new Date().toISOString(),
           kind: "recorded_offline",

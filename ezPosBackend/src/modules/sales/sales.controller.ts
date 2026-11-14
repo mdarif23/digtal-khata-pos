@@ -232,6 +232,24 @@ export async function getAvailableSerials(req: Request, res: Response) {
   }
 }
 
+/** P3 Phase 2 (F.1): eligible batches for the POS batch picker. */
+export async function getAvailableBatches(req: Request, res: Response) {
+  try {
+    const variantId = Number(req.params.variantId);
+    if (!Number.isInteger(variantId) || variantId <= 0) {
+      return res.status(400).json({ message: "Invalid Variant ID" });
+    }
+    const batches = await salesService.getAvailableBatches(
+      getBusinessId(req),
+      getLocationId(req),
+      variantId,
+    );
+    return res.status(200).json({ success: true, data: batches });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to load available batches.");
+  }
+}
+
 export async function updateAvailableSerial(req: Request, res: Response) {
   try {
     const variantId = Number(req.params.variantId);

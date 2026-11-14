@@ -594,6 +594,13 @@
       "when": 1794500034000,
       "tag": "0084_pos_store_credit_expiry_setting",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1794500035000,
+      "tag": "0085_pos_batch_policy",
+      "breakpoints": true
     }
   ]
 }

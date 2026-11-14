@@ -91,15 +91,19 @@ export async function runCommerceSweeps(
 }
 
 /**
- * Expiring-inventory notifications (Module 14): batches expiring within 7
- * days with stock remaining, deduped per batch per day.
+ * Expiring-inventory notifications (Module 14; P3 Phase 2 F.5): batches
+ * nearing expiry within the business's window (pos_settings.expiry_warning_days,
+ * default 7 — previously a fixed window) plus batches ALREADY expired with
+ * stock remaining (kind expired_inventory), deduped per batch per day.
  */
 async function sweepExpiringInventory(): Promise<number> {
   const { sql } = await import("drizzle-orm");
   const { db } = await import("../db/schema/index.js");
-  const { notifyExpiringBatches } = await import(
+  const { notifyExpiringBatches, notifyExpiredBatches } = await import(
     "../services/notifications.js"
   );
+  // Per-business window: LEFT JOIN pos_settings so absent rows keep the
+  // 7-day default — one query, per-row window.
   const result = await db.execute(sql`
     SELECT b.id AS "batchId", p.name AS "productName",
            b.expiry_date::text AS "expiryDate",
@@ -108,9 +112,11 @@ async function sweepExpiringInventory(): Promise<number> {
     FROM inventory_batches b
     JOIN product_variants v ON v.id = b.variant_id
     JOIN products p ON p.id = v.product_id
+    LEFT JOIN pos_settings ps ON ps.business_id = b.business_id
     WHERE b.quantity_remaining > 0
       AND b.expiry_date IS NOT NULL
-      AND b.expiry_date <= (CURRENT_DATE + INTERVAL '7 days')
+      AND b.expiry_date >= CURRENT_DATE
+      AND b.expiry_date <= (CURRENT_DATE + (COALESCE(ps.expiry_warning_days, 7) || ' days')::interval)
     LIMIT 100
   `);
   const rows = result.rows as {
@@ -129,5 +135,39 @@ async function sweepExpiringInventory(): Promise<number> {
   for (const [businessId, list] of byBusiness) {
     await notifyExpiringBatches(businessId, list);
   }
-  return rows.length;
+
+  // Already-expired batches with stock left — a distinct, stronger signal.
+  const expiredResult = await db.execute(sql`
+    SELECT b.id AS "batchId", p.name AS "productName",
+           b.expiry_date::text AS "expiryDate",
+           b.quantity_remaining AS "quantity",
+           b.business_id AS "businessId",
+           v.id AS "variantId", b.location_id AS "locationId"
+    FROM inventory_batches b
+    JOIN product_variants v ON v.id = b.variant_id
+    JOIN products p ON p.id = v.product_id
+    WHERE b.quantity_remaining > 0
+      AND b.expiry_date IS NOT NULL
+      AND b.expiry_date < CURRENT_DATE
+    LIMIT 100
+  `);
+  const expiredRows = expiredResult.rows as {
+    batchId: number;
+    productName: string;
+    expiryDate: string;
+    quantity: number;
+    businessId: number;
+    variantId: number;
+    locationId: number;
+  }[];
+  const expiredByBusiness = new Map<number, typeof expiredRows>();
+  for (const row of expiredRows) {
+    const list = expiredByBusiness.get(row.businessId) ?? [];
+    list.push(row);
+    expiredByBusiness.set(row.businessId, list);
+  }
+  for (const [businessId, list] of expiredByBusiness) {
+    await notifyExpiredBatches(businessId, list);
+  }
+  return rows.length + expiredRows.length;
 }

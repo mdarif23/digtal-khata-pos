@@ -14,6 +14,7 @@ import {
 } from "@/features/products/product.schema";
 import { toast } from "@/components/ui/toast";
 import { checkAllowance } from "@/features/pos/offline/allocations.js";
+import { readVariantBatches } from "@/features/pos/offline/catalog.js";
 import {
   Select,
   SelectContent,
@@ -97,6 +98,27 @@ export function ProductList({
         return;
       }
       const unit = await resolveDefaultSaleUnit(variant.id);
+      // P3 Phase 2 (D10): offline batch selling requires cached batch truth —
+      // a batch line without it is blocked (mirrors the serial hard block).
+      // The FEFO-first cached batch attaches automatically; the cashier can
+      // re-pick from the cached list on the cart line.
+      if (!navigator.onLine && product.trackingType === "batch") {
+        const cached = await readVariantBatches(variant.id ?? 0);
+        if (!cached || cached.length === 0) {
+          toast.add({
+            type: "error",
+            description: `${product.name}: no cached batch info offline.`,
+            priority: "high",
+          });
+          return;
+        }
+        addToCart(product, unit ?? undefined);
+        const first = cached[0]!;
+        useCartStore
+          .getState()
+          .setLineBatch(variant.id, { id: first.id, batchNumber: first.batchNumber });
+        return;
+      }
       addToCart(product, unit ?? undefined);
     },
     [addToCart],
@@ -162,6 +184,39 @@ export function ProductList({
       if (product.trackingType === "serial") {
         setSearchProducts("");
         setActiveSerialProduct({ product, variantId: variant.id });
+        return;
+      }
+
+      // P3 Phase 2 (D10): offline batch scans need cached batch truth and
+      // auto-attach the FEFO-first cached batch (server re-validates at sync).
+      if (!navigator.onLine && product.trackingType === "batch") {
+        const cached = await readVariantBatches(variant.id ?? 0);
+        if (!cached || cached.length === 0) {
+          setSearchProducts("");
+          throw new Error(
+            `${product.name}: no cached batch info offline.`,
+          );
+        }
+        const batchVariantName = buildVariantName(product.name, variant.options);
+        addToCart(
+          { ...product, name: batchVariantName, variants: [variant] },
+          scannedUnit
+            ? {
+                uomConversionId: scannedUnit.conversionId,
+                unitName: scannedUnit.unitName,
+                unitAbbreviation: scannedUnit.unitAbbreviation,
+                conversionFactor: scannedUnit.conversionFactor,
+                salePrice: scannedUnit.salePrice,
+              }
+            : undefined,
+        );
+        useCartStore
+          .getState()
+          .setLineBatch(variant.id ?? 0, { id: cached[0]!.id, batchNumber: cached[0]!.batchNumber });
+        setSearchProducts("");
+        toast.add({
+          description: `${batchVariantName} ← batch ${cached[0]!.batchNumber} added.`,
+        });
         return;
       }
 
