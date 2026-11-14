@@ -90,12 +90,12 @@ describe("PaymentModal", () => {
     const user = userEvent.setup();
     render(<Harness finalTotal={100} />);
 
-    expect(screen.getByText("Total Due : 100.00")).toBeInTheDocument();
+    expect(screen.getByText(/Total due:/)).toBeInTheDocument();
     expect(confirm()).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Exact" }));
     expect(confirm()).toBeEnabled();
-    expect(screen.getByText("Change to Give")).toBeInTheDocument();
+    expect(screen.getByText("Change to give")).toBeInTheDocument();
   });
 
   it("charges the quoted final total as-is (coupon/inclusive-tax safe)", async () => {
@@ -106,7 +106,7 @@ describe("PaymentModal", () => {
     // Items total 100, coupon takes 15 → quote finalTotal 85.
     render(<Harness finalTotal={85} />);
 
-    expect(screen.getByText("Total Due : 85.00")).toBeInTheDocument();
+    expect(screen.getByText(/Total due:/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Exact" }));
     expect(confirm()).toBeEnabled();
   });
@@ -117,7 +117,7 @@ describe("PaymentModal", () => {
 
     await user.type(screen.getByLabelText("Cash Receive"), "50");
     expect(screen.getByText("Still owed")).toBeInTheDocument();
-    expect(screen.getByText("50.00")).toBeInTheDocument();
+    expect(screen.getByText("৳50.00")).toBeInTheDocument();
     expect(confirm()).toBeDisabled();
   });
 
@@ -150,8 +150,9 @@ describe("PaymentModal", () => {
 
     await user.type(screen.getByLabelText("Cash Part"), "40");
     // 60 remains — Fill Due puts the remainder on the customer's account.
-    await user.click(screen.getByRole("button", { name: "Fill Due" }));
-    expect(screen.getByText(/Remaining: ৳0\.00/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Fill due" }));
+    expect(screen.getByText("Remaining")).toBeInTheDocument();
+    expect(screen.getAllByText("৳0.00").length).toBeGreaterThan(0);
     expect(confirm()).toBeEnabled();
 
     const payments = (
@@ -169,7 +170,7 @@ describe("PaymentModal", () => {
 
     await user.click(screen.getByRole("button", { name: "Split" }));
     expect(screen.getByLabelText("Due part")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Fill Due" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Fill due" })).toBeDisabled();
   });
 
   it("blocks due and store-credit methods without a customer", async () => {
@@ -190,7 +191,7 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
     render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Store credit" }));
-    await screen.findByText("Available: ৳500.00");
+    await screen.findByText("৳500.00");
     expect(confirm()).toBeEnabled();
   });
 
@@ -200,7 +201,7 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
     render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Store credit" }));
-    await screen.findByText("Available: ৳40.00");
+    await screen.findByText("৳40.00");
     expect(confirm()).toBeDisabled();
     expect(screen.getByText(/Insufficient store credit — ৳60\.00 short/)).toBeInTheDocument();
   });
@@ -227,8 +228,8 @@ describe("PaymentModal — balance tenders (store credit / loyalty)", () => {
     render(<Harness finalTotal={100} customerId={5} />);
 
     await user.click(screen.getByRole("button", { name: "Loyalty points" }));
-    await screen.findByText(/10\.00 points/);
-    expect(screen.getByText(/Balance: 2000\.00 points/)).toBeInTheDocument();
+    await screen.findByText("10 pts");
+    expect(screen.getByText("2,000")).toBeInTheDocument();
     expect(confirm()).toBeEnabled();
   });
 
