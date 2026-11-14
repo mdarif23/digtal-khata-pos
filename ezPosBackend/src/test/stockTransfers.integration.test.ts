@@ -531,4 +531,132 @@ describe("stock transfers integration", { skip: !runIntegration }, () => {
     const res = await api(other, "GET", `/api/stock-transfers/${anyId}`);
     assert.equal(res.status, 404);
   });
+
+  it("serial-tracked units travel with their serials (in_transit → re-pointed on receive)", async () => {
+    // C1-02: shipped serials used to stay 'in_stock' at the SOURCE while the
+    // destination counted units whose serials were elsewhere.
+    const unitRes = await api(owner, "POST", "/api/product/unit", {
+      unitName: `Serial Piece ${stamp}`,
+      abbreviation: "SPc",
+    });
+    assert.equal(unitRes.status, 201);
+    const unitId = (unitRes.body as { data: { value: number } }).data.value;
+    const serials = Array.from(
+      { length: 3 },
+      (_, i) => `TRF-SN-${stamp}-${i}`,
+    );
+    const prodRes = await api(owner, "POST", "/api/product", {
+      name: `Serial Transfer Product ${stamp}`,
+      categoryId: null,
+      brandId: null,
+      unitId,
+      description: "",
+      productType: "physical",
+      hasVariants: false,
+      trackingType: "serial",
+      supplierId: null,
+      status: "active",
+      imageUrl: null,
+      imageFile: null,
+      source: "opening",
+      variants: [
+        {
+          sku: `TRF-SER-${stamp}`,
+          barcode: null,
+          sellingPrice: 100,
+          alertQuantity: 0,
+          isDefault: true,
+          status: "active",
+          imageUrl: null,
+          imageFile: null,
+          batchNumber: "",
+          purchasePrice: 40,
+          quantity: 3,
+          expiryDate: null,
+          serialNumbers: serials.map((serial) => ({ serial })),
+        },
+      ],
+    });
+    assert.equal(prodRes.status, 201, JSON.stringify(prodRes.body));
+    const listRes = await api(owner, "GET", "/api/products");
+    const serialProduct = (
+      listRes.body as unknown as {
+        id: number;
+        name: string;
+        variants: { id: number }[];
+      }[]
+    ).find((p) => p.name === `Serial Transfer Product ${stamp}`)!;
+    const serialVariantId = serialProduct.variants[0]!.id;
+
+    const created = await api(owner, "POST", "/api/stock-transfers", {
+      fromLocationId: locationA,
+      toLocationId: locationB,
+      items: [{ variantId: serialVariantId, quantity: 2 }],
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const transferId = (created.body as { data: { id: number } }).data.id;
+
+    const shipped = await api(
+      owner,
+      "POST",
+      `/api/stock-transfers/${transferId}/ship`,
+    );
+    assert.equal(shipped.status, 200, JSON.stringify(shipped.body));
+
+    // Ship records the moved serials on the item and marks them in_transit.
+    const detail = (
+      shipped.body as {
+        data: { items: { serialNumbers: string[] | null }[] };
+      }
+    ).data;
+    assert.deepEqual(detail.items[0]!.serialNumbers, serials.slice(0, 2));
+
+    const { default: pg } = await import("pg");
+    const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    const midShip = await client.query(
+      `SELECT status, location_id FROM serial_numbers
+       WHERE business_id = $1 AND variant_id = $2 AND serial_number = ANY($3)
+       ORDER BY id`,
+      [owner.businessId, serialVariantId, serials.slice(0, 2)],
+    );
+    assert.equal(midShip.rows.length, 2);
+    for (const row of midShip.rows) {
+      assert.equal(row.status, "in_transit");
+      assert.equal(row.location_id, locationA);
+    }
+
+    const received = await api(
+      owner,
+      "POST",
+      `/api/stock-transfers/${transferId}/receive`,
+      {},
+    );
+    assert.equal(received.status, 200, JSON.stringify(received.body));
+
+    const after = await client.query(
+      `SELECT sn.status, sn.location_id, sn.batch_id,
+              ib.batch_number LIKE 'TRF-%' AS trf_batch
+       FROM serial_numbers sn
+       LEFT JOIN inventory_batches ib ON ib.id = sn.batch_id
+       WHERE sn.business_id = $1 AND sn.variant_id = $2
+         AND sn.serial_number = ANY($3)
+       ORDER BY sn.id`,
+      [owner.businessId, serialVariantId, serials.slice(0, 2)],
+    );
+    const leftBehind = await client.query(
+      `SELECT status FROM serial_numbers
+       WHERE business_id = $1 AND variant_id = $2 AND serial_number = $3`,
+      [owner.businessId, serialVariantId, serials[2]],
+    );
+    await client.end();
+
+    for (const row of after.rows) {
+      assert.equal(row.status, "in_stock");
+      assert.equal(row.location_id, locationB);
+      assert.equal(row.trf_batch, true);
+    }
+    // The unit that stayed home is untouched.
+    assert.equal(leftBehind.rows[0].status, "in_stock");
+  });
 });

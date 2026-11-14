@@ -690,17 +690,20 @@ async function executeGroupCreate(input: {
     if (opening > 0 && product.trackingType !== "none") {
       const batchNumber =
         row.batchNumber?.slice(0, 100) ?? `AUTO-${variant!.id}-${Date.now()}`;
-      await tx.insert(inventoryBatches).values({
-        businessId,
-        variantId: variant!.id,
-        locationId,
-        purchaseItemId: null,
-        batchNumber,
-        purchasePrice: row.purchasePrice ?? 0,
-        quantityReceived: opening,
-        quantityRemaining: opening,
-        expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
-      });
+      const [openingBatch] = await tx
+        .insert(inventoryBatches)
+        .values({
+          businessId,
+          variantId: variant!.id,
+          locationId,
+          purchaseItemId: null,
+          batchNumber,
+          purchasePrice: row.purchasePrice ?? 0,
+          quantityReceived: opening,
+          quantityRemaining: opening,
+          expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
+        })
+        .returning({ id: inventoryBatches.id });
       await tx
         .insert(inventoryStock)
         .values({
@@ -730,7 +733,11 @@ async function executeGroupCreate(input: {
         await tx.insert(serialNumbers).values({
           businessId,
           variantId: variant!.id,
-          batchId: null,
+          // B1-05: imported serials MUST land in their opening batch — the
+          // sale path hard-fails any serial without a batch ("A serial
+          // number has no batch"), which made imported serial stock
+          // unsellable until manual backfill.
+          batchId: openingBatch?.id ?? null,
           serialNumber: serial,
           locationId,
         });

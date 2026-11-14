@@ -144,6 +144,11 @@ export async function adjustVariantStock(
 
     // Explicit columns: keeps FIFO stable regardless of new batch columns
     // (landed cost) added to the schema.
+    // C1-04: batches are LOCATION-scoped — an adjustment at location A must
+    // never consume (or average) batches owned by location B; that shrank
+    // B's valuation while its stock row stayed untouched and later ops at B
+    // hit "Not enough batch stock". Every other consumer (sale, transfer,
+    // count) already filters by location.
     const batches = await tx
       .select({
       id: inventoryBatches.id,
@@ -163,6 +168,7 @@ export async function adjustVariantStock(
         and(
           eq(inventoryBatches.variantId, variantId),
           eq(inventoryBatches.businessId, businessId),
+          eq(inventoryBatches.locationId, locationId),
           gt(inventoryBatches.quantityRemaining, 0),
         ),
       )
@@ -181,6 +187,7 @@ export async function adjustVariantStock(
           and(
             eq(serialNumbers.variantId, variantId),
             eq(serialNumbers.businessId, businessId),
+            eq(serialNumbers.locationId, locationId),
             eq(serialNumbers.status, "in_stock"),
             inArray(serialNumbers.serialNumber, serialList),
           ),
