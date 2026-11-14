@@ -151,6 +151,17 @@ export interface Promotion {
   canStackWithGroupDiscount: boolean;
   canStackWithCoupons: boolean;
   isActive: boolean;
+  // Phase 3 (Feature 8) engine config — the edit form must round-trip
+  // these exactly; the backend merges defined PATCH values over the row.
+  promoKind: "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier";
+  /** Kind-specific rule payload: {buyQty,getQty} | {comboSize,discountPercent} | {tiers:[…]}. */
+  rule: Record<string, unknown> | null;
+  daysOfWeek: number[] | null;
+  startTime: string | null;
+  endTime: string | null;
+  usageLimit: number | null;
+  perCustomerLimit: number | null;
+  priority: number;
   scopeLabel: string;
   customerGroups: { id: number; name: string }[];
 }

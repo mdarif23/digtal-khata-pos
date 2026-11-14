@@ -78,7 +78,10 @@ export function CouponsPage() {
         maxDiscountAmount: cap ? Number(cap) : null,
         usageLimit: usageLimit ? Number(usageLimit) : null,
         perCustomerLimit: perCustomerLimit ? Number(perCustomerLimit) : null,
-        endsAt: endsAt ? new Date(endsAt).toISOString() : null,
+        // End of the chosen business day (H1-04): a bare date parses to
+        // 00:00 UTC, which in Dhaka kills the coupon at 06:00 local on its
+        // last day. Same end-of-day convention as PromotionsPage.
+        endsAt: endsAt ? new Date(`${endsAt}T23:59:59`).toISOString() : null,
       });
       toast.add({ type: "success", description: "Coupon created." });
       setCode("");
