@@ -5,11 +5,15 @@ import {
   getBusinessId,
   requireBusinessContext,
 } from "../../middleware/business.js";
-import { requireLocationAccess, getLocationId } from "../../middleware/location.js";
+import {
+  requireLocationAccess,
+  getLocationId,
+  resolveOptionalLocationParam,
+} from "../../middleware/location.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { callerHasPermission } from "../../middleware/permissions.js";
+import { recordAudit } from "../../services/audit.js";
 import { sendSafeError } from "../../utils/safeError.js";
-import { BadRequestError } from "../../utils/handleError.js";
 import {
   exportCustomers,
   exportExpenses,
@@ -39,26 +43,27 @@ function optionalSearch(req: Request): string | undefined {
   return `%${raw.trim().replace(/[%_]/g, "\\$&")}%`;
 }
 
-function optionalLocationId(req: Request): number | undefined {
-  const raw = req.query.locationId;
-  if (typeof raw !== "string" || raw.trim() === "") return undefined;
-  const id = Number(raw);
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new BadRequestError("Invalid locationId.");
-  }
-  return id;
-}
-
 // Exports are permission-gated per entity; requireView is applied per route.
 const requireView = (key: string) => requirePermission(key);
 
 router.get(
   "/api/export/customers",
   ...read,
-  requireView("customers.view"),
+  // Q1-2: the full customer book (name/phone/email/address, up to 50k rows)
+  // is PII — bulk exfiltration is a ledger-tier capability, not something
+  // the cashier default holds, and every export leaves an audit record.
+  requireView("customers.view_ledger"),
   async (req: Request, res: Response) => {
     try {
       const file = await exportCustomers(getBusinessId(req), optionalSearch(req));
+      void recordAudit({
+        businessId: getBusinessId(req),
+        actorUserId: req.user?.id ?? null,
+        action: "data.exported",
+        entityType: "customers",
+        entityId: null,
+        metadata: { rows: file.body.split("\n").length - 1, format: "csv" },
+      });
       sendCsv(res, file);
     } catch (err: unknown) {
       sendSafeError(res, err, "Unable to export customers.");
@@ -69,10 +74,18 @@ router.get(
 router.get(
   "/api/export/suppliers",
   ...read,
-  requireView("suppliers.view"),
+  requireView("suppliers.view_ledger"),
   async (req: Request, res: Response) => {
     try {
       const file = await exportSuppliers(getBusinessId(req), optionalSearch(req));
+      void recordAudit({
+        businessId: getBusinessId(req),
+        actorUserId: req.user?.id ?? null,
+        action: "data.exported",
+        entityType: "suppliers",
+        entityId: null,
+        metadata: { rows: file.body.split("\n").length - 1, format: "csv" },
+      });
       sendCsv(res, file);
     } catch (err: unknown) {
       sendSafeError(res, err, "Unable to export suppliers.");
@@ -87,10 +100,13 @@ router.get(
   async (req: Request, res: Response) => {
     try {
       const range = requireDateRange(req.query as Record<string, unknown>);
+      // L1-1: the requested location is validated against the caller's
+      // server-side assignments (reports do this; exports skipped it, so a
+      // restricted user could read another location's sales via CSV).
       const file = await exportSales(
         getBusinessId(req),
         range,
-        optionalLocationId(req),
+        await resolveOptionalLocationParam(req),
       );
       sendCsv(res, file);
     } catch (err: unknown) {
@@ -109,7 +125,7 @@ router.get(
       const file = await exportSalesLines(
         getBusinessId(req),
         range,
-        optionalLocationId(req),
+        await resolveOptionalLocationParam(req),
       );
       sendCsv(res, file);
     } catch (err: unknown) {

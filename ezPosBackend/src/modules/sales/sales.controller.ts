@@ -5,6 +5,9 @@ import { getLocationId } from "../../middleware/location.js";
 import { getTerminalId } from "../../middleware/terminalContext.js";
 import { callerHasPermission } from "../../middleware/permissions.js";
 import { resolveOptionalLocationParam } from "../../middleware/location.js";
+import { listAccessibleLocationIds } from "../locations/locations.service.js";
+import { WILDCARD_PERMISSION } from "../../rbac/permissions.js";
+import { stripCostData } from "../../rbac/sanitize.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import {
   createSalePayloadSchema,
@@ -22,8 +25,29 @@ function isDashboardPeriod(period: string): period is DashboardPeriod {
 
 export async function getSalesData(req: Request, res: Response) {
   try {
-    const salesData = await salesService.getSalesData(getBusinessId(req));
-    res.status(200).json(salesData);
+    const businessId = getBusinessId(req);
+    // L1-2: scope the listing to the caller's server-verified location
+    // assignments — the route chain checked ACCESS but the query was
+    // business-wide, so restricted staff could read other locations' sales.
+    // Owners (wildcard) keep the business-wide view.
+    const membership = req.membership;
+    const callerIsOwner =
+      membership?.permissions.includes(WILDCARD_PERMISSION) ?? false;
+    const accessibleLocationIds = callerIsOwner
+      ? null
+      : await listAccessibleLocationIds(businessId, req.user!.id, false);
+    const salesData = await salesService.getSalesData(businessId, {
+      accessibleLocationIds,
+    });
+    // Q1-1: per-line cost is margin data — callers without
+    // products.view_cost never receive it (same rule as the catalog).
+    res
+      .status(200)
+      .json(
+        callerHasPermission(req, "products.view_cost")
+          ? salesData
+          : stripCostData(salesData),
+      );
   } catch (err) {
     sendSafeError(res, err, "Unable to load sales.");
   }

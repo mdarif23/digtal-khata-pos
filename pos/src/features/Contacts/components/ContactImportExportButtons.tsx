@@ -4,6 +4,7 @@ import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +47,7 @@ interface SessionDetail {
  * guarded CSV export. One component, entity-parameterized.
  */
 export function ContactImportExportButtons(props: { entity: "customers" | "suppliers" }) {
+  const { hasPermission } = usePermissions();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -144,9 +146,17 @@ export function ContactImportExportButtons(props: { entity: "customers" | "suppl
   return (
     <>
       <div className="flex gap-2">
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void handleExport()}>
-          <Download className="size-4" /> Export
-        </Button>
+        {/* Q1-2: bulk PII export is ledger-tier + audit-logged server-side —
+            the button hides for callers without the ledger permission. */}
+        {hasPermission(
+          props.entity === "customers"
+            ? "customers.view_ledger"
+            : "suppliers.view_ledger",
+        ) ? (
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void handleExport()}>
+            <Download className="size-4" /> Export
+          </Button>
+        ) : null}
         <Button
           variant="outline"
           size="sm"
