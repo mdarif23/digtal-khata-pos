@@ -124,7 +124,7 @@ describe("Expense page", () => {
   it("renders overview metrics from the server summary", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("৳1800.00")).toBeInTheDocument();
+      expect(screen.getByText("৳1,800.00")).toBeInTheDocument();
     });
     expect(screen.getByText("৳600.00")).toBeInTheDocument();
     expect(screen.getByText("3 expenses · page 1 of 1")).toBeInTheDocument();

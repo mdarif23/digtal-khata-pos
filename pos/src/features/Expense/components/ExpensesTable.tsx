@@ -51,8 +51,8 @@ const dateFormatter = new Intl.DateTimeFormat("en-BD", {
 });
 
 const STATUS_STYLES: Record<ExpensePaymentStatus, string> = {
-  paid: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:text-emerald-400",
-  partial: "bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400",
+  paid: "bg-success/10 text-success border-success/30",
+  partial: "bg-warning/10 text-warning border-warning/30",
   unpaid: "bg-destructive/10 text-destructive border-destructive/30",
 };
 
