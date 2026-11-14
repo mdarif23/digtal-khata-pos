@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
-import { ArrowRight, ShoppingCart, TriangleAlert } from "lucide-react";
+import { ArrowRight, PackageSearch, ShoppingCart, TriangleAlert } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -10,9 +10,15 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import {
+  StatusBadge,
+  type StatusTone,
+} from "@/components/common/StatusBadge";
 import {
   Dialog,
   DialogContent,
@@ -41,7 +47,7 @@ import useProductStore from "@/features/products/useProductStore";
 import {
   formatCurrency,
   formatNumber,
-} from "@/features/reports/utils/reportUtils";
+} from "@/lib/format";
 import {
   convertSuggestionsApi,
   getReorderDashboardApi,
@@ -55,40 +61,19 @@ import {
 
 const PAGE_SIZE = 20;
 
-const STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  out_of_stock: {
-    label: "Out of stock",
-    className: "bg-red-100 text-red-700 hover:bg-red-100",
-  },
-  low_stock: {
-    label: "Low stock",
-    className: "bg-amber-100 text-amber-700 hover:bg-amber-100",
-  },
-  needs_reorder: {
-    label: "Needs reorder",
-    className: "bg-sky-100 text-sky-700 hover:bg-sky-100",
-  },
-  healthy: { label: "Healthy", className: "" },
+const STATUS_BADGE: Record<string, { label: string; tone: StatusTone }> = {
+  out_of_stock: { label: "Out of stock", tone: "danger" },
+  low_stock: { label: "Low stock", tone: "warning" },
+  needs_reorder: { label: "Needs reorder", tone: "info" },
+  healthy: { label: "Healthy", tone: "success" },
 };
 
-const ORDER_STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  below_minimum: {
-    label: "Below minimum",
-    className: "bg-amber-100 text-amber-700 hover:bg-amber-100",
-  },
-  minimum_reached: {
-    label: "Minimum reached",
-    className: "bg-sky-100 text-sky-700 hover:bg-sky-100",
-  },
-  target_reached: {
-    label: "Target reached",
-    className: "bg-emerald-100 text-emerald-700 hover:bg-emerald-100",
-  },
-  above_target: {
-    label: "Above target",
-    className: "bg-emerald-100 text-emerald-700 hover:bg-emerald-100",
-  },
-  ready_for_review: { label: "Ready for review", className: "" },
+const ORDER_STATUS_BADGE: Record<string, { label: string; tone: StatusTone }> = {
+  below_minimum: { label: "Below minimum", tone: "warning" },
+  minimum_reached: { label: "Minimum reached", tone: "info" },
+  target_reached: { label: "Target reached", tone: "success" },
+  above_target: { label: "Above target", tone: "success" },
+  ready_for_review: { label: "Ready for review", tone: "neutral" },
 };
 
 /**
@@ -296,32 +281,28 @@ export function ReorderDashboardPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6">
+    <PageContainer>
+      <PageHeader
+        title="Smart Reorder Planning"
+        description="Availability nets reserved stock, outstanding purchase orders, and in-transit transfers into this location — so nothing is double-ordered. Quantities are suggestions; you decide what to order."
+      />
+
       <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">Smart Reorder Planning</CardTitle>
-          <CardDescription>
-            Availability nets reserved stock, outstanding purchase orders,
-            and in-transit transfers into this location — so nothing is
-            double-ordered. Quantities are suggestions; you decide what to
-            order.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        <CardContent className="grid grid-cols-2 gap-3 pt-6 md:grid-cols-3 lg:grid-cols-6">
           <MetricCard
             label="Out of stock"
             value={summary ? formatNumber(summary.outOfStock) : null}
-            tone="text-red-600"
+            tone="text-destructive"
           />
           <MetricCard
             label="Low stock"
             value={summary ? formatNumber(summary.lowStock) : null}
-            tone="text-amber-600"
+            tone="text-warning"
           />
           <MetricCard
             label="Needs reorder"
             value={summary ? formatNumber(summary.needsReorder) : null}
-            tone="text-sky-600"
+            tone="text-info"
           />
           <MetricCard
             label="Estimated reorder value"
@@ -350,9 +331,11 @@ export function ReorderDashboardPage() {
           {isLoading ? (
             <Skeleton className="h-24 w-full" />
           ) : groups.length === 0 ? (
-            <div className="flex items-center justify-center rounded-lg border border-dashed border-slate-200 py-8 text-sm text-slate-400">
-              Nothing to group — no attention products with a cost basis.
-            </div>
+            <EmptyState
+              icon={PackageSearch}
+              title="Nothing to group"
+              description="No attention products with a cost basis."
+            />
           ) : (
             <Table>
               <TableHeader>
@@ -378,30 +361,28 @@ export function ReorderDashboardPage() {
                         {group.supplierName ?? "No supplier yet"}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary" className={badge.className}>
-                          {badge.label}
-                        </Badge>
+                        <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right tabular-nums">
                         {group.orderStatus === "below_minimum"
                           ? formatCurrency(group.amountRemaining)
                           : "—"}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right tabular-nums">
                         {formatNumber(group.itemCount)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right tabular-nums">
                         {formatNumber(group.totalQuantity)}
                       </TableCell>
-                      <TableCell className="text-right font-medium">
+                      <TableCell className="text-right font-medium tabular-nums">
                         {formatCurrency(group.estimatedValue)}
                       </TableCell>
-                      <TableCell className="text-right text-slate-500">
+                      <TableCell className="text-right text-muted-foreground tabular-nums">
                         {group.minimumOrderValue !== null
                           ? formatCurrency(group.minimumOrderValue)
                           : "—"}
                       </TableCell>
-                      <TableCell className="text-right text-slate-500">
+                      <TableCell className="text-right text-muted-foreground tabular-nums">
                         {group.targetOrderValue !== null
                           ? formatCurrency(group.targetOrderValue)
                           : "—"}
@@ -516,16 +497,13 @@ export function ReorderDashboardPage() {
                     : rows.length === 0
                       ? (
                           <TableRow>
-                            <TableCell colSpan={12}>
-                              <div className="flex flex-col items-center gap-1 py-10 text-center">
-                                <p className="text-sm font-medium text-slate-600">
-                                  Nothing needs attention
-                                </p>
-                                <p className="text-xs text-slate-400">
-                                  Configure reorder points or alert quantities
-                                  on variants to monitor them here.
-                                </p>
-                              </div>
+                            <TableCell colSpan={12} className="py-6">
+                              <EmptyState
+                                icon={PackageSearch}
+                                title="Nothing needs attention"
+                                description="Configure reorder points or alert quantities on variants to monitor them here."
+                                className="border-0 bg-transparent"
+                              />
                             </TableCell>
                           </TableRow>
                         )
@@ -550,14 +528,14 @@ export function ReorderDashboardPage() {
                                   <span className="font-medium">
                                     {row.productName}
                                   </span>
-                                  <span className="flex items-center gap-2 text-xs text-slate-400">
+                                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
                                     <span>
                                       {row.sku ?? "—"}
                                       {row.unitName ? ` · ${row.unitName}` : ""}
                                     </span>
                                     <Link
                                       to={`/procurement/prices/${row.variantId}`}
-                                      className="text-sky-600 hover:underline"
+                                      className="text-primary hover:underline"
                                       onClick={(event) => event.stopPropagation()}
                                     >
                                       Compare prices
@@ -566,32 +544,29 @@ export function ReorderDashboardPage() {
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <Badge
-                                  variant="secondary"
-                                  className={badge.className}
-                                >
+                                <StatusBadge tone={badge.tone}>
                                   {badge.label}
-                                </Badge>
+                                </StatusBadge>
                               </TableCell>
-                              <TableCell className="text-right">
+                              <TableCell className="text-right tabular-nums">
                                 {formatNumber(row.currentStock)}
                               </TableCell>
-                              <TableCell className="text-right text-slate-500">
+                              <TableCell className="text-right text-muted-foreground tabular-nums">
                                 {row.reservedQuantity > 0
                                   ? formatNumber(row.reservedQuantity)
                                   : "—"}
                               </TableCell>
-                              <TableCell className="text-right text-slate-500">
+                              <TableCell className="text-right text-muted-foreground tabular-nums">
                                 {row.outstandingOnOrder > 0
                                   ? formatNumber(row.outstandingOnOrder)
                                   : "—"}
                               </TableCell>
-                              <TableCell className="text-right text-slate-500">
+                              <TableCell className="text-right text-muted-foreground tabular-nums">
                                 {row.inTransitQuantity > 0
                                   ? formatNumber(row.inTransitQuantity)
                                   : "—"}
                               </TableCell>
-                              <TableCell className="text-right font-medium">
+                              <TableCell className="text-right font-medium tabular-nums">
                                 {formatNumber(row.availableQuantity)}
                               </TableCell>
                               <TableCell className="text-right">
@@ -616,17 +591,17 @@ export function ReorderDashboardPage() {
                                 ) : row.suggestedQuantity !== null ? (
                                   formatNumber(row.suggestedQuantity)
                                 ) : (
-                                  <span className="text-xs text-slate-400">
+                                  <span className="text-xs text-muted-foreground">
                                     set qty at order time
                                   </span>
                                 )}
                               </TableCell>
-                              <TableCell className="text-right text-slate-500">
+                              <TableCell className="text-right text-muted-foreground tabular-nums">
                                 {row.lastUnitCost !== null
                                   ? formatCurrency(row.lastUnitCost)
                                   : "—"}
                               </TableCell>
-                              <TableCell className="text-right">
+                              <TableCell className="text-right tabular-nums">
                                 {row.estimatedValue !== null
                                   ? formatCurrency(row.estimatedValue)
                                   : "—"}
@@ -635,12 +610,12 @@ export function ReorderDashboardPage() {
                                 <div className="flex flex-col">
                                   <span>
                                     {row.lastSupplierName ?? (
-                                      <span className="text-amber-600">
+                                      <span className="text-warning">
                                         No supplier yet
                                       </span>
                                     )}
                                   </span>
-                                  <span className="text-xs text-slate-400">
+                                  <span className="text-xs text-muted-foreground">
                                     last purchase{" "}
                                     {row.lastUnitCost !== null ? "recorded" : "missing"}
                                   </span>
@@ -654,7 +629,7 @@ export function ReorderDashboardPage() {
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 text-sm text-slate-500">
+          <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
             <Button
               variant="outline"
               size="sm"
@@ -692,7 +667,7 @@ export function ReorderDashboardPage() {
             <DialogTitle>Create draft purchase orders</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4 text-sm">
-            <p className="text-slate-500">
+            <p className="text-muted-foreground">
               One unpaid draft per supplier, created through the existing
               purchase workflow. Review them in Purchases before receiving or
               paying anything — you can also change the supplier per draft.
@@ -706,7 +681,7 @@ export function ReorderDashboardPage() {
                 <div key={group.key} className="flex flex-col gap-3 rounded-lg border p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <span className="text-xs font-medium text-slate-500">
+                      <span className="text-xs font-medium text-muted-foreground">
                         Draft for
                       </span>
                       <Select
@@ -766,7 +741,7 @@ export function ReorderDashboardPage() {
                     {group.items.map((item) => (
                       <div
                         key={item.row.variantId}
-                        className="flex items-center justify-between text-xs text-slate-500"
+                        className="flex items-center justify-between text-xs text-muted-foreground"
                       >
                         <span>
                           {item.row.productName} × {item.quantity}
@@ -780,13 +755,13 @@ export function ReorderDashboardPage() {
                     ))}
                   </div>
 
-                  <Badge variant="secondary" className={`w-fit ${badge.className}`}>
-                    {badge.label}
-                  </Badge>
+                  <span className="w-fit">
+                    <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
+                  </span>
 
                   {group.orderStatus === "below_minimum" ? (
-                    <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-2">
-                      <p className="flex items-start gap-2 text-xs text-amber-700">
+                    <div className="flex flex-col gap-2 rounded-md border border-warning/30 bg-warning/10 p-2">
+                      <p className="flex items-start gap-2 text-xs text-warning">
                         <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
                         Below {group.supplierName}&apos;s minimum by{" "}
                         {formatCurrency(group.amountRemaining)}. You can still
@@ -810,7 +785,7 @@ export function ReorderDashboardPage() {
                       {additionalRows?.groupKey === group.key &&
                       !additionalRows.loading ? (
                         additionalRows.rows.length === 0 ? (
-                          <p className="text-xs text-slate-400">
+                          <p className="text-xs text-muted-foreground">
                             No other products from this supplier need
                             replenishment right now.
                           </p>
@@ -854,7 +829,7 @@ export function ReorderDashboardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -869,8 +844,8 @@ function MetricCard({
 }) {
   return (
     <div className="flex flex-col gap-1 rounded-lg border p-3">
-      <span className="text-xs text-slate-500">{label}</span>
-      <span className={`text-lg font-semibold ${tone ?? ""}`}>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={`text-lg font-semibold tabular-nums ${tone ?? ""}`}>
         {value ?? "—"}
       </span>
     </div>

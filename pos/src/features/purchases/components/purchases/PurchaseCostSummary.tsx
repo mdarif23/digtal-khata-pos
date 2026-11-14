@@ -4,7 +4,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { formatCurrency } from "../../utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 
 /**
  * Cost-summary block for purchase creation (Phase 3). Layout per the

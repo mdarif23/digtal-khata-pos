@@ -1,17 +1,21 @@
 import { useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { EmptyState } from "@/components/common/EmptyState";
+import { formatCurrency } from "@/lib/format";
 import { useGroupProfitability, usePromotionPerformance } from "../hooks/usePricing";
-
-const tk = (n: number) => `৳${n.toFixed(2)}`;
 
 /**
  * Pricing attribution reports (Phase 7): group profitability (from the
@@ -31,20 +35,21 @@ export function PricingReportsPage() {
   const groupsQuery = useGroupProfitability(rangeParams);
   const promosQuery = usePromotionPerformance(rangeParams);
 
+  const groupRows = groupsQuery.data?.rows ?? [];
+  const promoRows = promosQuery.data?.rows ?? [];
+
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4">
+    <PageContainer width="wide">
+      <PageHeader
+        title="Pricing reports"
+        description="Who the discounts go to and what they cost — computed from historical sale snapshots."
+      />
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>Pricing reports</CardTitle>
-            <CardDescription>
-              Who the discounts go to and what they cost — computed from
-              historical sale snapshots.
-            </CardDescription>
-          </div>
+        <CardContent className="space-y-6">
           <div className="flex flex-wrap items-end gap-2">
             <select
               className="h-9 rounded-md border bg-background px-2 text-sm"
+              aria-label="Report period"
               value={period}
               onChange={(e) => setPeriod(e.target.value)}
             >
@@ -83,47 +88,61 @@ export function PricingReportsPage() {
               </>
             )}
           </div>
-        </CardHeader>
-        <CardContent className="space-y-6">
+
           {/* Group profitability */}
           <div className="space-y-2">
             <h3 className="font-semibold">Group profitability</h3>
             {groupsQuery.isLoading ? (
               <Skeleton className="h-24 w-full" />
-            ) : (groupsQuery.data?.rows.length ?? 0) === 0 ? (
-              <p className="text-sm text-muted-foreground">No sales in this period.</p>
             ) : (
               <div className="overflow-hidden rounded-md border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 text-left">
-                    <tr>
-                      <th className="p-2 font-medium">Group</th>
-                      <th className="p-2 font-medium">Sales</th>
-                      <th className="p-2 font-medium">Gross</th>
-                      <th className="p-2 font-medium">Group disc.</th>
-                      <th className="p-2 font-medium">Promo disc.</th>
-                      <th className="p-2 font-medium">Net revenue</th>
-                      <th className="p-2 font-medium">Net profit</th>
-                      <th className="p-2 font-medium">Margin</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(groupsQuery.data?.rows ?? []).map((row) => (
-                      <tr key={row.groupId ?? "none"} className="border-t">
-                        <td className="p-2 font-medium">{row.groupName}</td>
-                        <td className="p-2">{row.salesCount}</td>
-                        <td className="p-2 font-mono">{tk(row.grossSales)}</td>
-                        <td className="p-2 font-mono text-emerald-700">-{tk(row.groupDiscounts)}</td>
-                        <td className="p-2 font-mono text-emerald-700">-{tk(row.promotionDiscounts)}</td>
-                        <td className="p-2 font-mono">{tk(row.netRevenue)}</td>
-                        <td className={`p-2 font-mono font-semibold ${row.netProfit >= 0 ? "" : "text-destructive"}`}>
-                          {tk(row.netProfit)}
-                        </td>
-                        <td className="p-2">{row.marginPercent}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <Table>
+                  <TableHeader className="bg-muted/50">
+                    <TableRow>
+                      <TableHead>Group</TableHead>
+                      <TableHead className="text-right">Sales</TableHead>
+                      <TableHead className="text-right">Gross</TableHead>
+                      <TableHead className="text-right">Group disc.</TableHead>
+                      <TableHead className="text-right">Promo disc.</TableHead>
+                      <TableHead className="text-right">Net revenue</TableHead>
+                      <TableHead className="text-right">Net profit</TableHead>
+                      <TableHead className="text-right">Margin</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {groupRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8}>
+                          <EmptyState
+                            title="No sales in this period"
+                            description="Group discounts will appear here once sales are recorded."
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      groupRows.map((row) => (
+                        <TableRow key={row.groupId ?? "none"}>
+                          <TableCell className="font-medium">{row.groupName}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.salesCount}</TableCell>
+                          <TableCell className="text-right font-mono tabular-nums">{formatCurrency(row.grossSales)}</TableCell>
+                          <TableCell className="text-right font-mono tabular-nums text-success">
+                            -{formatCurrency(row.groupDiscounts)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono tabular-nums text-success">
+                            -{formatCurrency(row.promotionDiscounts)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono tabular-nums">{formatCurrency(row.netRevenue)}</TableCell>
+                          <TableCell
+                            className={`text-right font-mono font-semibold tabular-nums ${row.netProfit >= 0 ? "" : "text-destructive"}`}
+                          >
+                            {formatCurrency(row.netProfit)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{row.marginPercent}%</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
               </div>
             )}
           </div>
@@ -133,35 +152,44 @@ export function PricingReportsPage() {
             <h3 className="font-semibold">Promotion performance</h3>
             {promosQuery.isLoading ? (
               <Skeleton className="h-24 w-full" />
-            ) : (promosQuery.data?.rows.length ?? 0) === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No promotions applied in this period.
-              </p>
             ) : (
               <div className="overflow-hidden rounded-md border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 text-left">
-                    <tr>
-                      <th className="p-2 font-medium">Promotion</th>
-                      <th className="p-2 font-medium">Sales</th>
-                      <th className="p-2 font-medium">Total discount given</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(promosQuery.data?.rows ?? []).map((row) => (
-                      <tr key={row.promotionId} className="border-t">
-                        <td className="p-2 font-medium">{row.promotionName}</td>
-                        <td className="p-2">{row.salesCount}</td>
-                        <td className="p-2 font-mono text-emerald-700">-{tk(row.totalDiscount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <Table>
+                  <TableHeader className="bg-muted/50">
+                    <TableRow>
+                      <TableHead>Promotion</TableHead>
+                      <TableHead className="text-right">Sales</TableHead>
+                      <TableHead className="text-right">Total discount given</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {promoRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={3}>
+                          <EmptyState
+                            title="No promotions applied in this period"
+                            description="Promotion performance appears once promotions are used at checkout."
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      promoRows.map((row) => (
+                        <TableRow key={row.promotionId}>
+                          <TableCell className="font-medium">{row.promotionName}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.salesCount}</TableCell>
+                          <TableCell className="text-right font-mono tabular-nums text-success">
+                            -{formatCurrency(row.totalDiscount)}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
               </div>
             )}
           </div>
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }

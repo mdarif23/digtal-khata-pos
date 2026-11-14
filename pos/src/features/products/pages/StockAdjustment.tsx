@@ -416,7 +416,7 @@ export function StockAdjustment() {
             <p className="text-xs text-muted-foreground">At/below alert</p>
             <p className="mt-1 flex items-center gap-1 text-xl font-semibold">
               {lowStockCount > 0 && (
-                <AlertTriangle className="size-4 text-amber-500" />
+                <AlertTriangle className="size-4 text-warning" />
               )}
               {lowStockCount}
             </p>
@@ -724,8 +724,8 @@ export function StockAdjustment() {
                   change === 0
                     ? "bg-muted/40"
                     : change > 0
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"
-                      : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300"
+                      ? "border-success/30 bg-success/10 text-success"
+                      : "border-warning/30 bg-warning/10 text-warning"
                 }`}
               >
                 <span className="text-sm font-medium">Stock change</span>
@@ -747,7 +747,7 @@ export function StockAdjustment() {
               </p>
             )}
             {successMessage && (
-              <p role="status" className="text-sm text-emerald-700">
+              <p role="status" className="text-sm text-success">
                 {successMessage}
               </p>
             )}
@@ -802,9 +802,9 @@ export function StockAdjustment() {
             </ol>
           </div>
 
-          <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-5 dark:border-amber-900 dark:bg-amber-950/20">
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-5">
             <div className="flex gap-3">
-              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600" />
+              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-warning" />
               <div>
                 <h2 className="text-sm font-semibold">Stock control</h2>
                 <p className="mt-1 text-sm text-muted-foreground">

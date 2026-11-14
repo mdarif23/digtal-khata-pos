@@ -130,7 +130,7 @@ describe("PurchasesList (server-driven, Phase 6-8)", () => {
     const rowBadges = screen.getAllByText("Partially returned");
     expect(rowBadges.length).toBeGreaterThanOrEqual(2); // tab + row badge
     // Summary cards come from the server summary.
-    expect(screen.getByText("৳ 1,600.00")).toBeInTheDocument(); // outstanding balance
+    expect(screen.getByText("৳1,600.00")).toBeInTheDocument(); // outstanding balance
   });
 
   it("issues exactly ONE list request on mount (no duplicates)", async () => {

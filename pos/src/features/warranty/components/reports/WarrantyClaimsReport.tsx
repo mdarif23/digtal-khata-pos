@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { PackageSearch, Receipt, Wallet, Wrench } from "lucide-react";
 import { useReportData } from "@/features/reports/hooks/useReportData";
 import type { ReportFilters } from "@/features/reports/types/report.types";
-import { exportToCsv, formatCurrency } from "@/features/reports/utils/reportUtils";
+import { exportToCsv } from "@/features/reports/utils/reportUtils";
+import { formatCurrency } from "@/lib/format";
 import { ReportHeader } from "@/features/reports/components/ReportHeader";
 import { ReportDateFilter } from "@/features/reports/components/ReportDateFilter";
 import { ReportMetricCard } from "@/features/reports/components/ReportMetricCard";
@@ -99,7 +100,7 @@ export function WarrantyClaimsReport() {
       key: "claimCount",
       header: "Claims",
       headerClassName: "text-right",
-      className: "text-right font-medium text-slate-900",
+      className: "text-right font-medium tabular-nums text-foreground",
       render: (row) => row.claimCount,
     },
   ];
@@ -109,7 +110,7 @@ export function WarrantyClaimsReport() {
       key: "productName",
       header: "Product",
       render: (row) => (
-        <span className="font-medium text-slate-900">{row.productName}</span>
+        <span className="font-medium text-foreground">{row.productName}</span>
       ),
     },
     {
@@ -131,7 +132,7 @@ export function WarrantyClaimsReport() {
       key: "claimRate",
       header: "Claim rate",
       render: (row) => (
-        <span className="font-medium text-slate-900">
+        <span className="font-medium tabular-nums text-foreground">
           {Number(row.claimRate).toFixed(1)}%
         </span>
       ),
@@ -167,7 +168,7 @@ export function WarrantyClaimsReport() {
           isCurrency={false}
           isCount
           icon={Receipt}
-          accent="bg-indigo-50 text-indigo-700"
+          accent="bg-info/10 text-info"
         />
         <ReportMetricCard
           title="Products with claims"
@@ -175,7 +176,7 @@ export function WarrantyClaimsReport() {
           isCurrency={false}
           isCount
           icon={PackageSearch}
-          accent="bg-sky-50 text-sky-700"
+          accent="bg-info/10 text-info"
         />
         <ReportMetricCard
           title="Units affected"
@@ -183,20 +184,20 @@ export function WarrantyClaimsReport() {
           isCurrency={false}
           isCount
           icon={Wrench}
-          accent="bg-amber-50 text-amber-700"
+          accent="bg-warning/10 text-warning"
         />
         <ReportMetricCard
           title="Total repair cost"
           value={totalCost}
           isCurrency
           icon={Wallet}
-          accent="bg-rose-50 text-rose-700"
-          valueClassName="text-rose-600"
+          accent="bg-destructive/10 text-destructive"
+          valueClassName="text-destructive"
         />
       </div>
 
       <section className="space-y-2">
-        <h3 className="text-sm font-semibold text-slate-900">Claims by status</h3>
+        <h3 className="text-sm font-semibold text-foreground">Claims by status</h3>
         <ReportTable
           columns={statusColumns}
           data={byStatus}
@@ -208,7 +209,7 @@ export function WarrantyClaimsReport() {
       </section>
 
       <section className="space-y-2">
-        <h3 className="text-sm font-semibold text-slate-900">Claims by product</h3>
+        <h3 className="text-sm font-semibold text-foreground">Claims by product</h3>
         <ReportTable
           columns={productColumns}
           data={byProduct}

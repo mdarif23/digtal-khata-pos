@@ -127,17 +127,17 @@ export function HardwareSettingsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Hardware</h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             Receipt printers and cash drawers for the active location.
           </p>
         </div>
         <Button onClick={() => setPairOpen(true)}>Pair a terminal</Button>
       </div>
 
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 p-4">
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
         <div className="space-y-1">
           <Label htmlFor="require-terminal">Require a registered terminal for checkout</Label>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             When on, sales are only accepted from PCs bound to an active
             terminal of this location. Unbound PCs can browse but not sell.
           </p>
@@ -150,10 +150,10 @@ export function HardwareSettingsPage() {
         />
       </div>
 
-      <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+      <div className="space-y-3 rounded-xl border border-border p-4">
         <div className="space-y-1">
           <h3 className="font-medium">Embedded price/weight barcodes</h3>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             Scale barcodes shaped PREFIX + item code + value. The scanner
             parses these before catalog lookup; the item barcode stores
             PREFIX + item code. Empty = parser defaults (21 / 5 / 5 / 3
@@ -265,11 +265,11 @@ export function HardwareSettingsPage() {
 
       <div className="space-y-3">
         {terminals.isLoading ? (
-          <div className="flex items-center justify-center gap-2 py-8 text-slate-400">
+          <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground/80">
             <Spinner className="size-4" /> Loading terminals…
           </div>
         ) : (terminals.data?.length ?? 0) === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-400">
+          <div className="rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground/80">
             <p className="text-sm">
               No POS terminals at this location yet. Install the ezPos
               hardware bridge on the Windows machine and pair it with a
@@ -283,7 +283,7 @@ export function HardwareSettingsPage() {
         )}
       </div>
 
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-muted-foreground/80">
         Drawer commands are authorized and audited by the backend, then relayed
         to the paired terminal. A drawer command never creates or changes a
         financial record, and a hardware failure never blocks a committed sale.

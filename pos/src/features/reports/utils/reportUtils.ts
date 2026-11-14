@@ -11,27 +11,14 @@ export const shortNumber = new Intl.NumberFormat("en-BD", {
   maximumFractionDigits: 0,
 });
 
-export function formatCurrency(value: number | string | null | undefined): string {
-  const num = Number(value);
-  return Number.isFinite(num) ? currency.format(num) : "৳ 0.00";
-}
-
-export function formatNumber(value: number | string | null | undefined): string {
-  const num = Number(value);
-  return Number.isFinite(num) ? shortNumber.format(num) : "0";
-}
-
-export function formatDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? "—" : format(d, "dd MMM yyyy");
-}
-
-export function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? "—" : format(d, "dd MMM yyyy, hh:mm a");
-}
+// Display formatting is canonical app-wide (৳ + grouped decimals, "14 Nov 2026").
+import {
+  formatCurrency,
+  formatNumber,
+  formatDate,
+  formatDateTime,
+} from "@/lib/format";
+export { formatCurrency, formatNumber, formatDate, formatDateTime };
 
 export function getPeriodDateRange(period: ReportPeriod): DateRange {
   const today = new Date();

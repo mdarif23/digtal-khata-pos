@@ -55,6 +55,7 @@ import { ReceiptPrintDialog } from "../components/receipt/ReceiptPrintDialog.js"
 import { ExchangeDialog } from "../components/pos/ExchangeDialog.js";
 import { PaymentIntentDialog } from "../components/pos/PaymentIntentDialog.js";
 import { LocationRequiredNotice } from "@/components/common/LocationRequiredNotice.js";
+import { SummaryCard } from "@/components/common/SummaryCard";
 
 const DATE_RANGES = ["all", "today", "7-days", "30-days"] as const;
 type DateRange = (typeof DATE_RANGES)[number];
@@ -106,15 +107,7 @@ const REFUND_DISPOSITION_LABELS: Record<
   damaged: "Damaged — do not restock",
 };
 
-const currencyFormatter = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 2,
-});
-
-function formatCurrency(value: number) {
-  return currencyFormatter.format(value);
-}
+import { formatCurrency } from "@/lib/format";
 
 function formatDate(
   value: string | null,
@@ -466,7 +459,7 @@ export function Sales() {
       </section>
 
       <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <CardTitle>Sales history</CardTitle>
             <CardDescription>
@@ -684,7 +677,7 @@ export function Sales() {
                   </Button>
                 </div>
                 <Button
-                  variant="destructive"
+                  variant="warning"
                   disabled={
                     busySaleId !== null ||
                     selectedSale.items.every(
@@ -894,7 +887,7 @@ export function Sales() {
                   Cancel
                 </Button>
                 <Button
-                  variant="destructive"
+                  variant="warning"
                   disabled={
                     !refundReason ||
                     !refundDisposition ||
@@ -937,29 +930,4 @@ export function Sales() {
   );
 }
 
-function SummaryCard({
-  title,
-  value,
-  description,
-  icon,
-}: {
-  title: string;
-  value: string;
-  description: string;
-  icon: ReactNode;
-}) {
-  return (
-    <Card>
-      <CardHeader className="flex-row items-start justify-between space-y-0 pb-2">
-        <div>
-          <CardDescription>{title}</CardDescription>
-          <CardTitle className="mt-1 text-2xl">{value}</CardTitle>
-        </div>
-        {icon}
-      </CardHeader>
-      <CardContent>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </CardContent>
-    </Card>
-  );
-}
+

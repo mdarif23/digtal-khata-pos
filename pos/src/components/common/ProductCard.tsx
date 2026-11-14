@@ -20,11 +20,7 @@ export interface ProductCardProps {
   onSerialClick?: (prod: ProductType) => void;
 }
 
-const currency = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 2,
-});
+import { formatCurrency as currency } from "@/lib/format";
 
 export function ProductImage({
   src,
@@ -105,8 +101,8 @@ export function ProductCard({
   const maxPrice = prices.length ? Math.max(...prices) : 0;
   const priceLabel =
     prices.length > 1 && minPrice !== maxPrice
-      ? `${currency.format(minPrice)} – ${currency.format(maxPrice)}`
-      : currency.format(
+      ? `${currency(minPrice)} – ${currency(maxPrice)}`
+      : currency(
           isSale
             ? defaultVariant.sellingPrice
             : getVariantPurchaseCost(defaultVariant),

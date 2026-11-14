@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { ArrowUpRight, Barcode, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/common/Kbd";
 
 export function ProductHeader({
   searchProducts,
@@ -90,7 +91,9 @@ export function ProductHeader({
         />
         <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center gap-1.5 text-xs text-muted-foreground">
           <Barcode className="size-4" />
-          <kbd className="rounded border bg-muted px-1.5 py-0.5 font-sans">/</kbd>
+          <Kbd keys={["F1"]} />
+          <span className="hidden sm:inline">or</span>
+          <Kbd keys={["/"]} />
           <span className="hidden sm:inline">to search</span>
         </div>
       </div>

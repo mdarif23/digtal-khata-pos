@@ -1,14 +1,17 @@
 import { useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +23,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
+import { formatCurrency } from "@/lib/format";
 import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/components/ui/toast";
 import { extractApiError } from "../components/RuleDialog";
@@ -34,8 +43,6 @@ import {
 } from "../hooks/usePricing";
 import type { CustomerGroup } from "../pricing.types";
 
-const tk = (n: number) => `৳${n.toFixed(2)}`;
-
 /**
  * Customer groups + group pricing (Phase 4 endpoints, Phase 5/6 UI): groups
  * hold members; pricing rows are whole-cart or scoped automatic discounts
@@ -48,6 +55,7 @@ export function CustomerGroupsPage() {
 
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<CustomerGroup | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CustomerGroup | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [isDefault, setIsDefault] = useState(false);
@@ -107,98 +115,95 @@ export function CustomerGroupsPage() {
     }
   }
 
-  async function removeGroup(group: CustomerGroup) {
-    if (!window.confirm(`Delete the group "${group.name}"? Members lose the group; sale history keeps its snapshots.`)) {
-      return;
-    }
-    try {
-      await deleteGroup.mutateAsync(group.id);
-      toast.add({ type: "success", description: "Group deleted." });
-    } catch (err) {
-      toast.add({
-        type: "error",
-        description: extractApiError(err, "Could not delete the group."),
-        priority: "high",
-      });
-    }
-  }
-
   const rows = groupsQuery.data ?? [];
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4">
+    <PageContainer width="wide">
+      <PageHeader
+        title="Customer groups"
+        description="Members of a group get its pricing automatically at checkout — walk-ins and group-less customers always pay list prices."
+        actions={
+          canManage ? (
+            <Button onClick={openCreate}>New group</Button>
+          ) : undefined
+        }
+      />
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>Customer groups</CardTitle>
-            <CardDescription>
-              Members of a group get its pricing automatically at checkout —
-              walk-ins and group-less customers always pay list prices.
-            </CardDescription>
-          </div>
-          {canManage && <Button onClick={openCreate}>New group</Button>}
-        </CardHeader>
         <CardContent>
           {groupsQuery.isLoading ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
-          ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No groups yet.</p>
           ) : (
             <div className="overflow-hidden rounded-md border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left">
-                  <tr>
-                    <th className="p-2 font-medium">Group</th>
-                    <th className="p-2 font-medium">Members</th>
-                    <th className="p-2 font-medium">Pricing rows</th>
-                    <th className="p-2 font-medium">Status</th>
-                    <th className="p-2 font-medium text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((group) => (
-                    <tr key={group.id} className="border-t">
-                      <td className="p-2">
-                        <span className="font-medium">{group.name}</span>
-                        {group.isDefault && <Badge className="ml-2">Default</Badge>}
-                        {group.description && (
-                          <div className="text-xs text-muted-foreground">{group.description}</div>
-                        )}
-                      </td>
-                      <td className="p-2">{group.memberCount}</td>
-                      <td className="p-2">{group.pricingCount}</td>
-                      <td className="p-2">
-                        {group.isActive ? <Badge>Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
-                      </td>
-                      <td className="p-2 text-right">
-                        <div className="flex justify-end gap-1.5">
-                          <Button variant="outline" size="sm" onClick={() => setPricingGroupId(group.id)}>
-                            Pricing
-                          </Button>
-                          {canManage && (
-                            <>
-                              <Button variant="outline" size="sm" onClick={() => openEdit(group)}>
-                                Edit
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={deleteGroup.isPending}
-                                onClick={() => void removeGroup(group)}
-                              >
-                                Delete
-                              </Button>
-                            </>
+              <Table>
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    <TableHead>Group</TableHead>
+                    <TableHead className="text-right">Members</TableHead>
+                    <TableHead className="text-right">Pricing rows</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5}>
+                        <EmptyState
+                          icon={Users}
+                          title="No groups yet"
+                          description="Create a group to give its members automatic pricing at checkout."
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.map((group) => (
+                      <TableRow key={group.id}>
+                        <TableCell>
+                          <span className="font-medium">{group.name}</span>
+                          {group.isDefault && <Badge className="ml-2">Default</Badge>}
+                          {group.description && (
+                            <div className="text-xs text-muted-foreground">{group.description}</div>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{group.memberCount}</TableCell>
+                        <TableCell className="text-right tabular-nums">{group.pricingCount}</TableCell>
+                        <TableCell>
+                          {group.isActive ? (
+                            <StatusBadge tone="success">Active</StatusBadge>
+                          ) : (
+                            <StatusBadge tone="neutral">Inactive</StatusBadge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1.5">
+                            <Button variant="outline" size="sm" onClick={() => setPricingGroupId(group.id)}>
+                              Pricing
+                            </Button>
+                            {canManage && (
+                              <>
+                                <Button variant="outline" size="sm" onClick={() => openEdit(group)}>
+                                  Edit
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={deleteGroup.isPending}
+                                  onClick={() => setDeleteTarget(group)}
+                                >
+                                  Delete
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
           )}
         </CardContent>
@@ -251,7 +256,21 @@ export function CustomerGroupsPage() {
           onClose={() => setPricingGroupId(null)}
         />
       )}
-    </div>
+
+      <ConfirmDeleteDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={`Delete the group "${deleteTarget?.name ?? ""}"?`}
+        description="Members lose the group; sale history keeps its snapshots."
+        entityName="customer group"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await deleteGroup.mutateAsync(deleteTarget.id);
+        }}
+      />
+    </PageContainer>
   );
 }
 
@@ -416,59 +435,69 @@ function GroupPricingDialog({
           </div>
         )}
         <div className="overflow-hidden rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left">
-              <tr>
-                <th className="p-2 font-medium">Scope</th>
-                <th className="p-2 font-medium">Discount</th>
-                <th className="p-2 font-medium">Conditions</th>
-                <th className="p-2 font-medium">Status</th>
-                {canManage && <th className="p-2" />}
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader className="bg-muted/50">
+              <TableRow>
+                <TableHead>Scope</TableHead>
+                <TableHead className="text-right">Discount</TableHead>
+                <TableHead>Conditions</TableHead>
+                <TableHead>Status</TableHead>
+                {canManage && <TableHead className="text-right" />}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {pricingQuery.isLoading ? (
-                <tr>
-                  <td colSpan={5} className="p-3">
+                <TableRow>
+                  <TableCell colSpan={canManage ? 5 : 4}>
                     <Skeleton className="h-6 w-full" />
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : (pricingQuery.data ?? []).length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="p-3 text-sm text-muted-foreground">
-                    No pricing rows for this group yet.
-                  </td>
-                </tr>
+                <TableRow>
+                  <TableCell colSpan={canManage ? 5 : 4}>
+                    <EmptyState
+                      icon={Users}
+                      title="No pricing rows for this group yet"
+                      description="Add a row above to discount this group's baskets."
+                    />
+                  </TableCell>
+                </TableRow>
               ) : (
                 (pricingQuery.data ?? []).map((row) => (
-                  <tr key={row.id} className="border-t">
-                    <td className="p-2 text-muted-foreground">{row.scopeLabel}</td>
-                    <td className="p-2 font-mono">
-                      {row.discountType === "percentage" ? `${row.discountValue}%` : tk(row.discountValue)}
-                    </td>
-                    <td className="p-2 text-xs text-muted-foreground">
-                      {row.minPurchaseAmount > 0 && `min ${tk(row.minPurchaseAmount)}`}
+                  <TableRow key={row.id}>
+                    <TableCell className="text-muted-foreground">{row.scopeLabel}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {row.discountType === "percentage"
+                        ? `${row.discountValue}%`
+                        : formatCurrency(row.discountValue)}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground tabular-nums">
+                      {row.minPurchaseAmount > 0 && `min ${formatCurrency(row.minPurchaseAmount)}`}
                       {row.minQuantity != null && ` · min qty ${row.minQuantity}`}
-                      {row.maxDiscountAmount != null && ` · cap ${tk(row.maxDiscountAmount)}`}
+                      {row.maxDiscountAmount != null && ` · cap ${formatCurrency(row.maxDiscountAmount)}`}
                       {(row.validFrom || row.validTo) &&
                         ` · ${row.validFrom ?? "…"} → ${row.validTo ?? "…"}`}
                       {row.stacksWithPromotions ? " · stacks with promotions" : " · no promotions"}
-                    </td>
-                    <td className="p-2">
-                      {row.isActive ? <Badge>Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
-                    </td>
+                    </TableCell>
+                    <TableCell>
+                      {row.isActive ? (
+                        <StatusBadge tone="success">Active</StatusBadge>
+                      ) : (
+                        <StatusBadge tone="neutral">Inactive</StatusBadge>
+                      )}
+                    </TableCell>
                     {canManage && (
-                      <td className="p-2 text-right">
+                      <TableCell className="text-right">
                         <Button variant="outline" size="sm" disabled={deletePricing.isPending} onClick={() => void remove(row.id)}>
                           Delete
                         </Button>
-                      </td>
+                      </TableCell>
                     )}
-                  </tr>
+                  </TableRow>
                 ))
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>

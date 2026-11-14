@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { CheckCircle2, TriangleAlert } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   Card,
@@ -9,8 +8,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { ReportMetricCard } from "@/features/reports/components/ReportMetricCard";
-import { formatCurrency } from "@/features/reports/utils/reportUtils";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { SummaryCard } from "@/components/common/SummaryCard";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { formatCurrency } from "@/lib/format";
 import { useBalanceSheet } from "../hooks/useFinance";
 
 /**
@@ -23,61 +25,50 @@ export function BalanceSheetPage() {
   const balanceSheet = useBalanceSheet(asOf || undefined);
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-            Finance &amp; Growth
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-            Balance Sheet &amp; Net Worth
-          </h1>
-          <div className="mt-2 flex items-center gap-3">
-            <div className="w-44">
-              <Label className="text-xs text-slate-500">As of (optional)</Label>
-              <Input
-                type="date"
-                value={asOf}
-                onChange={(e) => setAsOf(e.target.value)}
-              />
-            </div>
-            {balanceSheet.data && (
-              <Badge
-                variant="outline"
-                className={
-                  balanceSheet.data.balanced
-                    ? "mt-4 gap-1 border-emerald-300 text-emerald-700"
-                    : "mt-4 gap-1 border-amber-300 text-amber-700"
-                }
-              >
-                {balanceSheet.data.balanced ? (
-                  <>
-                    <CheckCircle2 className="size-3.5" /> Assets = Liabilities + Equity
-                  </>
-                ) : (
-                  <>
-                    <TriangleAlert className="size-3.5" /> Out of balance — investigate
-                  </>
-                )}
-              </Badge>
-            )}
+    <PageContainer>
+      <PageHeader title="Balance Sheet & Net Worth" />
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-44">
+            <Label className="text-xs text-muted-foreground">As of (optional)</Label>
+            <Input
+              type="date"
+              value={asOf}
+              onChange={(e) => setAsOf(e.target.value)}
+            />
           </div>
+          {balanceSheet.data && (
+            <StatusBadge
+              tone={balanceSheet.data.balanced ? "success" : "warning"}
+              dot={false}
+              className="gap-1"
+            >
+              {balanceSheet.data.balanced ? (
+                <>
+                  <CheckCircle2 className="size-3.5" /> Assets = Liabilities + Equity
+                </>
+              ) : (
+                <>
+                  <TriangleAlert className="size-3.5" /> Out of balance — investigate
+                </>
+              )}
+            </StatusBadge>
+          )}
         </div>
         <div className="grid w-full max-w-md grid-cols-2 gap-4">
-          <ReportMetricCard
+          <SummaryCard
             title="Net Worth"
-            value={balanceSheet.data?.netWorth}
-            icon={CheckCircle2}
-            accent="bg-emerald-50 text-emerald-700"
+            value={balanceSheet.data ? formatCurrency(balanceSheet.data.netWorth) : "—"}
+            icon={<CheckCircle2 className="size-4 text-muted-foreground" />}
           />
-          <ReportMetricCard
+          <SummaryCard
             title="Total Assets"
-            value={balanceSheet.data?.assets.total}
-            icon={TriangleAlert}
-            accent="bg-sky-50 text-sky-700"
+            value={balanceSheet.data ? formatCurrency(balanceSheet.data.assets.total) : "—"}
+            icon={<TriangleAlert className="size-4 text-muted-foreground" />}
           />
         </div>
-      </header>
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <SectionCard
@@ -106,7 +97,7 @@ export function BalanceSheetPage() {
           }
         />
       </div>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -127,21 +118,21 @@ function SectionCard({
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-1.5 text-sm">
-        {lines.length === 0 && <p className="text-slate-400">Nothing to show.</p>}
+        {lines.length === 0 && <p className="text-muted-foreground">Nothing to show.</p>}
         {lines.map((line) => (
           <div key={line.code} className="flex items-center justify-between gap-2">
-            <span className="min-w-0 text-slate-600">
-              <span className="mr-1.5 font-mono text-xs text-slate-400">{line.code}</span>
+            <span className="min-w-0 text-foreground">
+              <span className="mr-1.5 font-mono text-xs text-muted-foreground">{line.code}</span>
               {line.name}
             </span>
-            <span className="shrink-0 font-medium">{formatCurrency(line.balance)}</span>
+            <span className="shrink-0 font-medium tabular-nums">{formatCurrency(line.balance)}</span>
           </div>
         ))}
         <div className="flex items-center justify-between border-t pt-2 font-semibold">
           <span>Total {title.toLowerCase()}</span>
-          <span>{formatCurrency(total ?? "0")}</span>
+          <span className="tabular-nums">{formatCurrency(total ?? "0")}</span>
         </div>
-        {footnote && <p className="pt-1 text-xs text-slate-400">{footnote}</p>}
+        {footnote && <p className="pt-1 text-xs text-muted-foreground">{footnote}</p>}
       </CardContent>
     </Card>
   );

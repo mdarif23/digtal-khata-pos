@@ -27,7 +27,7 @@ import { getVariantPurchaseCost } from "@/features/products/utils/getVariantPurc
 import type { PurchaseCart } from "../purchase.types";
 import { PurchaseTable } from "../components/purchases/PurchaseTable";
 import { usePurchasesStore } from "../usePurchaseStore";
-import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 import {
   fetchPurchaseUnits,
   pickDefaultPurchaseUnit,
@@ -514,7 +514,7 @@ export function PurchasesOrder() {
                       handleSearchEnter(searchProducts);
                     }
                   }}
-                  className="h-11 pl-9 pr-10"
+                  className="pl-9 pr-10"
                   placeholder="Search products or scan barcode..."
                   aria-label="Search products or scan barcode"
                 />

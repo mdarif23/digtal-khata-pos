@@ -1,16 +1,26 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PackageSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Card,
+  CardContent,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { EmptyState } from "@/components/common/EmptyState";
+import { formatCurrency } from "@/lib/format";
 import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/components/ui/toast";
 import axios from "@/api/axios";
@@ -24,9 +34,6 @@ import {
 import type { PricingPreviewRow } from "../pricing.types";
 
 const PAGE_SIZE = 25;
-
-const tk = (n: number | null | undefined) =>
-  n == null ? "—" : `৳${Number(n).toFixed(2)}`;
 
 interface ProductsListItem {
   id: number;
@@ -93,7 +100,7 @@ export function ProductPricingPage() {
           label: p.name,
           variants: (p.variants ?? []).map((v) => ({
             variantId: v.id,
-            label: `${p.name}${v.sku ? ` — ${v.sku}` : ""} (৳${v.sellingPrice})`,
+            label: `${p.name}${v.sku ? ` — ${v.sku}` : ""} (${formatCurrency(v.sellingPrice)})`,
           })),
         })),
       );
@@ -157,7 +164,7 @@ export function ProductPricingPage() {
       if (result.applied) {
         toast.add({
           type: "success",
-          description: `Price applied: ৳${result.oldPrice.toFixed(2)} → ৳${Number(result.newPrice).toFixed(2)} (recorded in price history).`,
+          description: `Price applied: ${formatCurrency(result.oldPrice)} → ${formatCurrency(Number(result.newPrice))} (recorded in price history).`,
         });
       } else {
         toast.add({
@@ -207,18 +214,13 @@ export function ProductPricingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4">
+    <PageContainer width="wide">
+      <PageHeader
+        title="Product pricing"
+        description="Effective selling price and its inheritance source per variant. Applying a recommendation is the audited write to the effective price; overrides ride the variant › product › category › global › default precedence."
+      />
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>Product pricing</CardTitle>
-            <CardDescription>
-              Effective selling price and its inheritance source per variant.
-              Applying a recommendation is the audited write to the effective
-              price; overrides ride the variant › product › category › global
-              › default precedence.
-            </CardDescription>
-          </div>
+        <CardContent className="space-y-3">
           <Input
             className="w-56"
             placeholder="Search product or SKU…"
@@ -228,107 +230,121 @@ export function ProductPricingPage() {
               setPage(1);
             }}
           />
-        </CardHeader>
-        <CardContent className="space-y-3">
           {previewQuery.isLoading || previewQuery.isFetching ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
-          ) : pageRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No products match.</p>
           ) : (
-            <div className="overflow-x-auto rounded-md border">
-              <table className="w-full min-w-[860px] text-sm">
-                <thead className="bg-muted/50 text-left">
-                  <tr>
-                    <th className="p-2 font-medium">Variant</th>
-                    <th className="p-2 font-medium">Current price</th>
-                    <th className="p-2 font-medium">Source</th>
-                    <th className="p-2 font-medium">Rule</th>
-                    {canViewCost && <th className="p-2 font-medium">Cost</th>}
-                    <th className="p-2 font-medium">Recommended</th>
-                    <th className="p-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageRows.map((catalogRow) => {
-                    const row = previewsById.get(catalogRow.variantId);
-                    const isVariantOverride = row?.source.kind === "variant_rule";
-                    return (
-                      <tr key={catalogRow.variantId} className="border-t align-middle">
-                        <td className="p-2">
-                          <p className="font-medium">{catalogRow.label}</p>
-                          <p className="text-xs text-muted-foreground">{catalogRow.sku}</p>
-                        </td>
-                        <td className="p-2 font-mono">{tk(catalogRow.sellingPrice)}</td>
-                        <td className="p-2">
-                          <Badge variant={isVariantOverride ? "default" : "outline"}>
-                            {row ? (SOURCE_LABELS[row.source.kind] ?? row.source.label) : "…"}
-                          </Badge>
-                        </td>
-                        <td className="p-2 font-mono text-xs">
-                          {row?.method === "fixed"
-                            ? `Fixed ${tk(row.fixedPrice)}`
-                            : row
-                              ? `${row.method === "markup" ? "Markup" : "Margin"} ${row.percentage ?? "—"}%`
-                              : "—"}
-                        </td>
-                        {canViewCost && (
-                          <td className="p-2 font-mono">
-                            {row?.costStatus === "available"
-                              ? tk(row.cost)
-                              : row?.costStatus === "unavailable"
-                                ? "n/a"
-                                : "—"}
-                          </td>
-                        )}
-                        <td className="p-2">
-                          <span className="font-mono">{tk(row?.recommendedPrice)}</span>
-                          {(row?.minimumViolations ?? []).map((v) => (
-                            <Badge key={v} variant="destructive" className="ml-1.5">
-                              {v === "minimum_price" ? "below min" : "below margin floor"}
+            <div className="overflow-hidden rounded-md border">
+              <Table className="min-w-[860px]">
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    <TableHead>Variant</TableHead>
+                    <TableHead className="text-right">Current price</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Rule</TableHead>
+                    {canViewCost && <TableHead className="text-right">Cost</TableHead>}
+                    <TableHead className="text-right">Recommended</TableHead>
+                    <TableHead className="text-right" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pageRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={canViewCost ? 7 : 6}>
+                        <EmptyState
+                          icon={PackageSearch}
+                          title="No products match"
+                          description="Try a different product name or SKU."
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    pageRows.map((catalogRow) => {
+                      const row = previewsById.get(catalogRow.variantId);
+                      const isVariantOverride = row?.source.kind === "variant_rule";
+                      return (
+                        <TableRow key={catalogRow.variantId}>
+                          <TableCell>
+                            <p className="font-medium">{catalogRow.label}</p>
+                            <p className="text-xs text-muted-foreground">{catalogRow.sku}</p>
+                          </TableCell>
+                          <TableCell className="text-right font-mono tabular-nums">
+                            {formatCurrency(catalogRow.sellingPrice)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={isVariantOverride ? "default" : "outline"}>
+                              {row ? (SOURCE_LABELS[row.source.kind] ?? row.source.label) : "…"}
                             </Badge>
-                          ))}
-                        </td>
-                        <td className="p-2 text-right">
-                          <div className="flex justify-end gap-1.5">
-                            {canApply && row?.recommendedPrice != null && (
-                              <Button
-                                size="sm"
-                                disabled={busyVariantId === row.variantId}
-                                onClick={() => void apply(row)}
-                              >
-                                Apply
-                              </Button>
-                            )}
-                            {canManageRules && row && !isVariantOverride && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => void openOverride(row)}
-                              >
-                                Override
-                              </Button>
-                            )}
-                            {canManageRules && row && isVariantOverride && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={busyVariantId === row.variantId}
-                                onClick={() => void clearOverride(row)}
-                              >
-                                Clear override
-                              </Button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs tabular-nums">
+                            {row?.method === "fixed"
+                              ? `Fixed ${row.fixedPrice != null ? formatCurrency(row.fixedPrice) : "—"}`
+                              : row
+                                ? `${row.method === "markup" ? "Markup" : "Margin"} ${row.percentage ?? "—"}%`
+                                : "—"}
+                          </TableCell>
+                          {canViewCost && (
+                            <TableCell className="text-right font-mono tabular-nums">
+                              {row?.costStatus === "available" && row?.cost != null
+                                ? formatCurrency(row.cost)
+                                : row?.costStatus === "unavailable"
+                                  ? "n/a"
+                                  : "—"}
+                            </TableCell>
+                          )}
+                          <TableCell className="text-right">
+                            <span className="font-mono tabular-nums">
+                              {row?.recommendedPrice != null
+                                ? formatCurrency(row.recommendedPrice)
+                                : "—"}
+                            </span>
+                            {(row?.minimumViolations ?? []).map((v) => (
+                              <Badge key={v} variant="destructive" className="ml-1.5">
+                                {v === "minimum_price" ? "below min" : "below margin floor"}
+                              </Badge>
+                            ))}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1.5">
+                              {canApply && row?.recommendedPrice != null && (
+                                <Button
+                                  size="sm"
+                                  disabled={busyVariantId === row.variantId}
+                                  onClick={() => void apply(row)}
+                                >
+                                  Apply
+                                </Button>
+                              )}
+                              {canManageRules && row && !isVariantOverride && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => void openOverride(row)}
+                                >
+                                  Override
+                                </Button>
+                              )}
+                              {canManageRules && row && isVariantOverride && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={busyVariantId === row.variantId}
+                                  onClick={() => void clearOverride(row)}
+                                >
+                                  Clear override
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
             </div>
           )}
 
@@ -369,6 +385,6 @@ export function ProductPricingPage() {
         categories={categories}
         products={products}
       />
-    </div>
+    </PageContainer>
   );
 }

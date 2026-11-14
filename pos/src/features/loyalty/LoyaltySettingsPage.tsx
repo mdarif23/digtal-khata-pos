@@ -162,7 +162,7 @@ export function LoyaltySettingsPage() {
   return (
     <div className="grid gap-5 p-4 lg:p-6">
       <div>
-        <h1 className="text-xl font-semibold">Loyalty program</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Loyalty program</h1>
         <p className="text-sm text-muted-foreground">
           Points earn and redemption policy for this business.
         </p>

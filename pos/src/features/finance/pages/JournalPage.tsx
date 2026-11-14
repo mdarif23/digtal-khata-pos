@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,8 +31,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
-import { formatCurrency, formatDate } from "@/features/reports/utils/reportUtils";
+import { formatCurrency, formatDate } from "@/lib/format";
 import {
   createJournalEntryApi,
   getAccountsApi,
@@ -83,22 +85,12 @@ export function JournalPage() {
   const [reverseId, setReverseId] = useState<number | null>(null);
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-            Finance &amp; Growth
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-            Journal &amp; Periods
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Posted entries are immutable — corrections are reversals. Replays of a
-            posting hook can never double-post (idempotency per source event).
-          </p>
-        </div>
-        <Button onClick={() => setManualOpen(true)}>New manual entry</Button>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="Journal & Periods"
+        description="Posted entries are immutable — corrections are reversals. Replays of a posting hook can never double-post (idempotency per source event)."
+        actions={<Button onClick={() => setManualOpen(true)}>New manual entry</Button>}
+      />
 
       <div className="grid gap-4 lg:grid-cols-4">
         <Card className="lg:col-span-1">
@@ -107,24 +99,21 @@ export function JournalPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {periods.isLoading ? (
-              <p className="py-2 text-xs text-slate-400">Loading periods…</p>
+              <p className="py-2 text-xs text-muted-foreground">Loading periods…</p>
             ) : (periods.data ?? []).length === 0 ? (
-              <p className="py-2 text-xs text-slate-400">
+              <p className="py-2 text-xs text-muted-foreground">
                 No accounting periods yet — one is created with the first posted entry.
               </p>
             ) : (periods.data ?? []).slice(0, 8).map((period) => (
               <div
                 key={period.id}
-                className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                className="flex items-center justify-between rounded-xl border px-3 py-2 text-sm"
               >
                 <span>{period.periodStart.slice(0, 7)}</span>
                 <div className="flex items-center gap-1.5">
-                  <Badge
-                    variant="outline"
-                    className={`text-xs ${period.status === "open" ? "text-emerald-700" : "text-slate-500"}`}
-                  >
+                  <StatusBadge tone={period.status === "open" ? "success" : "neutral"}>
                     {period.status}
-                  </Badge>
+                  </StatusBadge>
                   {period.status === "open" ? (
                     <Button
                       variant="outline"
@@ -205,7 +194,7 @@ export function JournalPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="overflow-hidden rounded-2xl border border-slate-200/80">
+            <div className="overflow-hidden rounded-2xl border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -213,7 +202,7 @@ export function JournalPage() {
                     <TableHead>Date</TableHead>
                     <TableHead>Source</TableHead>
                     <TableHead>Memo</TableHead>
-                    <TableHead>Total</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead />
                   </TableRow>
@@ -226,23 +215,24 @@ export function JournalPage() {
                       <TableCell className="capitalize">
                         {entry.sourceType?.replace(/_/g, " ") ?? "manual"}
                       </TableCell>
-                      <TableCell className="max-w-56 truncate text-slate-500">
+                      <TableCell className="max-w-56 truncate text-muted-foreground">
                         {entry.memo ?? "—"}
                       </TableCell>
-                      <TableCell>{formatCurrency(entry.totalDebit ?? "0")}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(entry.totalDebit ?? "0")}
+                      </TableCell>
                       <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={
+                        <StatusBadge
+                          tone={
                             entry.status === "posted"
-                              ? "text-xs text-emerald-700"
+                              ? "success"
                               : entry.status === "reversed"
-                                ? "text-xs text-slate-500"
-                                : "text-xs text-amber-700"
+                                ? "neutral"
+                                : "warning"
                           }
                         >
                           {entry.status}
-                        </Badge>
+                        </StatusBadge>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
@@ -287,7 +277,7 @@ export function JournalPage() {
         onOpenChange={setManualOpen}
         accounts={accounts.data ?? []}
       />
-    </div>
+    </PageContainer>
   );
 }
 
@@ -296,16 +286,23 @@ function EntryDetailDialog({ id, onClose }: { id: number; onClose: () => void })
   const lines = entry.data?.lines ?? [];
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>
-            {entry.data?.entryNo}{" "}
-            <Badge
-              variant="outline"
-              className="ml-2 text-xs"
-            >
-              {entry.data?.status}
-            </Badge>
+          <DialogTitle className="flex items-center gap-2">
+            {entry.data?.entryNo}
+            {entry.data?.status && (
+              <StatusBadge
+                tone={
+                  entry.data.status === "posted"
+                    ? "success"
+                    : entry.data.status === "reversed"
+                      ? "neutral"
+                      : "warning"
+                }
+              >
+                {entry.data.status}
+              </StatusBadge>
+            )}
           </DialogTitle>
           <DialogDescription>
             {formatDate(entry.data?.entryDate)} ·{" "}
@@ -313,7 +310,7 @@ function EntryDetailDialog({ id, onClose }: { id: number; onClose: () => void })
             {entry.data?.memo ?? ""}
           </DialogDescription>
         </DialogHeader>
-        <div className="overflow-hidden rounded-xl border border-slate-200">
+        <div className="overflow-hidden rounded-xl border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -327,18 +324,18 @@ function EntryDetailDialog({ id, onClose }: { id: number; onClose: () => void })
               {lines.map((line) => (
                 <TableRow key={line.id}>
                   <TableCell>
-                    <span className="mr-1.5 font-mono text-xs text-slate-400">
+                    <span className="mr-1.5 font-mono text-xs text-muted-foreground">
                       {line.accountCode}
                     </span>
                     {line.accountName}
                   </TableCell>
-                  <TableCell className="max-w-56 truncate text-slate-500">
+                  <TableCell className="max-w-56 truncate text-muted-foreground">
                     {line.description ?? "—"}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right tabular-nums">
                     {formatCurrency(line.debit)}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right tabular-nums">
                     {formatCurrency(line.credit)}
                   </TableCell>
                 </TableRow>
@@ -369,7 +366,7 @@ function ReverseDialog({ id, onClose }: { id: number; onClose: () => void }) {
   };
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Reverse entry</DialogTitle>
           <DialogDescription>
@@ -447,7 +444,7 @@ function ManualEntryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Manual journal entry</DialogTitle>
           <DialogDescription>
@@ -563,7 +560,13 @@ function ManualEntryDialog({
                 </SelectContent>
               </Select>
             </div>
-            <span className={balanced ? "font-medium text-emerald-700" : "font-medium text-amber-700"}>
+            <span
+              className={
+                balanced
+                  ? "font-medium text-success tabular-nums"
+                  : "font-medium text-warning tabular-nums"
+              }
+            >
               Debits {formatCurrency(totalDebit)} · Credits {formatCurrency(totalCredit)}
               {balanced ? " ✓" : ""}
             </span>

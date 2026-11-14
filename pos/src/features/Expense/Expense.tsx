@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { exportToCsv } from "@/features/reports/utils/reportUtils";
 import { getErrorMessage } from "@/utils/getErrorMessage";
+import { formatCurrency } from "@/lib/format";
 import { useSessionStore } from "@/auth/sessionStore";
 import { ExpenseDialog } from "./components/ExpenseDialog";
 import { ExpenseCategoriesDialog } from "./components/ExpenseCategoriesDialog";
@@ -188,7 +189,7 @@ export function Expense() {
           ? "—"
           : list.isLoading
             ? "…"
-            : `৳${summary.totalAmount.toFixed(2)}`,
+            : formatCurrency(summary.totalAmount),
       description: "Cost incurred across matching expenses",
     },
     {
@@ -198,7 +199,7 @@ export function Expense() {
           ? "—"
           : list.isLoading
             ? "…"
-            : `৳${summary.totalDue.toFixed(2)}`,
+            : formatCurrency(summary.totalDue),
       description: `${summary ? summary.unpaidCount + summary.partialCount : 0} unpaid or partial expense(s)`,
     },
   ];
@@ -405,9 +406,9 @@ export function Expense() {
         {categoriesQuery.isError ? (
           <div
             role="alert"
-            className="flex flex-col gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+            className="flex flex-col gap-3 rounded-lg border border-warning/30 bg-warning/5 p-4 sm:flex-row sm:items-center sm:justify-between"
           >
-            <p className="text-sm text-amber-800 dark:text-amber-300">
+            <p className="text-sm text-warning">
               Could not load expense categories.{" "}
               {categoriesQuery.error instanceof Error
                 ? categoriesQuery.error.message

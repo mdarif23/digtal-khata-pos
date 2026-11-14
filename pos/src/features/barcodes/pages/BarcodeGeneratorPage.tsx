@@ -315,7 +315,7 @@ export function BarcodeGeneratorPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Barcode Generator</h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             Generate internal CODE128 barcodes, assign manufacturer codes, and
             print scanner-ready labels.
           </p>
@@ -326,12 +326,12 @@ export function BarcodeGeneratorPage() {
       </div>
 
       {showHistory ? (
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <div className="overflow-x-auto rounded-xl border border-border">
           {(historyQuery.data?.length ?? 0) === 0 ? (
-            <div className="p-4 text-sm text-slate-400">No print jobs recorded yet.</div>
+            <div className="p-4 text-sm text-muted-foreground/80">No print jobs recorded yet.</div>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+              <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2">When</th>
                   <th className="px-3 py-2 text-right">Items</th>
@@ -341,7 +341,7 @@ export function BarcodeGeneratorPage() {
               </thead>
               <tbody>
                 {(historyQuery.data ?? []).map((entry) => (
-                  <tr key={entry.id} className="border-t border-slate-100">
+                  <tr key={entry.id} className="border-t border-border">
                     <td className="px-3 py-2">{entry.createdAt?.slice(0, 19).replace("T", " ")}</td>
                     <td className="px-3 py-2 text-right">{entry.variantCount}</td>
                     <td className="px-3 py-2 text-right">{entry.copies}</td>
@@ -356,7 +356,7 @@ export function BarcodeGeneratorPage() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         {/* ---- Selection ---- */}
-        <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+        <div className="space-y-3 rounded-xl border border-border p-4">
           <div className="flex flex-wrap items-center gap-2">
             <Input
               placeholder="Search by product, SKU, or barcode…"
@@ -418,17 +418,17 @@ export function BarcodeGeneratorPage() {
           </div>
 
           {searchQuery.isLoading ? (
-            <div className="flex items-center justify-center gap-2 py-8 text-slate-400">
+            <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground/80">
               <Spinner className="size-4" /> Loading…
             </div>
           ) : rows.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
+            <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground/80">
               No products match — adjust the search or filters.
             </div>
           ) : (
-            <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="overflow-hidden rounded-lg border border-border">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2">
                       <Checkbox
@@ -447,7 +447,7 @@ export function BarcodeGeneratorPage() {
                 </thead>
                 <tbody>
                   {rows.map((row) => (
-                    <tr key={row.variantId} className="border-t border-slate-100">
+                    <tr key={row.variantId} className="border-t border-border">
                       <td className="px-3 py-2">
                         <Checkbox
                           aria-label={`Select ${row.productName}`}
@@ -457,13 +457,13 @@ export function BarcodeGeneratorPage() {
                       </td>
                       <td className="px-3 py-2">
                         <div className="font-medium">{row.productName}</div>
-                        <div className="text-xs text-slate-500">
+                        <div className="text-xs text-muted-foreground">
                           {row.variantLabel ?? "Default variant"} · {row.sku}
                           {row.aliases.length > 0 ? ` · +${row.aliases.length} alias(es)` : ""}
                         </div>
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">
-                        {row.barcode ?? <span className="text-slate-400">none yet</span>}
+                        {row.barcode ?? <span className="text-muted-foreground/80">none yet</span>}
                       </td>
                       <td className="px-3 py-2 text-right">{formatCurrency(row.sellingPrice)}</td>
                     </tr>
@@ -474,7 +474,7 @@ export function BarcodeGeneratorPage() {
           )}
 
           <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-muted-foreground">
               {total} item(s) — page {page} of {totalPages}
             </span>
             <div className="flex gap-1">
@@ -500,7 +500,7 @@ export function BarcodeGeneratorPage() {
 
         {/* ---- Configuration + preview ---- */}
         <div className="space-y-3">
-          <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+          <div className="space-y-3 rounded-xl border border-border p-4">
             <div className="flex items-center justify-between">
               <Label className="font-semibold">Generate internal barcodes</Label>
               <Badge variant="secondary">CODE128 · EZ…</Badge>
@@ -518,14 +518,14 @@ export function BarcodeGeneratorPage() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="text-rose-600"
+                  className="text-destructive"
                   onClick={() => void onGenerate(true)}
                 >
                   Regenerate (replace)…
                 </Button>
               </PermissionGuard>
             </div>
-            <div className="border-t border-slate-100 pt-3">
+            <div className="border-t border-border pt-3">
               <Label className="mb-1.5 block">Assign a manual / manufacturer code</Label>
               <div className="flex gap-2">
                 <Input
@@ -597,20 +597,20 @@ export function BarcodeGeneratorPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     A package barcode means ONE of the chosen unit — scanning
                     it counts a whole package (e.g. 12 pieces).
                   </p>
                 </div>
               )}
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-xs text-muted-foreground">
                 Retail codes are validated (GS1 check digit); duplicates are
                 refused. Select exactly one item.
               </p>
             </div>
           </div>
 
-          <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+          <div className="space-y-3 rounded-xl border border-border p-4">
             <Label className="font-semibold">Label configuration</Label>
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -782,12 +782,12 @@ export function BarcodeGeneratorPage() {
             logoDataUrl={logoUrl}
           />
 
-          <div className="flex items-center justify-between rounded-xl border border-slate-200 p-3">
-            <span className="text-sm text-slate-600">
+          <div className="flex items-center justify-between rounded-xl border border-border p-3">
+            <span className="text-sm text-foreground">
               <strong>{selectedItems.length}</strong> selected ·{" "}
               {labelItems.length * copies} label(s)
               {selectedItems.length > labelItems.length ? (
-                <span className="text-amber-600">
+                <span className="text-warning">
                   {" "}· {selectedItems.length - labelItems.length} without barcode (generate first)
                 </span>
               ) : null}

@@ -280,7 +280,7 @@ export function ProductInfoInput({
           </div>
 
           {serialNotice && (
-            <p className="text-sm text-emerald-700" role="status">
+            <p className="text-sm text-success" role="status">
               {serialNotice}
             </p>
           )}

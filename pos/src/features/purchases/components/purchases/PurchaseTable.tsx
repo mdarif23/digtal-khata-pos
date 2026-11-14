@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { PurchaseCart } from "../../purchase.types";
 import { buildVariantOptionsLabel } from "@/lib/variantDisplay";
-import { formatCurrency } from "../../utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 import { usePurchaseUnits } from "../../hooks/usePurchaseUnits";
 import {
   formatConversionHint,

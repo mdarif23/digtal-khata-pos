@@ -5,7 +5,6 @@ import { Package, Pencil } from "lucide-react";
 import { ProductTaxCell } from "@/features/taxes/components/ProductTaxCell";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
 import { DataTableColumnHeader } from "./data-table-column-header";
 import { type DataTableFeatures } from "./data-table-features";
 import { ProductType } from "@/features/products/product.schema";
@@ -15,20 +14,18 @@ import { ViewSerialsDialog } from "./data-table";
 import { hasPermission } from "@/auth/sessionStore";
 import useProductStore from "@/features/products/useProductStore";
 
+import { StatusBadge, type StatusTone } from "@/components/common/StatusBadge";
+import { formatCurrency } from "@/lib/format";
+
 const columnHelper = createColumnHelper<DataTableFeatures, ProductType>();
-const currencyFormatter = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 0,
-});
 
 function formatPriceRange(prices: number[]) {
   if (prices.length === 0) return "—";
   const minimum = Math.min(...prices);
   const maximum = Math.max(...prices);
   return minimum === maximum
-    ? currencyFormatter.format(minimum)
-    : `${currencyFormatter.format(minimum)} – ${currencyFormatter.format(maximum)}`;
+    ? formatCurrency(minimum)
+    : `${formatCurrency(minimum)} – ${formatCurrency(maximum)}`;
 }
 
 export const columns = columnHelper.columns([
@@ -120,16 +117,14 @@ export const columns = columnHelper.columns([
         "out-of-stock": "Out of stock",
       }[stockState];
       const stockTone = {
-        "in-stock": "border-emerald-200 bg-emerald-50 text-emerald-700",
-        "low-stock": "border-amber-200 bg-amber-50 text-amber-700",
-        "out-of-stock": "border-rose-200 bg-rose-50 text-rose-700",
-      }[stockState];
+        "in-stock": "success",
+        "low-stock": "warning",
+        "out-of-stock": "danger",
+      }[stockState] as StatusTone;
 
       return (
         <div className="flex flex-col items-start gap-1">
-          <Badge variant="outline" className={stockTone}>
-            {stockLabel}
-          </Badge>
+          <StatusBadge tone={stockTone}>{stockLabel}</StatusBadge>
           <span className="text-xs text-muted-foreground">
             {totalQuantity.toLocaleString()} {unitAbbreviation ?? "base units"}
             {!product.hasVariants &&

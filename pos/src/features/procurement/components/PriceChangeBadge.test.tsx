@@ -9,11 +9,11 @@ describe("PriceChangeBadge", () => {
     expect(badge).toBeInTheDocument();
   });
 
-  it("renders a decrease in a green badge", () => {
+  it("renders a decrease in a success-toned badge", () => {
     render(<PriceChangeBadge value={-4.5} />);
     const badge = screen.getByText("−4.50%");
     expect(badge).toBeInTheDocument();
-    expect(badge.className).toContain("emerald");
+    expect(badge.className).toContain("bg-success/10");
   });
 
   it("renders a flat change as neutral", () => {

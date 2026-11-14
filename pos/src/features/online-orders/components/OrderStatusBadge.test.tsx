@@ -10,13 +10,17 @@ describe("OrderStatusBadge", () => {
     );
   });
 
-  it("uses an emerald style for delivered and a rose style for returned", () => {
+  it("uses a success tone for delivered and a danger tone for returned", () => {
     const { container, rerender } = render(
       <OrderStatusBadge status="delivered" />,
     );
-    expect(container.firstChild).toHaveClass("bg-emerald-50");
+    expect(
+      container.querySelector('[data-testid="order-fulfillment-badge"] span'),
+    ).toHaveClass("bg-success/10");
     rerender(<OrderStatusBadge status="returned" />);
-    expect(container.firstChild).toHaveClass("bg-rose-50");
+    expect(
+      container.querySelector('[data-testid="order-fulfillment-badge"] span'),
+    ).toHaveClass("bg-destructive/10");
   });
 
   it("falls back to a readable label for unknown states", () => {

@@ -12,6 +12,8 @@ import {
 import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Kbd } from "@/components/common/Kbd";
+import { formatCurrency } from "@/lib/format";
 import { useEffect, useState } from "react";
 import { useWatch, type UseFormReturn } from "react-hook-form";
 import type { CartSchemaType } from "../../schemas/cart.schema";
@@ -115,10 +117,11 @@ export function DiscountModal({
         render={
           <Button
             type="button"
-            className="w-full"
+            className="w-full justify-between"
             onClick={() => setOpen(true)}
           >
             Discount
+            <Kbd keys={["F4"]} className="opacity-70" />
           </Button>
         }
       />
@@ -126,8 +129,8 @@ export function DiscountModal({
         <DialogHeader>
           <DialogTitle>Discounts & VAT</DialogTitle>
           <DialogDescription>
-            Subtotal: ৳{subTotal.toFixed(2)} · Current total: ৳
-            {currentTotal.toFixed(2)}
+            Subtotal: {formatCurrency(subTotal)} · Current total:{" "}
+            {formatCurrency(currentTotal)}
           </DialogDescription>
         </DialogHeader>
 
@@ -173,7 +176,7 @@ export function DiscountModal({
             </div>
             <FieldDescription>
               {discount?.type === "percentage"
-                ? `Applied: ${discount.value}% off (৳${discountAmount.toFixed(2)})`
+                ? `Applied: ${discount.value}% off (${formatCurrency(discountAmount)})`
                 : "No percentage discount"}
             </FieldDescription>
           </Field>
@@ -211,7 +214,7 @@ export function DiscountModal({
             </div>
             <FieldDescription>
               {discount?.type === "fixed"
-                ? `Applied: ৳${discountAmount.toFixed(2)} flat off`
+                ? `Applied: ${formatCurrency(discountAmount)} flat off`
                 : "No flat discount"}
             </FieldDescription>
           </Field>
@@ -254,7 +257,7 @@ export function DiscountModal({
             </div>
             <FieldDescription>
               {vatPercent > 0
-                ? `VAT: ${vatPercent}% (৳${vatAmount.toFixed(2)})`
+                ? `VAT: ${vatPercent}% (${formatCurrency(vatAmount)})`
                 : "No VAT"}
             </FieldDescription>
           </Field>

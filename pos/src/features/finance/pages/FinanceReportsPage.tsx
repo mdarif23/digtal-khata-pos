@@ -4,9 +4,12 @@ import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { ReportDateFilter } from "@/features/reports/components/ReportDateFilter";
 import { ReportTable, type ReportColumn } from "@/features/reports/components/ReportTable";
-import { formatCurrency } from "@/features/reports/utils/reportUtils";
+import { formatCurrency } from "@/lib/format";
 import type { ReportFilters } from "@/features/reports/types/report.types";
 import api from "@/api/axios";
 import {
@@ -119,31 +122,23 @@ export function FinanceReportsPage() {
   };
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-            Finance &amp; Growth
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-            Finance Reports
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Every report derives from posted ledger entries — CSV exports come from
-            the same figures.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <ReportDateFilter
-            filters={filters}
-            onFiltersChange={setFilters}
-            showLocationFilter={false}
-          />
-          <Button variant="outline" onClick={downloadCsv}>
-            <Download className="size-4" /> CSV
-          </Button>
-        </div>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="Finance Reports"
+        description="Every report derives from posted ledger entries — CSV exports come from the same figures."
+        actions={
+          <>
+            <ReportDateFilter
+              filters={filters}
+              onFiltersChange={setFilters}
+              showLocationFilter={false}
+            />
+            <Button variant="outline" onClick={downloadCsv}>
+              <Download className="size-4" /> CSV
+            </Button>
+          </>
+        }
+      />
 
       <nav className="flex flex-wrap gap-2">
         {TABS.map((t) => (
@@ -152,8 +147,8 @@ export function FinanceReportsPage() {
             onClick={() => setTab(t.key)}
             className={
               t.key === tab
-                ? "rounded-full bg-slate-900 px-3 py-1.5 text-xs font-medium text-white"
-                : "rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                ? "rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+                : "rounded-full border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
             }
           >
             {t.title}
@@ -172,13 +167,13 @@ export function FinanceReportsPage() {
       ) : (
         <TableBody tab={tab as FinanceReportTableTab} report={table.data} />
       )}
-    </div>
+    </PageContainer>
   );
 }
 
 function PnlBody({ report }: { report: PnlReport | undefined }) {
   if (!report) {
-    return <p className="py-16 text-center text-sm text-slate-400">No report data.</p>;
+    return <p className="py-16 text-center text-sm text-muted-foreground">No report data.</p>;
   }
   const lines: { section: string; code: string; name: string; amount: string; total?: boolean }[] =
     [
@@ -213,22 +208,26 @@ function PnlBody({ report }: { report: PnlReport | undefined }) {
       },
     ];
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
-      <div className="divide-y divide-slate-100">
+    <div className="overflow-hidden rounded-2xl border bg-card">
+      <div className="divide-y divide-border">
         {lines.map((line, index) => (
           <div
             key={index}
             className={`flex items-center justify-between px-4 py-2.5 text-sm ${
-              line.total ? "bg-slate-50 font-semibold" : ""
+              line.total ? "bg-muted/50 font-semibold" : ""
             }`}
           >
-            <span className="text-slate-700">
+            <span className="text-foreground">
               {line.code && (
-                <span className="mr-2 font-mono text-xs text-slate-400">{line.code}</span>
+                <span className="mr-2 font-mono text-xs text-muted-foreground">{line.code}</span>
               )}
               {line.name}
             </span>
-            <span className={Number(line.amount) < 0 ? "text-rose-700" : "text-slate-950"}>
+            <span
+              className={`tabular-nums ${
+                Number(line.amount) < 0 ? "text-destructive" : "text-foreground"
+              }`}
+            >
               {formatCurrency(line.amount)}
             </span>
           </div>
@@ -240,22 +239,22 @@ function PnlBody({ report }: { report: PnlReport | undefined }) {
 
 function RetainedBody({ report }: { report: RetainedEarningsReport | undefined }) {
   if (!report) {
-    return <p className="py-16 text-center text-sm text-slate-400">No report data.</p>;
+    return <p className="py-16 text-center text-sm text-muted-foreground">No report data.</p>;
   }
   return (
     <div className="max-w-xl space-y-3">
-      <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
-        <div className="divide-y divide-slate-100 text-sm">
+      <div className="overflow-hidden rounded-2xl border bg-card">
+        <div className="divide-y divide-border text-sm">
           <RowLine label="Opening retained earnings" value={report.openingRetainedEarnings} />
           <RowLine label="Net profit (period)" value={report.netProfit} />
           <RowLine label="Less: profit distributions" value={report.lessProfitDistributions} />
-          <div className="flex items-center justify-between bg-slate-50 px-4 py-2.5 font-semibold">
+          <div className="flex items-center justify-between bg-muted/50 px-4 py-2.5 font-semibold">
             <span>Closing retained earnings</span>
-            <span>{formatCurrency(report.closingRetainedEarnings)}</span>
+            <span className="tabular-nums">{formatCurrency(report.closingRetainedEarnings)}</span>
           </div>
         </div>
       </div>
-      <p className="text-xs text-slate-500">{report.note}</p>
+      <p className="text-xs text-muted-foreground">{report.note}</p>
     </div>
   );
 }
@@ -263,8 +262,8 @@ function RetainedBody({ report }: { report: RetainedEarningsReport | undefined }
 function RowLine({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between px-4 py-2.5">
-      <span className="text-slate-700">{label}</span>
-      <span>{formatCurrency(value)}</span>
+      <span className="text-foreground">{label}</span>
+      <span className="tabular-nums">{formatCurrency(value)}</span>
     </div>
   );
 }
@@ -297,15 +296,13 @@ function renderCell(key: string, row: Record<string, unknown>) {
   }
   if (key === "overBudget") {
     return raw ? (
-      <Badge variant="outline" className="text-xs text-rose-700">
-        Over budget
-      </Badge>
+      <StatusBadge tone="danger">Over budget</StatusBadge>
     ) : (
-      <span className="text-xs text-emerald-600">Within budget</span>
+      <StatusBadge tone="success">Within budget</StatusBadge>
     );
   }
   if (raw === null || raw === undefined || raw === "") {
-    return <span className="text-slate-400">—</span>;
+    return <span className="text-muted-foreground">—</span>;
   }
   return <span>{String(raw)}</span>;
 }
@@ -322,6 +319,9 @@ function TableBody({
       key: def.key,
       header: def.label,
       render: (row) => renderCell(def.key, row),
+      ...(MONEY_KEYS.has(def.key)
+        ? { className: "text-right tabular-nums", headerClassName: "text-right" }
+        : {}),
     }),
   );
   const rows = (report?.rows ?? []) as Record<string, unknown>[];
@@ -346,23 +346,16 @@ function TableBody({
             </Badge>
           )}
           {report?.totalDebit && (
-            <Badge
-              variant="outline"
-              className={
-                report.balanced
-                  ? "text-xs text-emerald-700"
-                  : "text-xs text-amber-700"
-              }
-            >
+            <StatusBadge tone={report.balanced ? "success" : "warning"}>
               Debits {formatCurrency(report.totalDebit)} = Credits{" "}
               {formatCurrency(report.totalCredit ?? "0")} ·{" "}
               {report.balanced ? "balanced" : "IMBALANCE"}
-            </Badge>
+            </StatusBadge>
           )}
           {report?.truncated && (
-            <Badge variant="outline" className="text-xs text-amber-700">
+            <StatusBadge tone="warning">
               First 1000 rows — narrow the date range
-            </Badge>
+            </StatusBadge>
           )}
         </div>
       )}

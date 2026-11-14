@@ -16,7 +16,8 @@ import {
   type ReceiveItemsFormValues,
 } from "../schemas/receiveItem.schema";
 import { usePurchasesStore } from "../usePurchaseStore";
-import { formatCurrency, roundMoney } from "@/features/purchases/utils/formatCurrency";
+import { roundMoney } from "@/features/purchases/utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 import { useReceivePurchase } from "../hooks/useReceivePurchase";
 import {
   outstandingOf,
@@ -328,8 +329,8 @@ export const ReceiveItems = () => {
       status: purchaseOrder?.status.replace("_", " ") ?? "Loading",
     },
     {
-      bg: "bg-emerald-50",
-      circleBg: "bg-emerald-500",
+      bg: "bg-success/10",
+      circleBg: "bg-success",
       title: "Payment status",
       status: purchaseOrder?.paymentStatus ?? "—",
     },
@@ -340,8 +341,8 @@ export const ReceiveItems = () => {
       total: Number(purchaseOrder?.totalAmount ?? 0),
     },
     {
-      bg: "bg-rose-50",
-      circleBg: "bg-rose-500",
+      bg: "bg-destructive/10",
+      circleBg: "bg-destructive",
       title: "Balance due",
       total: dueAmount,
     },
@@ -554,7 +555,7 @@ export const ReceiveItems = () => {
           <div className="rounded-lg border bg-background px-4 py-3">
             <p className="text-sm text-muted-foreground">Order total</p>
             <p className="text-xl font-semibold">
-              ৳ {formatCurrency(Number(purchaseOrder.totalAmount))}
+              {formatCurrency(Number(purchaseOrder.totalAmount))}
             </p>
           </div>
         </header>
@@ -636,6 +637,9 @@ export const ReceiveItems = () => {
             </Button>
             <Button
               type="submit"
+              // Receiving stock is the positive completion of this flow; a
+              // payment-only submit stays a neutral primary action.
+              variant={hasItemsToReceive ? "success" : "default"}
               disabled={
                 form.formState.isSubmitting ||
                 receiveItems.length === 0 ||

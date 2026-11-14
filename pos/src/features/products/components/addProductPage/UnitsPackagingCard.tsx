@@ -81,14 +81,10 @@ import type {
  * line and the "Add packaging unit" button (zero-touch rule 2).
  */
 
-const moneyFormatter = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 2,
-});
+import { formatCurrency as moneyFormatter } from "@/lib/format";
 
 function formatMoney(value: number): string {
-  return moneyFormatter.format(value);
+  return moneyFormatter(value);
 }
 
 function formatFactor(value: number): string {
@@ -409,14 +405,14 @@ function PackagingRow({
         {isActive ? (
           <Badge
             variant="outline"
-            className="border-emerald-200 bg-emerald-50 text-emerald-700"
+            className="border-success/30 bg-success/10 text-success"
           >
             Active
           </Badge>
         ) : (
           <Badge
             variant="outline"
-            className="border-amber-200 bg-amber-50 text-amber-700"
+            className="border-warning/30 bg-warning/10 text-warning"
           >
             Inactive
           </Badge>

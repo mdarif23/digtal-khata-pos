@@ -19,15 +19,19 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SummaryCard } from "@/components/common/SummaryCard";
 import { useDueSummary, useDueTrend } from "../hooks/useDueManagement";
-import { formatMoney } from "../lib/format";
+import { formatCurrency } from "@/lib/format";
 
-function SummaryCard({
+/**
+ * Thin adapter over the shared SummaryCard: keeps the loading skeleton and
+ * the footer line, renders money through the canonical formatter.
+ */
+function DueSummaryCard({
   title,
   description,
   value,
   icon: Icon,
-  iconClassName,
   footer,
   loading,
 }: {
@@ -35,30 +39,16 @@ function SummaryCard({
   description: string;
   value: number;
   icon: React.ComponentType<{ className?: string }>;
-  iconClassName?: string;
   footer?: string | undefined;
   loading: boolean;
 }) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between text-base font-medium">
-          {title}
-          <Icon className={`h-5 w-5 ${iconClassName ?? ""}`} />
-        </CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <Skeleton className="h-8 w-28" />
-        ) : (
-          <p className="text-2xl font-semibold tabular-nums">{formatMoney(value)}</p>
-        )}
-        {footer && !loading ? (
-          <p className="mt-1 text-xs text-muted-foreground">{footer}</p>
-        ) : null}
-      </CardContent>
-    </Card>
+    <SummaryCard
+      title={title}
+      description={footer ? `${description} — ${footer}` : description}
+      value={loading ? <Skeleton className="h-8 w-28" /> : formatCurrency(value)}
+      icon={<Icon className="size-4 text-muted-foreground" />}
+    />
   );
 }
 
@@ -92,12 +82,11 @@ export function DueSummaryCards() {
           Receivables — money customers owe you
         </p>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <SummaryCard
+          <DueSummaryCard
             title="Total customer dues"
             description="Open receivable balances"
             value={summary?.customerOutstanding ?? 0}
             icon={ArrowUpRight}
-            iconClassName="text-emerald-600"
             footer={
               summary
                 ? `${summary.customersWithDue} customer${summary.customersWithDue === 1 ? "" : "s"} with dues`
@@ -105,20 +94,18 @@ export function DueSummaryCards() {
             }
             loading={summaryQuery.isLoading}
           />
-          <SummaryCard
+          <DueSummaryCard
             title={`Overdue customer dues`}
             description={`Unpaid for more than ${summary?.overdueDays ?? 30} days`}
             value={summary?.customerOverdue ?? 0}
             icon={CalendarClock}
-            iconClassName="text-red-600"
             loading={summaryQuery.isLoading}
           />
-          <SummaryCard
+          <DueSummaryCard
             title="Collected today"
             description="All customer payments today"
             value={summary?.amountCollectedToday ?? 0}
             icon={HandCoins}
-            iconClassName="text-emerald-600"
             loading={summaryQuery.isLoading}
           />
         </div>
@@ -129,12 +116,11 @@ export function DueSummaryCards() {
           Payables — money you owe suppliers
         </p>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <SummaryCard
+          <DueSummaryCard
             title="Total supplier payables"
             description="Open payable balances"
             value={summary?.supplierOutstanding ?? 0}
             icon={ArrowDownLeft}
-            iconClassName="text-amber-600"
             footer={
               summary
                 ? `${summary.suppliersWithPayable} supplier${summary.suppliersWithPayable === 1 ? "" : "s"} to pay`
@@ -142,20 +128,18 @@ export function DueSummaryCards() {
             }
             loading={summaryQuery.isLoading}
           />
-          <SummaryCard
+          <DueSummaryCard
             title={`Overdue supplier payables`}
             description={`Unpaid for more than ${summary?.overdueDays ?? 30} days`}
             value={summary?.supplierOverdue ?? 0}
             icon={CalendarClock}
-            iconClassName="text-orange-600"
             loading={summaryQuery.isLoading}
           />
-          <SummaryCard
+          <DueSummaryCard
             title="Paid to suppliers today"
             description="All supplier payments today"
             value={summary?.amountPaidToSuppliersToday ?? 0}
             icon={Truck}
-            iconClassName="text-blue-600"
             loading={summaryQuery.isLoading}
           />
         </div>
@@ -184,24 +168,24 @@ export function DueSummaryCards() {
                 <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="collectedFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#059669" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#059669" stopOpacity={0} />
+                      <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="paidFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#d97706" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#d97706" stopOpacity={0} />
+                      <stop offset="5%" stopColor="var(--chart-3)" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="var(--chart-3)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="label" fontSize={11} tickLine={false} axisLine={false} interval="preserveStartEnd" />
                   <YAxis fontSize={11} tickLine={false} axisLine={false} width={64} tickFormatter={(value: number) => `${Math.round(value)}`} />
-                  <Tooltip formatter={(value) => formatMoney(Number(value))} />
+                  <Tooltip formatter={(value) => formatCurrency(Number(value))} />
                   <Legend />
                   <Area
                     type="monotone"
                     dataKey="collected"
                     name="Collected from customers"
-                    stroke="#059669"
+                    stroke="var(--chart-1)"
                     fill="url(#collectedFill)"
                     strokeWidth={2}
                   />
@@ -209,7 +193,7 @@ export function DueSummaryCards() {
                     type="monotone"
                     dataKey="paidToSuppliers"
                     name="Paid to suppliers"
-                    stroke="#d97706"
+                    stroke="var(--chart-3)"
                     fill="url(#paidFill)"
                     strokeWidth={2}
                   />

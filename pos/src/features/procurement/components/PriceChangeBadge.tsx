@@ -27,7 +27,7 @@ export function PriceChangeBadge({ value, className }: PriceChangeBadgeProps) {
   if (direction === "up") {
     return (
       <Badge
-        className={`bg-red-100 text-red-700 hover:bg-red-100 ${className ?? ""}`}
+        className={`bg-destructive/10 text-destructive hover:bg-destructive/10 ${className ?? ""}`}
       >
         <TrendingUp aria-hidden className="size-3" />
         {formatted}
@@ -36,7 +36,7 @@ export function PriceChangeBadge({ value, className }: PriceChangeBadgeProps) {
   }
   return (
     <Badge
-      className={`bg-emerald-100 text-emerald-700 hover:bg-emerald-100 ${className ?? ""}`}
+      className={`bg-success/10 text-success hover:bg-success/10 ${className ?? ""}`}
     >
       <TrendingDown aria-hidden className="size-3" />
       {formatted}

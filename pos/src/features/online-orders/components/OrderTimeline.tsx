@@ -1,4 +1,4 @@
-import { formatDateTime } from "@/features/reports/utils/reportUtils";
+import { formatDateTime } from "@/lib/format";
 import type { OrderTimelineEvent } from "../types/onlineOrders.types";
 
 const EVENT_LABELS: Record<string, string> = {
@@ -36,34 +36,34 @@ export function OrderTimeline({ events, isLoading }: OrderTimelineProps) {
     return (
       <div className="space-y-3">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-10 animate-pulse rounded-md bg-slate-100" />
+          <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />
         ))}
       </div>
     );
   }
   if (!events || events.length === 0) {
     return (
-      <p className="py-6 text-center text-sm text-slate-500">
+      <p className="py-6 text-center text-sm text-muted-foreground">
         No activity recorded yet.
       </p>
     );
   }
   return (
-    <ol className="relative space-y-5 border-l border-slate-200 pl-5">
+    <ol className="relative space-y-5 border-l border-border pl-5">
       {events.map((event) => (
         <li key={event.id} className="relative">
           <span
-            className="absolute -left-[26px] top-1.5 h-3 w-3 rounded-full border-2 border-white bg-blue-500"
+            className="absolute -left-[26px] top-1.5 h-3 w-3 rounded-full border-2 border-card bg-info"
             aria-hidden="true"
           />
-          <p className="text-sm font-medium text-slate-800">
+          <p className="text-sm font-medium text-foreground">
             {EVENT_LABELS[event.eventType] ?? event.eventType.replace(/_/g, " ")}
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted-foreground">
             {formatDateTime(event.createdAt)} · {actorName(event)}
           </p>
           {event.note ? (
-            <p className="mt-0.5 text-xs text-slate-600">{event.note}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{event.note}</p>
           ) : null}
         </li>
       ))}

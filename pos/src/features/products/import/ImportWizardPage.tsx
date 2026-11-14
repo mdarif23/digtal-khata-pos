@@ -55,7 +55,7 @@ const UPDATE_FIELDS = [
 
 function EmptyState({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-32 items-center justify-center rounded-xl border border-dashed border-slate-200 px-4 text-center text-sm text-slate-500">
+    <div className="flex min-h-32 items-center justify-center rounded-xl border border-dashed border-border px-4 text-center text-sm text-muted-foreground">
       {children}
     </div>
   );
@@ -154,14 +154,14 @@ export function ImportWizardPage() {
     }
   };
 
-  const card = "rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02]";
+  const card = "rounded-xl border border-border bg-card p-5 shadow-xs";
   const stepLabel = (n: number, label: string, active: boolean, done: boolean) => (
     <span
-      className={`flex items-center gap-2 text-sm ${active ? "font-semibold text-slate-900" : done ? "text-emerald-700" : "text-slate-400"}`}
+      className={`flex items-center gap-2 text-sm ${active ? "font-semibold text-foreground" : done ? "text-success" : "text-muted-foreground/80"}`}
     >
       <span
         className={`flex size-6 items-center justify-center rounded-full text-xs ${
-          active ? "bg-emerald-600 text-white" : done ? "bg-emerald-50 text-emerald-700" : "bg-slate-100"
+          active ? "bg-success text-white" : done ? "bg-success/10 text-success" : "bg-muted"
         }`}
       >
         {done ? "✓" : n}
@@ -178,12 +178,12 @@ export function ImportWizardPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-4 sm:p-6">
       <div className="flex items-center justify-between">
-        <Link to="/purchases-list" className="text-sm font-semibold text-emerald-700 hover:text-emerald-900">
+        <Link to="/purchases-list" className="text-sm font-semibold text-success hover:text-success">
           ← Back
         </Link>
         <a
           href="/api/products/import/template?format=xlsx"
-          className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+          className="inline-flex items-center gap-1 text-sm font-semibold text-success hover:text-success"
           onClick={(e) => {
             e.preventDefault();
             window.open(`/api/products/import/template?format=xlsx`, "_blank");
@@ -202,14 +202,14 @@ export function ImportWizardPage() {
       </div>
 
       {error && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>
+        <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
       )}
 
       {step === 1 && (
         <div className={card}>
           <Label className="text-sm font-semibold">Upload CSV or XLSX</Label>
           <label
-            className="mt-3 flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 p-4 text-sm text-slate-500 hover:border-emerald-500 hover:bg-emerald-50/40"
+            className="mt-3 flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border p-4 text-sm text-muted-foreground hover:border-success hover:bg-success/10/40"
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
@@ -221,7 +221,7 @@ export function ImportWizardPage() {
               <Spinner className="size-5" />
             ) : (
               <>
-                <FileSpreadsheet className="mb-2 size-6 text-slate-400" />
+                <FileSpreadsheet className="mb-2 size-6 text-muted-foreground/80" />
                 Drag & drop or click to choose (.csv / .xlsx, max 15 MB)
               </>
             )}
@@ -240,17 +240,17 @@ export function ImportWizardPage() {
 
       {step >= 2 && fileMeta && (
         <div className={card}>
-          <p className="text-sm font-semibold text-slate-700">
+          <p className="text-sm font-semibold text-foreground">
             {fileMeta.name}{" "}
-            <span className="font-normal text-slate-400">
+            <span className="font-normal text-muted-foreground/80">
               ({(fileMeta.size / 1024).toFixed(0)} KB)
             </span>
           </p>
           {worksheets.length > 1 && (
             <div className="mt-2">
-              <Label className="text-xs text-slate-500">Worksheet</Label>
+              <Label className="text-xs text-muted-foreground">Worksheet</Label>
               <select
-                className="mt-1 rounded-md border border-slate-200 px-2 py-1 text-sm"
+                className="mt-1 rounded-md border border-border px-2 py-1 text-sm"
                 value={worksheet ?? ""}
                 onChange={(e) => setWorksheet(e.target.value)}
               >
@@ -263,10 +263,10 @@ export function ImportWizardPage() {
             </div>
           )}
 
-          <Label className="mt-4 block text-sm font-semibold text-slate-700">
+          <Label className="mt-4 block text-sm font-semibold text-foreground">
             Column mapping
           </Label>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-muted-foreground/80">
             ezPos matched your columns automatically — adjust anything wrong.
             Unmapped columns are ignored (nothing is silently discarded without
             a mapping decision).
@@ -274,12 +274,12 @@ export function ImportWizardPage() {
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {headers.map((header) => (
               <div key={header} className="flex items-center gap-2 text-sm">
-                <span className="min-w-0 flex-1 truncate text-slate-600" title={header}>
+                <span className="min-w-0 flex-1 truncate text-foreground" title={header}>
                   {header}
                 </span>
-                <span className="text-slate-300">→</span>
+                <span className="text-muted-foreground/60">→</span>
                 <select
-                  className="w-44 rounded-md border border-slate-200 px-2 py-1 text-sm"
+                  className="w-44 rounded-md border border-border px-2 py-1 text-sm"
                   value={mapping[header] ?? ""}
                   onChange={(e) =>
                     setMapping((current) => ({
@@ -299,7 +299,7 @@ export function ImportWizardPage() {
             ))}
           </div>
           {missingRequired.length > 0 && (
-            <p className="mt-3 text-sm text-amber-700">
+            <p className="mt-3 text-sm text-warning">
               Required fields not mapped: {missingRequired.map((f) => FIELD_LABELS[f]).join(", ")}
             </p>
           )}
@@ -319,7 +319,7 @@ export function ImportWizardPage() {
 
       {step >= 5 && totals && (
         <div className={card}>
-          <Label className="text-sm font-semibold text-slate-700">Validation results</Label>
+          <Label className="text-sm font-semibold text-foreground">Validation results</Label>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[
               ["Total rows", totals.totalRows],
@@ -327,14 +327,14 @@ export function ImportWizardPage() {
               ["Errors", totals.errorRows],
               ["Products", totals.products],
             ].map(([label, value]) => (
-              <div key={String(label)} className="rounded-xl bg-slate-50 p-3 text-center">
-                <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
-                <p className="text-lg font-semibold text-slate-900">{value}</p>
+              <div key={String(label)} className="rounded-xl bg-muted/50 p-3 text-center">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground/80">{label}</p>
+                <p className="text-lg font-semibold text-foreground">{value}</p>
               </div>
             ))}
           </div>
 
-          <Label className="mt-4 block text-sm font-semibold text-slate-700">Import mode</Label>
+          <Label className="mt-4 block text-sm font-semibold text-foreground">Import mode</Label>
           <div className="mt-2 flex flex-wrap gap-2">
             {(["create", "update", "upsert", "skip"] as const).map((option) => (
               <button
@@ -343,15 +343,15 @@ export function ImportWizardPage() {
                 onClick={() => setMode(option)}
                 className={`rounded-full border px-3 py-1 text-sm capitalize ${
                   mode === option
-                    ? "border-emerald-600 bg-emerald-50 text-emerald-700"
-                    : "border-slate-200 text-slate-600"
+                    ? "border-success bg-success/10 text-success"
+                    : "border-border text-foreground"
                 }`}
               >
                 {option}
               </button>
             ))}
           </div>
-          <label className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+          <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
             <Checkbox
               checked={createMissing}
               onCheckedChange={(checked) => setCreateMissing(checked === true)}
@@ -359,7 +359,7 @@ export function ImportWizardPage() {
             Create missing categories / brands / units (else map to existing or skip)
           </label>
           {mode !== "create" && (
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-muted-foreground/80">
               Update modes match rows by SKU (barcode as fallback). Only mapped fields with
               values are overwritten.
             </p>
@@ -368,7 +368,7 @@ export function ImportWizardPage() {
           {rows.length > 0 && (
             <>
               <div className="mt-4 flex items-center justify-between">
-                <Label className="text-sm font-semibold text-slate-700">Row preview</Label>
+                <Label className="text-sm font-semibold text-foreground">Row preview</Label>
                 <div className="flex gap-1 text-xs">
                   {(["all", "valid", "error"] as const).map((f) => (
                     <button
@@ -376,7 +376,7 @@ export function ImportWizardPage() {
                       type="button"
                       onClick={() => setFilter(f)}
                       className={`rounded-full px-2.5 py-1 capitalize ${
-                        filter === f ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"
+                        filter === f ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
                       }`}
                     >
                       {f}
@@ -384,27 +384,27 @@ export function ImportWizardPage() {
                   ))}
                 </div>
               </div>
-              <div className="mt-2 max-h-72 overflow-y-auto rounded-xl border border-slate-100">
+              <div className="mt-2 max-h-72 overflow-y-auto rounded-xl border border-border">
                 <table className="w-full text-left text-sm">
-                  <tbody className="divide-y divide-slate-50">
+                  <tbody className="divide-y divide-border">
                     {filteredRows.map((row) => (
                       <tr key={row.id}>
-                        <td className="w-14 px-3 py-2 text-xs text-slate-400">#{row.rowNumber}</td>
+                        <td className="w-14 px-3 py-2 text-xs text-muted-foreground/80">#{row.rowNumber}</td>
                         <td className="px-3 py-2">{row.productRef}</td>
                         <td className="px-3 py-2">
                           <span
                             className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                               row.status === "error" || row.status === "failed"
-                                ? "bg-rose-50 text-rose-700"
+                                ? "bg-destructive/10 text-destructive"
                                 : row.status === "valid"
-                                  ? "bg-emerald-50 text-emerald-700"
-                                  : "bg-slate-100 text-slate-600"
+                                  ? "bg-success/10 text-success"
+                                  : "bg-muted text-foreground"
                             }`}
                           >
                             {row.status}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-xs text-rose-600">
+                        <td className="px-3 py-2 text-xs text-destructive">
                           {row.errors?.map((e) => e.message).join("; ")}
                           {row.payload?.issues
                             ?.filter((i) => i.code === "similar_name_warning")
@@ -419,7 +419,7 @@ export function ImportWizardPage() {
               {sessionId !== null && (
                 <a
                   href={`/api/products/import/${sessionId}/errors`}
-                  className="mt-2 inline-block text-xs font-semibold text-emerald-700"
+                  className="mt-2 inline-block text-xs font-semibold text-success"
                   onClick={(e) => {
                     e.preventDefault();
                     window.open(`/api/products/import/${sessionId}/errors`, "_blank");
@@ -459,7 +459,7 @@ export function ImportWizardPage() {
 
       {step === 8 && totals && (
         <div className={card}>
-          <Label className="text-sm font-semibold text-emerald-700">Import complete</Label>
+          <Label className="text-sm font-semibold text-success">Import complete</Label>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[
               ["Created", totals.created ?? 0],
@@ -467,24 +467,24 @@ export function ImportWizardPage() {
               ["Skipped", totals.skipped ?? 0],
               ["Failed", totals.failed ?? 0],
             ].map(([label, value]) => (
-              <div key={String(label)} className="rounded-xl bg-slate-50 p-3 text-center">
-                <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
-                <p className="text-lg font-semibold text-slate-900">{value}</p>
+              <div key={String(label)} className="rounded-xl bg-muted/50 p-3 text-center">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground/80">{label}</p>
+                <p className="text-lg font-semibold text-foreground">{value}</p>
               </div>
             ))}
           </div>
           {totals.processingMs != null && (
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-muted-foreground/80">
               Finished in {(totals.processingMs / 1000).toFixed(1)}s
             </p>
           )}
           <div className="mt-4 flex gap-3">
-            <Link to="/product/import-history" className="text-sm font-semibold text-emerald-700">
+            <Link to="/product/import-history" className="text-sm font-semibold text-success">
               View import history →
             </Link>
             <button
               type="button"
-              className="text-sm font-semibold text-emerald-700"
+              className="text-sm font-semibold text-success"
               onClick={() => {
                 setStep(1);
                 setSessionId(null);

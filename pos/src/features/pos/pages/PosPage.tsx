@@ -332,9 +332,9 @@ function Pos() {
   return (
     <main className="min-h-dvh bg-muted/40 p-3 sm:p-4 lg:h-dvh lg:min-h-0 lg:overflow-hidden">
       <div className="mx-auto flex min-h-[calc(100dvh-1.5rem)] max-w-[1800px] flex-col gap-3 sm:min-h-[calc(100dvh-2rem)] lg:grid lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1.55fr)_minmax(380px,0.9fr)] lg:gap-4">
-        <div className="col-span-full flex items-center justify-between">
+        <div className="col-span-full flex flex-wrap items-center justify-between gap-2">
           <LocationBadge />
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <NotificationBell revision={notificationRevision} />
             <SyncStatusIndicator />
             <RegisterDialog />

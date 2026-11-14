@@ -18,6 +18,19 @@ import { Controller, UseFormReturn, useWatch } from "react-hook-form";
 import { CartSchemaType, PaymentSchemaType } from "../../schemas/cart.schema";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
 import { useEffect, useState } from "react";
+import { formatCurrency, formatNumber } from "@/lib/format";
+import { Kbd } from "@/components/common/Kbd";
+import {
+  Banknote,
+  Clock3,
+  Coins,
+  CreditCard,
+  Gift,
+  Layers,
+  QrCode,
+  Wallet,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import axios from "../../../../api/axios.js";
 
 // Bangla QR destination: runtime config (public/config.js) → env → legacy
@@ -279,16 +292,19 @@ export function PaymentModal({
             disabled={cart.length === 0}
             className="h-14 w-full justify-between px-4 text-base font-semibold"
           >
-            <span>Charge customer</span>
-            <span>৳{finalTotal.toFixed(2)}</span>
+            <span className="flex items-center gap-2">
+              Charge customer
+              <Kbd keys={["F6"]} className="opacity-70" />
+            </span>
+            <span className="tabular-nums">{formatCurrency(finalTotal)}</span>
           </Button>
         }
       />
       <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Payment</DialogTitle>
-          <DialogDescription>
-            Total Due : {finalTotal.toFixed(2)}
+          <DialogDescription className="text-base font-semibold text-foreground">
+            Total due: <span className="tabular-nums">{formatCurrency(finalTotal)}</span>
           </DialogDescription>
         </DialogHeader>
 
@@ -384,19 +400,19 @@ function PaymentMethod({
   customerId: number | null;
 }) {
   const options = [
-    { label: "Cash", value: "cash" },
-    { label: "Bangla QR", value: "bangla_qr" },
-    { label: "Card", value: "card" },
-    { label: "Store credit", value: "store_credit" },
-    { label: "Loyalty points", value: "loyalty_points" },
-    { label: "Gift card", value: "gift_card" },
-    { label: "Due", value: "due" },
-    { label: "Split", value: "split" },
+    { label: "Cash", value: "cash", icon: Banknote },
+    { label: "Bangla QR", value: "bangla_qr", icon: QrCode },
+    { label: "Card", value: "card", icon: CreditCard },
+    { label: "Store credit", value: "store_credit", icon: Wallet },
+    { label: "Loyalty points", value: "loyalty_points", icon: Coins },
+    { label: "Gift card", value: "gift_card", icon: Gift },
+    { label: "Due", value: "due", icon: Clock3 },
+    { label: "Split", value: "split", icon: Layers },
   ];
 
   return (
     <div className="flex flex-col gap-3">
-      <span>Select method</span>
+      <span className="text-sm font-medium">Select method</span>
       <ToggleGroup
         value={mode ? [mode] : []}
         onValueChange={(value: string[]) => {
@@ -419,8 +435,9 @@ function PaymentMethod({
                 m.value === "store_credit" ||
                 m.value === "loyalty_points")
             }
-            className="col-span-1 data-pressed:bg-primary data-pressed:text-primary-foreground"
+            className="col-span-1 justify-start gap-2 px-3 data-pressed:bg-primary data-pressed:text-primary-foreground"
           >
+            <m.icon className="size-4" aria-hidden="true" />
             {m.label}
           </ToggleGroupItem>
         ))}
@@ -477,13 +494,12 @@ function CashPayment({
         )}
       />
 
-      <div className="flex flex-wrap gap-3">
+      <div className="grid grid-cols-3 gap-2">
         {shortcuts.map((s) => (
           <Button
             key={s.label}
             type="button"
             variant="outline"
-            size="lg"
             onClick={() => form.setValue("payments.0.tendered", s.value)}
           >
             {s.label}
@@ -491,15 +507,23 @@ function CashPayment({
         ))}
       </div>
 
-      <Card>
-        <CardContent className="flex flex-col items-center gap-1">
+      <Card
+        className={cn(
+          "ring-1",
+          isOwed ? "ring-destructive/30" : "ring-success/30",
+        )}
+      >
+        <CardContent className="flex flex-col items-center gap-0.5 py-4">
           <span className="text-sm text-muted-foreground">
-            {isOwed ? "Still owed" : "Change to Give"}
+            {isOwed ? "Still owed" : "Change to give"}
           </span>
           <span
-            className={`text-xl font-bold ${isOwed ? "text-red-500" : "text-green-500"}`}
+            className={cn(
+              "text-2xl font-bold tabular-nums",
+              isOwed ? "text-destructive" : "text-success",
+            )}
           >
-            {(isOwed ? owed : change).toFixed(2)}
+            {formatCurrency(isOwed ? owed : change)}
           </span>
         </CardContent>
       </Card>
@@ -521,9 +545,11 @@ function DigitalCashPayment({
   return (
     <>
       <Card>
-        <CardContent className="flex flex-col">
-          <span>Send To</span>
-          <span>{paymentInstruction}</span>
+        <CardContent className="flex flex-col gap-1 py-4">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {paymentInstruction.startsWith("Bangla QR") ? "Send to" : "Instruction"}
+          </span>
+          <span className="font-medium">{paymentInstruction}</span>
         </CardContent>
       </Card>
 
@@ -546,12 +572,14 @@ function DigitalCashPayment({
         )}
       />
 
-      <Card>
-        <CardContent className="flex flex-col">
-          <span>Amount to charge digitally:</span>
-          <span>{finalTotal.toFixed(2)}</span>
-        </CardContent>
-      </Card>
+      <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
+        <span className="text-sm text-muted-foreground">
+          Amount to charge
+        </span>
+        <span className="text-base font-semibold tabular-nums">
+          {formatCurrency(finalTotal)}
+        </span>
+      </div>
     </>
   );
 }
@@ -571,15 +599,24 @@ function StoreCreditPayment({
 
   return (
     <Card>
-      <CardContent className="flex flex-col gap-1">
-        <span>Store credit</span>
-        <span>
-          Available:{" "}
-          {available === null ? "checking…" : `৳${available.toFixed(2)}`}
+      <CardContent className="flex flex-col gap-1.5 py-4">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Store credit
         </span>
-        <span>Amount applied: ৳{finalTotal.toFixed(2)}</span>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">Available</span>
+          <span className="font-medium tabular-nums">
+            {available === null ? "checking…" : formatCurrency(available)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">Amount applied</span>
+          <span className="font-semibold tabular-nums">
+            {formatCurrency(finalTotal)}
+          </span>
+        </div>
         {issue && (
-          <span className="text-sm text-red-500">{issue}</span>
+          <span className="text-sm text-destructive">{issue}</span>
         )}
       </CardContent>
     </Card>
@@ -606,25 +643,34 @@ function LoyaltyPointsPayment({
 
   return (
     <Card>
-      <CardContent className="flex flex-col gap-1">
-        <span>Loyalty points</span>
-        <span>
-          Balance:{" "}
-          {balance === null ? "checking…" : `${balance.toFixed(2)} points`}
+      <CardContent className="flex flex-col gap-1.5 py-4">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Loyalty points
         </span>
-        {points !== null && (
-          <span>
-            Redeems ৳{finalTotal.toFixed(2)} for {points.toFixed(2)} points
-            {config ? ` (৳${config.redeemValue} per point)` : ""}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">Balance</span>
+          <span className="font-medium tabular-nums">
+            {balance === null ? "checking…" : formatNumber(balance)}
           </span>
+        </div>
+        {points !== null && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
+              Redeems {formatCurrency(finalTotal)}
+              {config ? ` (৳${config.redeemValue}/point)` : ""}
+            </span>
+            <span className="font-semibold tabular-nums">
+              {formatNumber(points)} pts
+            </span>
+          </div>
         )}
         {config && config.maxRedemptionPointsPerSale !== null && (
           <span className="text-xs text-muted-foreground">
-            Max {config.maxRedemptionPointsPerSale} points per sale
+            Max {formatNumber(config.maxRedemptionPointsPerSale)} points per sale
           </span>
         )}
         {issue && (
-          <span className="text-sm text-red-500">{issue}</span>
+          <span className="text-sm text-destructive">{issue}</span>
         )}
       </CardContent>
     </Card>
@@ -658,14 +704,25 @@ function SplitPayment({
   return (
     <>
       <Card>
-        <CardContent className="flex flex-col">
-          <span>Split Payment</span>
-          <div className="flex justify-between">
-            <span>Total: ৳{finalTotal.toFixed(2)}</span>
+        <CardContent className="flex flex-col gap-1 py-4">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Split payment
+          </span>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Total</span>
+            <span className="font-medium tabular-nums">
+              {formatCurrency(finalTotal)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Remaining</span>
             <span
-              className={remaining === 0 ? "text-green-500" : "text-red-500"}
+              className={cn(
+                "font-semibold tabular-nums",
+                remaining === 0 ? "text-success" : "text-destructive",
+              )}
             >
-              Remaining: ৳{remaining.toFixed(2)}
+              {formatCurrency(remaining)}
             </span>
           </div>
         </CardContent>
@@ -729,7 +786,7 @@ function SplitPayment({
                 onChange={(e) => field.onChange(toNum(e))}
                 placeholder="0.00"
               />
-              <Button type="button" onClick={() => fill(1)}>
+              <Button type="button" variant="outline" onClick={() => fill(1)}>
                 Fill digital
               </Button>
             </div>
@@ -775,10 +832,11 @@ function SplitPayment({
               />
               <Button
                 type="button"
+                variant="outline"
                 disabled={customerId == null}
                 onClick={() => fill(2)}
               >
-                Fill Due
+                Fill due
               </Button>
             </div>
           </Field>
@@ -786,20 +844,26 @@ function SplitPayment({
       />
 
       <Card>
-        <CardContent className="flex flex-col">
-          <div className="flex justify-between">
-            <span>Cash</span>
-            <span>৳{cash.toFixed(2)}</span>
+        <CardContent className="flex flex-col gap-1 py-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Cash</span>
+            <span className="font-medium tabular-nums">
+              {formatCurrency(cash)}
+            </span>
           </div>
-          <div className="flex justify-between">
-            <span>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
               {payments?.[1]?.method === "card" ? "Card" : "Bangla QR"}
             </span>
-            <span>৳{digital.toFixed(2)}</span>
+            <span className="font-medium tabular-nums">
+              {formatCurrency(digital)}
+            </span>
           </div>
-          <div className="flex justify-between">
-            <span>Due</span>
-            <span>৳{due.toFixed(2)}</span>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Due</span>
+            <span className="font-medium tabular-nums">
+              {formatCurrency(due)}
+            </span>
           </div>
         </CardContent>
       </Card>
@@ -821,15 +885,20 @@ function Due({
 
   return (
     <Card>
-      <CardContent>
-        <DialogHeader>
-          <DialogTitle>Recording as Due (Baki)</DialogTitle>
-          <DialogDescription>
-            ৳{finalTotal.toFixed(2)} will be added to{" "}
-            {customer?.name ?? "this customer's"} outstanding balance.
-          </DialogDescription>
-        </DialogHeader>
-        <span>Customer phone: {customer?.phone ?? "N/A"}</span>
+      <CardContent className="flex flex-col gap-1.5 py-4">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Recording as due (baki)
+        </span>
+        <p className="text-sm">
+          {formatCurrency(finalTotal)} will be added to{" "}
+          <span className="font-medium">
+            {customer?.name ?? "this customer's"}
+          </span>{" "}
+          outstanding balance.
+        </p>
+        <span className="text-sm text-muted-foreground">
+          Phone: {customer?.phone ?? "N/A"}
+        </span>
       </CardContent>
     </Card>
   );

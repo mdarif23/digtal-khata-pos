@@ -17,11 +17,10 @@ import {
 } from "@/components/ui/card";
 import type { ProductStats } from "../../utils/calculateProductStats";
 
-const currencyFormatter = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 0,
-});
+import { formatCurrency } from "@/lib/format";
+
+// Whole-taka presentation for large aggregate values.
+const money0 = (value: number) => formatCurrency(value).replace(/\.00$/, "");
 
 function ProductStat({
   label,
@@ -120,38 +119,38 @@ export default function ProductOverview({
         />
         <ProductStat
           label="Inventory cost"
-          value={currencyFormatter.format(stats.inventoryValue)}
+          value={money0(stats.inventoryValue)}
           detail="Current stock at purchase cost"
           icon={CircleDollarSign}
-          tone="bg-blue-500/10 text-blue-600"
+          tone="bg-info/10 text-info"
         />
         <ProductStat
           label="Retail value"
-          value={currencyFormatter.format(stats.retailValue)}
+          value={money0(stats.retailValue)}
           detail="Potential sales value"
           icon={TrendingUp}
-          tone="bg-emerald-500/10 text-emerald-600"
+          tone="bg-success/10 text-success"
         />
         <ProductStat
           label="Potential margin"
-          value={currencyFormatter.format(stats.potentialMargin)}
+          value={money0(stats.potentialMargin)}
           detail="Retail value less inventory cost"
           icon={CircleDollarSign}
-          tone="bg-violet-500/10 text-violet-600"
+          tone="bg-primary/10 text-primary"
         />
         <ProductStat
           label="Low-stock variants"
           value={stats.lowStockCount.toLocaleString()}
           detail="At or below alert quantity"
           icon={AlertTriangle}
-          tone="bg-amber-500/10 text-amber-600"
+          tone="bg-warning/10 text-warning"
         />
         <ProductStat
           label="Out-of-stock variants"
           value={stats.outOfStockCount.toLocaleString()}
           detail="Inventory needs replenishing"
           icon={Boxes}
-          tone="bg-rose-500/10 text-rose-600"
+          tone="bg-destructive/10 text-destructive"
         />
       </div>
     </section>

@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { ArrowDownRight, ArrowUpRight, Scale } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { SummaryCard } from "@/components/common/SummaryCard";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { ReportDateFilter } from "@/features/reports/components/ReportDateFilter";
-import { ReportMetricCard } from "@/features/reports/components/ReportMetricCard";
 import { ReportTrendChart } from "@/features/reports/components/ReportChart";
 import { ReportTable, type ReportColumn } from "@/features/reports/components/ReportTable";
-import { formatCurrency } from "@/features/reports/utils/reportUtils";
+import { formatCurrency } from "@/lib/format";
 import type { ReportFilters } from "@/features/reports/types/report.types";
 import { useCashFlow } from "../hooks/useFinance";
 
@@ -36,9 +37,27 @@ export function CashFlowPage() {
   const sourceColumns: ReportColumn<{ sourceType: string; category: string; inflow: string; outflow: string; net: string }>[] = [
     { key: "sourceType", header: "Source", render: (row) => <span className="capitalize">{row.sourceType.replace(/_/g, " ")}</span> },
     { key: "category", header: "Category", render: (row) => <span className="capitalize">{row.category}</span> },
-    { key: "inflow", header: "Inflow", render: (row) => <span className="text-emerald-700">{formatCurrency(row.inflow)}</span> },
-    { key: "outflow", header: "Outflow", render: (row) => <span className="text-rose-700">{formatCurrency(row.outflow)}</span> },
-    { key: "net", header: "Net", render: (row) => <strong>{formatCurrency(row.net)}</strong> },
+    {
+      key: "inflow",
+      header: "Inflow",
+      render: (row) => <span className="text-success tabular-nums">{formatCurrency(row.inflow)}</span>,
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "outflow",
+      header: "Outflow",
+      render: (row) => <span className="text-destructive tabular-nums">{formatCurrency(row.outflow)}</span>,
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "net",
+      header: "Net",
+      render: (row) => <strong>{formatCurrency(row.net)}</strong>,
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
   ];
 
   const series =
@@ -50,53 +69,40 @@ export function CashFlowPage() {
     })) ?? [];
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-            Finance &amp; Growth
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-            Cash Flow
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Direct method from the cash GL accounts. Credit sales appear only when
-            collected. Net movement must equal the change in cash balances — it does
-            by construction.
-          </p>
-        </div>
-        <ReportDateFilter filters={filters} onFiltersChange={setFilters} showLocationFilter={false} />
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="Cash Flow"
+        description="Direct method from the cash GL accounts. Credit sales appear only when collected. Net movement must equal the change in cash balances — it does by construction."
+        actions={
+          <ReportDateFilter filters={filters} onFiltersChange={setFilters} showLocationFilter={false} />
+        }
+      />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <ReportMetricCard
+        <SummaryCard
           title="Cash Inflow"
-          value={cashFlow.data?.totals.inflow}
-          icon={ArrowUpRight}
-          accent="bg-emerald-50 text-emerald-700"
+          value={cashFlow.data ? formatCurrency(cashFlow.data.totals.inflow) : "—"}
+          icon={<ArrowUpRight className="size-4 text-muted-foreground" />}
         />
-        <ReportMetricCard
+        <SummaryCard
           title="Cash Outflow"
-          value={cashFlow.data?.totals.outflow}
-          icon={ArrowDownRight}
-          accent="bg-rose-50 text-rose-700"
+          value={cashFlow.data ? formatCurrency(cashFlow.data.totals.outflow) : "—"}
+          icon={<ArrowDownRight className="size-4 text-muted-foreground" />}
         />
-        <ReportMetricCard
+        <SummaryCard
           title="Net Movement"
-          value={cashFlow.data?.totals.net}
-          icon={Scale}
-          accent="bg-sky-50 text-sky-700"
+          value={cashFlow.data ? formatCurrency(cashFlow.data.totals.net) : "—"}
+          icon={<Scale className="size-4 text-muted-foreground" />}
         />
-        <ReportMetricCard
+        <SummaryCard
           title="Closing Cash"
-          value={cashFlow.data?.reconciliation.closingBalance}
-          subtitle={
+          value={cashFlow.data ? formatCurrency(cashFlow.data.reconciliation.closingBalance) : "—"}
+          description={
             cashFlow.data
               ? `Opening ${formatCurrency(cashFlow.data.reconciliation.openingBalance)}`
               : undefined
           }
-          icon={Scale}
-          accent="bg-slate-100 text-slate-700"
+          icon={<Scale className="size-4 text-muted-foreground" />}
         />
       </div>
 
@@ -110,9 +116,9 @@ export function CashFlowPage() {
               data={series}
               xKey="date"
               lines={[
-                { key: "inflow", name: "Inflow", color: "#059669", isCurrency: true },
-                { key: "outflow", name: "Outflow", color: "#e11d48", isCurrency: true },
-                { key: "net", name: "Net", color: "#0284c7", isCurrency: true },
+                { key: "inflow", name: "Inflow", color: "var(--chart-1)", isCurrency: true },
+                { key: "outflow", name: "Outflow", color: "var(--destructive)", isCurrency: true },
+                { key: "net", name: "Net", color: "var(--chart-2)", isCurrency: true },
               ]}
             />
           </CardContent>
@@ -127,20 +133,22 @@ export function CashFlowPage() {
             </CardHeader>
             <CardContent className="space-y-1.5 text-sm">
               <div className="flex justify-between">
-                <span className="text-slate-500">Inflow</span>
-                <span className="text-emerald-700">
+                <span className="text-muted-foreground">Inflow</span>
+                <span className="text-success tabular-nums">
                   {formatCurrency(cashFlow.data?.byCategory[category].inflow ?? "0")}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Outflow</span>
-                <span className="text-rose-700">
+                <span className="text-muted-foreground">Outflow</span>
+                <span className="text-destructive tabular-nums">
                   {formatCurrency(cashFlow.data?.byCategory[category].outflow ?? "0")}
                 </span>
               </div>
               <div className="flex justify-between border-t pt-1.5 font-semibold">
                 <span>Net</span>
-                <span>{formatCurrency(cashFlow.data?.byCategory[category].net ?? "0")}</span>
+                <span className="tabular-nums">
+                  {formatCurrency(cashFlow.data?.byCategory[category].net ?? "0")}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -161,6 +169,6 @@ export function CashFlowPage() {
           />
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }

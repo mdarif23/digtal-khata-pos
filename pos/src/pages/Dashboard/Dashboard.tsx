@@ -32,6 +32,7 @@ import { ChartResponsiveContainer } from "@/components/common/ChartResponsiveCon
 import { Link } from "react-router";
 import axios from "../../api/axios.js";
 import { useSessionStore } from "@/auth/sessionStore";
+import { formatCurrency as currency } from "@/lib/format";
 import type {
   DashboardData,
   LowStockProduct,
@@ -73,12 +74,6 @@ const emptyDashboard: DashboardData = {
   staleStockProducts: [],
   topSellingProducts: [],
 };
-
-const currency = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 2,
-});
 
 const periodOptions = [
   { value: "today", label: "Today", comparison: "vs yesterday" },
@@ -353,12 +348,12 @@ function MetricCard({
   const growthGood = growthUp === growthIsGood;
   const GrowthIcon = growthUp ? ArrowUpRight : ArrowDownRight;
   return (
-    <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02]">
+    <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-500">{title}</p>
-          <p className="mt-3 truncate text-2xl font-semibold tracking-tight text-slate-950">
-            {currency.format(amount)}
+          <p className="text-sm font-medium text-muted-foreground">{title}</p>
+          <p className="mt-3 truncate text-2xl font-semibold tracking-tight text-foreground">
+            {currency(amount)}
           </p>
         </div>
         <span className={`rounded-xl p-2.5 ${accent}`}>
@@ -367,18 +362,18 @@ function MetricCard({
       </div>
       <div className="mt-4 flex min-h-5 items-center justify-between gap-2">
         {growth === null || growth === undefined ? (
-          <span className="text-xs text-slate-500">{detail}</span>
+          <span className="text-xs text-muted-foreground">{detail}</span>
         ) : (
           <>
             <span
               className={`inline-flex items-center gap-1 text-xs font-medium ${
-                growthGood ? "text-emerald-700" : "text-rose-700"
+                growthGood ? "text-success" : "text-destructive"
               }`}
             >
               <GrowthIcon aria-hidden="true" className="size-3.5" />
               {Math.abs(growth).toLocaleString("en-BD")}% {comparison}
             </span>
-            <span className="truncate text-xs text-slate-400">{detail}</span>
+            <span className="truncate text-xs text-muted-foreground/80">{detail}</span>
           </>
         )}
       </div>
@@ -398,9 +393,9 @@ function SectionHeading({
   return (
     <div className="flex items-center justify-between gap-4">
       <div>
-        <h2 className="font-semibold text-slate-900">{title}</h2>
+        <h2 className="font-semibold text-foreground">{title}</h2>
         {description ? (
-          <p className="mt-1 text-sm text-slate-500">{description}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         ) : null}
       </div>
       {action}
@@ -410,7 +405,7 @@ function SectionHeading({
 
 function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-36 items-center justify-center rounded-xl border border-dashed border-slate-200 px-4 text-center text-sm text-slate-500">
+    <div className="flex min-h-36 items-center justify-center rounded-xl border border-dashed border-border px-4 text-center text-sm text-muted-foreground">
       {children}
     </div>
   );
@@ -515,7 +510,7 @@ export default function DashboardComponent() {
       [`Slow-moving products (${staleDays}+ days)`, dashboard.staleStockProducts.length],
       ...dashboard.staleStockProducts.map((product) => [
         `${product.variantName || product.productName} (${product.sku ?? "No SKU"})`,
-        `${product.quantity} units; ${product.daysSinceLastSale === null ? "never sold" : `${product.daysSinceLastSale} days since last sale`}; stock value ${currency.format(product.stockValue)}`,
+        `${product.quantity} units; ${product.daysSinceLastSale === null ? "never sold" : `${product.daysSinceLastSale} days since last sale`}; stock value ${currency(product.stockValue)}`,
       ] as [string, string]),
       ...dashboard.paymentBreakdown.map((payment) => [
         `Payment method: ${payment.method}`,
@@ -541,20 +536,20 @@ export default function DashboardComponent() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/80 px-4 pb-10 pt-12 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl space-y-7">
+    <div className="mx-auto w-full max-w-[1600px] space-y-6 p-4 md:p-6">
+      <div className="space-y-6">
         <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-emerald-700">
+            <p className="text-sm font-medium text-success">
               Business overview
             </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               Dashboard
             </h1>
-            <p className="mt-2 text-sm text-slate-500">
+            <p className="mt-2 text-sm text-muted-foreground">
               A clear view of your sales, cash flow, and inventory.
             </p>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-muted-foreground/80">
               Auto-refreshes every minute
               {lastUpdated
                 ? ` · Updated ${new Intl.DateTimeFormat("en-BD", {
@@ -584,7 +579,7 @@ export default function DashboardComponent() {
                         : Number(event.target.value),
                     )
                   }
-                  className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                  className="h-10 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <option value="all">All Locations</option>
                   {locations.map((location) => (
@@ -603,7 +598,7 @@ export default function DashboardComponent() {
                   setRange(event.target.value);
                 }
               }}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+              className="h-10 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {periodOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -615,7 +610,7 @@ export default function DashboardComponent() {
               type="button"
               onClick={() => void loadDashboard()}
               disabled={loading}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3.5 text-sm font-medium text-foreground shadow-sm transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCw
                 aria-hidden="true"
@@ -627,7 +622,7 @@ export default function DashboardComponent() {
               type="button"
               onClick={exportCsv}
               disabled={loading}
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-900 px-3.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Download aria-hidden="true" className="size-4" />
               Export report
@@ -638,21 +633,21 @@ export default function DashboardComponent() {
         <nav aria-label="Quick actions" className="flex flex-wrap gap-2">
           <Link
             to="/"
-            className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800"
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90"
           >
             <Plus aria-hidden="true" className="size-4" />
             New sale
           </Link>
           <Link
             to="/product/addproduct"
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-medium text-foreground transition hover:bg-muted"
           >
             <Package aria-hidden="true" className="size-4" />
             Add product
           </Link>
           <Link
             to="/customer"
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-medium text-foreground transition hover:bg-muted"
           >
             <Users aria-hidden="true" className="size-4" />
             Customers
@@ -667,7 +662,7 @@ export default function DashboardComponent() {
             <p className="text-sm font-medium text-sky-900">
               Create your first location to see your dashboard.
             </p>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="mt-1 text-sm text-foreground">
               The dashboard tracks sales, stock, and cash per location. Add one
               under Products → Locations, then come back — everything fills in
               automatically.
@@ -682,15 +677,15 @@ export default function DashboardComponent() {
         ) : error ? (
           <div
             role="alert"
-            className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+            className="flex flex-col gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
           >
-            <p className="text-sm text-rose-800">
+            <p className="text-sm text-destructive">
               Dashboard data could not be refreshed. {error}
             </p>
             <button
               type="button"
               onClick={() => void loadDashboard()}
-              className="inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-rose-800 hover:text-rose-950"
+              className="inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-destructive hover:text-destructive/80"
             >
               Try again <ArrowRight aria-hidden="true" className="size-4" />
             </button>
@@ -708,7 +703,7 @@ export default function DashboardComponent() {
             comparison={selectedPeriod.comparison}
             detail={periodLabel}
             icon={ShoppingCart}
-            accent="bg-emerald-50 text-emerald-700"
+            accent="bg-success/10 text-success"
           />
           <MetricCard
             title="Net profit"
@@ -727,7 +722,7 @@ export default function DashboardComponent() {
             comparison="vs previous period"
             detail="Current balance"
             icon={Wallet}
-            accent="bg-amber-50 text-amber-700"
+            accent="bg-warning/10 text-warning"
           />
           <MetricCard
             title="Expenses"
@@ -737,41 +732,41 @@ export default function DashboardComponent() {
             comparison={selectedPeriod.comparison}
             detail={periodLabel}
             icon={ShoppingBag}
-            accent="bg-violet-50 text-violet-700"
+            accent="bg-primary/10 text-primary"
           />
         </section>
 
         <section className="grid gap-5 lg:grid-cols-2">
-          <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Sales activity"
               description={`A quick read on sales volume · ${periodLabel.toLowerCase()}.`}
             />
             <div className="mt-5 grid grid-cols-2 gap-4">
-              <div className="rounded-xl bg-slate-50 p-4">
-                <div className="flex items-center gap-2 text-sm text-slate-500">
-                  <Receipt aria-hidden="true" className="size-4 text-emerald-700" />
+              <div className="rounded-xl bg-muted/50 p-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Receipt aria-hidden="true" className="size-4 text-success" />
                   Transactions
                 </div>
-                <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                <p className="mt-3 text-2xl font-semibold tracking-tight text-foreground">
                   {dashboard.salesActivity.transactionCount.toLocaleString("en-BD")}
                 </p>
-                <p className="mt-1 text-xs text-slate-400">{periodLabel}</p>
+                <p className="mt-1 text-xs text-muted-foreground/80">{periodLabel}</p>
               </div>
-              <div className="rounded-xl bg-slate-50 p-4">
-                <div className="flex items-center gap-2 text-sm text-slate-500">
+              <div className="rounded-xl bg-muted/50 p-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <ShoppingCart aria-hidden="true" className="size-4 text-sky-700" />
                   Average sale
                 </div>
-                <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
-                  {currency.format(dashboard.salesActivity.averageSale)}
+                <p className="mt-3 text-2xl font-semibold tracking-tight text-foreground">
+                  {currency(dashboard.salesActivity.averageSale)}
                 </p>
-                <p className="mt-1 text-xs text-slate-400">Average invoice total</p>
+                <p className="mt-1 text-xs text-muted-foreground/80">Average invoice total</p>
               </div>
             </div>
           </article>
 
-          <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Payment methods"
               description={`Payments recorded · ${periodLabel.toLowerCase()}.`}
@@ -799,18 +794,18 @@ export default function DashboardComponent() {
                   return (
                     <li key={payment.method}>
                       <div className="flex items-center justify-between gap-3">
-                        <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                        <span className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
                           <MethodIcon
                             aria-hidden="true"
-                            className="size-4 text-slate-400"
+                            className="size-4 text-muted-foreground/80"
                           />
                           {methodName}
-                          <span className="text-xs font-normal text-slate-400">
+                          <span className="text-xs font-normal text-muted-foreground/80">
                             {payment.paymentCount.toLocaleString("en-BD")} payments
                           </span>
                         </span>
-                        <span className="text-sm font-semibold text-slate-900">
-                          {currency.format(payment.amount)}
+                        <span className="text-sm font-semibold text-foreground">
+                          {currency(payment.amount)}
                         </span>
                       </div>
                       <div
@@ -819,10 +814,10 @@ export default function DashboardComponent() {
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={Math.round(share)}
-                        className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"
+                        className="mt-2 h-2 overflow-hidden rounded-full bg-muted"
                       >
                         <div
-                          className="h-full rounded-full bg-emerald-600 transition-all"
+                          className="h-full rounded-full bg-success transition-all"
                           style={{ width: `${share}%` }}
                         />
                       </div>
@@ -839,55 +834,55 @@ export default function DashboardComponent() {
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02]">
-            <p className="text-sm font-medium text-slate-500">Purchases</p>
-            <p className="mt-2 text-xl font-semibold text-slate-950">
-              {currency.format(dashboard.purchasesSummary.currentPurchases)}
+          <div className="rounded-xl border border-border bg-card p-5 shadow-xs">
+            <p className="text-sm font-medium text-muted-foreground">Purchases</p>
+            <p className="mt-2 text-xl font-semibold text-foreground">
+              {currency(dashboard.purchasesSummary.currentPurchases)}
             </p>
-            <p className="mt-1 text-xs text-slate-400">{periodLabel}</p>
+            <p className="mt-1 text-xs text-muted-foreground/80">{periodLabel}</p>
           </div>
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02]">
-            <p className="text-sm font-medium text-slate-500">Sales returns</p>
-            <p className="mt-2 text-xl font-semibold text-slate-950">
-              {currency.format(dashboard.salesSummary.currentReturn)}
+          <div className="rounded-xl border border-border bg-card p-5 shadow-xs">
+            <p className="text-sm font-medium text-muted-foreground">Sales returns</p>
+            <p className="mt-2 text-xl font-semibold text-foreground">
+              {currency(dashboard.salesSummary.currentReturn)}
             </p>
-            <p className="mt-1 text-xs text-slate-400">{periodLabel}</p>
+            <p className="mt-1 text-xs text-muted-foreground/80">{periodLabel}</p>
           </div>
           <Link
             to="/product"
-            className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] transition hover:border-amber-300 hover:bg-amber-50/30"
+            className="rounded-xl border border-border bg-card p-5 shadow-xs transition hover:border-warning/40 hover:bg-warning/10/30"
           >
-            <p className="text-sm font-medium text-slate-500">Stock to review</p>
-            <p className="mt-2 text-xl font-semibold text-slate-950">
+            <p className="text-sm font-medium text-muted-foreground">Stock to review</p>
+            <p className="mt-2 text-xl font-semibold text-foreground">
               {loading ? "…" : lowStockCount}
-              <span className="ml-1 text-sm font-normal text-slate-500">
+              <span className="ml-1 text-sm font-normal text-muted-foreground">
                 products
               </span>
             </p>
-            <p className="mt-1 text-xs text-amber-700">
+            <p className="mt-1 text-xs text-warning">
               {dashboard.productsSummary.stockOut} out of stock ·{" "}
               {dashboard.productsSummary.lowStock} running low
             </p>
           </Link>
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02]">
-            <p className="text-sm font-medium text-slate-500">Inventory value</p>
-            <p className="mt-2 text-xl font-semibold text-slate-950">
-              {currency.format(dashboard.productsSummary.totalValuation)}
+          <div className="rounded-xl border border-border bg-card p-5 shadow-xs">
+            <p className="text-sm font-medium text-muted-foreground">Inventory value</p>
+            <p className="mt-2 text-xl font-semibold text-foreground">
+              {currency(dashboard.productsSummary.totalValuation)}
             </p>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-muted-foreground/80">
               {dashboard.productsSummary.totalItems.toLocaleString("en-BD")} units in stock
             </p>
           </div>
         </section>
 
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)]">
-          <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Sales overview"
               description={`${periodLabel} · ${selectedPeriod.comparison}.`}
             />
             {loading && !hasData ? (
-              <div className="flex h-[280px] items-center justify-center text-sm text-slate-500">
+              <div className="flex h-[280px] items-center justify-center text-sm text-muted-foreground">
                 <LoaderCircle aria-hidden="true" className="mr-2 size-4 animate-spin" />
                 Loading sales overview…
               </div>
@@ -924,7 +919,7 @@ export default function DashboardComponent() {
                     />
                     <Tooltip
                       formatter={(value, name) => [
-                        currency.format(Number(value) || 0),
+                        currency(Number(value) || 0),
                         name === "cash" ? "Fully paid" : "Sales",
                       ]}
                       contentStyle={{
@@ -961,9 +956,9 @@ export default function DashboardComponent() {
                 </EmptyState>
               </div>
             )}
-            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-2">
-                <span className="size-2 rounded-full bg-emerald-600" />
+                <span className="size-2 rounded-full bg-success" />
                 Total sales
               </span>
               <span className="inline-flex items-center gap-2">
@@ -973,7 +968,7 @@ export default function DashboardComponent() {
             </div>
           </article>
 
-          <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Inventory attention"
               description="Products that may need a restock."
@@ -981,35 +976,35 @@ export default function DashboardComponent() {
                 <Link
                   to="/product"
                   aria-label="View all products"
-                  className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                  className="rounded-lg p-2 text-muted-foreground/80 transition hover:bg-muted hover:text-foreground"
                 >
                   <ArrowRight aria-hidden="true" className="size-4" />
                 </Link>
               }
             />
             {dashboard.lowStockProducts.length ? (
-              <ul className="mt-5 divide-y divide-slate-100">
+              <ul className="mt-5 divide-y divide-border">
                 {dashboard.lowStockProducts.map((product) => (
                   <li
                     key={product.id}
                     className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-800">
+                      <p className="truncate text-sm font-medium text-foreground">
                         {product.variantName || product.productName || "Unnamed product"}
                       </p>
-                      <p className="mt-1 truncate text-xs text-slate-500">
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
                         {product.sku || "No SKU"}
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                    <span className="shrink-0 rounded-full bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
                       {product.quantity} left
                     </span>
                   </li>
                 ))}
               </ul>
             ) : loading ? (
-              <div className="flex min-h-36 items-center justify-center text-sm text-slate-500">
+              <div className="flex min-h-36 items-center justify-center text-sm text-muted-foreground">
                 <LoaderCircle aria-hidden="true" className="mr-2 size-4 animate-spin" />
                 Checking inventory…
               </div>
@@ -1025,7 +1020,7 @@ export default function DashboardComponent() {
             {lowStockCount > 0 ? (
               <Link
                 to="/product"
-                className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+                className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-success hover:text-success"
               >
                 Review inventory <ArrowRight aria-hidden="true" className="size-4" />
               </Link>
@@ -1034,14 +1029,14 @@ export default function DashboardComponent() {
         </section>
 
         <section className="grid gap-5 lg:grid-cols-2">
-          <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Recent sales"
               description={`Latest completed transactions · ${periodLabel.toLowerCase()}.`}
               action={
                 <Link
                   to="/sales"
-                  className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+                  className="text-sm font-semibold text-success hover:text-success"
                 >
                   View sales
                 </Link>
@@ -1051,7 +1046,7 @@ export default function DashboardComponent() {
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full min-w-[560px] text-left text-sm">
                   <thead>
-                    <tr className="border-b border-slate-100 text-xs font-medium uppercase tracking-wide text-slate-400">
+                    <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-muted-foreground/80">
                       <th className="pb-3 pr-4">Invoice</th>
                       <th className="pb-3 pr-4">Customer</th>
                       <th className="pb-3 pr-4">Time</th>
@@ -1059,21 +1054,21 @@ export default function DashboardComponent() {
                       <th className="pb-3 text-right">Total</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-border">
                     {dashboard.recentSales.map((sale) => (
                       <tr key={sale.id}>
-                        <td className="whitespace-nowrap py-3 pr-4 font-medium text-emerald-800">
+                        <td className="whitespace-nowrap py-3 pr-4 font-medium text-success">
                           {sale.invoiceNumber || `#${sale.id}`}
                         </td>
-                        <td className="max-w-[160px] truncate py-3 pr-4 text-slate-700">
+                        <td className="max-w-[160px] truncate py-3 pr-4 text-foreground">
                           {sale.customerName || "Walk-in customer"}
-                          <span className="ml-1 text-xs text-slate-400">
+                          <span className="ml-1 text-xs text-muted-foreground/80">
                             · {sale.itemCount} items
                           </span>
                         </td>
-                        <td className="whitespace-nowrap py-3 pr-4 text-slate-500">
+                        <td className="whitespace-nowrap py-3 pr-4 text-muted-foreground">
                           <span>{formatTime(sale.createdAt)}</span>
-                          <span className="ml-1 text-xs text-slate-400">
+                          <span className="ml-1 text-xs text-muted-foreground/80">
                             {formatDate(sale.createdAt)}
                           </span>
                         </td>
@@ -1081,17 +1076,17 @@ export default function DashboardComponent() {
                           <span
                             className={`rounded-full px-2 py-1 text-xs font-medium capitalize ${
                               sale.paymentStatus === "paid"
-                                ? "bg-emerald-50 text-emerald-700"
+                                ? "bg-success/10 text-success"
                                 : sale.paymentStatus === "partial"
-                                  ? "bg-amber-50 text-amber-800"
-                                  : "bg-rose-50 text-rose-700"
+                                  ? "bg-warning/10 text-warning"
+                                  : "bg-destructive/10 text-destructive"
                             }`}
                           >
                             {sale.paymentStatus}
                           </span>
                         </td>
-                        <td className="whitespace-nowrap py-3 text-right font-semibold text-slate-800">
-                          {currency.format(sale.soldPrice)}
+                        <td className="whitespace-nowrap py-3 text-right font-semibold text-foreground">
+                          {currency(sale.soldPrice)}
                         </td>
                       </tr>
                     ))}
@@ -1107,42 +1102,42 @@ export default function DashboardComponent() {
             )}
           </article>
 
-          <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Top performers"
               description={`Products leading sales · ${periodLabel.toLowerCase()}.`}
               action={
                 <Link
                   to="/product"
-                  className="text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+                  className="text-sm font-semibold text-success hover:text-success"
                 >
                   Products
                 </Link>
               }
             />
             {dashboard.topSellingProducts.length ? (
-              <ul className="mt-4 divide-y divide-slate-100">
+              <ul className="mt-4 divide-y divide-border">
                 {dashboard.topSellingProducts.map((product, index) => (
                   <li
                     key={`${product.id}-${index}`}
                     className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0"
                   >
                     <div className="flex min-w-0 items-center gap-3">
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-semibold text-slate-500">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-semibold text-muted-foreground">
                         {index + 1}
                       </span>
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-slate-800">
+                        <p className="truncate text-sm font-medium text-foreground">
                           {product.variantName || product.productName || "Unnamed product"}
                         </p>
-                        <p className="mt-1 text-xs text-slate-500">
+                        <p className="mt-1 text-xs text-muted-foreground">
                           {product.unitsSold.toLocaleString("en-BD")} units sold
                         </p>
-                        <p className="mt-1 text-xs text-slate-400">
-                          Average unit price {currency.format(product.soldPrice)}
+                        <p className="mt-1 text-xs text-muted-foreground/80">
+                          Average unit price {currency(product.soldPrice)}
                         </p>
-                        <p className="mt-1 text-xs font-medium text-slate-500">
-                          Gross sales {currency.format(product.grossSales)}
+                        <p className="mt-1 text-xs font-medium text-muted-foreground">
+                          Gross sales {currency(product.grossSales)}
                         </p>
                       </div>
                     </div>
@@ -1158,22 +1153,22 @@ export default function DashboardComponent() {
         </section>
 
         <section className="grid gap-5 lg:grid-cols-3">
-          <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Most sold categories"
               description={`Units sold · ${periodLabel.toLowerCase()}.`}
             />
             {dashboard.topSoldProductsByCategory.length ? (
-              <ul className="mt-4 divide-y divide-slate-100">
+              <ul className="mt-4 divide-y divide-border">
                 {dashboard.topSoldProductsByCategory.map((category) => (
                   <li
                     key={category.category}
                     className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
                   >
-                    <span className="truncate text-sm font-medium text-slate-700">
+                    <span className="truncate text-sm font-medium text-foreground">
                       {category.category}
                     </span>
-                    <span className="shrink-0 text-sm font-semibold text-slate-900">
+                    <span className="shrink-0 text-sm font-semibold text-foreground">
                       {category.soldItems.toLocaleString("en-BD")} units
                     </span>
                   </li>
@@ -1188,23 +1183,23 @@ export default function DashboardComponent() {
             )}
           </article>
 
-          <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Profit by category"
               description={`Top categories · ${periodLabel.toLowerCase()}.`}
             />
             {dashboard.profitByCategory.length ? (
-              <ul className="mt-4 divide-y divide-slate-100">
+              <ul className="mt-4 divide-y divide-border">
                 {dashboard.profitByCategory.map((category) => (
                   <li
                     key={category.category}
                     className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
                   >
-                    <span className="truncate text-sm font-medium text-slate-700">
+                    <span className="truncate text-sm font-medium text-foreground">
                       {category.category}
                     </span>
-                    <span className="shrink-0 text-sm font-semibold text-slate-900">
-                      {currency.format(category.profit)}
+                    <span className="shrink-0 text-sm font-semibold text-foreground">
+                      {currency(category.profit)}
                     </span>
                   </li>
                 ))}
@@ -1216,29 +1211,29 @@ export default function DashboardComponent() {
             )}
           </article>
 
-          <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Top items by gross"
               description={`Highest grossing items · ${periodLabel.toLowerCase()}.`}
             />
             {dashboard.topItemsByGross.length ? (
-              <ul className="mt-4 divide-y divide-slate-100">
+              <ul className="mt-4 divide-y divide-border">
                 {dashboard.topItemsByGross.map((item, index) => (
                   <li
                     key={item.variantId ?? `${item.productName}-${index}`}
                     className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
                   >
-                    <span className="truncate text-sm font-medium text-slate-700">
+                    <span className="truncate text-sm font-medium text-foreground">
                       {item.variantName || item.productName}
                     </span>
                     <span className="flex shrink-0 items-baseline gap-2">
                       {item.currentQuantity ? (
-                        <span className="text-xs text-slate-400">
+                        <span className="text-xs text-muted-foreground/80">
                           {item.currentQuantity.toLocaleString("en-BD")}
                         </span>
                       ) : null}
-                      <span className="text-sm font-semibold text-slate-900">
-                        {currency.format(item.currentGross)}
+                      <span className="text-sm font-semibold text-foreground">
+                        {currency(item.currentGross)}
                       </span>
                     </span>
                   </li>
@@ -1253,15 +1248,15 @@ export default function DashboardComponent() {
         </section>
 
         {lowStockCount > 0 ? (
-          <p className="flex items-center gap-2 text-xs text-slate-500">
-            <AlertTriangle aria-hidden="true" className="size-4 text-amber-600" />
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <AlertTriangle aria-hidden="true" className="size-4 text-warning" />
             {lowStockCount} product{lowStockCount === 1 ? "" : "s"} need
             {lowStockCount === 1 ? "s" : ""} an inventory check.
           </p>
         ) : null}
 
         <section>
-          <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-950/[0.02] sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Slow-moving stock"
               description={`In-stock products with no completed sale in ${staleDays}+ days, including products never sold. Showing up to ${staleLimit}.`}
@@ -1270,7 +1265,7 @@ export default function DashboardComponent() {
                   <div className="flex items-center gap-2">
                     <label
                       htmlFor="stale-stock-threshold"
-                      className="text-xs font-medium text-slate-500"
+                      className="text-xs font-medium text-muted-foreground"
                     >
                       No sale for
                     </label>
@@ -1288,7 +1283,7 @@ export default function DashboardComponent() {
                           setStaleDays(threshold);
                         }
                       }}
-                      className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                      className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {staleStockThresholds.map((days) => (
                         <option key={days} value={days}>
@@ -1300,7 +1295,7 @@ export default function DashboardComponent() {
                   <div className="flex items-center gap-2">
                     <label
                       htmlFor="stale-stock-limit"
-                      className="text-xs font-medium text-slate-500"
+                      className="text-xs font-medium text-muted-foreground"
                     >
                       Show
                     </label>
@@ -1317,7 +1312,7 @@ export default function DashboardComponent() {
                           setStaleLimit(limit);
                         }
                       }}
-                      className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                      className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {staleStockLimits.map((limit) => (
                         <option key={limit} value={limit}>
@@ -1333,7 +1328,7 @@ export default function DashboardComponent() {
               <div className="mt-5 overflow-x-auto">
                 <table className="w-full min-w-[640px] text-left text-sm">
                   <thead>
-                    <tr className="border-b border-slate-100 text-xs font-medium uppercase tracking-wide text-slate-400">
+                    <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-muted-foreground/80">
                       <th className="pb-3 pr-4">Product</th>
                       <th className="pb-3 pr-4">SKU</th>
                       <th className="pb-3 pr-4 text-right">In stock</th>
@@ -1341,38 +1336,38 @@ export default function DashboardComponent() {
                       <th className="pb-3 text-right">Stock value</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-border">
                     {dashboard.staleStockProducts.map((product) => (
                       <tr key={product.id}>
-                        <td className="max-w-[240px] truncate py-3 pr-4 font-medium text-slate-800">
+                        <td className="max-w-[240px] truncate py-3 pr-4 font-medium text-foreground">
                           {product.variantName || product.productName || "Unnamed product"}
                         </td>
-                        <td className="whitespace-nowrap py-3 pr-4 text-slate-500">
+                        <td className="whitespace-nowrap py-3 pr-4 text-muted-foreground">
                           {product.sku || "No SKU"}
                         </td>
-                        <td className="whitespace-nowrap py-3 pr-4 text-right font-medium text-slate-700">
+                        <td className="whitespace-nowrap py-3 pr-4 text-right font-medium text-foreground">
                           {product.quantity.toLocaleString("en-BD")}
                         </td>
                         <td className="whitespace-nowrap py-3 pr-4">
                           {product.lastSoldAt ? (
-                            <span className="inline-flex items-center gap-2 text-slate-600">
+                            <span className="inline-flex items-center gap-2 text-foreground">
                               <Clock3
                                 aria-hidden="true"
-                                className="size-3.5 text-amber-600"
+                                className="size-3.5 text-warning"
                               />
                               {product.daysSinceLastSale} days ago
-                              <span className="text-xs text-slate-400">
+                              <span className="text-xs text-muted-foreground/80">
                                 ({formatDate(product.lastSoldAt)})
                               </span>
                             </span>
                           ) : (
-                            <span className="rounded-full bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700">
+                            <span className="rounded-full bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive">
                               Never sold
                             </span>
                           )}
                         </td>
-                        <td className="whitespace-nowrap py-3 text-right font-semibold text-slate-800">
-                          {currency.format(product.stockValue)}
+                        <td className="whitespace-nowrap py-3 text-right font-semibold text-foreground">
+                          {currency(product.stockValue)}
                         </td>
                       </tr>
                     ))}
@@ -1380,7 +1375,7 @@ export default function DashboardComponent() {
                 </table>
               </div>
             ) : loading ? (
-              <div className="flex min-h-36 items-center justify-center text-sm text-slate-500">
+              <div className="flex min-h-36 items-center justify-center text-sm text-muted-foreground">
                 <LoaderCircle
                   aria-hidden="true"
                   className="mr-2 size-4 animate-spin"

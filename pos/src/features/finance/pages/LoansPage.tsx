@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,8 +23,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
-import { formatCurrency } from "@/features/reports/utils/reportUtils";
+import { formatCurrency } from "@/lib/format";
 import { ReportTable, type ReportColumn } from "@/features/reports/components/ReportTable";
 import {
   createLoanApi,
@@ -54,26 +56,49 @@ export function LoansPage() {
   const columns: ReportColumn<BusinessLoan>[] = [
     { key: "lenderName", header: "Lender", render: (row) => <span className="font-medium">{row.lenderName}</span> },
     { key: "lenderType", header: "Type", render: (row) => <span className="capitalize">{row.lenderType}</span> },
-    { key: "principal", header: "Principal", render: (row) => formatCurrency(row.principal) },
-    { key: "principalRepaid", header: "Repaid", render: (row) => formatCurrency(row.principalRepaid ?? "0") },
-    { key: "interestPaid", header: "Interest paid", render: (row) => formatCurrency(row.interestPaid ?? "0") },
-    { key: "outstanding", header: "Outstanding", render: (row) => <strong>{formatCurrency(row.outstanding ?? "0")}</strong> },
+    {
+      key: "principal",
+      header: "Principal",
+      render: (row) => formatCurrency(row.principal),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "principalRepaid",
+      header: "Repaid",
+      render: (row) => formatCurrency(row.principalRepaid ?? "0"),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "interestPaid",
+      header: "Interest paid",
+      render: (row) => formatCurrency(row.interestPaid ?? "0"),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "outstanding",
+      header: "Outstanding",
+      render: (row) => <strong>{formatCurrency(row.outstanding ?? "0")}</strong>,
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
     {
       key: "status",
       header: "Status",
       render: (row) => (
-        <Badge
-          variant="outline"
-          className={
+        <StatusBadge
+          tone={
             row.status === "active"
-              ? "text-xs text-sky-700"
+              ? "info"
               : row.status === "closed"
-                ? "text-xs text-emerald-700"
-                : "text-xs text-slate-500"
+                ? "success"
+                : "neutral"
           }
         >
           {row.status.replace("_", " ")}
-        </Badge>
+        </StatusBadge>
       ),
     },
     {
@@ -89,22 +114,12 @@ export function LoansPage() {
   ];
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-            Finance &amp; Growth
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-            Loans
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Principal repayment reduces the loan payable; interest is an expense —
-            reported separately, never conflated.
-          </p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>Record Loan</Button>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="Loans"
+        description="Principal repayment reduces the loan payable; interest is an expense — reported separately, never conflated."
+        actions={<Button onClick={() => setCreateOpen(true)}>Record Loan</Button>}
+      />
 
       <Card>
         <CardContent>
@@ -125,7 +140,7 @@ export function LoansPage() {
           onClose={() => setRepayLoan(null)}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }
 
@@ -161,7 +176,7 @@ function CreateLoanDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Record loan received</DialogTitle>
           <DialogDescription>Posted as DR cash / CR loans payable.</DialogDescription>
@@ -260,19 +275,40 @@ function RepayDialog({ loan, onClose }: { loan: BusinessLoan; onClose: () => voi
     totalAmount: string;
   }>[] = [
     { key: "paymentDate", header: "Date", render: (row) => row.paymentDate },
-    { key: "principalAmount", header: "Principal", render: (row) => formatCurrency(row.principalAmount) },
-    { key: "interestAmount", header: "Interest", render: (row) => formatCurrency(row.interestAmount) },
-    { key: "totalAmount", header: "Total", render: (row) => formatCurrency(row.totalAmount) },
+    {
+      key: "principalAmount",
+      header: "Principal",
+      render: (row) => formatCurrency(row.principalAmount),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "interestAmount",
+      header: "Interest",
+      render: (row) => formatCurrency(row.interestAmount),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "totalAmount",
+      header: "Total",
+      render: (row) => formatCurrency(row.totalAmount),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
   ];
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Repay {loan.lenderName}</DialogTitle>
           <DialogDescription>
-            Outstanding {formatCurrency(loan.outstanding ?? "0")} · principal
-            reduces the payable, interest posts to the interest expense account.
+            <span className="tabular-nums">
+              Outstanding {formatCurrency(loan.outstanding ?? "0")}
+            </span>{" "}
+            · principal reduces the payable, interest posts to the interest expense
+            account.
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-3 items-end gap-2">

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { BellRing } from "lucide-react";
+import { BellRing, PackageSearch } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -19,6 +19,9 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { toast } from "@/components/ui/toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
@@ -39,7 +42,7 @@ import {
   formatCurrency,
   formatDate,
   formatNumber,
-} from "@/features/reports/utils/reportUtils";
+} from "@/lib/format";
 import { PriceChangeBadge } from "../components/PriceChangeBadge";
 import { usePriceOverview } from "../hooks/useProcurement";
 import type { PriceOverviewFilters } from "../api/procurement.api";
@@ -168,7 +171,12 @@ export function PriceMonitoringPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6">
+    <PageContainer>
+      <PageHeader
+        title="Product Price Monitoring"
+        description="Compare the latest received purchase price of every product against its history and suppliers. Only received purchase quantities count as actual prices — quotations come later from Price Check."
+      />
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -192,7 +200,7 @@ export function PriceMonitoringPage() {
           </label>
           <div className="flex items-end gap-2">
             <div className="flex flex-col gap-1">
-              <span className="text-xs text-slate-500">Threshold (%)</span>
+              <span className="text-xs text-muted-foreground">Threshold (%)</span>
               <Input
                 aria-label="Alert threshold percentage"
                 type="number"
@@ -214,7 +222,7 @@ export function PriceMonitoringPage() {
             </Button>
           </div>
           {!canManageAlerts ? (
-            <p className="text-xs text-slate-400 sm:ml-auto">
+            <p className="text-xs text-muted-foreground sm:ml-auto">
               Only users with price alert permission can change these
               settings.
             </p>
@@ -223,15 +231,6 @@ export function PriceMonitoringPage() {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">Product Price Monitoring</CardTitle>
-          <CardDescription>
-            Compare the latest received purchase price of every product
-            against its history and suppliers. Only received purchase
-            quantities count as actual prices — quotations come later from
-            Price Check.
-          </CardDescription>
-        </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Input
@@ -331,16 +330,13 @@ export function PriceMonitoringPage() {
                     : rows.length === 0
                       ? (
                           <TableRow>
-                            <TableCell colSpan={10}>
-                              <div className="flex flex-col items-center gap-1 py-10 text-center">
-                                <p className="text-sm font-medium text-slate-600">
-                                  No price history yet
-                                </p>
-                                <p className="text-xs text-slate-400">
-                                  Prices appear here once purchases are
-                                  received into inventory.
-                                </p>
-                              </div>
+                            <TableCell colSpan={10} className="py-6">
+                              <EmptyState
+                                icon={PackageSearch}
+                                title="No price history yet"
+                                description="Prices appear here once purchases are received into inventory."
+                                className="border-0 bg-transparent"
+                              />
                             </TableCell>
                           </TableRow>
                         )
@@ -357,40 +353,40 @@ export function PriceMonitoringPage() {
                                 <span className="font-medium">
                                   {row.variantName || row.productName}
                                 </span>
-                                <span className="text-xs text-slate-400">
+                                <span className="text-xs text-muted-foreground">
                                   {row.sku ?? "—"}
                                   {row.unitName ? ` · ${row.unitName}` : ""}
                                 </span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-sm text-slate-500">
+                            <TableCell className="text-sm text-muted-foreground">
                               {row.categoryName}
                             </TableCell>
                             <TableCell className="text-right font-medium">
                               {formatCurrency(row.latestPrice)}
                             </TableCell>
-                            <TableCell className="text-right text-slate-500">
+                            <TableCell className="text-right text-muted-foreground tabular-nums">
                               {formatCurrency(row.previousPrice)}
                             </TableCell>
                             <TableCell className="text-center">
                               <PriceChangeBadge value={row.priceChangePercent} />
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right tabular-nums">
                               {formatCurrency(row.lowestPrice)}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right tabular-nums">
                               {formatCurrency(row.highestPrice)}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right tabular-nums">
                               {formatCurrency(row.averagePrice)}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right tabular-nums">
                               {formatNumber(row.purchaseCount)}
                             </TableCell>
                             <TableCell className="text-sm">
                               <div className="flex flex-col">
                                 <span>{formatDate(row.lastPurchaseDate)}</span>
-                                <span className="text-xs text-slate-400">
+                                <span className="text-xs text-muted-foreground">
                                   {row.lastSupplierName ?? "—"}
                                 </span>
                               </div>
@@ -402,7 +398,7 @@ export function PriceMonitoringPage() {
             </div>
           )}
 
-          <div className="flex items-center justify-between text-sm text-slate-500">
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
             <span>
               {total} variant{total === 1 ? "" : "s"} with received purchases
             </span>
@@ -432,6 +428,6 @@ export function PriceMonitoringPage() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }

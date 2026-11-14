@@ -55,35 +55,42 @@ export const OPEN_CLAIM_STATUSES = new Set([
   "ready_for_pickup",
 ]);
 
-const STATUS_STYLES: Record<string, string> = {
+import type { StatusTone } from "@/components/common/StatusBadge";
+
+/**
+ * Status → semantic tone (rendered through the shared StatusBadge):
+ * green → success, amber/yellow/orange → warning, red → danger,
+ * blue/indigo/teal → info, purple → primary, gray → neutral.
+ */
+const STATUS_TONES: Record<string, StatusTone> = {
   // warranties
-  active: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  expiring: "bg-amber-50 text-amber-700 border-amber-200",
-  expired: "bg-rose-50 text-rose-700 border-rose-200",
-  voided: "bg-slate-100 text-slate-500 border-slate-200",
-  replaced: "bg-purple-50 text-purple-700 border-purple-200",
-  suspended: "bg-slate-100 text-slate-500 border-slate-200",
-  exhausted: "bg-amber-50 text-amber-700 border-amber-200",
+  active: "success",
+  expiring: "warning",
+  expired: "danger",
+  voided: "neutral",
+  replaced: "primary",
+  suspended: "neutral",
+  exhausted: "warning",
   // claims
-  submitted: "bg-sky-50 text-sky-700 border-sky-200",
-  under_inspection: "bg-indigo-50 text-indigo-700 border-indigo-200",
-  approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  rejected: "bg-rose-50 text-rose-700 border-rose-200",
-  repairing: "bg-amber-50 text-amber-700 border-amber-200",
-  waiting_parts: "bg-orange-50 text-orange-700 border-orange-200",
-  ready_for_pickup: "bg-teal-50 text-teal-700 border-teal-200",
-  closed: "bg-slate-100 text-slate-500 border-slate-200",
-  cancelled: "bg-slate-100 text-slate-500 border-slate-200",
+  submitted: "info",
+  under_inspection: "info",
+  approved: "success",
+  rejected: "danger",
+  repairing: "warning",
+  waiting_parts: "warning",
+  ready_for_pickup: "info",
+  closed: "neutral",
+  cancelled: "neutral",
   // supplier claim responses
-  sent_to_supplier: "bg-blue-50 text-blue-700 border-blue-200",
-  under_repair: "bg-amber-50 text-amber-700 border-amber-200",
-  recovered: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  sent_to_supplier: "info",
+  under_repair: "warning",
+  recovered: "success",
 };
 
-/** Tailwind classes for a status pill (falls back to neutral). */
-export function statusBadgeClass(status: string | null | undefined): string {
-  if (!status) return "bg-slate-50 text-slate-500 border-slate-200";
-  return STATUS_STYLES[status] ?? "bg-slate-50 text-slate-700 border-slate-200";
+/** Semantic tone for a warranty/claim status pill (falls back to neutral). */
+export function statusTone(status: string | null | undefined): StatusTone {
+  if (!status) return "neutral";
+  return STATUS_TONES[status] ?? "neutral";
 }
 
 export function statusLabel(status: string | null | undefined): string {

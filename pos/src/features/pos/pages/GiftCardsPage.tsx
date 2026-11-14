@@ -346,7 +346,7 @@ export function GiftCardsPage() {
                     </span>
                     <span
                       className={`font-mono ${
-                        t.amount < 0 ? "text-red-600" : "text-emerald-700"
+                        t.amount < 0 ? "text-destructive" : "text-success"
                       }`}
                     >
                       {t.amount > 0 ? "+" : ""}

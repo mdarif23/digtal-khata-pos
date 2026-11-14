@@ -10,6 +10,12 @@ import { CustomerDialog } from "@/features/Contacts/components/customers/Custome
 import { useCustomerStore } from "@/store/useCustomerStore";
 import { useState } from "react";
 import { Controller, type UseFormReturn } from "react-hook-form";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Kbd } from "@/components/common/Kbd";
 
 import {
   Combobox,
@@ -47,13 +53,23 @@ export function CartHeader({
         </div>
       </div>
       <div className="flex gap-2">
-        <div
-          className="min-w-0 flex-1"
-          data-hotkey-target="customer-search"
-          tabIndex={-1}
-        >
-          <CustomerInputAndSearch form={form} />
-        </div>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <div
+                className="min-w-0 flex-1"
+                data-hotkey-target="customer-search"
+                tabIndex={-1}
+              >
+                <CustomerInputAndSearch form={form} />
+              </div>
+            }
+          />
+          <TooltipContent>
+            Select a customer{" "}
+            <Kbd keys={["F5"]} className="ml-1" />
+          </TooltipContent>
+        </Tooltip>
         {/* Same dialog the /customer page uses — one form, one validation. */}
         <CustomerDialog
           trigger={

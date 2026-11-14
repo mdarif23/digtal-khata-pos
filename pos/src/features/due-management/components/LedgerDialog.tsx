@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Printer } from "lucide-react";
+import { BookOpen, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,11 +19,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/common/EmptyState";
 import {
   useCustomerLedger,
   useSupplierLedger,
 } from "../hooks/useDueManagement";
-import { formatDate, formatMoney } from "../lib/format";
+import { formatCurrency, formatDate } from "@/lib/format";
 
 const TYPE_LABELS: Record<string, string> = {
   invoice: "Sale invoice",
@@ -60,9 +61,10 @@ function LedgerTable({
   }
   if (transactions.length === 0) {
     return (
-      <p className="py-6 text-center text-sm text-muted-foreground">
-        No transactions in the selected date range.
-      </p>
+      <EmptyState
+        icon={BookOpen}
+        title="No transactions in the selected date range."
+      />
     );
   }
   return (
@@ -86,8 +88,8 @@ function LedgerTable({
                 <span
                   className={
                     transaction.debit > 0
-                      ? "font-medium text-red-600"
-                      : "font-medium text-emerald-600"
+                      ? "font-medium text-destructive"
+                      : "font-medium text-success"
                   }
                 >
                   {TYPE_LABELS[transaction.type] ?? transaction.type}
@@ -96,14 +98,14 @@ function LedgerTable({
               <TableCell className="font-mono text-xs">
                 {transaction.reference}
               </TableCell>
-              <TableCell className="text-right">
-                {transaction.debit > 0 ? formatMoney(transaction.debit) : "—"}
+              <TableCell className="text-right tabular-nums">
+                {transaction.debit > 0 ? formatCurrency(transaction.debit) : "—"}
               </TableCell>
-              <TableCell className="text-right">
-                {transaction.credit > 0 ? formatMoney(transaction.credit) : "—"}
+              <TableCell className="text-right tabular-nums">
+                {transaction.credit > 0 ? formatCurrency(transaction.credit) : "—"}
               </TableCell>
-              <TableCell className="text-right font-medium">
-                {formatMoney(transaction.runningBalance)}
+              <TableCell className="text-right font-medium tabular-nums">
+                {formatCurrency(transaction.runningBalance)}
               </TableCell>
             </TableRow>
           ))}
@@ -121,22 +123,22 @@ function LedgerTotals({
   totals: { debit: number; credit: number; closing: number };
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm tabular-nums sm:grid-cols-4">
       <div>
         <p className="text-muted-foreground">Opening balance</p>
-        <p className="font-semibold">{formatMoney(openingBalance)}</p>
+        <p className="font-semibold">{formatCurrency(openingBalance)}</p>
       </div>
       <div>
         <p className="text-muted-foreground">Total debit</p>
-        <p className="font-semibold">{formatMoney(totals.debit)}</p>
+        <p className="font-semibold">{formatCurrency(totals.debit)}</p>
       </div>
       <div>
         <p className="text-muted-foreground">Total credit</p>
-        <p className="font-semibold">{formatMoney(totals.credit)}</p>
+        <p className="font-semibold">{formatCurrency(totals.credit)}</p>
       </div>
       <div>
         <p className="text-muted-foreground">Closing balance</p>
-        <p className="font-semibold">{formatMoney(totals.closing)}</p>
+        <p className="font-semibold">{formatCurrency(totals.closing)}</p>
       </div>
     </div>
   );

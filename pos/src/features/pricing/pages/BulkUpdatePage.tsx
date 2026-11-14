@@ -1,22 +1,25 @@
 import { useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { formatCurrency } from "@/lib/format";
 import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/components/ui/toast";
 import { extractApiError } from "../components/RuleDialog";
 import { useBulkUpdate } from "../hooks/usePricing";
 import type { BulkRow } from "../pricing.types";
-
-const tk = (n: number) => `৳${n.toFixed(2)}`;
 
 /**
  * Bulk price update wizard (Phase 8): filter the catalog, preview every
@@ -98,16 +101,12 @@ export function BulkUpdatePage() {
   const changedCount = preview.filter((r) => r.changed && !r.blockedReason).length;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4">
+    <PageContainer width="wide">
+      <PageHeader
+        title="Bulk price update"
+        description="Recomputes every filtered variant from its effective pricing rule and current cost. Preview first — nothing is written until you apply."
+      />
       <Card>
-        <CardHeader>
-          <CardTitle>Bulk price update</CardTitle>
-          <CardDescription>
-            Recomputes every filtered variant from its effective pricing rule
-            and current cost. Preview first — nothing is written until you
-            apply.
-          </CardDescription>
-        </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
@@ -161,7 +160,6 @@ export function BulkUpdatePage() {
               Preview
             </Button>
             <Button
-              variant="destructive"
               disabled={applying || preview.length === 0 || changedCount === 0}
               onClick={() => void apply()}
             >
@@ -171,56 +169,54 @@ export function BulkUpdatePage() {
 
           {preview.length > 0 && (
             <div className="overflow-hidden rounded-md border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left">
-                  <tr>
-                    <th className="p-2 font-medium">Product</th>
-                    <th className="p-2 font-medium">Source</th>
-                    {canSeeCost && <th className="p-2 font-medium">Cost</th>}
-                    <th className="p-2 font-medium">Current → recommended</th>
-                    <th className="p-2 font-medium">Result</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table>
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    <TableHead>Product</TableHead>
+                    <TableHead>Source</TableHead>
+                    {canSeeCost && <TableHead className="text-right">Cost</TableHead>}
+                    <TableHead className="text-right">Current → recommended</TableHead>
+                    <TableHead>Result</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {preview.map((row) => (
-                    <tr key={row.variantId} className="border-t">
-                      <td className="p-2">
+                    <TableRow key={row.variantId}>
+                      <TableCell>
                         <div className="font-medium">{row.variantName}</div>
                         {row.sku && <div className="text-xs text-muted-foreground">{row.sku}</div>}
-                      </td>
-                      <td className="p-2 text-xs text-muted-foreground">{row.sourceLabel}</td>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{row.sourceLabel}</TableCell>
                       {canSeeCost && (
-                        <td className="p-2 font-mono text-xs">
-                          {row.cost != null ? tk(row.cost) : "—"}
-                        </td>
+                        <TableCell className="text-right font-mono text-xs tabular-nums">
+                          {row.cost != null ? formatCurrency(row.cost) : "—"}
+                        </TableCell>
                       )}
-                      <td className="p-2 font-mono">
-                        {tk(row.currentPrice)} →{" "}
+                      <TableCell className="text-right font-mono tabular-nums">
+                        {formatCurrency(row.currentPrice)} →{" "}
                         <span className="font-semibold">
-                          {row.recommended != null ? tk(row.recommended) : "—"}
+                          {row.recommended != null ? formatCurrency(row.recommended) : "—"}
                         </span>
-                      </td>
-                      <td className="p-2">
+                      </TableCell>
+                      <TableCell>
                         {row.blockedReason ? (
-                          <Badge variant="outline" className="text-destructive">
-                            {row.blockedReason}
-                          </Badge>
+                          <StatusBadge tone="danger">{row.blockedReason}</StatusBadge>
                         ) : row.applied ? (
-                          <Badge>Applied</Badge>
+                          <StatusBadge tone="success">Applied</StatusBadge>
                         ) : row.changed ? (
-                          <Badge variant="outline">Ready</Badge>
+                          <StatusBadge tone="info">Ready</StatusBadge>
                         ) : (
-                          <Badge variant="secondary">Unchanged</Badge>
+                          <StatusBadge tone="neutral">Unchanged</StatusBadge>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }

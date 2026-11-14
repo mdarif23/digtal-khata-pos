@@ -48,16 +48,115 @@ export function useHotkeyAction(
   }, [action, callback]);
 }
 
-/** The default key map shown in the cheatsheet (Shift+/ opens it). */
-export const SHORTCUTS: { keys: string; action: PosHotkeyAction; label: string }[] = [
-  { keys: "F1", action: "product-search", label: "Product search" },
-  { keys: "F2", action: "hold-sale", label: "Hold sale" },
-  { keys: "F3", action: "retrieve-held", label: "Retrieve held sale" },
-  { keys: "F4", action: "discount", label: "Discount" },
-  { keys: "F5", action: "customer", label: "Customer" },
-  { keys: "F6", action: "payment", label: "Payment" },
-  { keys: "F7", action: "print-receipt", label: "Print last receipt" },
-  { keys: "F8", action: "barcode-focus", label: "Barcode / search focus" },
-  { keys: "?", action: "shortcuts-help", label: "Shortcut help" },
-  { keys: "Esc", action: "product-search", label: "Close dialog" },
+/**
+ * The cheatsheet inventory — the SOURCE OF TRUTH mirror of PosHotkeyManager's
+ * keydown switch plus the two search-focus listeners in ProductHeader
+ * (Ctrl/Cmd+K and "/"). Every entry here is backed by an implementation;
+ * Esc is listed as a standard-behavior note only (dialogs close on Escape
+ * natively — it is NOT part of the hotkey bus).
+ */
+export interface ShortcutEntry {
+  /** Key combo, each part rendered as its own keycap. */
+  keys: string[];
+  action: PosHotkeyAction | null;
+  label: string;
+  description?: string;
+}
+
+export const SHORTCUT_GROUPS: {
+  title: string;
+  items: ShortcutEntry[];
+}[] = [
+  {
+    title: "Product search & scanning",
+    items: [
+      {
+        keys: ["F1"],
+        action: "product-search",
+        label: "Product search",
+        description: "Focus the product search field",
+      },
+      {
+        keys: ["F8"],
+        action: "barcode-focus",
+        label: "Barcode focus",
+        description: "Jump back to search to scan the next item",
+      },
+      {
+        keys: ["Ctrl", "K"],
+        action: null,
+        label: "Search focus",
+        description: "Also focuses search (⌘K on Mac)",
+      },
+      {
+        keys: ["/"],
+        action: null,
+        label: "Quick search",
+        description: "Focus search when not typing in a field",
+      },
+    ],
+  },
+  {
+    title: "Cart & customer",
+    items: [
+      {
+        keys: ["F5"],
+        action: "customer",
+        label: "Select customer",
+        description: "Focus the customer selector",
+      },
+      {
+        keys: ["F2"],
+        action: "hold-sale",
+        label: "Hold sale",
+        description: "Save the current cart to held sales",
+      },
+      {
+        keys: ["F3"],
+        action: "retrieve-held",
+        label: "Retrieve held sale",
+        description: "Open held sales to restore a cart",
+      },
+    ],
+  },
+  {
+    title: "Discount & payment",
+    items: [
+      {
+        keys: ["F4"],
+        action: "discount",
+        label: "Discount",
+        description: "Open the discount & VAT dialog",
+      },
+      {
+        keys: ["F6"],
+        action: "payment",
+        label: "Payment",
+        description: "Open the payment dialog to charge the customer",
+      },
+      {
+        keys: ["F7"],
+        action: "print-receipt",
+        label: "Print last receipt",
+        description: "Reprint the most recent receipt",
+      },
+    ],
+  },
+  {
+    title: "General",
+    items: [
+      {
+        keys: ["?"],
+        action: "shortcuts-help",
+        label: "Shortcut help",
+        description: "Show or hide this cheat sheet",
+      },
+      {
+        keys: ["Esc"],
+        action: null,
+        label: "Close dialog",
+        description: "Closes the active dialog (standard behavior)",
+      },
+    ],
+  },
 ];

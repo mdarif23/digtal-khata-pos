@@ -2,10 +2,8 @@ import { useMemo, useState } from "react";
 import { CalendarClock, Layers, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useReportData } from "@/features/reports/hooks/useReportData";
 import type { ReportFilters } from "@/features/reports/types/report.types";
-import {
-  exportToCsv,
-  formatDate,
-} from "@/features/reports/utils/reportUtils";
+import { exportToCsv } from "@/features/reports/utils/reportUtils";
+import { formatDate } from "@/lib/format";
 import { ReportHeader } from "@/features/reports/components/ReportHeader";
 import { ReportDateFilter } from "@/features/reports/components/ReportDateFilter";
 import { ReportMetricCard } from "@/features/reports/components/ReportMetricCard";
@@ -100,7 +98,7 @@ export function WarrantyExpiryReport() {
         key: "warrantyNumber",
         header: "Warranty #",
         render: (r) => (
-          <span className="font-mono font-semibold text-slate-900">
+          <span className="font-mono font-semibold text-foreground">
             {r.warrantyNumber}
           </span>
         ),
@@ -112,10 +110,10 @@ export function WarrantyExpiryReport() {
           <span
             className={`text-xs font-semibold ${
               r.bucket === "expired"
-                ? "text-rose-600"
+                ? "text-destructive"
                 : r.bucket === "expiring_soon"
-                  ? "text-amber-600"
-                  : "text-emerald-600"
+                  ? "text-warning"
+                  : "text-success"
             }`}
           >
             {r.bucket.replace(/_/g, " ")}
@@ -132,8 +130,8 @@ export function WarrantyExpiryReport() {
         header: "Customer",
         render: (r) => (
           <div className="text-xs">
-            <p className="text-slate-800">{r.customer_name ?? "Walk-in"}</p>
-            <p className="font-mono text-slate-400">{r.invoice_number ?? "—"}</p>
+            <p className="text-foreground">{r.customer_name ?? "Walk-in"}</p>
+            <p className="font-mono text-muted-foreground">{r.invoice_number ?? "—"}</p>
           </div>
         ),
       },
@@ -142,12 +140,12 @@ export function WarrantyExpiryReport() {
         header: "Product",
         render: (r) => (
           <div className="max-w-xs">
-            <p className="truncate font-medium text-slate-900">{r.product_name}</p>
+            <p className="truncate font-medium text-foreground">{r.product_name}</p>
             {r.variant_label ? (
-              <p className="truncate text-xs text-slate-500">{r.variant_label}</p>
+              <p className="truncate text-xs text-muted-foreground">{r.variant_label}</p>
             ) : null}
             {r.serialNumber ? (
-              <p className="truncate font-mono text-xs text-slate-400">
+              <p className="truncate font-mono text-xs text-muted-foreground">
                 SN: {r.serialNumber}
               </p>
             ) : null}
@@ -168,7 +166,7 @@ export function WarrantyExpiryReport() {
         key: "start_date",
         header: "Start",
         render: (r) => (
-          <span className="text-xs text-slate-500">{formatDate(r.start_date)}</span>
+          <span className="text-xs text-muted-foreground">{formatDate(r.start_date)}</span>
         ),
       },
       {
@@ -176,12 +174,12 @@ export function WarrantyExpiryReport() {
         header: "Expiry",
         render: (r) => (
           <span
-            className={`text-xs font-semibold ${
+            className={`text-xs font-semibold tabular-nums ${
               r.bucket === "expired"
-                ? "text-rose-600"
+                ? "text-destructive"
                 : r.bucket === "expiring_soon"
-                  ? "text-amber-600"
-                  : "text-slate-700"
+                  ? "text-warning"
+                  : "text-foreground"
             }`}
           >
             {formatDate(r.expiry_date)}
@@ -192,7 +190,7 @@ export function WarrantyExpiryReport() {
         key: "location_name",
         header: "Location",
         render: (r) => (
-          <span className="text-xs text-slate-500">{r.location_name ?? "—"}</span>
+          <span className="text-xs text-muted-foreground">{r.location_name ?? "—"}</span>
         ),
       },
     ],
@@ -217,7 +215,7 @@ export function WarrantyExpiryReport() {
           <select
             value={bucket}
             onChange={(event) => setBucket(event.target.value)}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-2xs outline-none"
+            className="h-9 rounded-lg border border-input bg-card px-3 text-sm text-foreground shadow-2xs outline-none"
             aria-label="Filter by expiry bucket"
           >
             {BUCKET_OPTIONS.map((option) => (
@@ -236,7 +234,7 @@ export function WarrantyExpiryReport() {
           isCurrency={false}
           isCount
           icon={Layers}
-          accent="bg-sky-50 text-sky-700"
+          accent="bg-info/10 text-info"
         />
         <ReportMetricCard
           title="Valid"
@@ -244,7 +242,7 @@ export function WarrantyExpiryReport() {
           isCurrency={false}
           isCount
           icon={ShieldCheck}
-          accent="bg-emerald-50 text-emerald-700"
+          accent="bg-success/10 text-success"
         />
         <ReportMetricCard
           title="Expiring soon"
@@ -252,8 +250,8 @@ export function WarrantyExpiryReport() {
           isCurrency={false}
           isCount
           icon={CalendarClock}
-          accent="bg-amber-50 text-amber-700"
-          valueClassName="text-amber-600"
+          accent="bg-warning/10 text-warning"
+          valueClassName="text-warning"
         />
         <ReportMetricCard
           title="Expired"
@@ -261,8 +259,8 @@ export function WarrantyExpiryReport() {
           isCurrency={false}
           isCount
           icon={ShieldAlert}
-          accent="bg-rose-50 text-rose-700"
-          valueClassName="text-rose-600"
+          accent="bg-destructive/10 text-destructive"
+          valueClassName="text-destructive"
         />
       </div>
 

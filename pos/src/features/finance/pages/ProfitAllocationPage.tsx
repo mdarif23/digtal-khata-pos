@@ -25,8 +25,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
-import { formatCurrency, formatDate } from "@/features/reports/utils/reportUtils";
+import { formatCurrency } from "@/lib/format";
 import {
   createAllocationApi,
   realizeAllocationApi,
@@ -76,25 +79,16 @@ export function ProfitAllocationPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-            Finance &amp; Growth
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-            Profit Allocation
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Designations only — no cash moves until a distribution is realized.
-            The backend recomputes distributable profit and rejects
-            over-allocation and overlapping periods.
-          </p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <PieChart className="size-4" /> Allocate Profit
-        </Button>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="Profit Allocation"
+        description="Designations only — no cash moves until a distribution is realized. The backend recomputes distributable profit and rejects over-allocation and overlapping periods."
+        actions={
+          <Button onClick={() => setCreateOpen(true)}>
+            <PieChart className="size-4" /> Allocate Profit
+          </Button>
+        }
+      />
 
       <div className="space-y-4">
         {(allocations.data ?? []).map((allocation) => (
@@ -107,7 +101,7 @@ export function ProfitAllocationPage() {
         ))}
         {allocations.data?.length === 0 && (
           <Card>
-            <CardContent className="py-12 text-center text-sm text-slate-400">
+            <CardContent className="py-12 text-center text-sm text-muted-foreground">
               No allocations yet — allocate a period's profit to get started.
             </CardContent>
           </Card>
@@ -122,7 +116,7 @@ export function ProfitAllocationPage() {
           invalidate();
         }}
       />
-    </div>
+    </PageContainer>
   );
 }
 
@@ -147,20 +141,13 @@ function AllocationCard({
             {allocation.periodLabel ?? `${allocation.periodStart} → ${allocation.periodEnd}`}
           </CardTitle>
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-xs">
+            <Badge variant="outline" className="text-xs tabular-nums">
               Distributable {formatCurrency(allocation.totalDistributable)}
             </Badge>
-            <Badge
-              variant="outline"
-              className={
-                reversed
-                  ? "text-xs text-slate-500"
-                  : "text-xs text-emerald-700"
-              }
-            >
+            <StatusBadge tone={reversed ? "neutral" : "success"}>
               {reversed ? "Reversed" : "Allocated"}{" "}
               {formatCurrency(allocation.totalAllocated)}
-            </Badge>
+            </StatusBadge>
             {!reversed && (
               <Button
                 variant="outline"
@@ -182,13 +169,13 @@ function AllocationCard({
           return (
             <div
               key={line.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2"
             >
               <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-800">
+                <p className="text-sm font-medium text-foreground">
                   {CATEGORY_LABELS[line.category] ?? line.category}
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-muted-foreground">
                   {line.basisType === "percent"
                     ? `${Number(line.basisValue)}% of distributable`
                     : "Fixed amount"}{" "}
@@ -197,7 +184,7 @@ function AllocationCard({
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-950">
+                <span className="font-semibold text-foreground tabular-nums">
                   {formatCurrency(line.amount)}
                 </span>
                 {canRealize && (
@@ -285,7 +272,7 @@ function CreateAllocationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Allocate distributable profit</DialogTitle>
           <DialogDescription>
@@ -437,7 +424,7 @@ function CreateAllocationDialog({
             </Button>
           </div>
 
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted-foreground">
             Percent lines total {totalPercent}%
             {totalPercent > 100 ? " — exceeds 100%, adjust before submitting." : ""}
           </p>

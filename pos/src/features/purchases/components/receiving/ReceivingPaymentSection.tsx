@@ -2,10 +2,8 @@ import { useWatch, type UseFormReturn } from "react-hook-form";
 import { Controller } from "react-hook-form";
 import { Wallet } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import {
-  formatCurrency,
-  roundMoney,
-} from "../../utils/formatCurrency";
+import { roundMoney } from "../../utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 import type { ReceiveItemsFormValues } from "../../schemas/receiveItem.schema";
 import { ReceivingCostSummary } from "./ReceivingCostSummary";
 
@@ -40,20 +38,20 @@ export function ReceivingPaymentSection({
 
   const paymentSummary = [
     {
-      bg: "bg-amber-50",
-      circleBg: "bg-amber-500",
+      bg: "bg-warning/10",
+      circleBg: "bg-warning",
       title: "Receiving now",
       total: receivingTotal,
     },
     {
-      bg: "bg-emerald-50",
-      circleBg: "bg-emerald-500",
+      bg: "bg-success/10",
+      circleBg: "bg-success",
       title: "Previously paid",
       total: paidAmount,
     },
     {
-      bg: "bg-blue-50",
-      circleBg: "bg-blue-500",
+      bg: "bg-info/10",
+      circleBg: "bg-info",
       title: "Maximum payable now",
       total: paymentLimit,
     },
@@ -107,7 +105,7 @@ export function ReceivingPaymentSection({
                   aria-invalid={fieldState.invalid}
                 />
                 <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>Maximum payable: ৳ {formatCurrency(paymentLimit)}</span>
+                  <span>Maximum payable: {formatCurrency(paymentLimit)}</span>
                   {paymentLimit > 0 && (
                     <button
                       type="button"

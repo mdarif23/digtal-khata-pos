@@ -1,5 +1,5 @@
 import { ClipboardList } from "lucide-react";
-import { formatCurrency } from "@/features/purchases/utils/formatCurrency";
+import { formatCurrency } from "@/lib/format";
 import type { PurchaseDetailItem } from "../../purchase.types";
 import {
   estimateReturnUnitPrice,
@@ -316,7 +316,7 @@ export function ReturnItemsTable({
                     )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right">
-                  ৳ {formatCurrency(unitCostFromBase(unitPrice, factor))}
+                  {formatCurrency(unitCostFromBase(unitPrice, factor))}
                   <span className="block text-xs text-muted-foreground">
                     per {unitName}
                   </span>

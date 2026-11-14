@@ -84,7 +84,7 @@ export function ExpenseReport() {
       key: "categoryName",
       header: "Category",
       render: (r) => (
-        <span className="text-xs rounded-md bg-purple-50 text-purple-700 px-2 py-0.5 border border-purple-200">
+        <span className="text-xs rounded-md bg-primary/10 text-primary px-2 py-0.5 border border-primary/30">
           {r.categoryName}
         </span>
       ),

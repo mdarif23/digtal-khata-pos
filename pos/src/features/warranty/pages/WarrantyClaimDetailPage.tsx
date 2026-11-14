@@ -7,13 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
+import { PageContainer } from "@/components/common/PageContainer";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   useAddWarrantyClaimNote,
   useWarrantyClaimDetail,
 } from "../hooks/useWarrantyClaims";
-import { formatCurrency, formatDate, formatDateTime } from "@/features/reports/utils/reportUtils";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { WarrantyDataTable } from "../components/table/WarrantyDataTable";
 import { WarrantyStatusBadge } from "../components/WarrantyStatusBadge";
 import { ClaimActionDialog } from "../components/ClaimActionDialog";
@@ -41,9 +42,9 @@ const MANAGE_TRANSITIONS = new Set([
 
 function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-1.5 last:border-0">
-      <span className="text-xs whitespace-nowrap text-slate-500">{label}</span>
-      <span className="text-right text-sm text-slate-800">{value}</span>
+    <div className="flex items-start justify-between gap-4 border-b border-border py-1.5 last:border-0">
+      <span className="text-xs whitespace-nowrap text-muted-foreground">{label}</span>
+      <span className="text-right text-sm text-foreground">{value}</span>
     </div>
   );
 }
@@ -75,13 +76,13 @@ export function WarrantyClaimDetailPage() {
         header: "Claim #",
         cell: ({ row }) =>
           row.original.id === claimId ? (
-            <span className="font-mono text-sm font-semibold text-slate-900">
+            <span className="font-mono text-sm font-semibold text-foreground">
               {row.original.claimNumber}
             </span>
           ) : (
             <Link
               to={`/warranty/claims/${row.original.id}`}
-              className="font-mono text-sm font-semibold text-emerald-700 hover:underline"
+              className="font-mono text-sm font-semibold text-primary hover:underline"
             >
               {row.original.claimNumber}
             </Link>
@@ -104,13 +105,17 @@ export function WarrantyClaimDetailPage() {
       columnHelper.accessor("repairCost", {
         id: "repairCost",
         header: "Repair cost",
-        cell: ({ row }) => formatCurrency(row.original.repairCost),
+        cell: ({ row }) => (
+          <span className="block tabular-nums">
+            {formatCurrency(row.original.repairCost)}
+          </span>
+        ),
       }),
       columnHelper.accessor("createdAt", {
         id: "createdAt",
         header: "Filed",
         cell: ({ row }) => (
-          <span className="text-xs whitespace-nowrap text-slate-500">
+          <span className="text-xs whitespace-nowrap text-muted-foreground">
             {formatDateTime(row.original.createdAt)}
           </span>
         ),
@@ -121,32 +126,32 @@ export function WarrantyClaimDetailPage() {
 
   if (query.isPending) {
     return (
-      <div className="space-y-4 p-5">
+      <PageContainer width="narrow">
         <Skeleton className="h-8 w-72" />
         <div className="grid gap-4 lg:grid-cols-3">
           <Skeleton className="h-64 rounded-xl" />
           <Skeleton className="h-64 rounded-xl" />
           <Skeleton className="h-64 rounded-xl" />
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
   if (query.isError || !query.data) {
     return (
-      <div className="p-5">
+      <PageContainer width="narrow">
         <div
           role="alert"
-          className="flex flex-col items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 py-10 text-center"
+          className="flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 py-10 text-center"
         >
-          <p className="text-sm font-medium text-rose-700">
+          <p className="text-sm font-medium text-destructive">
             Unable to load this claim.
           </p>
           <Button variant="outline" size="sm" onClick={() => void query.refetch()}>
             Try again
           </Button>
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
@@ -177,7 +182,7 @@ export function WarrantyClaimDetailPage() {
   };
 
   return (
-    <div className="space-y-5 p-5">
+    <PageContainer width="narrow">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <Button
@@ -189,11 +194,11 @@ export function WarrantyClaimDetailPage() {
             <ArrowLeft aria-hidden="true" />
           </Button>
           <div className="min-w-0">
-            <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold text-slate-950">
+            <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold text-foreground">
               <span className="font-mono">{claim.claimNumber}</span>
               <WarrantyStatusBadge status={claim.status} />
             </h1>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-muted-foreground">
               {claim.claimType.replace(/_/g, " ")} · filed{" "}
               {formatDateTime(claim.createdAt)}
             </p>
@@ -272,7 +277,7 @@ export function WarrantyClaimDetailPage() {
               value={
                 <Link
                   to={`/warranty/registry/${claim.warrantyId}`}
-                  className="font-mono text-xs text-emerald-700 hover:underline"
+                  className="font-mono text-xs text-primary hover:underline"
                 >
                   {detail.warrantyNumber}
                 </Link>
@@ -294,7 +299,7 @@ export function WarrantyClaimDetailPage() {
             {detail.warrantyTerms ? (
               <Fact
                 label="Terms"
-                value={<span className="text-xs text-slate-600">{detail.warrantyTerms}</span>}
+                value={<span className="text-xs text-muted-foreground">{detail.warrantyTerms}</span>}
               />
             ) : null}
           </CardContent>
@@ -314,26 +319,26 @@ export function WarrantyClaimDetailPage() {
             {claim.inspectionNotes ? (
               <Fact
                 label="Inspection"
-                value={<span className="text-xs text-slate-600">{claim.inspectionNotes}</span>}
+                value={<span className="text-xs text-muted-foreground">{claim.inspectionNotes}</span>}
               />
             ) : null}
             {claim.repairDescription ? (
               <Fact
                 label="Repair"
-                value={<span className="text-xs text-slate-600">{claim.repairDescription}</span>}
+                value={<span className="text-xs text-muted-foreground">{claim.repairDescription}</span>}
               />
             ) : null}
             {claim.partsUsed ? (
               <Fact
                 label="Parts used"
-                value={<span className="text-xs text-slate-600">{claim.partsUsed}</span>}
+                value={<span className="text-xs text-muted-foreground">{claim.partsUsed}</span>}
               />
             ) : null}
             {claim.replacementVariantId ? (
               <Fact
                 label="Replacement"
                 value={
-                  <span className="text-xs text-slate-600">
+                  <span className="text-xs text-muted-foreground">
                     Variant #{claim.replacementVariantId}
                     {claim.replacementSerialNumber
                       ? ` · SN ${claim.replacementSerialNumber}`
@@ -354,7 +359,7 @@ export function WarrantyClaimDetailPage() {
             {claim.resolutionNotes ? (
               <Fact
                 label="Resolution note"
-                value={<span className="text-xs text-slate-600">{claim.resolutionNotes}</span>}
+                value={<span className="text-xs text-muted-foreground">{claim.resolutionNotes}</span>}
               />
             ) : null}
           </CardContent>
@@ -366,7 +371,7 @@ export function WarrantyClaimDetailPage() {
           <CardTitle className="text-base">Reported problem</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-slate-700">{claim.reportedProblem}</p>
+          <p className="text-sm text-foreground">{claim.reportedProblem}</p>
         </CardContent>
       </Card>
 
@@ -379,7 +384,7 @@ export function WarrantyClaimDetailPage() {
             <ClaimTimeline events={detail.events} />
 
             {!isClosed && hasPermission("warranty.claim.manage") && (
-              <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
+              <div className="mt-4 space-y-2 border-t border-border pt-4">
                 <Textarea
                   rows={2}
                   value={noteDraft}
@@ -404,7 +409,7 @@ export function WarrantyClaimDetailPage() {
         </Card>
 
         <div>
-          <h2 className="mb-3 text-base font-semibold text-slate-900">
+          <h2 className="mb-3 text-base font-semibold text-foreground">
             Claims on this warranty
           </h2>
           <WarrantyDataTable
@@ -421,6 +426,6 @@ export function WarrantyClaimDetailPage() {
         transition={activeTransition}
         onClose={() => setActiveTransition(null)}
       />
-    </div>
+    </PageContainer>
   );
 }

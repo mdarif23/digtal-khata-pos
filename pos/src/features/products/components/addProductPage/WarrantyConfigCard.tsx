@@ -172,7 +172,7 @@ export function WarrantyConfigCard({ productId }: { productId: number | null }) 
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <ShieldCheck className="text-emerald-500" />
+          <ShieldCheck className="text-success" />
           Warranty
         </CardTitle>
         <CardDescription>

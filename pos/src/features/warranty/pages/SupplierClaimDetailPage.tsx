@@ -6,13 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
+import { PageContainer } from "@/components/common/PageContainer";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   useNoteSupplierClaim,
   useSupplierClaimDetail,
 } from "../hooks/useSupplierWarranties";
-import { formatCurrency, formatDate, formatDateTime } from "@/features/reports/utils/reportUtils";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { WarrantyStatusBadge } from "../components/WarrantyStatusBadge";
 import {
   SupplierClaimActionDialog,
@@ -42,9 +43,9 @@ const ACTION_LABELS: Record<SupplierClaimAction, string> = {
 
 function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-1.5 last:border-0">
-      <span className="text-xs whitespace-nowrap text-slate-500">{label}</span>
-      <span className="text-right text-sm text-slate-800">{value}</span>
+    <div className="flex items-start justify-between gap-4 border-b border-border py-1.5 last:border-0">
+      <span className="text-xs whitespace-nowrap text-muted-foreground">{label}</span>
+      <span className="text-right text-sm text-foreground">{value}</span>
     </div>
   );
 }
@@ -88,32 +89,32 @@ export function SupplierClaimDetailPage() {
 
   if (query.isPending) {
     return (
-      <div className="space-y-4 p-5">
+      <PageContainer width="narrow">
         <Skeleton className="h-8 w-72" />
         <div className="grid gap-4 lg:grid-cols-3">
           <Skeleton className="h-56 rounded-xl" />
           <Skeleton className="h-56 rounded-xl" />
           <Skeleton className="h-56 rounded-xl" />
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
   if (query.isError || !query.data) {
     return (
-      <div className="p-5">
+      <PageContainer width="narrow">
         <div
           role="alert"
-          className="flex flex-col items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 py-10 text-center"
+          className="flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 py-10 text-center"
         >
-          <p className="text-sm font-medium text-rose-700">
+          <p className="text-sm font-medium text-destructive">
             Unable to load this supplier claim.
           </p>
           <Button variant="outline" size="sm" onClick={() => void query.refetch()}>
             Try again
           </Button>
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
@@ -137,7 +138,7 @@ export function SupplierClaimDetailPage() {
   };
 
   return (
-    <div className="space-y-5 p-5">
+    <PageContainer width="narrow">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <Button
@@ -149,11 +150,11 @@ export function SupplierClaimDetailPage() {
             <ArrowLeft aria-hidden="true" />
           </Button>
           <div className="min-w-0">
-            <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold text-slate-950">
+            <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold text-foreground">
               <span className="font-mono">{claim.claimNumber}</span>
               <WarrantyStatusBadge status={claim.status} />
             </h1>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-muted-foreground">
               {detail.supplierName} · {detail.productName}
               {detail.variantOptionLabel ? ` · ${detail.variantOptionLabel}` : ""} ·
               filed {formatDateTime(claim.createdAt)}
@@ -192,7 +193,7 @@ export function SupplierClaimDetailPage() {
               value={
                 <Link
                   to="/warranty/supplier-warranties"
-                  className="text-xs text-emerald-700 hover:underline"
+                  className="text-xs text-primary hover:underline"
                 >
                   #{claim.supplierWarrantyId}
                 </Link>
@@ -204,7 +205,7 @@ export function SupplierClaimDetailPage() {
                 value={
                   <Link
                     to={`/warranty/claims/${claim.customerWarrantyClaimId}`}
-                    className="text-xs text-emerald-700 hover:underline"
+                    className="text-xs text-primary hover:underline"
                   >
                     #{claim.customerWarrantyClaimId}
                   </Link>
@@ -273,7 +274,7 @@ export function SupplierClaimDetailPage() {
             <CardTitle className="text-base">Issue description</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-slate-700">{claim.issueDescription}</p>
+            <p className="text-sm text-foreground">{claim.issueDescription}</p>
           </CardContent>
         </Card>
       ) : null}
@@ -286,7 +287,7 @@ export function SupplierClaimDetailPage() {
           <ClaimTimeline events={detail.events} />
 
           {!isTerminal && canManage && (
-            <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
+            <div className="mt-4 space-y-2 border-t border-border pt-4">
               <Textarea
                 rows={2}
                 value={noteDraft}
@@ -315,6 +316,6 @@ export function SupplierClaimDetailPage() {
         action={activeAction}
         onClose={() => setActiveAction(null)}
       />
-    </div>
+    </PageContainer>
   );
 }

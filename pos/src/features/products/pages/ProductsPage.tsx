@@ -325,7 +325,7 @@ export function Products() {
                     }
                   }
                 }}
-                className="h-10 pl-9 pr-10"
+                className="pl-9 pr-10"
               />
               {search && (
                 <Button

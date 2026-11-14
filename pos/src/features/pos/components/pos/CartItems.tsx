@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { MdOutlineAddCircleOutline, MdDeleteOutline } from "react-icons/md";
-import { FiMinusCircle } from "react-icons/fi";
+import { Minus, Plus, ShoppingCart, Trash2 } from "lucide-react";
 import { useWatch } from "react-hook-form";
 import { ClearCartDialog } from "./ClearCartDialog.js";
 import type { DiscountType } from "../../types/cart.types.js";
@@ -35,7 +34,10 @@ import { SerialPickerDialog } from "./SerialPickerDialog.js";
 import { SaveQuotationDialog } from "./SaveQuotationDialog.js";
 import { toast } from "@/components/ui/toast.js";
 import { Button } from "@/components/ui/button.js";
-import { ShoppingCart } from "lucide-react";
+import { ProductImage } from "@/components/common/ProductCard.js";
+import { EmptyState } from "@/components/common/EmptyState.js";
+import { ShortcutsHint } from "../../hotkeys/ShortcutsHint.js";
+import { formatCurrency, formatNumber } from "@/lib/format.js";
 import { usePermissions } from "@/hooks/usePermissions.js";
 import {
   useSellUnits,
@@ -43,12 +45,10 @@ import {
 } from "../../hooks/useSellUnits.js";
 import { UnitSwitcher } from "./UnitSwitcher.js";
 
-const FALLBACK_IMAGE =
-  "https://www.startech.com.bd/image/cache/catalog/ceiling-fan/qulik/windora/windora-01-500x500.webp";
-
 type CartItem = ReturnType<typeof useCartStore.getState>["cart"][number];
 
-const tk = (n: number) => `৳${n.toFixed(2)}`;
+// Canonical money presentation (was a local `৳${n.toFixed(2)}` helper).
+const tk = formatCurrency;
 
 // ---------- shared totals (used by every cart component) ----------
 // Server-authoritative: the backend computes the same totals createSale will
@@ -207,24 +207,60 @@ function CartCustomerInfo() {
 
   return (
     <Card className="my-2">
-      <CardContent className="grid grid-cols-2 gap-1">
-        <span>Name: {name}</span>
-        <span>Phone: {phone}</span>
-        <span className="col-span-2">Address: {address}</span>
-        <span className="col-span-2">
-          {customerDue
-            ? `Total Amount: ${customerDue.totalAmount ?? 0}, Total Paid: ${customerDue.totalPaid ?? 0}, Total Due: ${customerDue.totalDue ?? 0}`
-            : "No Due"}
-        </span>
+      <CardContent className="grid grid-cols-2 gap-x-3 gap-y-1.5 px-4 py-3 text-sm">
+        <div className="min-w-0">
+          <span className="text-xs text-muted-foreground">Name</span>
+          <p className="truncate font-medium">{name}</p>
+        </div>
+        <div className="min-w-0">
+          <span className="text-xs text-muted-foreground">Phone</span>
+          <p className="truncate">{phone}</p>
+        </div>
+        {address ? (
+          <div className="col-span-2 min-w-0">
+            <span className="text-xs text-muted-foreground">Address</span>
+            <p className="truncate">{address}</p>
+          </div>
+        ) : null}
+        {customerDue ? (
+          <div className="col-span-2 rounded-md bg-muted/50 px-3 py-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Total due</span>
+              <span className="font-semibold tabular-nums text-destructive">
+                {formatCurrency(customerDue.totalDue ?? 0)}
+              </span>
+            </div>
+            <div className="mt-0.5 flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                Billed {formatCurrency(Number(customerDue.totalAmount ?? 0))}
+              </span>
+              <span>
+                Paid {formatCurrency(Number(customerDue.totalPaid ?? 0))}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="col-span-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2 py-0.5 font-medium text-success">
+              No due
+            </span>
+          </div>
+        )}
         {loyaltyBalance !== null && (
-          <span className="col-span-2 text-xs">
-            Loyalty points: {loyaltyBalance.toFixed(2)}
-          </span>
+          <div className="col-span-2 flex items-center justify-between text-xs text-muted-foreground">
+            <span>Loyalty points</span>
+            <span className="font-medium text-foreground">
+              {formatNumber(loyaltyBalance)}
+            </span>
+          </div>
         )}
         {storeCreditBalance !== null && (
-          <span className="col-span-2 text-xs">
-            Store credit: ৳{storeCreditBalance.toFixed(2)}
-          </span>
+          <div className="col-span-2 flex items-center justify-between text-xs text-muted-foreground">
+            <span>Store credit</span>
+            <span className="font-medium text-foreground">
+              {formatCurrency(storeCreditBalance)}
+            </span>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -255,10 +291,16 @@ export default function CartItems() {
     <>
       <CartCustomerInfo />
       {cart.length === 0 ? (
-        <div className="h-full flex flex-col items-center justify-center">
-          <ShoppingCart className="size-20" />
-          <span>Cart is empty</span>
-          <span>Scan a barcode or click products to start a sale.</span>
+        <div className="flex h-full flex-col items-center justify-center">
+          <EmptyState
+            icon={ShoppingCart}
+            title="Cart is empty"
+            description="Scan a barcode or click products to start a sale."
+            className="border-none bg-transparent"
+          />
+          {/* First-time guidance — only ever visible while the cart is
+              empty, so it never sits between a cashier and checkout. */}
+          <ShortcutsHint />
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -357,11 +399,9 @@ function CartItemRow({ item }: { item: CartItem }) {
     <Card className="overflow-hidden shadow-none">
       <CardContent className="p-3 sm:p-4">
         <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
-          <img
-            className="size-16 shrink-0 rounded-xl object-cover sm:size-20"
-            src={item.imageUrl ?? FALLBACK_IMAGE}
-            alt={item.name}
-          />
+          <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-muted/40 sm:h-20 sm:w-20">
+            <ProductImage src={item.imageUrl ?? null} alt={item.name} />
+          </div>
 
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="truncate font-medium">{item.name}</span>
@@ -419,7 +459,7 @@ function CartItemRow({ item }: { item: CartItem }) {
                   });
                 }}
               />
-              <div className="ml-auto flex w-full items-center justify-end gap-2 text-xl sm:w-auto">
+              <div className="ml-auto flex w-full items-center justify-end gap-2 sm:w-auto">
                 <Button
                   type="button"
                   onClick={() => {
@@ -429,23 +469,27 @@ function CartItemRow({ item }: { item: CartItem }) {
                   {" "}
                   Serials ({item.serialNumbers?.length ?? 0})
                 </Button>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   aria-label="Remove item"
                   onClick={() => {
                     returnVariantStock(variantId, quantity * conversionFactor);
                     removeCartItem(variantId, lineUnit);
                   }}
-                  className="cursor-pointer rounded-full text-muted-foreground transition hover:text-destructive"
+                  className="text-muted-foreground hover:text-destructive"
                 >
-                  <MdDeleteOutline />
-                </button>
+                  <Trash2 />
+                </Button>
               </div>
             </>
           ) : (
-            <div className="ml-auto flex w-full items-center justify-end gap-2 text-xl sm:w-auto">
-              <button
+            <div className="ml-auto flex w-full items-center justify-end gap-1 sm:w-auto">
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label="Decrease quantity"
                 disabled={!isWeightLine && quantity <= 1}
                 onClick={() => {
@@ -470,10 +514,9 @@ function CartItemRow({ item }: { item: CartItem }) {
                   returnVariantStock(variantId, conversionFactor);
                   removeCartQuantity(variantId, lineUnit);
                 }}
-                className="cursor-pointer rounded-full transition hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <FiMinusCircle />
-              </button>
+                <Minus />
+              </Button>
 
               <CartQuantityInput
                 itemId={variantId}
@@ -491,29 +534,32 @@ function CartItemRow({ item }: { item: CartItem }) {
                 }}
               />
 
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label="Increase quantity"
                 onClick={() => {
                   takeVariantStock(variantId, conversionFactor);
                   addCartQuantity(variantId, lineUnit);
                 }}
-                className="cursor-pointer rounded-full transition hover:text-primary"
               >
-                <MdOutlineAddCircleOutline />
-              </button>
+                <Plus />
+              </Button>
 
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label="Remove item"
                 onClick={() => {
                   returnVariantStock(variantId, quantity * conversionFactor);
                   removeCartItem(variantId, lineUnit);
                 }}
-                className="cursor-pointer rounded-full text-muted-foreground transition hover:text-destructive"
+                className="text-muted-foreground hover:text-destructive"
               >
-                <MdDeleteOutline />
-              </button>
+                <Trash2 />
+              </Button>
             </div>
           )}
         </div>
@@ -531,7 +577,10 @@ export function CartCalculation({
   setIsPaymentDialogOpen,
   totals,
 }: ShowCustomerInfoProps & { totals: CartTotalsView }) {
-const [discountSignal, setDiscountSignal] = useState(0);
+  // Quotation button gates on cart emptiness — the selector was missing, so
+  // any user with quotations.create hit a ReferenceError on render.
+  const cart = useCartStore((state) => state.cart);
+  const [discountSignal, setDiscountSignal] = useState(0);
   const [quoteOpen, setQuoteOpen] = useState(false);
   const { hasPermission } = usePermissions();
   // Phase 3 hotkey: F4 opens the discount dialog.
@@ -612,25 +661,25 @@ function CartTextModal({
         <span>{tk(totals.itemsBase)}</span>
       </div>
       {totals.itemDiscount > 0 && (
-        <div className="flex justify-between py-1.5 text-sm text-emerald-700">
+        <div className="flex justify-between py-1.5 text-sm text-success">
           <span>Item discounts</span>
           <span>-{tk(totals.itemDiscount)}</span>
         </div>
       )}
       {totals.cartDiscountAmount > 0 && (
-        <div className="flex justify-between py-1.5 text-sm text-emerald-700">
+        <div className="flex justify-between py-1.5 text-sm text-success">
           <span>Discount</span>
           <span>-{tk(totals.cartDiscountAmount)}</span>
         </div>
       )}
       {"group" in totals && totals.group && totals.group.discountAmount > 0 && (
-        <div className="flex justify-between py-1.5 text-sm text-emerald-700">
+        <div className="flex justify-between py-1.5 text-sm text-success">
           <span>{totals.group.name} pricing</span>
           <span>-{tk(totals.group.discountAmount)}</span>
         </div>
       )}
       {"promotions" in totals && totals.promotions && totals.promotions.total > 0 && (
-        <div className="flex justify-between py-1.5 text-sm text-emerald-700">
+        <div className="flex justify-between py-1.5 text-sm text-success">
           <span>
             {totals.promotions.applied.length === 1
               ? totals.promotions.applied[0]!.name
@@ -642,7 +691,7 @@ function CartTextModal({
       {"nearMisses" in totals && totals.nearMisses && totals.nearMisses.length > 0 && (
         <div className="grid gap-0.5 py-1">
           {totals.nearMisses.slice(0, 3).map((offer) => (
-            <div key={offer.id} className="flex justify-between text-xs text-amber-700">
+            <div key={offer.id} className="flex justify-between text-xs text-warning">
               <span className="font-medium">{offer.name}</span>
               <span>{offer.reason}</span>
             </div>
@@ -650,7 +699,7 @@ function CartTextModal({
         </div>
       )}
       {"coupon" in totals && totals.coupon && (
-        <div className="flex justify-between py-1.5 text-sm text-emerald-700">
+        <div className="flex justify-between py-1.5 text-sm text-success">
           <span>Coupon {totals.coupon.code}</span>
           <span>-{tk(totals.coupon.discountAmount)}</span>
         </div>
@@ -659,7 +708,7 @@ function CartTextModal({
         <div className="py-1 text-xs text-destructive">{totals.couponError}</div>
       )}
       {"warnings" in totals && totals.warnings && totals.warnings.length > 0 && (
-        <div className="space-y-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+        <div className="space-y-1.5 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-warning">
           {totals.warnings.map((w, i) => (
             <div key={`${w.variantId}-${i}`}>⚠ {w.message}</div>
           ))}
@@ -678,7 +727,9 @@ function CartTextModal({
       )}
       <div className="flex items-center justify-between border-t pt-2 font-semibold">
         <span>Total due</span>
-        <span className="text-lg tracking-tight">{tk(totals.finalTotal)}</span>
+        <span className="text-lg tracking-tight tabular-nums">
+          {tk(totals.finalTotal)}
+        </span>
       </div>
     </>
   );
@@ -793,7 +844,7 @@ function BelowMinimumReasonInput() {
   const setReason = useCartStore((s) => s.setBelowMinimumReason);
   if (!canApprove) {
     return (
-      <p className="text-amber-900">
+      <p className="text-warning">
         A sale below the minimum needs a manager with below-minimum approval.
       </p>
     );

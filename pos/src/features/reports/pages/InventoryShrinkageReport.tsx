@@ -103,7 +103,7 @@ export function InventoryShrinkageReport() {
                 : isExpired
                 ? "bg-amber-50 text-amber-700 border-amber-200"
                 : isLost
-                ? "bg-purple-50 text-purple-700 border-purple-200"
+                ? "bg-primary/10 text-primary border-primary/30"
                 : "bg-slate-100 text-slate-700 border-slate-200"
             }`}
           >

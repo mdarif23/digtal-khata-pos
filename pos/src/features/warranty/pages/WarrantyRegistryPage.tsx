@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { createColumnHelper } from "@tanstack/react-table";
 import { Link } from "react-router";
-import { FileText, Plus, Printer, Search } from "lucide-react";
+import { FileText, Plus, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -12,13 +12,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { SearchInput } from "@/components/common/SearchInput";
 import { toast } from "@/components/ui/toast";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useWarrantiesList } from "../hooks/useWarranties";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { formatDate } from "@/features/reports/utils/reportUtils";
+import { formatDate } from "@/lib/format";
 import { WarrantyDataTable } from "../components/table/WarrantyDataTable";
 import { WarrantyStatusBadge } from "../components/WarrantyStatusBadge";
 import { ClaimCreationDialog } from "../components/ClaimCreationDialog";
@@ -88,7 +90,7 @@ export function WarrantyRegistryPage() {
         cell: ({ row }) => (
           <Link
             to={`/warranty/registry/${row.original.id}`}
-            className="font-mono text-sm font-semibold text-emerald-700 hover:underline"
+            className="font-mono text-sm font-semibold text-primary hover:underline"
           >
             {row.original.warrantyNumber}
           </Link>
@@ -104,11 +106,11 @@ export function WarrantyRegistryPage() {
         header: "Product",
         cell: ({ row }) => (
           <div className="min-w-0">
-            <p className="truncate font-medium text-slate-900">
+            <p className="truncate font-medium text-foreground">
               {row.original.productName}
             </p>
             {row.original.variantOptionLabel ? (
-              <p className="truncate text-xs text-slate-500">
+              <p className="truncate text-xs text-muted-foreground">
                 {row.original.variantOptionLabel}
               </p>
             ) : null}
@@ -122,7 +124,7 @@ export function WarrantyRegistryPage() {
           row.original.serialNumber ? (
             <span className="font-mono text-xs">{row.original.serialNumber}</span>
           ) : (
-            <span className="text-slate-400">—</span>
+            <span className="text-muted-foreground">—</span>
           ),
       }),
       columnHelper.display({
@@ -130,11 +132,11 @@ export function WarrantyRegistryPage() {
         header: "Customer",
         cell: ({ row }) => (
           <div className="min-w-0">
-            <p className="truncate text-slate-800">
+            <p className="truncate text-foreground">
               {row.original.customerName ?? "Walk-in"}
             </p>
             {row.original.customerPhone ? (
-              <p className="truncate text-xs text-slate-500">
+              <p className="truncate text-xs text-muted-foreground">
                 {row.original.customerPhone}
               </p>
             ) : null}
@@ -148,7 +150,7 @@ export function WarrantyRegistryPage() {
           row.original.invoiceNumber ? (
             <span className="font-mono text-xs">{row.original.invoiceNumber}</span>
           ) : (
-            <span className="text-slate-400">—</span>
+            <span className="text-muted-foreground">—</span>
           ),
       }),
       columnHelper.display({
@@ -156,10 +158,10 @@ export function WarrantyRegistryPage() {
         header: "Coverage",
         cell: ({ row }) => (
           <div className="text-xs">
-            <p className="text-slate-700">
+            <p className="text-foreground">
               {durationLabel(row.original.duration, row.original.durationUnit)}
             </p>
-            <p className="text-slate-500">
+            <p className="text-muted-foreground">
               Ends {formatDate(row.original.expiryDate)}
             </p>
           </div>
@@ -169,10 +171,10 @@ export function WarrantyRegistryPage() {
         id: "quantity",
         header: "Qty",
         cell: ({ row }) => (
-          <span className="text-slate-700">
+          <span className="tabular-nums text-foreground">
             {row.original.quantity}
             {row.original.returnedQuantity ? (
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-muted-foreground">
                 {" "}
                 (−{row.original.returnedQuantity})
               </span>
@@ -222,28 +224,22 @@ export function WarrantyRegistryPage() {
   );
 
   return (
-    <div className="p-5 space-y-5">
+    <PageContainer>
+      <PageHeader
+        title="Warranty Registry"
+        description="Every customer warranty issued from sales — search, inspect and print certificates."
+      />
+
       <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">Warranty Registry</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Every customer warranty issued from sales — search, inspect and
-            print certificates.
-          </p>
-        </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
-            <InputGroup className="w-full lg:max-w-sm">
-              <InputGroupInput
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search warranty, product, customer, serial…"
-                aria-label="Search warranties"
-              />
-              <InputGroupAddon>
-                <Search />
-              </InputGroupAddon>
-            </InputGroup>
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search warranty, product, customer, serial…"
+              ariaLabel="Search warranties"
+              className="lg:max-w-sm"
+            />
 
             <Select
               value={status}
@@ -312,6 +308,6 @@ export function WarrantyRegistryPage() {
           if (!open) setCertificateId(null);
         }}
       />
-    </div>
+    </PageContainer>
   );
 }

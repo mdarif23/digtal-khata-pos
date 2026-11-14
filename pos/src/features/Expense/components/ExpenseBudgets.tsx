@@ -400,7 +400,7 @@ export function BudgetsSection({
                   <div
                     className={cn(
                       "h-full rounded-full",
-                      budget.overBudget ? "bg-destructive" : "bg-emerald-600",
+                      budget.overBudget ? "bg-destructive" : "bg-success",
                     )}
                     style={{ width: `${utilization}%` }}
                   />

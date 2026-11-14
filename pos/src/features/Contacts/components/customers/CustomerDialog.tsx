@@ -123,7 +123,7 @@ export function CustomerDialog({
           ))
         }
       />
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <form className="space-y-5" onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>

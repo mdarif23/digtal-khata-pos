@@ -9,6 +9,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { useSessionStore } from "@/auth/sessionStore";
+import { Button } from "@/components/ui/button";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { SearchInput } from "@/components/common/SearchInput";
+import { SummaryCard } from "@/components/common/SummaryCard";
 import { useOnlineOrders, useOrdersSummary } from "../hooks/useOnlineOrders";
 import { OnlineOrdersTable } from "../components/OnlineOrdersTable";
 import { OrderStatusBadge } from "../components/OrderStatusBadge";
@@ -20,7 +25,7 @@ import {
   type OrderStatus,
   type SalesChannel,
 } from "../types/onlineOrders.types";
-import { formatCurrency } from "@/features/reports/utils/reportUtils";
+import { formatCurrency } from "@/lib/format";
 
 const PAGE_SIZE = 20;
 
@@ -42,33 +47,6 @@ const statusOptions: OrderStatus[] = [
   "cancelled",
   "refunded",
 ];
-
-function SummaryCard({
-  label,
-  value,
-  hint,
-  icon: Icon,
-  accent,
-}: {
-  label: string;
-  value: string;
-  hint?: string | undefined;
-  icon: React.ComponentType<{ className?: string }>;
-  accent: string;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">{label}</p>
-        <span className={`rounded-md p-1.5 ${accent}`}>
-          <Icon className="h-4 w-4" />
-        </span>
-      </div>
-      <p className="mt-1 text-2xl font-semibold text-slate-800">{value}</p>
-      {hint ? <p className="mt-0.5 text-xs text-slate-400">{hint}</p> : null}
-    </div>
-  );
-}
 
 /** Online Orders dashboard (module one §4.1) — KPI counts are computed
  * server-side over the same filters as the list below. Cancelled orders are
@@ -131,75 +109,61 @@ export function OnlineOrdersPage() {
   };
 
   return (
-    <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Online Orders</h1>
-        <p className="text-sm text-slate-500">
-          Orders from WooCommerce and your storefronts — confirm, pack, ship
-          and track payment collection.
-        </p>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Online Orders"
+        description="Orders from WooCommerce and your storefronts — confirm, pack, ship and track payment collection."
+      />
 
       {/* KPI dashboard */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <SummaryCard
-          label="New / awaiting confirmation"
+          title="New / awaiting confirmation"
           value={String(summary?.newOrders ?? "—")}
-          hint={`${summary?.total ?? 0} orders in range`}
-          icon={RefreshCw}
-          accent="bg-blue-50 text-blue-600"
+          description={`${summary?.total ?? 0} orders in range`}
+          icon={<RefreshCw className="size-4 text-muted-foreground" />}
         />
         <SummaryCard
-          label="In fulfillment"
+          title="In fulfillment"
           value={
             summary
               ? String(summary.confirmed + summary.processing + summary.packed + summary.readyToShip)
               : "—"
           }
-          hint={`${summary?.shipped ?? 0} shipped · ${summary?.delivered ?? 0} delivered`}
-          icon={PackageCheck}
-          accent="bg-indigo-50 text-indigo-600"
+          description={`${summary?.shipped ?? 0} shipped · ${summary?.delivered ?? 0} delivered`}
+          icon={<PackageCheck className="size-4 text-muted-foreground" />}
         />
         <SummaryCard
-          label="Completed (net of refunds)"
+          title="Completed (net of refunds)"
           value={summary ? formatCurrency(summary.netSales) : "—"}
-          hint={`${summary?.completed ?? 0} orders · ${formatCurrency(summary?.refundedTotal ?? 0)} refunded`}
-          icon={CheckCircle2}
-          accent="bg-emerald-50 text-emerald-600"
+          description={`${summary?.completed ?? 0} orders · ${formatCurrency(summary?.refundedTotal ?? 0)} refunded`}
+          icon={<CheckCircle2 className="size-4 text-muted-foreground" />}
         />
         <SummaryCard
-          label="Issues"
+          title="Issues"
           value={String(summary?.unpaidCount ?? "—")}
-          hint={
+          description={
             summary
               ? `${summary.cancelled} cancelled · ${summary.returnRequests} returns · unpaid above`
               : undefined
           }
-          icon={XCircle}
-          accent="bg-rose-50 text-rose-600"
+          icon={<XCircle className="size-4 text-muted-foreground" />}
         />
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
+        <SearchInput
+          value={search}
+          onChange={(value) => {
+            setSearch(value);
+            setPage(1);
+          }}
+          placeholder="Order # / external ID"
+          ariaLabel="Search online orders"
+        />
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-500" htmlFor="oo-search">
-            Search
-          </label>
-          <input
-            id="oo-search"
-            type="search"
-            value={search}
-            placeholder="Order # / external ID"
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-            className="w-52 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-500" htmlFor="oo-channel">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="oo-channel">
             Channel
           </label>
           <select
@@ -209,7 +173,7 @@ export function OnlineOrdersPage() {
               setChannel(e.target.value as SalesChannel | "");
               setPage(1);
             }}
-            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
           >
             <option value="">All channels</option>
             <option value="woocommerce">{CHANNEL_LABELS.woocommerce}</option>
@@ -219,7 +183,7 @@ export function OnlineOrdersPage() {
           </select>
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-500" htmlFor="oo-fulfillment">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="oo-fulfillment">
             Fulfillment
           </label>
           <select
@@ -229,7 +193,7 @@ export function OnlineOrdersPage() {
               setFulfillment(e.target.value as FulfillmentState | "");
               setPage(1);
             }}
-            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
           >
             <option value="">All stages</option>
             {fulfillmentOptions.map((f) => (
@@ -240,7 +204,7 @@ export function OnlineOrdersPage() {
           </select>
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-500" htmlFor="oo-status">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="oo-status">
             Status
           </label>
           <select
@@ -250,7 +214,7 @@ export function OnlineOrdersPage() {
               setStatus(e.target.value as OrderStatus | "");
               setPage(1);
             }}
-            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
           >
             <option value="">All statuses</option>
             {statusOptions.map((s) => (
@@ -261,7 +225,7 @@ export function OnlineOrdersPage() {
           </select>
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-500" htmlFor="oo-location">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="oo-location">
             Location
           </label>
           <select
@@ -271,7 +235,7 @@ export function OnlineOrdersPage() {
               setLocationId(e.target.value ? Number(e.target.value) : "");
               setPage(1);
             }}
-            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
           >
             <option value="">All locations</option>
             {locations.map((loc) => (
@@ -282,7 +246,7 @@ export function OnlineOrdersPage() {
           </select>
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-500" htmlFor="oo-from">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="oo-from">
             From
           </label>
           <input
@@ -293,11 +257,11 @@ export function OnlineOrdersPage() {
               setFrom(e.target.value);
               setPage(1);
             }}
-            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-500" htmlFor="oo-to">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="oo-to">
             To
           </label>
           <input
@@ -308,21 +272,17 @@ export function OnlineOrdersPage() {
               setTo(e.target.value);
               setPage(1);
             }}
-            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
           />
         </div>
-        <button
-          type="button"
-          onClick={resetFilters}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
-        >
+        <Button type="button" variant="outline" onClick={resetFilters}>
           Reset
-        </button>
+        </Button>
       </div>
 
       {/* Active-fulfillment quick glance */}
       {summary && summary.shipped > 0 ? (
-        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+        <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-4 py-2.5 text-sm text-warning">
           <Truck className="h-4 w-4" />
           {summary.shipped} {summary.shipped === 1 ? "order is" : "orders are"} in
           transit — confirm delivery to close the loop.
@@ -338,37 +298,37 @@ export function OnlineOrdersPage() {
       />
 
       {/* Server-side pagination */}
-      <div className="flex items-center justify-between text-sm text-slate-600">
+      <div className="flex items-center justify-between text-sm text-muted-foreground">
         <span>
           Page {ordersQuery.data?.page ?? page} of {totalPages} ·{" "}
           {ordersQuery.data?.total ?? 0} orders
         </span>
         <div className="flex gap-2">
-          <button
+          <Button
             type="button"
+            variant="outline"
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-40"
           >
             Previous
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="outline"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
-            className="rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-40"
           >
             Next
-          </button>
+          </Button>
         </div>
       </div>
 
       {fulfillment ? (
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-muted-foreground">
           Filtered by fulfillment stage: <OrderStatusBadge status={fulfillment} />
         </p>
       ) : null}
-    </div>
+    </PageContainer>
   );
 }
 

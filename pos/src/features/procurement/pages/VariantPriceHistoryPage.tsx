@@ -1,6 +1,9 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, ScanSearch } from "lucide-react";
+import { ArrowLeft, PackageSearch, ScanSearch } from "lucide-react";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import {
   Card,
   CardContent,
@@ -25,7 +28,7 @@ import {
   formatCurrency,
   formatDate,
   formatNumber,
-} from "@/features/reports/utils/reportUtils";
+} from "@/lib/format";
 import { PriceChangeBadge } from "../components/PriceChangeBadge";
 import { formatPercent } from "../utils/priceMath";
 import { useVariantPriceHistory } from "../hooks/useProcurement";
@@ -96,42 +99,45 @@ export function VariantPriceHistoryPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6">
+    <PageContainer>
       <BackButton />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">
-            {isLoading ? (
-              <Skeleton className="h-6 w-64" />
-            ) : (
+      <PageHeader
+        title={
+          isLoading
+            ? "Variant price history"
+            : (data?.variant.variantName || data?.variant.productName || "Variant price history")
+        }
+        description={
+          <span>
+            {data && !isLoading ? (
               <>
-                {data?.variant.variantName || data?.variant.productName}
-                <span className="ml-2 text-sm font-normal text-slate-400">
-                  {data?.variant.sku ?? "—"}
-                  {data?.variant.unitName ? ` · per ${data.variant.unitName}` : ""}
-                </span>
+                <span className="font-mono">
+                  {data.variant.sku ?? "—"}
+                  {data.variant.unitName ? ` · per ${data.variant.unitName}` : ""}
+                </span>{" "}
               </>
-            )}
-          </CardTitle>
-          <CardDescription>
+            ) : null}
             Historical received purchase prices for this product variant.
             Sell price today: {formatCurrency(data?.variant.sellingPrice ?? 0)}
-          </CardDescription>
-          <div className="flex">
-            <Button
-              variant="outline"
-              size="sm"
-              render={
-                <Link to={`/procurement/price-check?variantId=${validId}`} />
-              }
-            >
-              <ScanSearch aria-hidden className="size-4" />
-              Quick Price Check
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+          </span>
+        }
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            render={
+              <Link to={`/procurement/price-check?variantId=${validId}`} />
+            }
+          >
+            <ScanSearch aria-hidden className="size-4" />
+            Quick Price Check
+          </Button>
+        }
+      />
+
+      <Card>
+        <CardContent className="grid grid-cols-2 gap-3 pt-6 md:grid-cols-4 lg:grid-cols-7">
           <SummaryStat
             label="Latest price"
             value={isLoading ? null : formatCurrency(data?.summary.latestPrice)}
@@ -209,7 +215,10 @@ export function VariantPriceHistoryPage() {
           {isLoading ? (
             <Skeleton className="h-40 w-full" />
           ) : (data?.suppliers.length ?? 0) === 0 ? (
-            <EmptyState text="No received purchases for this variant yet." />
+            <EmptyState
+              icon={PackageSearch}
+              title="No received purchases for this variant yet"
+            />
           ) : (
             <Table>
               <TableHeader>
@@ -233,43 +242,43 @@ export function VariantPriceHistoryPage() {
                       <div className="flex items-center gap-2">
                         {supplier.supplierName ?? "Unknown supplier"}
                         {supplier.supplierId === bestSupplierId ? (
-                          <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                          <Badge className="bg-success/10 text-success hover:bg-success/10">
                             Best price
                           </Badge>
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell className="text-right font-medium">
+                    <TableCell className="text-right font-medium tabular-nums">
                       {formatCurrency(supplier.latestPrice)}
                     </TableCell>
-                    <TableCell className="text-right text-slate-500">
+                    <TableCell className="text-right text-muted-foreground tabular-nums">
                       {supplier.latestQuotation !== null ? (
                         <div className="flex flex-col">
                           <span>{formatCurrency(supplier.latestQuotation)}</span>
-                          <span className="text-xs text-slate-400">
+                          <span className="text-xs text-muted-foreground">
                             quoted {formatDate(supplier.lastObservationDate)}
                           </span>
                         </div>
                       ) : (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right text-slate-500">
+                    <TableCell className="text-right text-muted-foreground tabular-nums">
                       {formatCurrency(supplier.previousPrice)}
                     </TableCell>
                     <TableCell className="text-center">
                       <PriceChangeBadge value={supplier.priceChangePercent} />
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right tabular-nums">
                       {formatCurrency(supplier.lowestPrice)}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right tabular-nums">
                       {formatCurrency(supplier.highestPrice)}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right tabular-nums">
                       {formatCurrency(supplier.averagePrice)}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right tabular-nums">
                       {formatNumber(supplier.purchaseCount)}
                     </TableCell>
                     <TableCell>{formatDate(supplier.lastPurchaseDate)}</TableCell>
@@ -297,7 +306,11 @@ export function VariantPriceHistoryPage() {
           {isLoading ? (
             <Skeleton className="h-24 w-full" />
           ) : (data?.observations.data.length ?? 0) === 0 ? (
-            <EmptyState text="No quotations recorded for this variant. Use Quick Price Check after your next market visit." />
+            <EmptyState
+              icon={ScanSearch}
+              title="No quotations recorded for this variant"
+              description="Use Quick Price Check after your next market visit."
+            />
           ) : (
             <Table>
               <TableHeader>
@@ -318,7 +331,7 @@ export function VariantPriceHistoryPage() {
                       <div className="flex flex-col">
                         <span>{formatCurrency(observation.quotedPrice)}</span>
                         {observation.packageQuantity !== null ? (
-                          <span className="text-xs text-slate-400">
+                          <span className="text-xs text-muted-foreground">
                             for {observation.packageQuantity}
                           </span>
                         ) : null}
@@ -327,9 +340,9 @@ export function VariantPriceHistoryPage() {
                     <TableCell className="text-right">
                       {observation.unitPrice !== null
                         ? formatCurrency(observation.unitPrice)
-                        : <span className="text-slate-400">—</span>}
+                        : <span className="text-muted-foreground">—</span>}
                     </TableCell>
-                    <TableCell className="max-w-48 truncate text-sm text-slate-500">
+                    <TableCell className="max-w-48 truncate text-sm text-muted-foreground">
                       {observation.notes ?? "—"}
                     </TableCell>
                   </TableRow>
@@ -353,7 +366,10 @@ export function VariantPriceHistoryPage() {
             {isLoading ? (
               <Skeleton className="h-40 w-full" />
             ) : (records?.data.length ?? 0) === 0 ? (
-              <EmptyState text="No received purchases for this variant yet." />
+              <EmptyState
+                icon={PackageSearch}
+                title="No received purchases for this variant yet"
+              />
             ) : (
               <Table>
                 <TableHeader>
@@ -374,13 +390,13 @@ export function VariantPriceHistoryPage() {
                       </TableCell>
                       <TableCell>{formatDate(record.purchaseDate)}</TableCell>
                       <TableCell>{record.supplierName ?? "—"}</TableCell>
-                      <TableCell className="text-right font-medium">
+                      <TableCell className="text-right font-medium tabular-nums">
                         {formatCurrency(record.unitCost)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right tabular-nums">
                         {formatNumber(record.quantity)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right tabular-nums">
                         {formatNumber(record.receivedQuantity)}
                       </TableCell>
                     </TableRow>
@@ -389,7 +405,7 @@ export function VariantPriceHistoryPage() {
               </Table>
             )}
           </div>
-          <div className="flex items-center justify-end gap-2 text-sm text-slate-500">
+          <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
             <Button
               variant="outline"
               size="sm"
@@ -412,7 +428,7 @@ export function VariantPriceHistoryPage() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -444,20 +460,12 @@ function SummaryStat({
   return (
     <div
       className={`flex flex-col gap-1 rounded-lg border p-3 ${
-        highlight ? "border-emerald-200 bg-emerald-50/50" : ""
+        highlight ? "border-success/30 bg-success/5" : ""
       }`}
     >
-      <span className="text-xs text-slate-500">{label}</span>
-      <span className="text-sm font-semibold">{value ?? "—"}</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-sm font-semibold tabular-nums">{value ?? "—"}</span>
       {badge}
-    </div>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="flex items-center justify-center rounded-lg border border-dashed border-slate-200 py-10 text-sm text-slate-400">
-      {text}
     </div>
   );
 }

@@ -26,8 +26,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { StatusBadge, type StatusTone } from "@/components/common/StatusBadge";
+import { SearchInput } from "@/components/common/SearchInput";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
-import { formatCurrency, formatDate } from "@/features/reports/utils/reportUtils";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { ReportTable, type ReportColumn } from "@/features/reports/components/ReportTable";
 import {
   approvePayrollPeriodApi,
@@ -57,19 +61,11 @@ type PayrollTab = "employees" | "runs";
 export function PayrollPage() {
   const [tab, setTab] = useState<PayrollTab>("employees");
   return (
-    <div className="space-y-5">
-      <header>
-        <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-          Finance &amp; Growth
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-          Staff &amp; Payroll
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Approval posts the accrual (DR 5020 / CR 2030, advance recovery → 1060);
-          payments settle the payable. An advance is an asset, never an expense.
-        </p>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="Staff & Payroll"
+        description="Approval posts the accrual (DR 5020 / CR 2030, advance recovery → 1060); payments settle the payable. An advance is an asset, never an expense."
+      />
       <Tabs value={tab} onValueChange={(value) => setTab(value as PayrollTab)}>
         <TabsList>
           <TabsTrigger value="employees">Employees</TabsTrigger>
@@ -82,7 +78,7 @@ export function PayrollPage() {
           <RunsTab />
         </TabsContent>
       </Tabs>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -110,29 +106,20 @@ function EmployeesTab() {
       header: "Salary",
       render: (row) =>
         row.payType ? (
-          <span>
+          <span className="tabular-nums">
             {row.payType} · {formatCurrency(row.basicAmount ?? "0")}
           </span>
         ) : (
-          <Badge variant="outline" className="text-xs text-amber-700">
-            No structure
-          </Badge>
+          <StatusBadge tone="warning">No structure</StatusBadge>
         ),
     },
     {
       key: "employmentStatus",
       header: "Status",
       render: (row) => (
-        <Badge
-          variant="outline"
-          className={
-            row.employmentStatus === "active"
-              ? "text-xs text-emerald-700"
-              : "text-xs text-slate-500"
-          }
-        >
+        <StatusBadge tone={row.employmentStatus === "active" ? "success" : "neutral"}>
           {row.employmentStatus}
-        </Badge>
+        </StatusBadge>
       ),
     },
     {
@@ -162,12 +149,12 @@ function EmployeesTab() {
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex items-center gap-2">
-          <Input
-            className="max-w-xs"
+          <SearchInput
             placeholder="Search name, code…"
+            ariaLabel="Search employees by name or code"
             value={filters.search ?? ""}
-            onChange={(e) =>
-              setFilters((prev) => ({ ...prev, search: e.target.value, page: 1 }))
+            onChange={(value) =>
+              setFilters((prev) => ({ ...prev, search: value, page: 1 }))
             }
           />
         </div>
@@ -230,7 +217,7 @@ function AddEmployeeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Add employee</DialogTitle>
           <DialogDescription>
@@ -367,11 +354,11 @@ function EmployeeManageDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {employee.fullName}{" "}
-            <span className="font-mono text-xs text-slate-400">{employee.employeeCode}</span>
+            <span className="font-mono text-xs text-muted-foreground">{employee.employeeCode}</span>
           </DialogTitle>
           <DialogDescription>
             Status: {employee.employmentStatus} ·{" "}
@@ -397,7 +384,7 @@ function EmployeeManageDialog({
             </Button>
           </div>
           {structureOpen && (
-            <div className="space-y-2 rounded-xl border border-slate-200 p-3">
+            <div className="space-y-2 rounded-xl border p-3">
               <p className="text-sm font-medium">New salary structure</p>
               <div className="grid grid-cols-3 gap-2">
                 <Select value={newPayType} onValueChange={(v) => setNewPayType(v as typeof newPayType)}>
@@ -424,19 +411,19 @@ function EmployeeManageDialog({
             </div>
           )}
           {advanceOpen && (
-            <div className="space-y-2 rounded-xl border border-slate-200 p-3">
+            <div className="space-y-2 rounded-xl border p-3">
               <p className="text-sm font-medium">Salary advances (asset — recovered from pay)</p>
               {advances.map((advance) => (
                 <div key={advance.id} className="flex items-center justify-between text-xs">
                   <span>
                     {formatDate(advance.advanceDate)} · {advance.reason ?? "Advance"}
                   </span>
-                  <span>
+                  <span className="tabular-nums">
                     Outstanding <strong>{formatCurrency(advance.outstandingAmount)}</strong>
                   </span>
                 </div>
               ))}
-              {advances.length === 0 && <p className="text-xs text-slate-400">No advances.</p>}
+              {advances.length === 0 && <p className="text-xs text-muted-foreground">No advances.</p>}
               <div className="flex items-end gap-2">
                 <div className="space-y-1">
                   <Label>Amount ৳</Label>
@@ -499,22 +486,22 @@ function RunsTab() {
               onClick={() => setSelectedId(period.id)}
               className={`w-full rounded-xl border px-3 py-2.5 text-left text-sm ${
                 selectedId === period.id
-                  ? "border-slate-900 bg-slate-50"
-                  : "border-slate-200 hover:bg-slate-50"
+                  ? "border-primary bg-muted"
+                  : "hover:bg-muted/50"
               }`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-medium">{period.periodStart.slice(0, 7)}</span>
-                <StatusBadge status={period.status} />
+                <PayrollStatusBadge status={period.status} />
               </div>
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-xs text-muted-foreground tabular-nums">
                 Gross {formatCurrency(period.grossTotal)} · Net{" "}
                 {formatCurrency(period.netTotal)}
               </p>
             </button>
           ))}
           {periods.data?.length === 0 && (
-            <p className="py-4 text-center text-sm text-slate-400">
+            <p className="py-4 text-center text-sm text-muted-foreground">
               No payroll runs yet.
             </p>
           )}
@@ -539,22 +526,18 @@ function RunsTab() {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const tone =
+function PayrollStatusBadge({ status }: { status: string }) {
+  const tone: StatusTone =
     status === "paid"
-      ? "text-emerald-700"
+      ? "success"
       : status === "approved"
-        ? "text-sky-700"
+        ? "info"
         : status === "partial"
-          ? "text-amber-700"
+          ? "warning"
           : status === "cancelled"
-            ? "text-rose-700"
-            : "text-slate-500";
-  return (
-    <Badge variant="outline" className={`text-xs ${tone}`}>
-      {status}
-    </Badge>
-  );
+            ? "danger"
+            : "neutral";
+  return <StatusBadge tone={tone}>{status}</StatusBadge>;
 }
 
 function PeriodDetail({
@@ -567,7 +550,7 @@ function PeriodDetail({
   const [payslipId, setPayslipId] = useState<number | null>(null);
   if (!period) {
     return (
-      <CardContent className="py-16 text-center text-sm text-slate-400">
+      <CardContent className="py-16 text-center text-sm text-muted-foreground">
         Select a payroll period to view its records.
       </CardContent>
     );
@@ -599,10 +582,34 @@ function PeriodDetail({
 
   const columns: ReportColumn<PayrollRecord>[] = [
     { key: "employeeName", header: "Employee", render: (row) => <span className="font-medium">{row.employeeName}</span> },
-    { key: "grossAmount", header: "Gross", render: (row) => formatCurrency(row.grossAmount) },
-    { key: "advanceDeduction", header: "Advance", render: (row) => formatCurrency(row.advanceDeduction) },
-    { key: "netAmount", header: "Net", render: (row) => <strong>{formatCurrency(row.netAmount)}</strong> },
-    { key: "paidAmount", header: "Paid", render: (row) => formatCurrency(row.paidAmount ?? "0") },
+    {
+      key: "grossAmount",
+      header: "Gross",
+      render: (row) => formatCurrency(row.grossAmount),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "advanceDeduction",
+      header: "Advance",
+      render: (row) => formatCurrency(row.advanceDeduction),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "netAmount",
+      header: "Net",
+      render: (row) => <strong>{formatCurrency(row.netAmount)}</strong>,
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "paidAmount",
+      header: "Paid",
+      render: (row) => formatCurrency(row.paidAmount ?? "0"),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
     {
       key: "actions",
       header: "",
@@ -624,9 +631,9 @@ function PeriodDetail({
       <CardHeader className="flex-row items-center justify-between pb-2">
         <div>
           <CardTitle className="text-base">
-            {period.periodStart.slice(0, 7)} <StatusBadge status={period.status} />
+            {period.periodStart.slice(0, 7)} <PayrollStatusBadge status={period.status} />
           </CardTitle>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-muted-foreground tabular-nums">
             Gross {formatCurrency(period.grossTotal)} · Net{" "}
             {formatCurrency(period.netTotal)} · Advance recovery{" "}
             {formatCurrency(period.advanceRecoveryTotal)}
@@ -683,7 +690,7 @@ function PayButton({ record, onDone }: { record: PayrollRecord; onDone: () => vo
     onDone();
   };
   if (remaining <= 0.005) {
-    return <Badge variant="outline" className="text-xs text-emerald-700">Paid</Badge>;
+    return <StatusBadge tone="success">Paid</StatusBadge>;
   }
   return (
     <div className="flex items-center gap-1">
@@ -727,7 +734,7 @@ function RunPayrollDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Run payroll</DialogTitle>
           <DialogDescription>
@@ -744,11 +751,11 @@ function RunPayrollDialog({
               onChange={(e) => setPeriodStart(e.target.value)}
             />
           </div>
-          <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-200 p-2">
+          <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border p-2">
             {(employees.data?.rows ?? []).map((employee) => (
               <label
                 key={employee.id}
-                className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50"
+                className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-muted/50"
               >
                 <span className="flex items-center gap-2">
                   <input
@@ -758,7 +765,7 @@ function RunPayrollDialog({
                   />
                   {employee.fullName}
                 </span>
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-muted-foreground">
                   {employee.payType ?? "no structure"}
                 </span>
               </label>
@@ -787,8 +794,10 @@ function RunPayrollDialog({
 function RowLine({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
     <div className={`flex items-center justify-between py-0.5 ${strong ? "font-semibold" : ""}`}>
-      <span className="text-slate-500">{label}</span>
-      <span className={strong ? "text-slate-950" : "text-slate-800"}>{formatCurrency(value)}</span>
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`text-foreground tabular-nums ${strong ? "font-semibold" : ""}`}>
+        {formatCurrency(value)}
+      </span>
     </div>
   );
 }
@@ -814,7 +823,7 @@ function PayslipDialog({ recordId, onClose }: { recordId: number; onClose: () =>
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Payslip</DialogTitle>
           <DialogDescription>Printable — use the browser print dialog.</DialogDescription>
@@ -831,12 +840,12 @@ function PayslipDialog({ recordId, onClose }: { recordId: number; onClose: () =>
                 {payslip.paymentStatus}
               </Badge>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-muted-foreground">
               {payslip.employee.employeeCode} ·{" "}
               {payslip.period.periodStart.slice(0, 7)} ·{" "}
               {payslip.earnings.workedDays} days worked · {payslip.earnings.overtimeHours}h OT
             </p>
-            <div className="rounded-xl border border-slate-200 p-3">
+            <div className="rounded-xl border p-3">
               <RowLine label="Basic" value={payslip.earnings.basicAmount} />
               <RowLine label="Allowances" value={payslip.earnings.allowancesTotal} />
               <RowLine label="Overtime" value={payslip.earnings.overtimeAmount} />

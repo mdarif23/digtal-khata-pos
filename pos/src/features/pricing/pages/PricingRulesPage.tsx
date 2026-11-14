@@ -1,14 +1,23 @@
 import { useMemo, useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
+import { formatCurrency } from "@/lib/format";
 import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/components/ui/toast";
 import axios from "@/api/axios";
@@ -45,6 +54,7 @@ export function PricingRulesPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<PricingRule | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PricingRule | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [products, setProducts] = useState<
     { productId: number; label: string; variants: { variantId: number; label: string }[] }[]
@@ -75,7 +85,7 @@ export function PricingRulesPage() {
           label: p.name,
           variants: (p.variants ?? []).map((v) => ({
             variantId: v.id,
-            label: `${p.name}${v.sku ? ` — ${v.sku}` : ""} (৳${v.sellingPrice})`,
+            label: `${p.name}${v.sku ? ` — ${v.sku}` : ""} (${formatCurrency(v.sellingPrice)})`,
           })),
         })),
       );
@@ -107,22 +117,6 @@ export function PricingRulesPage() {
     }
   }
 
-  async function remove(rule: PricingRule) {
-    if (!window.confirm(`Delete the ${rule.scope.toLowerCase()} rule "${rule.scopeLabel}"?`)) {
-      return;
-    }
-    try {
-      await deleteRule.mutateAsync(rule.id);
-      toast.add({ type: "success", description: "Rule deleted. Price history keeps its references." });
-    } catch (err) {
-      toast.add({
-        type: "error",
-        description: extractApiError(err, "Could not delete the rule."),
-        priority: "high",
-      });
-    }
-  }
-
   const rows = rulesQuery.data ?? [];
   const sorted = useMemo(
     () => [...rows].sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.id - b.id),
@@ -130,95 +124,96 @@ export function PricingRulesPage() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4">
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>Pricing rules</CardTitle>
-            <CardDescription>
-              Precedence: variant rule › product rule › nearest category rule ›
-              global rule › business default. At most one ACTIVE rule per
-              scope — duplicates are rejected. Rules describe how to calculate;
-              nothing here changes a price until you apply it on the Product
-              Pricing page.
-            </CardDescription>
-          </div>
-          {canManage && (
+    <PageContainer width="wide">
+      <PageHeader
+        title="Pricing rules"
+        description="Precedence: variant rule › product rule › nearest category rule › global rule › business default. At most one ACTIVE rule per scope — duplicates are rejected. Rules describe how to calculate; nothing here changes a price until you apply it on the Product Pricing page."
+        actions={
+          canManage ? (
             <Button onClick={() => void openCreate()}>New rule</Button>
-          )}
-        </CardHeader>
+          ) : undefined
+        }
+      />
+      <Card>
         <CardContent>
           {rulesQuery.isLoading ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
-          ) : sorted.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No pricing rules yet — every product falls back to the business
-              default in Pricing Settings.
-            </p>
           ) : (
             <div className="overflow-hidden rounded-md border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left">
-                  <tr>
-                    <th className="p-2 font-medium">Scope</th>
-                    <th className="p-2 font-medium">Rule</th>
-                    <th className="p-2 font-medium">Status</th>
-                    {canManage && <th className="p-2" />}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sorted.map((rule) => (
-                    <tr key={rule.id} className="border-t">
-                      <td className="p-2">
-                        <Badge variant="outline">{rule.scope}</Badge>
-                        <span className="ml-2 text-muted-foreground">
-                          {rule.scopeLabel}
-                        </span>
-                      </td>
-                      <td className="p-2 font-mono">
-                        {rule.method === "fixed"
-                          ? `Fixed ৳${rule.fixedPrice}`
-                          : `${rule.method === "markup" ? "Markup" : "Margin"} ${rule.percentage}%`}
-                      </td>
-                      <td className="p-2">
-                        {rule.isActive ? (
-                          <Badge>Active</Badge>
-                        ) : (
-                          <Badge variant="secondary">Inactive</Badge>
+              <Table>
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    <TableHead>Scope</TableHead>
+                    <TableHead>Rule</TableHead>
+                    <TableHead>Status</TableHead>
+                    {canManage && <TableHead className="text-right" />}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sorted.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={canManage ? 4 : 3}>
+                        <EmptyState
+                          icon={ScrollText}
+                          title="No pricing rules yet"
+                          description="Every product falls back to the business default in Pricing Settings."
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    sorted.map((rule) => (
+                      <TableRow key={rule.id}>
+                        <TableCell>
+                          <Badge variant="outline">{rule.scope}</Badge>
+                          <span className="ml-2 text-muted-foreground">
+                            {rule.scopeLabel}
+                          </span>
+                        </TableCell>
+                        <TableCell className="font-mono tabular-nums">
+                          {rule.method === "fixed"
+                            ? `Fixed ${formatCurrency(rule.fixedPrice ?? 0)}`
+                            : `${rule.method === "markup" ? "Markup" : "Margin"} ${rule.percentage}%`}
+                        </TableCell>
+                        <TableCell>
+                          {rule.isActive ? (
+                            <StatusBadge tone="success">Active</StatusBadge>
+                          ) : (
+                            <StatusBadge tone="neutral">Inactive</StatusBadge>
+                          )}
+                        </TableCell>
+                        {canManage && (
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1.5">
+                              <Button variant="outline" size="sm" onClick={() => void openEdit(rule)}>
+                                Edit
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={updateRule.isPending}
+                                onClick={() => void toggleActive(rule)}
+                              >
+                                {rule.isActive ? "Deactivate" : "Activate"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={deleteRule.isPending}
+                                onClick={() => setDeleteTarget(rule)}
+                              >
+                                Delete
+                              </Button>
+                            </div>
+                          </TableCell>
                         )}
-                      </td>
-                      {canManage && (
-                        <td className="p-2 text-right">
-                          <div className="flex justify-end gap-1.5">
-                            <Button variant="outline" size="sm" onClick={() => void openEdit(rule)}>
-                              Edit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={updateRule.isPending}
-                              onClick={() => void toggleActive(rule)}
-                            >
-                              {rule.isActive ? "Deactivate" : "Activate"}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={deleteRule.isPending}
-                              onClick={() => void remove(rule)}
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
           )}
         </CardContent>
@@ -231,6 +226,20 @@ export function PricingRulesPage() {
         categories={categories}
         products={products}
       />
-    </div>
+
+      <ConfirmDeleteDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={`Delete the ${deleteTarget?.scope.toLowerCase() ?? ""} rule "${deleteTarget?.scopeLabel ?? ""}"?`}
+        description="The rule stops applying immediately; price history keeps its references."
+        entityName="pricing rule"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await deleteRule.mutateAsync(deleteTarget.id);
+        }}
+      />
+    </PageContainer>
   );
 }

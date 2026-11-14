@@ -1,4 +1,4 @@
-import { formatDateTime } from "@/features/reports/utils/reportUtils";
+import { formatDateTime } from "@/lib/format";
 import type { WarrantyClaimEvent } from "../types/warranty.types";
 import { statusLabel } from "../lib/warranty-format";
 
@@ -13,7 +13,7 @@ interface ClaimTimelineProps {
 export function ClaimTimeline({ events }: ClaimTimelineProps) {
   if (events.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+      <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
         No activity recorded yet.
       </p>
     );
@@ -43,26 +43,26 @@ export function ClaimTimeline({ events }: ClaimTimelineProps) {
             {!isLast && (
               <span
                 aria-hidden="true"
-                className="absolute top-4 left-[7px] h-full w-px bg-slate-200"
+                className="absolute top-4 left-[7px] h-full w-px bg-border"
               />
             )}
             <span
               aria-hidden="true"
-              className="relative mt-1.5 size-3.5 shrink-0 rounded-full border-2 border-emerald-500 bg-white"
+              className="relative mt-1.5 size-3.5 shrink-0 rounded-full border-2 border-success bg-card"
             />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-slate-900">
+              <p className="text-sm font-medium text-foreground">
                 {statusLabel(event.eventType)}
               </p>
               {transition && (
-                <p className="text-xs text-slate-500">{transition}</p>
+                <p className="text-xs text-muted-foreground">{transition}</p>
               )}
               {event.note && (
-                <p className="mt-1 rounded-md bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600">
+                <p className="mt-1 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
                   {event.note}
                 </p>
               )}
-              <p className="mt-1 text-xs text-slate-400">
+              <p className="mt-1 text-xs text-muted-foreground/70">
                 {formatDateTime(event.createdAt)}
                 {event.actorType ? ` · ${event.actorType.replace(/_/g, " ")}` : ""}
               </p>

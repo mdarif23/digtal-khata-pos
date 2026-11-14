@@ -94,7 +94,7 @@ export function ExpenseAnalyticsPanel({
                   "rounded-full px-2 py-0.5 text-xs font-medium",
                   comparison.growthPercent !== null && comparison.growthPercent > 0
                     ? "bg-destructive/10 text-destructive"
-                    : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+                    : "bg-success/10 text-success",
                 )}
               >
                 {comparison.growthPercent !== null && comparison.growthPercent > 0
