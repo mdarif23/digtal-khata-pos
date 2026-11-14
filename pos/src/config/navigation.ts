@@ -1,31 +1,31 @@
 import {
   BadgePercent,
+  BarChart3,
+  Calculator,
   ContactRound,
   CreditCard,
   Landmark,
   LayoutDashboard,
-  MapPin,
+  Megaphone,
+  MessageSquare,
   Package,
   PackageCheck,
-  Tags,
-  Users,
-  BarChart3,
+  Settings2,
   ShieldCheck,
-  Percent,
-  ReceiptText,
-  DatabaseBackup,
+  Store,
+  TrendingUp,
+  Users,
+  Wallet,
 } from "lucide-react";
-import { GiExpense } from "react-icons/gi";
-import { MdOutlineForum } from "react-icons/md";
-import { FaListCheck } from "react-icons/fa6";
-import { FaShieldHalved } from "react-icons/fa6";
-import { MdOutlinePointOfSale } from "react-icons/md";
-import { FcSalesPerformance } from "react-icons/fc";
 
 /**
  * Sidebar/route configuration. `permission` (string) or `anyPermission`
  * (string[]) gate visibility client-side; the backend independently enforces
  * the same permission keys on every API call.
+ *
+ * Visibility always mirrors the route guard in AppRoutes.tsx — an entry the
+ * current role cannot open (403) must never be shown, and a reachable page
+ * must never be hidden from the sidebar.
  */
 export const navigation = [
   {
@@ -35,16 +35,54 @@ export const navigation = [
     permission: "dashboard.view",
   },
   {
+    title: "POS",
+    url: "/",
+    icon: Store,
+    permission: "pos.view",
+  },
+  {
+    title: "Sales",
+    url: "/sales",
+    icon: TrendingUp,
+    permission: "sales.view",
+  },
+  {
+    title: "Cash Register",
+    url: "/register",
+    icon: Calculator,
+    permission: "cash_register.view",
+  },
+  {
+    title: "Quotations",
+    url: "/quotations",
+    icon: BadgePercent,
+    permission: "quotations.view",
+  },
+  {
+    title: "Online Orders",
+    url: "/online-orders",
+    icon: PackageCheck,
+    permission: "orders.view",
+  },
+  {
     title: "Due Management",
     url: "/due-management",
     icon: CreditCard,
     anyPermission: ["customers.view_ledger", "suppliers.view_ledger"],
   },
   {
-    title: "POS",
-    url: "/",
-    icon: MdOutlinePointOfSale,
-    permission: "pos.view",
+    title: "Expense",
+    url: "/expense",
+    icon: Wallet,
+    permission: "expenses.view",
+  },
+  {
+    title: "Messages",
+    url: "/comms-settings",
+    icon: MessageSquare,
+    // Mirrors the /comms-settings route guard (comms.manage) — comms.view-only
+    // users would hit 403, so the entry stays hidden for them.
+    permission: "comms.manage",
   },
   {
     title: "Reports",
@@ -57,6 +95,7 @@ export const navigation = [
       "reports.inventory.view",
       "reports.financial.view",
       "reports.online_profitability.view",
+      "warranty.reports.view",
     ],
     items: [
       {
@@ -70,6 +109,7 @@ export const navigation = [
           "reports.inventory.view",
           "reports.financial.view",
           "reports.online_profitability.view",
+          "warranty.reports.view",
         ],
       },
       { title: "Shift Close (Z-Report)", url: "/reports?tab=register-close", permission: "reports.sales.view" },
@@ -115,24 +155,6 @@ export const navigation = [
     ],
   },
   {
-    title: "Sales",
-    url: "/sales",
-    icon: FcSalesPerformance,
-    permission: "sales.view",
-  },
-  {
-    title: "Quotations",
-    url: "/quotations",
-    icon: BadgePercent,
-    permission: "quotations.view",
-  },
-  {
-    title: "Online Orders",
-    url: "/online-orders",
-    icon: PackageCheck,
-    permission: "orders.view",
-  },
-  {
     title: "Contacts",
     icon: ContactRound,
     anyPermission: ["customers.view", "suppliers.view"],
@@ -142,61 +164,8 @@ export const navigation = [
     ],
   },
   {
-    title: "Expense",
-    url: "/expense",
-    icon: GiExpense,
-    permission: "expenses.view",
-  },
-  {
-    title: "Commissions",
-    url: "/commissions",
-    icon: FcSalesPerformance,
-    permission: "commission.view",
-  },
-  {
-    title: "Targets",
-    url: "/targets",
-    icon: FaListCheck,
-    permission: "commission.view",
-  },
-  {
-    title: "Messages",
-    url: "/comms-settings",
-    icon: MdOutlineForum,
-    anyPermission: ["comms.manage", "comms.view"],
-  },
-  {
-    title: "Finance & Growth",
-    icon: Landmark,
-    anyPermission: [
-      "finance.view",
-      "finance.overview.view",
-      "finance.profit.view",
-      "finance.investment.view",
-      "finance.withdrawal.view",
-      "finance.assets.view",
-      "payroll.view",
-      "budget.view",
-      "loans.view",
-    ],
-    items: [
-      { title: "Financial Overview", url: "/finance", permission: "finance.overview.view" },
-      { title: "Growth Analytics", url: "/finance/growth", permission: "finance.profit.view" },
-      { title: "Cash Flow", url: "/finance/cash-flow", permission: "finance.overview.view" },
-      { title: "Balance Sheet & Net Worth", url: "/finance/balance-sheet", permission: "finance.overview.view" },
-      { title: "Finance Reports", url: "/finance/reports", permission: "finance.profit.view" },
-      { title: "Owner Capital", url: "/finance/owners", anyPermission: ["finance.investment.view", "finance.withdrawal.view"] },
-      { title: "Profit Allocation", url: "/finance/profit-allocations", permission: "finance.profit.view" },
-      { title: "Staff & Payroll", url: "/payroll", permission: "payroll.view" },
-      { title: "Loans", url: "/finance/loans", permission: "loans.view" },
-      { title: "Assets & Depreciation", url: "/finance/assets", permission: "finance.assets.view" },
-      { title: "Expense Budgets", url: "/expense", permission: "budget.view" },
-      { title: "Journal & Periods", url: "/finance/journal", permission: "finance.journal.view" },
-    ],
-  },
-  {
     title: "Purchases",
-    icon: Tags,
+    icon: Package,
     anyPermission: ["purchases.view", "purchases.create"],
     items: [
       { title: "Smart Reorder Planning", url: "/procurement/reorder", permission: "purchases.view" },
@@ -206,18 +175,6 @@ export const navigation = [
       { title: "All Purchases", url: "/purchases", permission: "purchases.create" },
       { title: "Purchases List", url: "/purchases-list", permission: "purchases.view" },
     ],
-  },
-  {
-    title: "Coupons",
-    url: "/coupons",
-    icon: Tags,
-    permission: "promotions.view",
-  },
-  {
-    title: "Gift Cards",
-    url: "/gift-cards",
-    icon: CreditCard,
-    permission: "pos.view",
   },
   {
     title: "Pricing",
@@ -236,52 +193,88 @@ export const navigation = [
     ],
   },
   {
-    title: "Locations",
-    url: "/locations",
-    icon: MapPin,
-    permission: "locations.view",
+    title: "Marketing",
+    icon: Megaphone,
+    anyPermission: ["promotions.view", "pos.view"],
+    items: [
+      { title: "Coupons", url: "/coupons", permission: "promotions.view" },
+      { title: "Gift Cards", url: "/gift-cards", permission: "pos.view" },
+    ],
   },
   {
-    title: "Attendance",
-    url: "/attendance",
+    title: "Finance & Growth",
+    icon: Landmark,
+    anyPermission: [
+      "finance.overview.view",
+      "finance.profit.view",
+      "finance.investment.view",
+      "finance.withdrawal.view",
+      "finance.assets.view",
+      "payroll.view",
+      "loans.view",
+    ],
+    items: [
+      { title: "Financial Overview", url: "/finance", permission: "finance.overview.view" },
+      { title: "Growth Analytics", url: "/finance/growth", permission: "finance.profit.view" },
+      { title: "Cash Flow", url: "/finance/cash-flow", permission: "finance.overview.view" },
+      { title: "Balance Sheet & Net Worth", url: "/finance/balance-sheet", permission: "finance.overview.view" },
+      { title: "Finance Reports", url: "/finance/reports", permission: "finance.profit.view" },
+      { title: "Owner Capital", url: "/finance/owners", anyPermission: ["finance.investment.view", "finance.withdrawal.view"] },
+      { title: "Profit Allocation", url: "/finance/profit-allocations", permission: "finance.profit.view" },
+      { title: "Staff & Payroll", url: "/payroll", permission: "payroll.view" },
+      { title: "Loans", url: "/finance/loans", permission: "loans.view" },
+      { title: "Assets & Depreciation", url: "/finance/assets", permission: "finance.assets.view" },
+      { title: "Journal & Periods", url: "/finance/journal", permission: "finance.journal.view" },
+    ],
+  },
+  {
+    title: "Staff",
     icon: Users,
-    permission: "attendance.view",
+    anyPermission: [
+      "attendance.view",
+      "commission.view",
+      "users.view",
+      "roles.view",
+    ],
+    items: [
+      { title: "Attendance", url: "/attendance", permission: "attendance.view" },
+      { title: "Commissions", url: "/commissions", permission: "commission.view" },
+      { title: "Targets", url: "/targets", permission: "commission.view" },
+      { title: "Users", url: "/users", permission: "users.view" },
+      { title: "Roles & Permissions", url: "/roles", permission: "roles.view" },
+    ],
   },
   {
-    title: "Users",
-    url: "/users",
-    icon: Users,
-    permission: "users.view",
-  },
-  {
-    title: "Roles & Permissions",
-    url: "/roles",
-    icon: ShieldCheck,
-    permission: "roles.view",
-  },
-  {
-    title: "Tax Rates",
-    url: "/tax-rates",
-    icon: Percent,
-    permission: "taxes.view",
-  },
-  {
-    title: "Audit Log",
-    url: "/audit-logs",
-    icon: FaShieldHalved,
-    permission: "audit.view",
-  },
-  {
-    title: "Backup & Restore",
-    url: "/settings/backup",
-    icon: DatabaseBackup,
-    permission: "backups.view",
-  },
-  {
-    title: "Receipt & Invoice",
-    url: "/settings/receipt",
-    icon: ReceiptText,
-    permission: "receipt_settings.view",
+    title: "Settings",
+    icon: Settings2,
+    anyPermission: [
+      "locations.view",
+      "taxes.view",
+      "loyalty.manage",
+      "backups.view",
+      "receipt_settings.view",
+      "pos_terminal.view",
+      "cash_drawer.open",
+      "cash_drawer.open_without_sale",
+      "audit.view",
+    ],
+    items: [
+      { title: "Locations", url: "/locations", permission: "locations.view" },
+      { title: "Tax Rates", url: "/tax-rates", permission: "taxes.view" },
+      { title: "Loyalty Program", url: "/loyalty-settings", permission: "loyalty.manage" },
+      { title: "Backup & Restore", url: "/settings/backup", permission: "backups.view" },
+      { title: "Receipt & Invoice", url: "/settings/receipt", permission: "receipt_settings.view" },
+      {
+        title: "Hardware & Terminals",
+        url: "/settings/hardware",
+        anyPermission: [
+          "pos_terminal.view",
+          "cash_drawer.open",
+          "cash_drawer.open_without_sale",
+        ],
+      },
+      { title: "Audit Log", url: "/audit-logs", permission: "audit.view" },
+    ],
   },
   {
     title: "Warranty Management",

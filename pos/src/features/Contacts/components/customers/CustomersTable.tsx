@@ -7,6 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { CustomerDialog } from "@/features/Contacts/components/customers/CustomerDialog";
 import { MapPin, Phone } from "lucide-react";
 import type { InputValue } from "@/types/customers.types";
 
