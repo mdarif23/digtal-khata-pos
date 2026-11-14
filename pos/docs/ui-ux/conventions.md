@@ -64,6 +64,14 @@ Apply these when touching any page under `pos/src`. They are presentation-only r
 ## Buttons
 - Native `<button>` → `Button` component when it's a simple clickable; keep aria-labels.
 - One primary (default variant) action per view; everything else outline/ghost.
+- Semantic variants exist and are used sparingly: `success` (approve, receive,
+  complete — positive completion), `warning` (refunds and other
+  attention-required financial actions), `info`, and `destructive` — which is
+  SOLID red: deletes, cancel/void of business transactions, discard changes.
+  Routine actions are never red (e.g. clock-out, bulk apply); a modal Cancel
+  is neutral outline, cancelling a business transaction is destructive.
+- Primary actions are action-BLUE (`--primary`); the ezPos green is the brand
+  mark (`--sidebar-primary`) and the SUCCESS color — never a button default.
 
 ## Testing
 - Tests asserting display copy (money strings, labels) must be updated to the new presentation —
