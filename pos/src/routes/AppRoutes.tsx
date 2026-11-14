@@ -20,6 +20,7 @@ import { StockAdjustment } from "@/features/products/pages/StockAdjustment";
 import { DueManagementPage } from "@/features/due-management/DueManagementPage";
 import ReportsHub from "@/features/reports/pages/ReportsHub";
 import ForbiddenPage from "@/pages/ForbiddenPage";
+import { RouteErrorBoundary } from "@/components/common/RouteErrorBoundary";
 import { RequirePermission } from "@/components/common/PermissionGuard";
 import { UsersPage } from "@/features/users/pages/UsersPage";
 import { LocationsPage } from "@/features/locations/pages/LocationsPage";
@@ -98,7 +99,10 @@ const REPORTS_PERMISSIONS = [
 const FINANCE_OVERVIEW_PERMISSIONS = ["finance.overview.view", "finance.profit.view"];
 const FINANCE_OWNER_PERMISSIONS = ["finance.investment.view", "finance.withdrawal.view"];
 
-const router = createBrowserRouter([
+// All application routes. Mounted inside a single pathless wrapper route
+// whose errorElement catches navigation errors and component crashes
+// (P1-1: a render error used to unmount the whole tree, POS included).
+const routes = [
   {
     // Gateway return handler — the provider redirects here with val_id +
     // tran_id; verification happens server-side before anything is recorded.
@@ -748,6 +752,12 @@ const router = createBrowserRouter([
           </RequirePermission>
         ),
       },
+      {
+        // P1-6: catch-all — unknown URLs render the layout with a clear
+        // not-found state instead of a blank content area.
+        path: "*",
+        element: <RouteErrorBoundary />,
+      },
     ],
   },
   {
@@ -769,6 +779,13 @@ const router = createBrowserRouter([
   {
     path: "/403",
     element: <ForbiddenPage />,
+  },
+];
+
+const router = createBrowserRouter([
+  {
+    errorElement: <RouteErrorBoundary />,
+    children: routes,
   },
 ]);
 
