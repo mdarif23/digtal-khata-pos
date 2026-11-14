@@ -459,7 +459,7 @@ export function Sales() {
       </section>
 
       <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <CardTitle>Sales history</CardTitle>
             <CardDescription>

@@ -348,7 +348,7 @@ function MetricCard({
   const growthGood = growthUp === growthIsGood;
   const GrowthIcon = growthUp ? ArrowUpRight : ArrowDownRight;
   return (
-    <article className="rounded-xl border border-border bg-card p-5 shadow-xs">
+    <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm font-medium text-muted-foreground">{title}</p>
@@ -732,12 +732,12 @@ export default function DashboardComponent() {
             comparison={selectedPeriod.comparison}
             detail={periodLabel}
             icon={ShoppingBag}
-            accent="bg-violet-50 text-violet-700"
+            accent="bg-primary/10 text-primary"
           />
         </section>
 
         <section className="grid gap-5 lg:grid-cols-2">
-          <article className="rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Sales activity"
               description={`A quick read on sales volume · ${periodLabel.toLowerCase()}.`}
@@ -766,7 +766,7 @@ export default function DashboardComponent() {
             </div>
           </article>
 
-          <article className="rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Payment methods"
               description={`Payments recorded · ${periodLabel.toLowerCase()}.`}
@@ -968,7 +968,7 @@ export default function DashboardComponent() {
             </div>
           </article>
 
-          <article className="rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Inventory attention"
               description="Products that may need a restock."
@@ -1029,7 +1029,7 @@ export default function DashboardComponent() {
         </section>
 
         <section className="grid gap-5 lg:grid-cols-2">
-          <article className="rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Recent sales"
               description={`Latest completed transactions · ${periodLabel.toLowerCase()}.`}
@@ -1102,7 +1102,7 @@ export default function DashboardComponent() {
             )}
           </article>
 
-          <article className="rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Top performers"
               description={`Products leading sales · ${periodLabel.toLowerCase()}.`}
@@ -1153,7 +1153,7 @@ export default function DashboardComponent() {
         </section>
 
         <section className="grid gap-5 lg:grid-cols-3">
-          <article className="rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Most sold categories"
               description={`Units sold · ${periodLabel.toLowerCase()}.`}
@@ -1183,7 +1183,7 @@ export default function DashboardComponent() {
             )}
           </article>
 
-          <article className="rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Profit by category"
               description={`Top categories · ${periodLabel.toLowerCase()}.`}
@@ -1211,7 +1211,7 @@ export default function DashboardComponent() {
             )}
           </article>
 
-          <article className="rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Top items by gross"
               description={`Highest grossing items · ${periodLabel.toLowerCase()}.`}
@@ -1256,7 +1256,7 @@ export default function DashboardComponent() {
         ) : null}
 
         <section>
-          <article className="rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading
               title="Slow-moving stock"
               description={`In-stock products with no completed sale in ${staleDays}+ days, including products never sold. Showing up to ${staleLimit}.`}

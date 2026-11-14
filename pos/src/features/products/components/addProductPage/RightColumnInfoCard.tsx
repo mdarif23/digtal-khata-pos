@@ -30,7 +30,7 @@ export function RightColumnInfoCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Grid className="text-purple-600" />
+          <Grid className="text-primary" />
           More Information
         </CardTitle>
         <CardDescription> Additional product details</CardDescription>

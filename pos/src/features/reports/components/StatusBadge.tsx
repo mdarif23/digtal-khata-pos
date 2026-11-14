@@ -27,7 +27,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
   },
   refunded: {
     label: "Refunded",
-    className: "bg-purple-50 text-purple-700 border-purple-200",
+    className: "bg-primary/10 text-primary border-primary/30",
   },
   held: {
     label: "Held",
