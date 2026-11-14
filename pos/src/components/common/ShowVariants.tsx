@@ -35,11 +35,7 @@ type VariantOptionGroup = {
 };
 
 const EMPTY_SERIALS: string[] = [];
-const currency = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 2,
-});
+import { formatCurrency as currency } from "@/lib/format";
 
 export interface ShowVariantsProps {
   product: ProductType;
@@ -223,7 +219,7 @@ export function ShowVariants({
                   <span className="font-semibold">
                     {variantPrice === null
                       ? "Select options"
-                      : currency.format(variantPrice)}
+                      : currency(variantPrice)}
                   </span>
                 </div>
                 {selectedVariant && (
