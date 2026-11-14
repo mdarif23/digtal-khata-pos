@@ -1,14 +1,22 @@
 import { useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { ClipboardList } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { StatusBadge, type StatusTone } from "@/components/common/StatusBadge";
+import { EmptyState } from "@/components/common/EmptyState";
+import { formatCurrency, formatDateTime } from "@/lib/format";
 import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/components/ui/toast";
 import { extractApiError } from "../components/RuleDialog";
@@ -20,8 +28,15 @@ import {
   useRunAutoUpdate,
 } from "../hooks/usePricing";
 import { usePricingSettings, useUpdatePricingSettings } from "../hooks/usePricing";
+import type { PriceProposal } from "../pricing.types";
 
-const tk = (n: number) => `৳${n.toFixed(2)}`;
+const PROPOSAL_TONES: Record<PriceProposal["status"], StatusTone> = {
+  pending: "warning",
+  approved: "success",
+  rejected: "danger",
+  applied: "success",
+  stale: "warning",
+};
 
 /**
  * Mode A proposals (Phase 8): cost/rule changes become reviewable price
@@ -123,19 +138,13 @@ export function PriceProposalsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4">
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>Price change proposals</CardTitle>
-            <CardDescription>
-              Generate recommendations from the active pricing rules and the
-              current weighted-average landed costs. Approving a proposal is
-              what writes the price — with a full history row.
-            </CardDescription>
-          </div>
-          <div className="flex flex-col items-end gap-2">
-            {canManage && (
+    <PageContainer width="wide">
+      <PageHeader
+        title="Price change proposals"
+        description="Generate recommendations from the active pricing rules and the current weighted-average landed costs. Approving a proposal is what writes the price — with a full history row."
+        actions={
+          canManage ? (
+            <div className="flex flex-col items-end gap-2">
               <div className="flex gap-2">
                 <Button onClick={() => void doGenerate()} disabled={generate.isPending}>
                   Generate proposals
@@ -153,8 +162,6 @@ export function PriceProposalsPage() {
                   Run auto-update
                 </Button>
               </div>
-            )}
-            {canManage && (
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
                 <input
                   type="checkbox"
@@ -163,9 +170,11 @@ export function PriceProposalsPage() {
                 />
                 Mode B auto-update enabled
               </label>
-            )}
-          </div>
-        </CardHeader>
+            </div>
+          ) : undefined
+        }
+      />
+      <Card>
         <CardContent>
           <div className="mb-3 flex flex-wrap gap-1.5">
             {["pending", "approved", "rejected", "applied", "stale"].map((s) => (
@@ -210,93 +219,104 @@ export function PriceProposalsPage() {
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
-          ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No {status} proposals.
-            </p>
           ) : (
             <div className="overflow-hidden rounded-md border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left">
-                  <tr>
-                    {canDecide && status === "pending" && <th className="p-2" />}
-                    <th className="p-2 font-medium">Product</th>
-                    <th className="p-2 font-medium">Price change</th>
-                    <th className="p-2 font-medium">Batch</th>
-                    <th className="p-2 font-medium">Generated</th>
-                    <th className="p-2 font-medium text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((proposal) => (
-                    <tr key={proposal.id} className="border-t">
-                      {canDecide && status === "pending" && (
-                        <td className="p-2">
-                          <input
-                            type="checkbox"
-                            checked={selected.includes(proposal.id)}
-                            onChange={(e) =>
-                              setSelected((prev) =>
-                                e.target.checked
-                                  ? [...prev, proposal.id]
-                                  : prev.filter((id) => id !== proposal.id),
-                              )
-                            }
-                          />
-                        </td>
-                      )}
-                      <td className="p-2">
-                        <div className="font-medium">{proposal.productName}</div>
-                        {proposal.sku && (
-                          <div className="text-xs text-muted-foreground">{proposal.sku}</div>
+              <Table>
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    {canDecide && status === "pending" && <TableHead className="w-8" />}
+                    <TableHead>Product</TableHead>
+                    <TableHead className="text-right">Price change</TableHead>
+                    <TableHead>Batch</TableHead>
+                    <TableHead>Generated</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={canDecide && status === "pending" ? 6 : 5}>
+                        <EmptyState
+                          icon={ClipboardList}
+                          title={`No ${status} proposals`}
+                          description="Generate proposals to review rule-based price recommendations."
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.map((proposal) => (
+                      <TableRow key={proposal.id}>
+                        {canDecide && status === "pending" && (
+                          <TableCell>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select proposal for ${proposal.productName}`}
+                              checked={selected.includes(proposal.id)}
+                              onChange={(e) =>
+                                setSelected((prev) =>
+                                  e.target.checked
+                                    ? [...prev, proposal.id]
+                                    : prev.filter((id) => id !== proposal.id),
+                                )
+                              }
+                            />
+                          </TableCell>
                         )}
-                      </td>
-                      <td className="p-2 font-mono">
-                        {proposal.oldPrice != null ? `${tk(proposal.oldPrice)} → ` : ""}
-                        <span className="font-semibold">{tk(proposal.recommendedPrice)}</span>
-                        {proposal.percentChange != null && (
-                          <Badge
-                            variant="outline"
-                            className={`ml-2 ${proposal.percentChange >= 0 ? "text-emerald-700" : "text-destructive"}`}
-                          >
-                            {proposal.percentChange >= 0 ? "+" : ""}
-                            {proposal.percentChange}%
-                          </Badge>
-                        )}
-                      </td>
-                      <td className="p-2 font-mono text-xs text-muted-foreground">
-                        {proposal.batchToken}
-                      </td>
-                      <td className="p-2 whitespace-nowrap text-xs text-muted-foreground">
-                        {new Date(proposal.createdAt).toLocaleString()}
-                      </td>
-                      <td className="p-2 text-right">
-                        {canDecide && status === "pending" ? (
-                          <div className="flex justify-end gap-1.5">
-                            <Button
-                              size="sm"
-                              disabled={decide.isPending}
-                              onClick={() => void decideOne(proposal.id, "approve")}
-                            >
-                              Approve
-                            </Button>
-                            <Button
-                              size="sm"
+                        <TableCell>
+                          <div className="font-medium">{proposal.productName}</div>
+                          {proposal.sku && (
+                            <div className="text-xs text-muted-foreground">{proposal.sku}</div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right font-mono tabular-nums">
+                          {proposal.oldPrice != null ? `${formatCurrency(proposal.oldPrice)} → ` : ""}
+                          <span className="font-semibold">{formatCurrency(proposal.recommendedPrice)}</span>
+                          {proposal.percentChange != null && (
+                            <Badge
                               variant="outline"
-                              disabled={decide.isPending}
-                              onClick={() => void decideOne(proposal.id, "reject")}
+                              className={`ml-2 ${proposal.percentChange >= 0 ? "text-success" : "text-destructive"}`}
                             >
-                              Reject
-                            </Button>
-                          </div>
-                        ) : (
-                          <Badge variant="secondary">{proposal.status}</Badge>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                              {proposal.percentChange >= 0 ? "+" : ""}
+                              {proposal.percentChange}%
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {proposal.batchToken}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {formatDateTime(proposal.createdAt)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {canDecide && status === "pending" ? (
+                            <div className="flex justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                disabled={decide.isPending}
+                                onClick={() => void decideOne(proposal.id, "approve")}
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={decide.isPending}
+                                onClick={() => void decideOne(proposal.id, "reject")}
+                              >
+                                Reject
+                              </Button>
+                            </div>
+                          ) : (
+                            <StatusBadge tone={PROPOSAL_TONES[proposal.status]}>
+                              {proposal.status}
+                            </StatusBadge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
           )}
           {meta && meta.totalPages > 1 && (
@@ -326,6 +346,6 @@ export function PriceProposalsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }

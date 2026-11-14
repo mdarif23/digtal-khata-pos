@@ -1,14 +1,17 @@
 import { useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Megaphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +23,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
+import { formatCurrency } from "@/lib/format";
 import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/components/ui/toast";
 import axios from "@/api/axios";
@@ -31,8 +40,6 @@ import {
   useUpdatePromotion,
 } from "../hooks/usePricing";
 import type { Promotion } from "../pricing.types";
-
-const tk = (n: number) => `৳${n.toFixed(2)}`;
 
 /**
  * Auto-applied promotions (Phase 5): store configuration that discounts by
@@ -49,6 +56,7 @@ export function PromotionsPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Promotion | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Promotion | null>(null);
   const [name, setName] = useState("");
   const [scope, setScope] = useState<"whole" | "category" | "product" | "variant">("whole");
   const [scopeId, setScopeId] = useState("");
@@ -255,123 +263,117 @@ export function PromotionsPage() {
     }
   }
 
-  async function remove(promo: Promotion) {
-    if (!window.confirm(`Delete the promotion "${promo.name}"?`)) return;
-    try {
-      await deletePromotion.mutateAsync(promo.id);
-      toast.add({
-        type: "success",
-        description: "Promotion deleted. Sale snapshots keep their attribution.",
-      });
-    } catch (err) {
-      toast.add({
-        type: "error",
-        description: extractApiError(err, "Could not delete the promotion."),
-        priority: "high",
-      });
-    }
-  }
-
   const rows = promotionsQuery.data ?? [];
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4">
+    <PageContainer width="wide">
+      <PageHeader
+        title="Promotions"
+        description="Auto-applied at checkout — no code needed. Stacking order: group pricing → promotions → manual discounts → VAT. A promotion stacks with a customer-group discount or a coupon only when its stacking switches allow it."
+        actions={
+          canManage ? (
+            <Button onClick={() => void openCreate()}>New promotion</Button>
+          ) : undefined
+        }
+      />
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>Promotions</CardTitle>
-            <CardDescription>
-              Auto-applied at checkout — no code needed. Stacking order: group
-              pricing → promotions → manual discounts → VAT. A promotion stacks
-              with a customer-group discount or a coupon only when its stacking
-              switches allow it.
-            </CardDescription>
-          </div>
-          {canManage && <Button onClick={() => void openCreate()}>New promotion</Button>}
-        </CardHeader>
         <CardContent>
           {promotionsQuery.isLoading ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
-          ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No promotions yet.</p>
           ) : (
             <div className="overflow-hidden rounded-md border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left">
-                  <tr>
-                    <th className="p-2 font-medium">Name</th>
-                    <th className="p-2 font-medium">Scope</th>
-                    <th className="p-2 font-medium">Discount</th>
-                    <th className="p-2 font-medium">Window / minimums</th>
-                    <th className="p-2 font-medium">Stacking</th>
-                    <th className="p-2 font-medium">Status</th>
-                    {canManage && <th className="p-2" />}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((promo) => (
-                    <tr key={promo.id} className="border-t">
-                      <td className="p-2 font-medium">{promo.name}</td>
-                      <td className="p-2 text-muted-foreground">{promo.scopeLabel}</td>
-                      <td className="p-2 font-mono">
-                        {promo.discountType === "percentage"
-                          ? `${promo.discountValue}%`
-                          : tk(promo.discountValue)}
-                        {promo.maxDiscountAmount != null && (
-                          <span className="ml-1 text-xs text-muted-foreground">
-                            cap {tk(promo.maxDiscountAmount)}
-                          </span>
+              <Table>
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Scope</TableHead>
+                    <TableHead className="text-right">Discount</TableHead>
+                    <TableHead>Window / minimums</TableHead>
+                    <TableHead>Stacking</TableHead>
+                    <TableHead>Status</TableHead>
+                    {canManage && <TableHead className="text-right" />}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={canManage ? 7 : 6}>
+                        <EmptyState
+                          icon={Megaphone}
+                          title="No promotions yet"
+                          description="Create a promotion to discount baskets automatically at checkout."
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.map((promo) => (
+                      <TableRow key={promo.id}>
+                        <TableCell className="font-medium">{promo.name}</TableCell>
+                        <TableCell className="text-muted-foreground">{promo.scopeLabel}</TableCell>
+                        <TableCell className="text-right font-mono tabular-nums">
+                          {promo.discountType === "percentage"
+                            ? `${promo.discountValue}%`
+                            : formatCurrency(promo.discountValue)}
+                          {promo.maxDiscountAmount != null && (
+                            <span className="ml-1 text-xs text-muted-foreground">
+                              cap {formatCurrency(promo.maxDiscountAmount)}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {promo.startsAt || promo.endsAt
+                            ? `${promo.startsAt?.slice(0, 10) ?? "…"} → ${promo.endsAt?.slice(0, 10) ?? "…"}`
+                            : "Always"}
+                          {promo.minOrderValue > 0 && ` · min ${formatCurrency(promo.minOrderValue)}`}
+                          {promo.minQuantity != null && ` · min qty ${promo.minQuantity}`}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {promo.canStackWithGroupDiscount && <Badge variant="outline" className="mr-1">+groups</Badge>}
+                          {promo.canStackWithCoupons && <Badge variant="outline">+coupons</Badge>}
+                          {!promo.canStackWithGroupDiscount && !promo.canStackWithCoupons && (
+                            <span className="text-muted-foreground">solo</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {promo.isActive ? (
+                            <StatusBadge tone="success">Active</StatusBadge>
+                          ) : (
+                            <StatusBadge tone="neutral">Inactive</StatusBadge>
+                          )}
+                        </TableCell>
+                        {canManage && (
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1.5">
+                              <Button variant="outline" size="sm" onClick={() => openEdit(promo)}>
+                                Edit
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={updatePromotion.isPending}
+                                onClick={() => void toggleActive(promo)}
+                              >
+                                {promo.isActive ? "Deactivate" : "Activate"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={deletePromotion.isPending}
+                                onClick={() => setDeleteTarget(promo)}
+                              >
+                                Delete
+                              </Button>
+                            </div>
+                          </TableCell>
                         )}
-                      </td>
-                      <td className="p-2 text-xs text-muted-foreground">
-                        {promo.startsAt || promo.endsAt
-                          ? `${promo.startsAt?.slice(0, 10) ?? "…"} → ${promo.endsAt?.slice(0, 10) ?? "…"}`
-                          : "Always"}
-                        {promo.minOrderValue > 0 && ` · min ${tk(promo.minOrderValue)}`}
-                        {promo.minQuantity != null && ` · min qty ${promo.minQuantity}`}
-                      </td>
-                      <td className="p-2 text-xs">
-                        {promo.canStackWithGroupDiscount && <Badge variant="outline" className="mr-1">+groups</Badge>}
-                        {promo.canStackWithCoupons && <Badge variant="outline">+coupons</Badge>}
-                        {!promo.canStackWithGroupDiscount && !promo.canStackWithCoupons && (
-                          <span className="text-muted-foreground">solo</span>
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {promo.isActive ? <Badge>Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
-                      </td>
-                      {canManage && (
-                        <td className="p-2 text-right">
-                          <div className="flex justify-end gap-1.5">
-                            <Button variant="outline" size="sm" onClick={() => openEdit(promo)}>
-                              Edit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={updatePromotion.isPending}
-                              onClick={() => void toggleActive(promo)}
-                            >
-                              {promo.isActive ? "Deactivate" : "Activate"}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={deletePromotion.isPending}
-                              onClick={() => void remove(promo)}
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
           )}
         </CardContent>
@@ -599,6 +601,20 @@ export function PromotionsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+
+      <ConfirmDeleteDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={`Delete the promotion "${deleteTarget?.name ?? ""}"?`}
+        description="The promotion stops applying at checkout; sale snapshots keep their attribution."
+        entityName="promotion"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await deletePromotion.mutateAsync(deleteTarget.id);
+        }}
+      />
+    </PageContainer>
   );
 }

@@ -207,17 +207,16 @@ export function RuleDialog({
         <div className="space-y-3">
           <div className="flex gap-1.5">
             {(["Global", "Category", "Product", "Variant"] as RuleScope[]).map((s) => (
-              <button
+              <Button
                 key={s}
                 type="button"
+                size="sm"
+                variant={scope === s ? "default" : "outline"}
                 disabled={editing}
                 onClick={() => setScope(s)}
-                className={`rounded-md border px-2.5 py-1.5 text-sm ${
-                  scope === s ? "bg-primary text-primary-foreground" : "hover:bg-muted"
-                } ${editing ? "opacity-60" : ""}`}
               >
                 {s}
-              </button>
+              </Button>
             ))}
           </div>
           {scope === "Category" && (
@@ -282,16 +281,16 @@ export function RuleDialog({
           )}
           <div className="flex gap-1.5">
             {(["markup", "margin", "fixed"] as PricingMethod[]).map((m) => (
-              <button
+              <Button
                 key={m}
                 type="button"
+                size="sm"
+                variant={method === m ? "default" : "outline"}
+                className="capitalize"
                 onClick={() => setMethod(m)}
-                className={`rounded-md border px-2.5 py-1.5 text-sm capitalize ${
-                  method === m ? "bg-primary text-primary-foreground" : "hover:bg-muted"
-                }`}
               >
                 {m}
-              </button>
+              </Button>
             ))}
           </div>
           {method === "fixed" ? (

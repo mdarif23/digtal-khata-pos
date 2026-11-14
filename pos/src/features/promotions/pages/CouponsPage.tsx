@@ -1,19 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
+import { Ticket } from "lucide-react";
+import { Button } from "@/components/ui/button.js";
+import { Input } from "@/components/ui/input.js";
+import { Skeleton } from "@/components/ui/skeleton.js";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card.js";
-import { Button } from "@/components/ui/button.js";
-import { Input } from "@/components/ui/input.js";
-import { Badge } from "@/components/ui/badge.js";
-import { Skeleton } from "@/components/ui/skeleton.js";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { EmptyState } from "@/components/common/EmptyState";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/components/ui/toast.js";
 import axios from "../../../api/axios.js";
-
-const tk = (n: number) => `৳${Number(n).toFixed(2)}`;
 
 interface CouponRow {
   id: number;
@@ -119,16 +127,12 @@ export function CouponsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4">
+    <PageContainer width="wide">
+      <PageHeader
+        title="Coupons"
+        description="Codes are validated server-side at checkout: windows, minimums, caps and usage limits all enforced; every redemption is recorded against its sale."
+      />
       <Card>
-        <CardHeader>
-          <CardTitle>Coupons</CardTitle>
-          <CardDescription>
-            Codes are validated server-side at checkout: windows, minimums,
-            caps and usage limits all enforced; every redemption is recorded
-            against its sale.
-          </CardDescription>
-        </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-2 rounded-md border p-3 sm:grid-cols-4">
             <label className="text-sm">
@@ -222,75 +226,85 @@ export function CouponsPage() {
 
           {coupons === null ? (
             <Skeleton className="h-32 w-full" />
-          ) : coupons.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No coupons yet.</p>
           ) : (
             <div className="overflow-x-auto rounded-md border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left">
-                  <tr>
-                    <th className="p-2 font-medium">Code</th>
-                    <th className="p-2 font-medium">Discount</th>
-                    <th className="p-2 text-right font-medium">Used</th>
-                    <th className="p-2 font-medium">Limits</th>
-                    <th className="p-2 font-medium">Status</th>
-                    <th className="p-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {coupons.map((coupon) => (
-                    <tr key={coupon.id} className="border-t">
-                      <td className="p-2 font-mono">{coupon.code}</td>
-                      <td className="p-2">
-                        {coupon.discountType === "percentage"
-                          ? `${coupon.value}%`
-                          : tk(coupon.value)}
-                        {coupon.maxDiscountAmount !== null && (
-                          <span className="text-xs text-muted-foreground">
-                            {" "}
-                            (cap {tk(coupon.maxDiscountAmount)})
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-2 text-right font-mono">
-                        {coupon.usedCount}
-                        {coupon.usageLimit !== null
-                          ? ` / ${coupon.usageLimit}`
-                          : ""}
-                      </td>
-                      <td className="p-2 text-xs text-muted-foreground">
-                        {coupon.perCustomerLimit !== null
-                          ? `${coupon.perCustomerLimit}× per customer`
-                          : ""}
-                        {coupon.endsAt
-                          ? ` · ends ${new Date(coupon.endsAt).toLocaleDateString()}`
-                          : ""}
-                      </td>
-                      <td className="p-2">
-                        <Badge
-                          variant={coupon.isActive ? "default" : "secondary"}
-                        >
-                          {coupon.isActive ? "Active" : "Paused"}
-                        </Badge>
-                      </td>
-                      <td className="p-2 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() => void toggle(coupon)}
-                        >
-                          {coupon.isActive ? "Pause" : "Activate"}
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <Table>
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    <TableHead>Code</TableHead>
+                    <TableHead className="text-right">Discount</TableHead>
+                    <TableHead className="text-right">Used</TableHead>
+                    <TableHead>Limits</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {coupons.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6}>
+                        <EmptyState
+                          icon={Ticket}
+                          title="No coupons yet"
+                          description="Create a code above to discount orders at checkout."
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    coupons.map((coupon) => (
+                      <TableRow key={coupon.id}>
+                        <TableCell className="font-mono">{coupon.code}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {coupon.discountType === "percentage"
+                            ? `${coupon.value}%`
+                            : formatCurrency(coupon.value)}
+                          {coupon.maxDiscountAmount !== null && (
+                            <span className="text-xs text-muted-foreground">
+                              {" "}
+                              (cap {formatCurrency(coupon.maxDiscountAmount)})
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right font-mono tabular-nums">
+                          {coupon.usedCount}
+                          {coupon.usageLimit !== null
+                            ? ` / ${coupon.usageLimit}`
+                            : ""}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {coupon.perCustomerLimit !== null
+                            ? `${coupon.perCustomerLimit}× per customer`
+                            : ""}
+                          {coupon.endsAt
+                            ? ` · ends ${formatDate(coupon.endsAt)}`
+                            : ""}
+                        </TableCell>
+                        <TableCell>
+                          {coupon.isActive ? (
+                            <StatusBadge tone="success">Active</StatusBadge>
+                          ) : (
+                            <StatusBadge tone="warning">Paused</StatusBadge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => void toggle(coupon)}
+                          >
+                            {coupon.isActive ? "Pause" : "Activate"}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }

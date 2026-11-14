@@ -1,16 +1,12 @@
 import { useEffect, useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent } from "@/components/ui/card";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/components/ui/toast";
 import { extractApiError } from "../components/RuleDialog";
@@ -108,16 +104,12 @@ export function PricingSettingsPage() {
   const busy = updateSettings.isPending;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4">
+    <PageContainer width="narrow">
+      <PageHeader
+        title="Pricing settings"
+        description="Business-wide defaults used when no pricing rule matches a product. Rules win over these defaults; previews and applies never change a price on their own."
+      />
       <Card>
-        <CardHeader>
-          <CardTitle>Pricing settings</CardTitle>
-          <CardDescription>
-            Business-wide defaults used when no pricing rule matches a product.
-            Rules win over these defaults; previews and applies never change a
-            price on their own.
-          </CardDescription>
-        </CardHeader>
         <CardContent className="space-y-4">
           {settingsQuery.isLoading ? (
             <div className="space-y-2">
@@ -130,19 +122,17 @@ export function PricingSettingsPage() {
                 <Label>Default pricing method</Label>
                 <div className="flex flex-wrap gap-1.5">
                   {METHODS.map((m) => (
-                    <button
+                    <Button
                       key={m.value}
                       type="button"
+                      size="sm"
+                      variant={method === m.value ? "default" : "outline"}
                       disabled={!canManage}
                       onClick={() => setMethod(m.value)}
-                      className={`rounded-md border px-3 py-1.5 text-sm ${
-                        method === m.value
-                          ? "bg-primary text-primary-foreground"
-                          : "hover:bg-muted"
-                      } ${!canManage ? "opacity-60" : ""}`}
+                      className={!canManage ? "opacity-60" : undefined}
                     >
                       {m.label}
-                    </button>
+                    </Button>
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground">{selectedHint}</p>
@@ -265,6 +255,6 @@ export function PricingSettingsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }

@@ -1,19 +1,24 @@
 import { useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { EmptyState } from "@/components/common/EmptyState";
+import { formatCurrency, formatDateTime } from "@/lib/format";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePriceHistory } from "../hooks/usePricing";
-
-const tk = (n: number) => `৳${n.toFixed(2)}`;
 
 /**
  * Price change history (Phase 2 endpoint, Phase 7 UI): every materialized
@@ -33,88 +38,91 @@ export function PriceHistoryPage() {
   });
 
   const meta = historyQuery.data?.meta;
+  const rows = historyQuery.data?.rows ?? [];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4">
+    <PageContainer width="wide">
+      <PageHeader
+        title="Price history"
+        description="Every applied change to a selling price — rules, bulk updates, approved proposals, auto-update sweeps and imports. Sale snapshots and reports are never rewritten."
+      />
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>Price history</CardTitle>
-            <CardDescription>
-              Every applied change to a selling price — rules, bulk updates,
-              approved proposals, auto-update sweeps and imports. Sale snapshots
-              and reports are never rewritten.
-            </CardDescription>
-          </div>
-          <div className="w-56 space-y-1.5">
-            <Input
-              type="number"
-              min="1"
-              placeholder="Filter by variant id"
-              value={variantId}
-              onChange={(e) => {
-                setVariantId(e.target.value);
-                setPage(1);
-              }}
-            />
-          </div>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          <Input
+            type="number"
+            min="1"
+            className="w-56"
+            placeholder="Filter by variant id"
+            aria-label="Filter by variant id"
+            value={variantId}
+            onChange={(e) => {
+              setVariantId(e.target.value);
+              setPage(1);
+            }}
+          />
           {historyQuery.isLoading ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
-          ) : (historyQuery.data?.rows.length ?? 0) === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No price changes recorded yet.
-            </p>
           ) : (
-            <div className="overflow-x-auto rounded-md border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left">
-                  <tr>
-                    <th className="p-2 font-medium">When</th>
-                    <th className="p-2 font-medium">Variant</th>
-                    <th className="p-2 font-medium">Change</th>
-                    <th className="p-2 font-medium">Source</th>
-                    {canSeeCost && <th className="p-2 font-medium">Cost at change</th>}
-                    <th className="p-2 font-medium">Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(historyQuery.data?.rows ?? []).map((row) => (
-                    <tr key={row.id} className="border-t">
-                      <td className="p-2 whitespace-nowrap text-xs text-muted-foreground">
-                        {new Date(row.createdAt).toLocaleString()}
-                      </td>
-                      <td className="p-2">
-                        <div className="font-medium">{row.productName}</div>
-                        {row.sku && <div className="text-xs text-muted-foreground">{row.sku}</div>}
-                      </td>
-                      <td className="p-2 font-mono">
-                        {row.oldPrice != null ? `${tk(row.oldPrice)} → ` : ""}
-                        <span className="font-semibold">{tk(row.newPrice)}</span>
-                      </td>
-                      <td className="p-2">
-                        <Badge variant="outline">{row.source}</Badge>
-                      </td>
-                      {canSeeCost && (
-                        <td className="p-2 font-mono text-xs">
-                          {row.costAtChange != null ? tk(row.costAtChange) : "—"}
-                        </td>
-                      )}
-                      <td className="p-2 max-w-72 truncate text-xs text-muted-foreground">
-                        {row.reason ?? "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="overflow-hidden rounded-md border">
+              <Table>
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    <TableHead>When</TableHead>
+                    <TableHead>Variant</TableHead>
+                    <TableHead className="text-right">Change</TableHead>
+                    <TableHead>Source</TableHead>
+                    {canSeeCost && <TableHead className="text-right">Cost at change</TableHead>}
+                    <TableHead>Reason</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={canSeeCost ? 6 : 5}>
+                        <EmptyState
+                          icon={History}
+                          title="No price changes recorded yet"
+                          description="Applied price changes are recorded here automatically."
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.map((row) => (
+                      <TableRow key={row.id}>
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {formatDateTime(row.createdAt)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium">{row.productName}</div>
+                          {row.sku && <div className="text-xs text-muted-foreground">{row.sku}</div>}
+                        </TableCell>
+                        <TableCell className="text-right font-mono tabular-nums">
+                          {row.oldPrice != null ? `${formatCurrency(row.oldPrice)} → ` : ""}
+                          <span className="font-semibold">{formatCurrency(row.newPrice)}</span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{row.source}</Badge>
+                        </TableCell>
+                        {canSeeCost && (
+                          <TableCell className="text-right font-mono text-xs tabular-nums">
+                            {row.costAtChange != null ? formatCurrency(row.costAtChange) : "—"}
+                          </TableCell>
+                        )}
+                        <TableCell className="max-w-72 truncate text-xs text-muted-foreground">
+                          {row.reason ?? "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
           )}
           {meta && meta.totalPages > 1 && (
-            <div className="mt-3 flex items-center justify-between text-sm">
+            <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">
                 Page {meta.page} of {meta.totalPages} · {meta.total} entries
               </span>
@@ -140,6 +148,6 @@ export function PriceHistoryPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }
