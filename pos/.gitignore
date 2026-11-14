@@ -28,6 +28,10 @@ dist-ssr
 .env.*
 !.env.example
 
+# Curl cookie jars / captured sessions (contain live tokens)
+cj-*.txt
+*cookies*.txt
+
 # Test coverage output
 coverage/
 
