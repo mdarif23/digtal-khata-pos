@@ -134,8 +134,7 @@ export function ProductList({
       // Phase 4 (Feature 10-A): embedded WEIGHT — the parsed value is the
       // quantity in base units for weight-sold variants.
       const weightQuantity =
-        scannedUnit == null &&
-        (variant as { soldByWeight?: boolean }).soldByWeight === true
+        scannedUnit == null && variant.soldByWeight === true
           ? (embeddedWeightRef.current ?? 0)
           : null;
       if (weightQuantity !== null && weightQuantity > 0) {

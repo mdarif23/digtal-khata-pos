@@ -297,8 +297,7 @@ function CartItemRow({ item }: { item: CartItem }) {
   // Sold-by-weight lines carry fractional base-unit quantities (kg) — scale
   // scans and the quantity input write decimals; the server re-enforces the
   // per-variant rule at checkout.
-  const isWeightLine =
-    (variant as { soldByWeight?: boolean }).soldByWeight === true;
+  const isWeightLine = variant.soldByWeight === true;
   const cartSerials =
     useCartStore(
       (state) =>

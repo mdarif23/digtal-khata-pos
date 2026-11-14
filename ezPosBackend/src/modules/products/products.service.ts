@@ -405,6 +405,7 @@ export async function getAllProducts(businessId: number, locationId: number) {
             'barcode', ${productVariants.barcode},
             'weight', ${productVariants.weight},
             'weightUnit', ${productVariants.weightUnit},
+            'soldByWeight', ${productVariants.soldByWeight},
             'sellingPrice', ${productVariants.sellingPrice},
             'alertQuantity', ${productVariants.alertQuantity},
             'isDefault', ${productVariants.isDefault},
