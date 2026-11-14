@@ -263,6 +263,86 @@ describe("loyalty program integration", { skip: !runIntegration }, () => {
     assert.equal(await balance(), 0.99); // 1.99 − 1 clawback (the redeem sale's earn stays)
   });
 
+  it("refund clawback consumes the earn batch — the expiry sweep cannot double-penalize", async () => {
+    // E1-005: the reversal used to write ONLY a ledger row, leaving the
+    // earn batch full — the daily sweep then expired the same points again
+    // (earn 100 → refund −100 → sweep −100 → balance −100).
+    const sale = await saleWith([{ method: "cash", amount: 100, tendered: 100 }]);
+    assert.equal(sale.status, 201);
+    const balanceAfterEarn = await balance();
+
+    const { default: pg } = await import("pg");
+    const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    const saleId = (sale.json as { data: { sale: { id: number } } }).data.sale.id;
+    const item = await client.query(
+      `SELECT id FROM sale_items WHERE sale_id = $1 LIMIT 1`,
+      [saleId],
+    );
+    await client.end();
+
+    const refund = await api("POST", `/api/sold_products/refund/${item.rows[0].id}`, {
+      reason: "customer_request",
+      disposition: "restock",
+    });
+    assert.equal(refund.status, 200);
+    assert.equal(await balance(), balanceAfterEarn - 1); // full clawback
+
+    // The clawback consumed the earn batches FIFO (oldest expiring first) —
+    // the core invariant: Σ batches == Σ ledger. Before the fix the reversal
+    // wrote ONLY a ledger row, leaving 1 extra batch point for the sweep to
+    // expire AGAIN (balance went negative on earn→refund→expire).
+    {
+      const { default: pg } = await import("pg");
+      const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+      await client.connect();
+      const batches = await client.query(
+        `SELECT COALESCE(SUM(points_remaining), 0) AS total FROM loyalty_points_batches
+         WHERE business_id = $1 AND customer_id = $2`,
+        [businessId, customerId],
+      );
+      await client.end();
+      assert.equal(Number(batches.rows[0].total), balanceAfterEarn - 1);
+    }
+
+    // Force every batch of this customer expired, then sweep: the sweep may
+    // only expire points still HELD (batch-backed), never points already
+    // clawed back.
+    {
+      const { default: pg } = await import("pg");
+      const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+      await client.connect();
+      await client.query(
+        `UPDATE loyalty_points_batches SET expires_at = now() - interval '1 day'
+         WHERE business_id = $1 AND customer_id = $2`,
+        [businessId, customerId],
+      );
+      await client.end();
+    }
+    const { runLoyaltyExpirySweep } = await import("../services/loyalty.js");
+    await runLoyaltyExpirySweep(businessId);
+
+    const balanceAfterSweep = await balance();
+    assert.ok(
+      balanceAfterSweep >= 0,
+      `sweep must never drive a refunded balance negative (got ${balanceAfterSweep})`,
+    );
+
+    // Core invariant after the sweep: batch sum must equal the ledger balance.
+    {
+      const { default: pg } = await import("pg");
+      const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+      await client.connect();
+      const batches = await client.query(
+        `SELECT COALESCE(SUM(points_remaining), 0) AS total FROM loyalty_points_batches
+         WHERE business_id = $1 AND customer_id = $2`,
+        [businessId, customerId],
+      );
+      await client.end();
+      assert.equal(Number(batches.rows[0].total), balanceAfterSweep);
+    }
+  });
+
   it("keeps the ledger reconciled with the reported balance", async () => {
     const { default: pg } = await import("pg");
     const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
