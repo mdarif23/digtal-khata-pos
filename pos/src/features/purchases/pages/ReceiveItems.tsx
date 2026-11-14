@@ -266,23 +266,47 @@ export const ReceiveItems = () => {
   const hasItemsToReceive = watchedItems.some(
     (item) => Number(item.receiveNow) > 0,
   );
-  // Client-side estimate of the payable limit (order cost × received units).
-  // The backend recomputes this from the actual batch costs and is
-  // authoritative — a rejected amount surfaces as a 400 toast. Rounded to
-  // the 2-dp money grid: raw float sums land just below the real balance
-  // (320.33999999999997) and clamp the final ৳0.34 payment.
-  const previouslyReceivedValue = roundMoney(
-    receiveItems.reduce(
-      (sum, item) =>
-        sum + Number(item.receivedQuantity || 0) * Number(item.unitCost || 0),
-      0,
-    ),
-  );
+  // Client-side estimate of the payable limit — the backend recomputes this
+  // from the actual batch costs and is authoritative; a rejected amount
+  // surfaces as a 400 toast. The estimate mirrors the backend's
+  // invoice-adjusted received basis (D1-01): batch value alone excludes line
+  // tax/discount and the order-level charges, so a fully received purchase
+  // must be payable in full. Rounded to the 2-dp money grid: raw float sums
+  // land just below the real balance (320.33999999999997) and clamp the
+  // final ৳0.34 payment.
+  const invoiceReceivedValue = (() => {
+    let orderedLineValue = 0;
+    let receivedLineValue = 0;
+    for (const item of receiveItems) {
+      const orderedQty = Number(item.quantity) || 0;
+      if (orderedQty <= 0) continue;
+      const unitCost = Number(item.unitCost) || 0;
+      const lineDiscount = Number(item.discount) || 0;
+      const lineTax = Number(item.tax) || 0;
+      const lineValue = orderedQty * unitCost - lineDiscount + lineTax;
+      if (lineValue <= 0) continue;
+      orderedLineValue += lineValue;
+      const receivedQty = Math.min(
+        (Number(item.receivedQuantity) || 0) + (Number(item.receiveNow) || 0),
+        orderedQty,
+      );
+      if (receivedQty <= 0) continue;
+      const share = receivedQty / orderedQty;
+      receivedLineValue +=
+        receivedQty * unitCost + share * (lineTax - lineDiscount);
+    }
+    const orderCharges =
+      Number(purchaseOrder?.tax ?? 0) +
+      Number(purchaseOrder?.shippingCost ?? 0) -
+      Number(purchaseOrder?.discount ?? 0);
+    const chargeShare =
+      orderedLineValue > 0
+        ? (receivedLineValue / orderedLineValue) * orderCharges
+        : 0;
+    return roundMoney(Math.max(0, receivedLineValue + chargeShare));
+  })();
   const paymentLimit = roundMoney(
-    Math.max(
-      0,
-      Math.min(dueAmount, previouslyReceivedValue + receivingTotal - paidAmount),
-    ),
+    Math.max(0, Math.min(dueAmount, invoiceReceivedValue - paidAmount)),
   );
 
   useEffect(() => {

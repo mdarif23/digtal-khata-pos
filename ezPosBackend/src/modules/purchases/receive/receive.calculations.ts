@@ -107,12 +107,16 @@ export function calculatePayments({
 
 export function calculatePaymentStatus(
   updatedPaidAmount: number,
-  totalAmount: number,
+  dueAmount: number,
 ): PaymentStatus {
   if (updatedPaidAmount <= 0) {
     return "unpaid";
   }
-  return updatedPaidAmount < totalAmount ? "partial" : "paid";
+  // Due-authoritative (same convention as the cancel/return flows): a
+  // fully-settled invoice is "paid" no matter which flow brought the due
+  // to zero — comparing paid against the RAW total marked a returned
+  // purchase with due=0 as "partial" forever.
+  return roundMoney(dueAmount) <= 0 ? "paid" : "partial";
 }
 
 /**
@@ -136,4 +140,82 @@ export function receivedAmountFromBatches(
     0,
   );
   return roundMoney(lineTotal);
+}
+
+type InvoiceLine = StatusItems & {
+  unitCost: number;
+  /** Line-level discount money (order value nets it, like the cancellation amortization). */
+  discount?: number | null;
+  /** Line-level tax money (order value includes it, like the cancellation amortization). */
+  tax?: number | null;
+};
+
+/**
+ * Invoice-adjusted received value (D1-01): batch rows price lines at
+ * unit_cost only, but the invoice also carries line tax/discount and the
+ * order-level discount/tax/shipping. A fully received purchase must be
+ * payable in full — payment for a 10 × ৳100 invoice with ৳50 shipping was
+ * capped at ৳1000 forever.
+ *
+ * Line components are added per line on the RECEIVED share
+ * (receivedQty/orderedQty, clamped to one — over-received units stay
+ * capped by the invoice total via the payment cap's min()); the order-level
+ * net charges (tax + shipping − discount) are allocated proportionally to
+ * the received share of the invoiced line value — the same per-unit
+ * amortization the short-receive cancellation uses for its line value
+ * (quantity × unitCost − discount + tax) / quantity.
+ */
+export function invoiceAdjustedReceivedAmount({
+  baseReceivedAmount,
+  lineItems,
+  orderDiscount = 0,
+  orderTax = 0,
+  shippingCost = 0,
+}: {
+  baseReceivedAmount: number;
+  lineItems: InvoiceLine[];
+  orderDiscount?: number;
+  orderTax?: number;
+  shippingCost?: number;
+}): number {
+  let receivedLineInvoiceValue = 0;
+  let receivedUnitCostValue = 0;
+  let orderedLineInvoiceValue = 0;
+  for (const item of lineItems) {
+    const orderedQty = Number(item.quantity ?? 0);
+    const unitCost = Number(item.unitCost ?? 0);
+    const lineDiscount = Number(item.discount ?? 0);
+    const lineTax = Number(item.tax ?? 0);
+    if (orderedQty <= 0) continue;
+    const orderedValue = orderedQty * unitCost - lineDiscount + lineTax;
+    if (orderedValue <= 0) continue; // degenerate line — nothing to allocate
+    orderedLineInvoiceValue += orderedValue;
+
+    const receivedQty = Math.min(
+      Number(item.receivedQuantity ?? 0),
+      orderedQty,
+    );
+    if (receivedQty <= 0) continue;
+    const receivedShare = receivedQty / orderedQty;
+    receivedUnitCostValue += receivedQty * unitCost;
+    receivedLineInvoiceValue +=
+      receivedQty * unitCost + receivedShare * (lineTax - lineDiscount);
+  }
+
+  // The base is batch-authoritative (actual per-session costs); the line
+  // adjustment layer only adds the invoice components batches don't carry.
+  const lineAdjustments = receivedLineInvoiceValue - receivedUnitCostValue;
+  const orderCharges =
+    Number(orderTax ?? 0) + Number(shippingCost ?? 0) - Number(orderDiscount ?? 0);
+  const chargeShare =
+    orderedLineInvoiceValue > 0
+      ? (receivedLineInvoiceValue / orderedLineInvoiceValue) * orderCharges
+      : 0;
+
+  return roundMoney(
+    Math.max(
+      0,
+      Number(baseReceivedAmount ?? 0) + lineAdjustments + chargeShare,
+    ),
+  );
 }
