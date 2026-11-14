@@ -160,7 +160,7 @@ export function ProductSalesReport() {
       <ReportHeader
         category="Sales Reports"
         title="Product & Variant Sales"
-        description="Performance of individual products, units sold, historical cost, and gross margins."
+        description="Performance of individual products, units sold, historical cost, and gross margins. Figures are VAT-exclusive line totals before cart-level discounts — the Sales Summary report nets those, so totals differ by design."
         onExport={handleExport}
         onRefresh={refetch}
         loading={loading}

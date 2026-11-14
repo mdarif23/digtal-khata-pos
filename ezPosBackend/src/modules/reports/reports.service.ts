@@ -98,6 +98,11 @@ function locationFilter(alias: string, locationId: number | undefined) {
 
 export async function getSalesSummaryReport(businessId: number, params: DateRangeQuery, locationId?: number) {
   const { start, end } = await getDateBounds(businessId, params);
+  // I1-03: day buckets follow the BUSINESS calendar — the window bounds are
+  // business-local, but bucketing on the raw UTC timestamptz put every
+  // 00:00–06:00 Dhaka sale into the previous day, so the rows disagreed
+  // with the dashboard (which buckets with AT TIME ZONE).
+  const tz = await getBusinessTimezone(db, businessId);
 
   // Refund impact uses the POS-005 definition (refund money out, COGS back
   // only for restocked goods) and is attributed to the refund's own date —
@@ -120,7 +125,7 @@ export async function getSalesSummaryReport(businessId: number, params: DateRang
     sale_stream AS (
       SELECT
         s.id,
-        DATE(s.created_at)::text AS bucket_date,
+        DATE(s.created_at AT TIME ZONE ${tz})::text AS bucket_date,
         s.final_total,
         s.discount,
         COALESCE(ic.profit, 0) AS item_profit
@@ -133,7 +138,7 @@ export async function getSalesSummaryReport(businessId: number, params: DateRang
     ),
     refund_stream AS (
       SELECT
-        DATE(sr.created_at)::text AS bucket_date,
+        DATE(sr.created_at AT TIME ZONE ${tz})::text AS bucket_date,
         COALESCE(SUM(sri.refund_total), 0) AS refund_money,
         COALESCE(SUM(
           CASE WHEN sr.status = 'restock'
@@ -224,8 +229,8 @@ export async function getSalesSummaryReport(businessId: number, params: DateRang
       CASE
         WHEN COALESCE(st.total_gross_sales, 0) > 0
         THEN ROUND(
-          (st.total_item_profit - COALESCE(ri.refund_money, 0) + COALESCE(ri.restocked_cost, 0))
-            / st.total_gross_sales * 100, 2)
+          ((st.total_item_profit - COALESCE(ri.refund_money, 0) + COALESCE(ri.restocked_cost, 0))
+            / st.total_gross_sales * 100)::numeric, 2)
         ELSE 0
       END AS overall_profit_margin
     FROM sale_totals st
@@ -289,8 +294,12 @@ export async function getSalesByInvoiceReport(businessId: number, params: DateRa
       WHERE business_id = ${businessId}
       GROUP BY sale_id
     ) sr ON sr.sale_id = s.id
+    -- I1-02: the list must carry the SAME status predicate as the count —
+    -- pending/held/cancelled sales appeared in rows but not in the total,
+    -- breaking pagination and leaking drafts into a sales report.
     WHERE s.business_id = ${businessId}${locationFilter("s", locationId)}
-    AND s.created_at >= ${start}::timestamp 
+    AND s.status IN ('completed', 'refunded')
+    AND s.created_at >= ${start}::timestamp
       AND s.created_at <= ${end}::timestamp
       ${params.paymentStatus ? sql`AND s.payment_status = ${params.paymentStatus}` : sql``}
       ${params.customerId ? sql`AND s.customer_id = ${params.customerId}` : sql``}
@@ -538,8 +547,12 @@ export async function getProfitReport(businessId: number, params: DateRangeQuery
     LEFT JOIN categories cat ON cat.id = p.category_id
     WHERE sr.business_id = ${businessId}
       AND s.business_id = ${businessId}${locationFilter("s", locationId)}
-      AND s.created_at >= ${start}::timestamp
-      AND s.created_at <= ${end}::timestamp
+      -- I1-05: refunds attribute to the REFUND's own date (same convention
+      -- as the sales summary and the dashboard) — windowing on the ORIGINAL
+      -- sale's created_at made a refund of last month's sale appear in last
+      -- month's profit report while the other two reports showed it now.
+      AND sr.created_at >= ${start}::timestamp
+      AND sr.created_at <= ${end}::timestamp
     GROUP BY cat.id, cat.name
   `);
 
@@ -1197,6 +1210,9 @@ export async function getSupplierPayablesReport(businessId: number, locationId?:
 
 export async function getHourlySalesReport(businessId: number, params: DateRangeQuery, locationId?: number) {
   const { start, end } = await getDateBounds(businessId, params);
+  // I1-03: hours bucket in the business timezone — raw UTC hours shifted
+  // every peak-hour chart by the Dhaka offset.
+  const tz = await getBusinessTimezone(db, businessId);
 
   // Sales totals and item counts are aggregated in separate CTEs: joining
   // sale_items into the sales aggregate multiplies SUM(final_total) by each
@@ -1207,7 +1223,7 @@ export async function getHourlySalesReport(businessId: number, params: DateRange
     ),
     hourly_sales AS (
       SELECT
-        EXTRACT(HOUR FROM s.created_at)::int AS hour_num,
+        EXTRACT(HOUR FROM s.created_at AT TIME ZONE ${tz})::int AS hour_num,
         COUNT(*)::int AS transaction_count,
         COALESCE(SUM(s.final_total), 0)::numeric AS gross_sales
       FROM sales s
@@ -1215,11 +1231,11 @@ export async function getHourlySalesReport(businessId: number, params: DateRange
         AND s.business_id = ${businessId}${locationFilter("s", locationId)}
         AND s.created_at >= ${start}::timestamp
         AND s.created_at <= ${end}::timestamp
-      GROUP BY EXTRACT(HOUR FROM s.created_at)
+      GROUP BY EXTRACT(HOUR FROM s.created_at AT TIME ZONE ${tz})
     ),
     hourly_items AS (
       SELECT
-        EXTRACT(HOUR FROM s.created_at)::int AS hour_num,
+        EXTRACT(HOUR FROM s.created_at AT TIME ZONE ${tz})::int AS hour_num,
         COALESCE(SUM(si.quantity), 0)::int AS items_sold
       FROM sale_items si
       INNER JOIN sales s ON s.id = si.sale_id
@@ -1227,7 +1243,7 @@ export async function getHourlySalesReport(businessId: number, params: DateRange
         AND s.business_id = ${businessId}${locationFilter("s", locationId)}
         AND s.created_at >= ${start}::timestamp
         AND s.created_at <= ${end}::timestamp
-      GROUP BY EXTRACT(HOUR FROM s.created_at)
+      GROUP BY EXTRACT(HOUR FROM s.created_at AT TIME ZONE ${tz})
     )
     SELECT
       h.hour_num AS "hourNum",
@@ -1287,55 +1303,60 @@ export async function getHourlySalesReport(businessId: number, params: DateRange
 
 export async function getTaxReconciliationReport(businessId: number, params: DateRangeQuery, locationId?: number) {
   const { start, end } = await getDateBounds(businessId, params);
+  // I1-03/I1-04: buckets follow the business calendar and the (optional)
+  // location filter is actually applied — the controller resolved and
+  // passed locationId, but the service never used it, so "per-branch VAT"
+  // was silently business-wide.
+  const tz = await getBusinessTimezone(db, businessId);
 
   const salesTax = await db.execute(sql`
-    SELECT 
+    SELECT
       COUNT(id)::int AS "taxableInvoices",
       COALESCE(SUM(subtotal), 0)::numeric AS "taxableSales",
       COALESCE(SUM(vat), 0)::numeric AS "outputVat",
       COALESCE(SUM(final_total), 0)::numeric AS "totalGrossSales"
     FROM sales
     WHERE status IN ('completed', 'refunded')
-      AND business_id = ${businessId}
-      AND created_at >= ${start}::timestamp 
+      AND business_id = ${businessId}${locationFilter("sales", locationId)}
+      AND created_at >= ${start}::timestamp
       AND created_at <= ${end}::timestamp
   `);
 
   const purchaseTax = await db.execute(sql`
-    SELECT 
+    SELECT
       COUNT(id)::int AS "purchaseOrdersCount",
       COALESCE(SUM(subtotal), 0)::numeric AS "taxablePurchases",
       COALESCE(SUM(tax), 0)::numeric AS "inputVat",
       COALESCE(SUM(total_amount), 0)::numeric AS "totalPurchases"
     FROM purchases
-    WHERE business_id = ${businessId}
-    AND created_at >= ${start}::timestamp 
+    WHERE business_id = ${businessId}${locationFilter("purchases", locationId)}
+    AND created_at >= ${start}::timestamp
       AND created_at <= ${end}::timestamp
   `);
 
   const dailyBreakdown = await db.execute(sql`
     WITH daily_sales AS (
-      SELECT 
-        DATE(created_at)::text AS tx_date,
+      SELECT
+        DATE(created_at AT TIME ZONE ${tz})::text AS tx_date,
         COALESCE(SUM(subtotal), 0)::numeric AS sales_subtotal,
         COALESCE(SUM(vat), 0)::numeric AS output_vat
       FROM sales
       WHERE status IN ('completed', 'refunded')
-        AND business_id = ${businessId}
-        AND created_at >= ${start}::timestamp 
+        AND business_id = ${businessId}${locationFilter("sales", locationId)}
+        AND created_at >= ${start}::timestamp
         AND created_at <= ${end}::timestamp
-      GROUP BY DATE(created_at)
+      GROUP BY DATE(created_at AT TIME ZONE ${tz})
     ),
     daily_purchases AS (
-      SELECT 
-        DATE(created_at)::text AS tx_date,
+      SELECT
+        DATE(created_at AT TIME ZONE ${tz})::text AS tx_date,
         COALESCE(SUM(subtotal), 0)::numeric AS purchase_subtotal,
         COALESCE(SUM(tax), 0)::numeric AS input_vat
       FROM purchases
-      WHERE business_id = ${businessId}
-      AND created_at >= ${start}::timestamp 
+      WHERE business_id = ${businessId}${locationFilter("purchases", locationId)}
+      AND created_at >= ${start}::timestamp
         AND created_at <= ${end}::timestamp
-      GROUP BY DATE(created_at)
+      GROUP BY DATE(created_at AT TIME ZONE ${tz})
     )
     SELECT 
       COALESCE(s.tx_date, p.tx_date) AS "reportDate",
@@ -1902,7 +1923,10 @@ export async function getDeadStockReport(
     JOIN products p ON p.id = v.product_id
     ${variantOptionsJoinSql("v", "vol")}
     LEFT JOIN (
-      SELECT si.variant_id, MAX(s.purchase_date) AS last_sold_at
+      -- I1-13: sales recency reads created_at (timestamptz, always set) —
+      -- purchase_date is a nullable naive timestamp that analytics-only
+      -- writes left stale.
+      SELECT si.variant_id, MAX(s.created_at) AS last_sold_at
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id AND s.business_id = si.business_id
       WHERE s.business_id = ${businessId}
@@ -1958,8 +1982,10 @@ export async function getChannelPerformanceReport(
     FROM sales s
     WHERE s.business_id = ${businessId}
       AND s.status IN ('completed', 'refunded')
-      AND s.purchase_date >= ${start}
-      AND s.purchase_date <= ${end}
+      -- I1-13: created_at (timestamptz) is the canonical sale timestamp —
+      -- the naive purchase_date column shifted these windows by the tz offset.
+      AND s.created_at >= ${start}::timestamp
+      AND s.created_at <= ${end}::timestamp
       ${locationId !== undefined ? sql`AND s.location_id = ${locationId}` : sql``}
     GROUP BY s.channel
     ORDER BY revenue DESC
@@ -1995,8 +2021,9 @@ export async function getCustomerLifetimeValueReport(
     SELECT c.id AS "customerId", c.name AS "customerName", c.phone AS "phone",
            COUNT(s.id)::int AS orders,
            COALESCE(SUM(s.final_total), 0)::numeric AS "totalSpent",
-           MIN(s.purchase_date)::text AS "firstPurchase",
-           MAX(s.purchase_date)::text AS "lastPurchase"
+           -- I1-13: created_at, not the stale naive purchase_date.
+           MIN(s.created_at)::text AS "firstPurchase",
+           MAX(s.created_at)::text AS "lastPurchase"
     FROM customers c
     JOIN sales s ON s.customer_id = c.id AND s.business_id = c.business_id
     WHERE c.business_id = ${businessId}
@@ -2035,13 +2062,13 @@ export async function getCustomerRetentionReport(
 ): Promise<RetentionRow[]> {
   const result = await db.execute(sql`
     WITH monthly AS (
-      SELECT date_trunc('month', s.purchase_date) AS month,
+      SELECT date_trunc('month', s.created_at) AS month,
              s.customer_id
       FROM sales s
       WHERE s.business_id = ${businessId}
         AND s.status IN ('completed', 'refunded')
         AND s.customer_id IS NOT NULL
-        AND s.purchase_date >= date_trunc('month', now()) - ((${months} || ' months')::interval)
+        AND s.created_at >= date_trunc('month', now()) - ((${months} || ' months')::interval)
       GROUP BY 1, 2
     )
     SELECT to_char(month, 'YYYY-MM') AS month,
@@ -2095,8 +2122,9 @@ export async function getStaffPerformanceReport(
     WHERE s.business_id = ${businessId}
       AND s.status IN ('completed', 'refunded')
       AND s.cashier_user_id IS NOT NULL
-      AND s.purchase_date >= ${start}
-      AND s.purchase_date <= ${end}
+      -- I1-13: created_at, not the stale naive purchase_date.
+      AND s.created_at >= ${start}::timestamp
+      AND s.created_at <= ${end}::timestamp
       ${locationId !== undefined ? sql`AND s.location_id = ${locationId}` : sql``}
     GROUP BY s.cashier_user_id, u.full_name
     ORDER BY revenue DESC
@@ -2144,7 +2172,7 @@ export async function getSalesForecastReport(
       INTERVAL '1 day'
     ) d
     LEFT JOIN sales s
-      ON date_trunc('day', s.purchase_date) = d
+      ON date_trunc('day', s.created_at) = d
       AND s.business_id = ${businessId}
       AND s.status IN ('completed', 'refunded')
       ${locationId !== undefined ? sql`AND s.location_id = ${locationId}` : sql``}
@@ -2246,7 +2274,10 @@ export async function getGroupProfitabilityReport(
         SUM(si.cost_at_sale * si.quantity) AS cogs
       FROM sales s
       INNER JOIN sale_items si ON si.sale_id = s.id AND si.business_id = s.business_id
-      WHERE s.business_id = ${businessId}
+      -- I1-06: same sale-status predicate as every other sales report —
+      -- pending/held/cancelled sales inflated group attribution.
+      WHERE s.status IN ('completed', 'refunded')
+        AND s.business_id = ${businessId}
         AND s.created_at >= ${start}::timestamp
         AND s.created_at <= ${end}::timestamp${locationFilter("s", locationId)}
       GROUP BY s.customer_group_id, s.id
@@ -2259,7 +2290,8 @@ export async function getGroupProfitabilityReport(
       FROM sales s
       INNER JOIN sale_items si ON si.sale_id = s.id AND si.business_id = s.business_id
       CROSS JOIN LATERAL jsonb_array_elements(si.price_adjustments) a(adj)
-      WHERE s.business_id = ${businessId}
+      WHERE s.status IN ('completed', 'refunded')
+        AND s.business_id = ${businessId}
         AND s.created_at >= ${start}::timestamp
         AND s.created_at <= ${end}::timestamp${locationFilter("s", locationId)}
       GROUP BY s.customer_group_id
@@ -2340,7 +2372,9 @@ export async function getPromotionPerformanceReport(
       FROM sales s
       INNER JOIN sale_items si ON si.sale_id = s.id AND si.business_id = s.business_id
       CROSS JOIN LATERAL jsonb_array_elements(si.price_adjustments) a(adj)
-      WHERE s.business_id = ${businessId}
+      -- I1-06: completed/refunded only, like every other sales report.
+      WHERE s.status IN ('completed', 'refunded')
+        AND s.business_id = ${businessId}
         AND s.created_at >= ${start}::timestamp
         AND s.created_at <= ${end}::timestamp${locationFilter("s", locationId)}
         AND a.adj->>'kind' = 'promotion'
