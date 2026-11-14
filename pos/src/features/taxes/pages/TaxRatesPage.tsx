@@ -117,16 +117,13 @@ export function TaxRatesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4">
+    <div className="mx-auto w-full max-w-4xl space-y-6 p-4 md:p-6">
+      <PageHeader
+        title="Tax rates"
+        description="Configurable VAT / tax rules. Rates apply to products assigned to them; historical sales keep the rate they were charged at."
+      />
       <Card>
-        <CardHeader>
-          <CardTitle>Tax rates</CardTitle>
-          <CardDescription>
-            Configurable VAT / tax rules. Rates apply to products assigned to
-            them; historical sales keep the rate they were charged at.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 pt-0">
           {canManage && (
             <div className="flex flex-wrap items-end gap-2 rounded-md border p-3">
               <label className="text-sm">

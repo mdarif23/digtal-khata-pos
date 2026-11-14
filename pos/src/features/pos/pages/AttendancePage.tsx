@@ -110,17 +110,13 @@ export function AttendancePage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4">
+    <div className="mx-auto w-full max-w-4xl space-y-6 p-4 md:p-6">
+      <PageHeader
+        title="Attendance"
+        description="Clock in at the start of your shift, take breaks as needed, and clock out at the end. Records are immutable once clocked out — managers approve them."
+      />
       <Card>
-        <CardHeader>
-          <CardTitle>Attendance</CardTitle>
-          <CardDescription>
-            Clock in at the start of your shift, take breaks as needed, and
-            clock out at the end. Records are immutable once clocked out —
-            managers approve them.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-3 pt-0">
           {status === null ? (
             <Skeleton className="h-16 w-full" />
           ) : (
