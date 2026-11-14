@@ -1,4 +1,4 @@
-import { formatDate, formatMoney } from "./format";
+import { formatCurrency, formatDate } from "@/lib/format";
 
 export type MessageTemplateKey =
   | "friendly_reminder"
@@ -33,35 +33,35 @@ export const MESSAGE_TEMPLATES: MessageTemplate[] = [
     label: "Friendly payment reminder",
     audience: "customer",
     build: (ctx) =>
-      `Hello ${ctx.name}, this is a friendly reminder from ${shop(ctx)}. Invoice ${ctx.invoiceNumber} dated ${formatDate(ctx.invoiceDate)} has a remaining balance of ${formatMoney(ctx.outstandingAmount)}. Please pay at your convenience. Thank you!`,
+      `Hello ${ctx.name}, this is a friendly reminder from ${shop(ctx)}. Invoice ${ctx.invoiceNumber} dated ${formatDate(ctx.invoiceDate)} has a remaining balance of ${formatCurrency(ctx.outstandingAmount)}. Please pay at your convenience. Thank you!`,
   },
   {
     key: "overdue_reminder",
     label: "Overdue payment reminder",
     audience: "customer",
     build: (ctx) =>
-      `Dear ${ctx.name}, invoice ${ctx.invoiceNumber} (dated ${formatDate(ctx.invoiceDate)}) from ${shop(ctx)} is past due. Outstanding amount: ${formatMoney(ctx.outstandingAmount)}. Kindly clear the balance at your earliest convenience. If you have already paid, please ignore this message.`,
+      `Dear ${ctx.name}, invoice ${ctx.invoiceNumber} (dated ${formatDate(ctx.invoiceDate)}) from ${shop(ctx)} is past due. Outstanding amount: ${formatCurrency(ctx.outstandingAmount)}. Kindly clear the balance at your earliest convenience. If you have already paid, please ignore this message.`,
   },
   {
     key: "payment_received",
     label: "Payment received confirmation",
     audience: "customer",
     build: (ctx) =>
-      `Dear ${ctx.name}, we have received your payment of ${formatMoney(ctx.paymentAmount ?? 0)} for invoice ${ctx.invoiceNumber}. Remaining balance: ${formatMoney(ctx.outstandingAmount)}. Thank you for your business! — ${shop(ctx)}`,
+      `Dear ${ctx.name}, we have received your payment of ${formatCurrency(ctx.paymentAmount ?? 0)} for invoice ${ctx.invoiceNumber}. Remaining balance: ${formatCurrency(ctx.outstandingAmount)}. Thank you for your business! — ${shop(ctx)}`,
   },
   {
     key: "remaining_balance",
     label: "Remaining balance notification",
     audience: "customer",
     build: (ctx) =>
-      `Dear ${ctx.name}, your account at ${shop(ctx)} currently has a balance of ${formatMoney(ctx.outstandingAmount)} across invoice ${ctx.invoiceNumber}. Visit us or transfer anytime to settle it. Thank you.`,
+      `Dear ${ctx.name}, your account at ${shop(ctx)} currently has a balance of ${formatCurrency(ctx.outstandingAmount)} across invoice ${ctx.invoiceNumber}. Visit us or transfer anytime to settle it. Thank you.`,
   },
   {
     key: "supplier_payment",
     label: "Supplier payment confirmation",
     audience: "supplier",
     build: (ctx) =>
-      `Dear ${ctx.name}, we have recorded a payment of ${formatMoney(ctx.paymentAmount ?? 0)} for purchase ${ctx.invoiceNumber}. Remaining payable: ${formatMoney(ctx.outstandingAmount)}. Thank you. — ${shop(ctx)}`,
+      `Dear ${ctx.name}, we have recorded a payment of ${formatCurrency(ctx.paymentAmount ?? 0)} for purchase ${ctx.invoiceNumber}. Remaining payable: ${formatCurrency(ctx.outstandingAmount)}. Thank you. — ${shop(ctx)}`,
   },
 ];
 

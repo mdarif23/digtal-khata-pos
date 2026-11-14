@@ -1,24 +1,9 @@
-const currencyFormatter = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 2,
-});
+import type { StatusTone } from "@/components/common/StatusBadge";
 
-export function formatMoney(value: number | null | undefined): string {
-  return currencyFormatter.format(Number(value ?? 0));
-}
-
-export function formatDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : date.toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      });
-}
+/**
+ * Business + messaging helpers for due management. Display formatting
+ * (money, dates) lives in the canonical `@/lib/format` module.
+ */
 
 export function todayInputValue(): string {
   const now = new Date();
@@ -28,18 +13,16 @@ export function todayInputValue(): string {
 
 export type PaymentStatusValue = "unpaid" | "partial" | "paid" | "credit";
 
-export function statusBadgeVariant(
-  status: PaymentStatusValue,
-): "default" | "secondary" | "destructive" | "outline" {
+export function statusTone(status: PaymentStatusValue): StatusTone {
   switch (status) {
     case "paid":
-      return "default";
+      return "success";
     case "partial":
-      return "secondary";
+      return "warning";
     case "credit":
-      return "outline";
+      return "primary";
     default:
-      return "destructive";
+      return "danger";
   }
 }
 

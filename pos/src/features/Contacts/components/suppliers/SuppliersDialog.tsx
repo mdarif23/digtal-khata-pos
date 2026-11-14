@@ -110,7 +110,7 @@ export function SupplierDialog({ editSupplier }: { editSupplier?: Supplier }) {
           )
         }
       />
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className="sm:max-w-lg">
         <form id="supplier-form" onSubmit={form.handleSubmit(onSubmit)}>
           <DialogHeader>
             <DialogTitle>

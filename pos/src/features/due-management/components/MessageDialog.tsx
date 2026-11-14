@@ -5,6 +5,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -23,12 +24,7 @@ import {
   type MessageContext,
   type MessageTemplateKey,
 } from "../lib/messages";
-import {
-  formatDate,
-  formatMoney,
-  normalizeBangladeshPhone,
-  whatsappLink,
-} from "../lib/format";
+import { normalizeBangladeshPhone, whatsappLink } from "../lib/format";
 
 /**
  * In-session throttle for reminder templates. Reminders are manual sends
@@ -137,7 +133,7 @@ export function MessageDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             Message {target.isCustomer ? "customer" : "supplier"} — {target.name}
@@ -204,14 +200,14 @@ export function MessageDialog({
           </div>
 
           {reminderThrottled ? (
-            <p className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <p className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
               <Timer className="mt-0.5 h-4 w-4 shrink-0" />
               You already used this reminder for this invoice in the last 30
               minutes. Consider a different template or wait before repeating it.
             </p>
           ) : null}
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <DialogFooter>
             <Button type="button" variant="outline" onClick={handleCopy}>
               {copied ? <Check /> : <Copy />}
               {copied ? "Copied" : "Copy message"}
@@ -225,7 +221,7 @@ export function MessageDialog({
               <ExternalLink />
               Open WhatsApp
             </Button>
-          </div>
+          </DialogFooter>
         </div>
       </DialogContent>
     </Dialog>

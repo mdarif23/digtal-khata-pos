@@ -11,9 +11,9 @@ import {
   MoreHorizontal,
   Receipt,
   Search,
+  Truck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,19 +29,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EmptyState } from "@/components/common/EmptyState";
+import { StatusBadge } from "@/components/common/StatusBadge";
 import { DataTablePagination } from "@/features/products/components/ProductsPage/Table/data-table-pagination.js";
 import { DataTableColumnHeader } from "@/features/products/components/ProductsPage/Table/data-table-column-header.js";
 import {
   features,
   type DataTableFeatures,
 } from "@/features/products/components/ProductsPage/Table/data-table-features.js";
+import { formatCurrency, formatDate } from "@/lib/format";
 import type { SupplierDueRow } from "../api/dueManagement.api";
-import {
-  formatDate,
-  formatMoney,
-  statusBadgeVariant,
-  statusLabel,
-} from "../lib/format";
+import { statusLabel, statusTone } from "../lib/format";
+
+/** Money columns render right-aligned with aligned digits. */
+const MONEY_COLUMNS = new Set([
+  "totalAmount",
+  "paidAmount",
+  "returnAmount",
+  "outstandingAmount",
+]);
 
 export type SupplierRowActions = {
   onRecordPayment: (row: SupplierDueRow) => void;
@@ -87,12 +93,9 @@ function createColumns(
         <div>
           <p>{formatDate(row.original.purchaseDate)}</p>
           {row.original.isOverdue ? (
-            <Badge
-              variant="outline"
-              className="border-destructive/30 bg-destructive/5 text-red-700"
-            >
+            <StatusBadge tone="danger" className="mt-1">
               Overdue
-            </Badge>
+            </StatusBadge>
           ) : null}
         </div>
       ),
@@ -103,7 +106,7 @@ function createColumns(
         <DataTableColumnHeader column={column} title="Purchase total" />
       ),
       cell: ({ row }) => (
-        <span className="tabular-nums">{formatMoney(row.original.totalAmount)}</span>
+        <span className="tabular-nums">{formatCurrency(row.original.totalAmount)}</span>
       ),
     },
     {
@@ -112,8 +115,8 @@ function createColumns(
         <DataTableColumnHeader column={column} title="Paid" />
       ),
       cell: ({ row }) => (
-        <span className="tabular-nums text-emerald-700">
-          {formatMoney(row.original.paidAmount)}
+        <span className="tabular-nums text-success">
+          {formatCurrency(row.original.paidAmount)}
         </span>
       ),
     },
@@ -124,8 +127,8 @@ function createColumns(
       ),
       cell: ({ row }) =>
         row.original.returnAmount > 0 ? (
-          <span className="tabular-nums text-amber-700">
-            {formatMoney(row.original.returnAmount)}
+          <span className="tabular-nums text-warning">
+            {formatCurrency(row.original.returnAmount)}
           </span>
         ) : (
           <span className="text-muted-foreground">—</span>
@@ -138,7 +141,7 @@ function createColumns(
       ),
       cell: ({ row }) => (
         <span className="font-semibold tabular-nums">
-          {formatMoney(row.original.outstandingAmount)}
+          {formatCurrency(row.original.outstandingAmount)}
         </span>
       ),
     },
@@ -148,9 +151,9 @@ function createColumns(
         <DataTableColumnHeader column={column} title="Status" />
       ),
       cell: ({ row }) => (
-        <Badge variant={statusBadgeVariant(row.original.status)}>
+        <StatusBadge tone={statusTone(row.original.status)}>
           {statusLabel(row.original.status)}
-        </Badge>
+        </StatusBadge>
       ),
     },
     {
@@ -290,7 +293,15 @@ export function SupplierPayablesTable({
               table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id}>
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className={cell.column.id === "actions" ? "text-right" : undefined}>
+                    <TableCell
+                      key={cell.id}
+                      className={
+                        cell.column.id === "actions" ||
+                        MONEY_COLUMNS.has(cell.column.id)
+                          ? "text-right"
+                          : undefined
+                      }
+                    >
                       <table.FlexRender cell={cell} />
                     </TableCell>
                   ))}
@@ -298,11 +309,12 @@ export function SupplierPayablesTable({
               ))
             ) : (
               <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="h-32 text-center text-muted-foreground"
-                >
-                  No purchases match these filters.
+                <TableCell colSpan={columns.length} className="p-0">
+                  <EmptyState
+                    icon={Truck}
+                    title="No purchases match these filters."
+                    description="Try clearing a filter or widening the date range."
+                  />
                 </TableCell>
               </TableRow>
             )}

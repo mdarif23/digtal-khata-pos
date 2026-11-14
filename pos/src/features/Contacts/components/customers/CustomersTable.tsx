@@ -1,4 +1,3 @@
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -7,8 +6,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EmptyState } from "@/components/common/EmptyState";
+import { StatusBadge } from "@/components/common/StatusBadge";
 import { CustomerDialog } from "@/features/Contacts/components/customers/CustomerDialog";
-import { MapPin, Phone } from "lucide-react";
+import { MapPin, Phone, Users } from "lucide-react";
+import { formatCurrency } from "@/lib/format";
 import type { InputValue } from "@/types/customers.types";
 
 interface CustomersTableProps {
@@ -17,12 +19,6 @@ interface CustomersTableProps {
   loading: boolean;
   dueStatus: "loading" | "error" | "loaded";
 }
-
-const money = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 2,
-});
 
 export function CustomersTable({
   customers,
@@ -98,12 +94,9 @@ export function CustomersTable({
                           Unavailable
                         </span>
                       ) : due > 0 ? (
-                        <Badge
-                          variant="secondary"
-                          className="bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                        >
-                          {money.format(due)}
-                        </Badge>
+                        <StatusBadge tone="warning" className="tabular-nums">
+                          {formatCurrency(due)}
+                        </StatusBadge>
                       ) : (
                         <span className="text-sm text-muted-foreground">No due</span>
                       )}
@@ -123,11 +116,12 @@ export function CustomersTable({
             })
           ) : (
             <TableRow>
-              <TableCell
-                colSpan={4}
-                className="h-28 text-center text-muted-foreground"
-              >
-                No customers match this search.
+              <TableCell colSpan={4} className="p-0">
+                <EmptyState
+                  icon={Users}
+                  title="No customers found"
+                  description="No customers match this search."
+                />
               </TableCell>
             </TableRow>
           )}

@@ -27,7 +27,8 @@ import {
   useRecordCustomerPayment,
   useRecordSupplierPayment,
 } from "../hooks/useDueManagement";
-import { formatMoney, todayInputValue } from "../lib/format";
+import { todayInputValue } from "../lib/format";
+import { formatCurrency } from "@/lib/format";
 
 export type CustomerPaymentTarget = {
   kind: "customer";
@@ -119,11 +120,11 @@ function OutstandingSummary({
     <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
       <div className="flex items-center justify-between">
         <span className="text-muted-foreground">Outstanding</span>
-        <span className="font-semibold">{formatMoney(outstanding)}</span>
+        <span className="font-semibold tabular-nums">{formatCurrency(outstanding)}</span>
       </div>
       <div className="flex items-center justify-between">
         <span className="text-muted-foreground">After this payment</span>
-        <span className="font-semibold">{formatMoney(remainingAfter)}</span>
+        <span className="font-semibold tabular-nums">{formatCurrency(remainingAfter)}</span>
       </div>
     </div>
   );
@@ -172,7 +173,7 @@ function CustomerPaymentForm({
       });
       toast.add({
         type: "success",
-        description: `Payment of ${formatMoney(values.amount)} recorded for ${target.invoiceNumber}.`,
+        description: `Payment of ${formatCurrency(values.amount)} recorded for ${target.invoiceNumber}.`,
       });
       onDone();
     } catch (error) {
@@ -363,7 +364,7 @@ function SupplierPaymentForm({
       });
       toast.add({
         type: "success",
-        description: `Payment of ${formatMoney(values.amount)} recorded for ${target.purchaseInvoice}.`,
+        description: `Payment of ${formatCurrency(values.amount)} recorded for ${target.purchaseInvoice}.`,
       });
       onDone();
     } catch (error) {
@@ -562,7 +563,7 @@ export function RecordPaymentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             Record{" "}

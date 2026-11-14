@@ -6,13 +6,8 @@ import { ContactImportExportButtons } from "../components/ContactImportExportBut
 import { CustomerDialog } from "../components/customers/CustomerDialog";
 import { useCustomerStore } from "@/store/useCustomerStore";
 import { getCustomerDueSummaryApi } from "@/api/customer.api";
+import { formatCurrency } from "@/lib/format";
 import type { CustomerDue } from "@/types/customers.types";
-
-const money = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 2,
-});
 
 export function CustomersPage() {
   const [search, setSearch] = useState("");
@@ -94,7 +89,7 @@ export function CustomersPage() {
             ? "—"
             : loadingDues
               ? "…"
-              : money.format(totalOutstanding),
+              : formatCurrency(totalOutstanding),
           description: "Unpaid customer balances",
         },
       ]}
@@ -132,7 +127,7 @@ export function CustomersPage() {
       {dueError ? (
         <div
           role="alert"
-          className="mt-3 flex flex-col gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 sm:flex-row sm:items-center sm:justify-between"
+          className="mt-3 flex flex-col gap-3 rounded-lg border border-warning/30 bg-warning/5 p-3 sm:flex-row sm:items-center sm:justify-between"
         >
           <p className="text-sm text-muted-foreground">
             Outstanding balances could not be loaded. {dueError}

@@ -1,14 +1,14 @@
 import {
   Table,
   TableBody,
-  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Mail, MapPin, Phone } from "lucide-react";
+import { EmptyState } from "@/components/common/EmptyState";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { Mail, MapPin, Phone, Truck } from "lucide-react";
 import { useNavigate } from "react-router";
 import type { Supplier } from "../../contact.type";
 import { SupplierDialog } from "./SuppliersDialog";
@@ -100,19 +100,14 @@ export function SuppliersTable({ suppliers, loading }: SuppliersTableProps) {
                     // on the Edit control belong to the dialog.
                     onClick={(event) => event.stopPropagation()}
                   >
-                    <Badge
-                      variant={supplier.status === "active" ? "secondary" : "outline"}
-                      className={
-                        supplier.status === "active"
-                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                          : ""
-                      }
+                    <StatusBadge
+                      tone={supplier.status === "active" ? "success" : "neutral"}
                     >
                       {supplier.status
                         ? supplier.status.charAt(0).toUpperCase() +
                           supplier.status.slice(1)
                         : "Unknown"}
-                    </Badge>
+                    </StatusBadge>
                     <SupplierDialog editSupplier={supplier} />
                   </div>
                 </TableCell>
@@ -120,11 +115,12 @@ export function SuppliersTable({ suppliers, loading }: SuppliersTableProps) {
             ))
           ) : (
             <TableRow>
-              <TableCell
-                colSpan={4}
-                className="h-28 text-center text-muted-foreground"
-              >
-                No suppliers match this search.
+              <TableCell colSpan={4} className="p-0">
+                <EmptyState
+                  icon={Truck}
+                  title="No suppliers found"
+                  description="No suppliers match this search."
+                />
               </TableCell>
             </TableRow>
           )}

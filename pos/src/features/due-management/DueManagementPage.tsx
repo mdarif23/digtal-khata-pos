@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { RefreshCcw, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -243,35 +245,31 @@ export function DueManagementPage() {
   );
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            Due Management
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Track receivables and payables side by side — and settle them.
-          </p>
-        </div>
-        <div className="flex items-center gap-2" role="tablist" aria-label="Due view">
-          <Button
-            role="tab"
-            aria-selected={activeTab === "customers"}
-            variant={activeTab === "customers" ? "default" : "outline"}
-            onClick={() => setActiveTab("customers")}
-          >
-            Customer dues
-          </Button>
-          <Button
-            role="tab"
-            aria-selected={activeTab === "suppliers"}
-            variant={activeTab === "suppliers" ? "default" : "outline"}
-            onClick={() => setActiveTab("suppliers")}
-          >
-            Supplier payables
-          </Button>
-        </div>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Due Management"
+        description="Track receivables and payables side by side — and settle them."
+        actions={
+          <div className="flex items-center gap-2" role="tablist" aria-label="Due view">
+            <Button
+              role="tab"
+              aria-selected={activeTab === "customers"}
+              variant={activeTab === "customers" ? "default" : "outline"}
+              onClick={() => setActiveTab("customers")}
+            >
+              Customer dues
+            </Button>
+            <Button
+              role="tab"
+              aria-selected={activeTab === "suppliers"}
+              variant={activeTab === "suppliers" ? "default" : "outline"}
+              onClick={() => setActiveTab("suppliers")}
+            >
+              Supplier payables
+            </Button>
+          </div>
+        }
+      />
 
       <DueSummaryCards />
 
@@ -365,6 +363,6 @@ export function DueManagementPage() {
         open={messageOpen}
         onOpenChange={setMessageOpen}
       />
-    </div>
+    </PageContainer>
   );
 }

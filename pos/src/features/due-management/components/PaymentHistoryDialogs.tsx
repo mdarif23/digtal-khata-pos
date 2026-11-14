@@ -18,7 +18,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDate, formatMoney } from "../lib/format";
+import { EmptyState } from "@/components/common/EmptyState";
+import { History } from "lucide-react";
+import { formatCurrency, formatDate } from "@/lib/format";
 
 function HistorySkeleton() {
   return (
@@ -32,9 +34,11 @@ function HistorySkeleton() {
 
 function EmptyHistory() {
   return (
-    <p className="py-6 text-center text-sm text-muted-foreground">
-      No payments recorded yet.
-    </p>
+    <EmptyState
+      icon={History}
+      title="No payments recorded yet."
+      description="Payments recorded against this document will appear here."
+    />
   );
 }
 
@@ -52,7 +56,7 @@ export function SalePaymentHistoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             Payment history — {historyQuery.data?.invoiceNumber ?? "invoice"}
@@ -90,8 +94,8 @@ export function SalePaymentHistoryDialog({
                     <TableCell className="font-mono text-xs">
                       {payment.reference ?? "—"}
                     </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatMoney(payment.amount)}
+                    <TableCell className="text-right font-medium tabular-nums">
+                      {formatCurrency(payment.amount)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -118,7 +122,7 @@ export function PurchasePaymentHistoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             Payment history —{" "}
@@ -157,8 +161,8 @@ export function PurchasePaymentHistoryDialog({
                     <TableCell className="max-w-40 truncate text-xs">
                       {payment.notes ?? "—"}
                     </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatMoney(payment.amount)}
+                    <TableCell className="text-right font-medium tabular-nums">
+                      {formatCurrency(payment.amount)}
                     </TableCell>
                   </TableRow>
                 ))}
