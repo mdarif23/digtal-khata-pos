@@ -209,8 +209,8 @@ export function TargetsPage() {
                         <span
                           className={
                             row.achievementPercent >= 100
-                              ? "font-semibold text-green-700"
-                              : "font-semibold text-amber-700"
+                              ? "font-semibold text-success"
+                              : "font-semibold text-warning"
                           }
                         >
                           {row.achievementPercent}%

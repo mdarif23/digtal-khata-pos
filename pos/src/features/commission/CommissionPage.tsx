@@ -161,7 +161,7 @@ export function CommissionPage() {
           </div>
           <div className="rounded-md border p-3">
             <p className="text-xs text-muted-foreground">Reversed</p>
-            <p className="text-lg font-semibold text-red-600">
+            <p className="text-lg font-semibold text-destructive">
               {formatCurrency(totals.reversed ?? 0)}
             </p>
           </div>

@@ -123,7 +123,7 @@ export default function BackupSettingsPage() {
       </div>
 
       {pendingCount > 0 && (
-        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
+        <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
           <span className="font-medium">{pendingCount} sale(s) recorded offline are not synced yet.</span>{" "}
           They live only in this browser — sync from the POS screen, or{" "}
           <button className="underline" onClick={() => void exportUnsynced()}>
@@ -164,7 +164,7 @@ export default function BackupSettingsPage() {
           <CardHeader className="pb-2">
             <CardDescription>Protection</CardDescription>
             <CardTitle className="flex items-center gap-1.5 text-base">
-              <ShieldCheck className="h-4 w-4 text-emerald-600" /> AES-256-GCM
+              <ShieldCheck className="h-4 w-4 text-success" /> AES-256-GCM
             </CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">

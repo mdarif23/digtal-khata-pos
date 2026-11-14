@@ -208,7 +208,7 @@ export function RegisterPage() {
 
   if (session.isLoading) {
     return (
-      <div className="flex items-center justify-center gap-2 py-16 text-slate-400">
+      <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground/80">
         <Spinner className="size-4" /> Loading your register…
       </div>
     );
@@ -225,7 +225,7 @@ export function RegisterPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Cash Register</h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             {currentSession
               ? `Open at ${currentSession.registerName} · ${currentSession.locationName}${currentSession.terminalName ? ` · ${currentSession.terminalName}` : ""}`
               : "No open session — open a drawer to start taking cash."}
@@ -239,7 +239,7 @@ export function RegisterPage() {
       </div>
 
       {currentSession === null ? (
-        <div className="max-w-md space-y-4 rounded-xl border border-slate-200 p-5">
+        <div className="max-w-md space-y-4 rounded-xl border border-border p-5">
           <div className="grid gap-1.5">
             <Label>Register</Label>
             <Select
@@ -258,7 +258,7 @@ export function RegisterPage() {
               </SelectContent>
             </Select>
             {(registers.data?.length ?? 0) === 0 ? (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 No registers yet — a manager can create one (Registers are
                 unique per location).
               </p>
@@ -295,24 +295,24 @@ export function RegisterPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="text-xs text-slate-500">Opening float</div>
+            <div className="rounded-xl border border-border p-3">
+              <div className="text-xs text-muted-foreground">Opening float</div>
               <div className="text-xl font-semibold">
                 {formatCurrency(currentSession.openingCash)}
               </div>
             </div>
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="text-xs text-slate-500">Expected drawer cash</div>
+            <div className="rounded-xl border border-border p-3">
+              <div className="text-xs text-muted-foreground">Expected drawer cash</div>
               <div className="text-xl font-semibold">{formatCurrency(expected)}</div>
             </div>
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="text-xs text-slate-500">Cashier</div>
+            <div className="rounded-xl border border-border p-3">
+              <div className="text-xs text-muted-foreground">Cashier</div>
               <div className="truncate text-xl font-semibold">
                 {currentSession.userName}
               </div>
             </div>
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="text-xs text-slate-500">Opened</div>
+            <div className="rounded-xl border border-border p-3">
+              <div className="text-xs text-muted-foreground">Opened</div>
               <div className="text-sm font-semibold">
                 {currentSession.openedAt === null
                   ? "—"
@@ -321,7 +321,7 @@ export function RegisterPage() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 p-4">
+          <div className="rounded-xl border border-border p-4">
             <Label className="mb-2 block">Cash movement</Label>
             <div className="flex flex-wrap items-center gap-2">
               <Select
@@ -390,9 +390,9 @@ export function RegisterPage() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 p-4">
+          <div className="rounded-xl border border-border p-4">
             <Label className="mb-1 block">Close register</Label>
-            <p className="mb-2 text-xs text-slate-500">
+            <p className="mb-2 text-xs text-muted-foreground">
               Count the drawer and enter the amount. Expected:{" "}
               <span className="font-medium">{formatCurrency(expected)}</span>
             </p>
@@ -406,15 +406,15 @@ export function RegisterPage() {
                 onChange={(event) => setCountedCash(event.target.value)}
               />
               {countedCash !== "" && Number.isFinite(Number(countedCash)) ? (
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-muted-foreground">
                   Difference:{" "}
                   <span
                     className={
                       Number(countedCash) - expected === 0
-                        ? "text-emerald-600"
+                        ? "text-success"
                         : Number(countedCash) - expected > 0
-                          ? "text-blue-600"
-                          : "text-rose-600"
+                          ? "text-info"
+                          : "text-destructive"
                     }
                   >
                     {formatCurrency(Number(countedCash) - expected)}
@@ -449,9 +449,9 @@ export function RegisterPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <div className="overflow-x-auto rounded-xl border border-border">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+              <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2.5">Type</th>
                   <th className="px-4 py-2.5 text-right">Amount</th>
@@ -464,32 +464,32 @@ export function RegisterPage() {
               <tbody>
                 {sessionDetail.isLoading ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                    <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground/80">
                       <Spinner className="mx-auto size-4" />
                     </td>
                   </tr>
                 ) : (sessionDetail.data?.transactions.length ?? 0) === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                    <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground/80">
                       No movements yet — cash sales and refunds land here
                       automatically.
                     </td>
                   </tr>
                 ) : (
                   (sessionDetail.data?.transactions ?? []).map((tx) => (
-                    <tr key={tx.id} className="border-t border-slate-100">
+                    <tr key={tx.id} className="border-t border-border">
                       <td className="px-4 py-2.5 font-medium">
                         {MOVEMENT_LABELS[tx.type as ManualMovementType] ?? tx.type}
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         {formatCurrency(tx.amount)}
                       </td>
-                      <td className="px-4 py-2.5 text-slate-500">
+                      <td className="px-4 py-2.5 text-muted-foreground">
                         {tx.referenceType ?? "—"}
                       </td>
-                      <td className="px-4 py-2.5 text-slate-500">{tx.note ?? "—"}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground">{tx.note ?? "—"}</td>
                       <td className="px-4 py-2.5">{tx.userName}</td>
-                      <td className="px-4 py-2.5 text-slate-500">
+                      <td className="px-4 py-2.5 text-muted-foreground">
                         {tx.createdAt === null
                           ? "—"
                           : formatDateTime(tx.createdAt)}
