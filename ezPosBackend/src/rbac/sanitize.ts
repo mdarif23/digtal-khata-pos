@@ -3,6 +3,7 @@ const COST_KEYS = new Set([
   "purchaseCost",
   "unitCost",
   "averageCost",
+  "cost", // sold_products rows expose sale_items.cost_at_sale
 ]);
 
 /**

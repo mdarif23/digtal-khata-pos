@@ -237,20 +237,22 @@ const toNum = (e: React.ChangeEvent<HTMLInputElement, HTMLInputElement>) =>
 
 // ---------- main modal ----------
 export function PaymentModal({
-  subTotal,
-  vat,
+  finalTotal: quotedFinalTotal,
   form,
   isPaymentDialogOpen,
   setIsPaymentDialogOpen,
 }: {
-  subTotal: number;
-  vat: number;
+  finalTotal: number;
   form: UseFormReturn<CartSchemaType>;
   isPaymentDialogOpen: boolean;
   setIsPaymentDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const cart = useCartStore((state) => state.cart);
-  const finalTotal = money(subTotal + vat);
+  // The server quote is the authoritative charge target: it already includes
+  // the coupon discount and the exclusive/inclusive tax split. Deriving the
+  // charge from subTotal + vat here double-counts inclusive tax and misses
+  // the coupon entirely.
+  const finalTotal = money(quotedFinalTotal);
 
   const payments = useWatch({ control: form.control, name: "payments" });
   const customerId = useWatch({ control: form.control, name: "customerId" });

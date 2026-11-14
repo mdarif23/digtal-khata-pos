@@ -345,8 +345,11 @@ async function lineEligibility(
 
 async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
   const payload = op.payload as { sale?: CreateSalePayload };
-  if (!payload?.sale) throw new BadRequestError("sale.create requires a sale payload.");
-  const parsed = createSalePayloadSchema.safeParse(payload.sale);
+  // Back-compat: outboxes recorded before the browser client adopted the
+  // wrapped contract hold the bare CreateSalePayload — accept both shapes.
+  const salePayload = payload?.sale ?? payload;
+  if (!salePayload) throw new BadRequestError("sale.create requires a sale payload.");
+  const parsed = createSalePayloadSchema.safeParse(salePayload);
   if (!parsed.success) {
     throw new BadRequestError(`Invalid sale payload: ${JSON.stringify(parsed.error.flatten())}`);
   }

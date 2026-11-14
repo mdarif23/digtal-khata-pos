@@ -14,6 +14,7 @@ import {
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
 import { productVariants } from "../../db/schema/productVariants.js";
+import { serialNumbers } from "../../db/schema/serialNumbers.js";
 import { products } from "../../db/schema/products.js";
 import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
 import {
@@ -310,8 +311,14 @@ export async function approveStockCount(
       .select({
         variantId: stockCountLines.variantId,
         countedQuantity: stockCountLines.countedQuantity,
+        trackingType: products.trackingType,
       })
       .from(stockCountLines)
+      .innerJoin(
+        productVariants,
+        eq(productVariants.id, stockCountLines.variantId),
+      )
+      .innerJoin(products, eq(products.id, productVariants.productId))
       .where(eq(stockCountLines.sessionId, sessionId));
     const countedLines = lines.filter((l) => l.countedQuantity !== null);
     if (countedLines.length === 0) {
@@ -380,7 +387,55 @@ export async function approveStockCount(
           shrinkageValue += take * Number(batch.landedCostPerUnit ?? 0);
           toRemove -= take;
         }
+        // C1-05: the count can never approve more shrinkage than the batch
+        // ledger can cover — silently forcing the stock row (the old
+        // behavior) created batch/stock divergence the rest of the system
+        // refuses to produce (sales and transfers both refuse). Mirror the
+        // transfer guard and refuse with the shortfall named.
+        if (toRemove > 0) {
+          throw new ConflictError(
+            `Variant ${line.variantId} is short ${toRemove} unit(s) in the batch ledger — the counted shrinkage of ${-delta} exceeds the stock batches can cover. Reconcile the batches (or adjust stock) before approving this count.`,
+          );
+        }
+        // C1-05: serial truth must follow the counted quantity — mark the
+        // surplus in-stock serials LOST (oldest first, deterministic) so a
+        // later sale can never consume a phantom serial against a batch the
+        // count already zeroed.
+        if (line.trackingType === "serial") {
+          const surplusSerials = await tx
+            .select({ id: serialNumbers.id })
+            .from(serialNumbers)
+            .where(
+              and(
+                eq(serialNumbers.variantId, line.variantId),
+                eq(serialNumbers.businessId, businessId),
+                eq(serialNumbers.locationId, locationId),
+                eq(serialNumbers.status, "in_stock"),
+              ),
+            )
+            .orderBy(asc(serialNumbers.id))
+            .for("update");
+          const surplus = -delta;
+          const toLose = surplusSerials.slice(0, Math.max(0, surplus));
+          if (toLose.length < surplus) {
+            throw new ConflictError(
+              `Variant ${line.variantId} has ${surplusSerials.length} in-stock serial(s) but the count removes ${surplus} — reconcile the serial ledger before approving.`,
+            );
+          }
+          await tx
+            .update(serialNumbers)
+            .set({ status: "lost" })
+            .where(
+              inArray(
+                serialNumbers.id,
+                toLose.map((serial) => serial.id),
+              ),
+            );
+        }
       } else {
+        // C1-14: the increase prices the new ADJ batch at THIS location's
+        // average landed cost — averaging batches across all locations put
+        // another location's valuation into this location's stock.
         const [avgRow] = await tx
           .select({
             avgCost: sql<string | null>`SUM(${inventoryBatches.quantityRemaining} * ${inventoryBatches.landedCostPerUnit}) / NULLIF(SUM(${inventoryBatches.quantityRemaining}), 0)`,
@@ -390,6 +445,7 @@ export async function approveStockCount(
             and(
               eq(inventoryBatches.variantId, line.variantId),
               eq(inventoryBatches.businessId, businessId),
+              eq(inventoryBatches.locationId, locationId),
             ),
           );
         const unitCost = Number(avgRow?.avgCost ?? 0);

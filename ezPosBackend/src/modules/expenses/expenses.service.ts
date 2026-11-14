@@ -1,6 +1,8 @@
 import { expenseCategories } from "../../db/schema/expenseCategories.js";
+import { chartOfAccounts } from "../../db/schema/chartOfAccounts.js";
 import { expensePayments } from "../../db/schema/expensePayments.js";
 import { expenses } from "../../db/schema/expenses.js";
+import { journalEntryLines } from "../../db/schema/journalEntries.js";
 import { locations } from "../../db/schema/locations.js";
 import {
   registerSessions,
@@ -30,6 +32,8 @@ import {
 } from "../../utils/handleError.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
 import type { Tx } from "../../services/audit.js";
+import { findPostedEntryBySource } from "../../services/ledger.js";
+import { roundMoney } from "../../utils/roundMoney.js";
 import {
   postExpenseLedgerEntry,
   postExpensePaymentLedgerEntry,
@@ -532,7 +536,14 @@ export async function updateExpense(
   // location stays whatever it was created with.
   const updated = await db.transaction(async (tx) => {
     const [existing] = await tx
-      .select({ id: expenses.id, paidAmount: expenses.paidAmount })
+      .select({
+        id: expenses.id,
+        paidAmount: expenses.paidAmount,
+        amount: expenses.amount,
+        categoryId: expenses.categoryId,
+        locationId: expenses.locationId,
+        title: expenses.title,
+      })
       .from(expenses)
       .where(
         and(
@@ -553,6 +564,12 @@ export async function updateExpense(
         )} already paid. Void the expense or record it as a smaller new expense.`,
       );
     }
+    // GL-relevant change (F1-02): amount or category moves money between
+    // accounts — reverse the creation accrual and repost it, otherwise the
+    // GL keeps the stale figures and P&L diverges from the expense list.
+    const glRelevantChange =
+      Number(existing.amount) !== data.amount ||
+      (existing.categoryId ?? null) !== (data.category_id ?? null);
     const updatedRows = await tx
       .update(expenses)
       .set({
@@ -581,6 +598,46 @@ export async function updateExpense(
     if (!expense) {
       throw new NotFoundError("Expense not found");
     }
+    if (glRelevantChange) {
+      const posted = await findPostedEntryBySource(tx, businessId, "expense", id);
+      if (posted) {
+        // The creation entry credits cash with the INITIAL payment and 2010
+        // with the unpaid remainder. The repost must reproduce exactly that
+        // cash credit — crediting the CURRENT paid amount would double-count
+        // later settlement payments (which post their own entries).
+        const lines = await tx
+          .select({
+            credit: journalEntryLines.credit,
+            description: journalEntryLines.description,
+          })
+          .from(journalEntryLines)
+          .where(eq(journalEntryLines.entryId, posted.id));
+        const initialPaid = roundMoney(
+          lines
+            .filter((line) => line.description === "Initial settlement")
+            .reduce((sum, line) => sum + Number(line.credit), 0),
+        );
+        await reverseExpenseLedgerEntry(tx, {
+          businessId,
+          expenseId: id,
+          reason: `Expense edited (amount ${Number(existing.amount).toFixed(2)} → ${data.amount.toFixed(2)})`,
+          actorUserId: updatedBy,
+        });
+        await postExpenseLedgerEntry(tx, {
+          businessId,
+          expense: {
+            id,
+            amount: data.amount,
+            paidAmount: Math.min(initialPaid, data.amount),
+            categoryId: data.category_id,
+            locationId: existing.locationId,
+            title: data.title,
+          },
+          initialPayment: null,
+          actorUserId: updatedBy,
+        });
+      }
+    }
     await recordAuditInTx(tx, {
       businessId,
       actorUserId: updatedBy,
@@ -591,6 +648,7 @@ export async function updateExpense(
         amount: expense.amount,
         paidAmount: expense.paidAmount,
         paymentStatus: expense.paymentStatus,
+        glReposted: glRelevantChange,
       },
     });
     return expense;
@@ -966,6 +1024,7 @@ export async function createExpenseCategory(
       "An expense category with this name already exists",
     );
   }
+  await assertCategoryAccount(businessId, data.glAccountId ?? null);
   const insertedCategories = await db
     .insert(expenseCategories)
     .values({
@@ -974,6 +1033,7 @@ export async function createExpenseCategory(
       description: data.description ?? null,
       color: data.color ?? null,
       icon: data.icon ?? null,
+      glAccountId: data.glAccountId ?? null,
     })
     .returning(categoryColumns);
   const category = insertedCategories[0];
@@ -991,12 +1051,35 @@ export async function createExpenseCategory(
   return category;
 }
 
+/** The mapped account must be a live chart account of THIS business. */
+async function assertCategoryAccount(
+  businessId: number,
+  glAccountId: number | null | undefined,
+) {
+  if (glAccountId == null) return;
+  const [account] = await db
+    .select({ id: chartOfAccounts.id })
+    .from(chartOfAccounts)
+    .where(
+      and(
+        eq(chartOfAccounts.id, glAccountId),
+        eq(chartOfAccounts.businessId, businessId),
+        isNull(chartOfAccounts.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (!account) {
+    throw new NotFoundError("The mapped GL account does not exist for this business.");
+  }
+}
+
 const categoryColumns = {
   id: expenseCategories.id,
   categoryName: expenseCategories.categoryName,
   description: expenseCategories.description,
   color: expenseCategories.color,
   icon: expenseCategories.icon,
+  glAccountId: expenseCategories.glAccountId,
   archivedAt: expenseCategories.archivedAt,
 } as const;
 
@@ -1050,6 +1133,7 @@ export async function updateExpenseCategory(
 ) {
   await findCategory(businessId, id);
   await assertActiveNameFree(businessId, data.categoryName, id);
+  await assertCategoryAccount(businessId, data.glAccountId ?? null);
   const updatedRows = await db
     .update(expenseCategories)
     .set({
@@ -1057,6 +1141,7 @@ export async function updateExpenseCategory(
       description: data.description ?? null,
       color: data.color ?? null,
       icon: data.icon ?? null,
+      glAccountId: data.glAccountId ?? null,
     })
     .where(
       and(

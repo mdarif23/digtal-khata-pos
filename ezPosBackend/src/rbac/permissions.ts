@@ -43,6 +43,16 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "sales.edit", module: "sales", description: "Edit sales records" },
   { key: "sales.return", module: "sales", description: "Process sale returns and refunds" },
 
+  // Quotations (sales documents; routes enforce these keys)
+  { key: "quotations.view", module: "sales", description: "View quotations and their lifecycle" },
+  { key: "quotations.create", module: "sales", description: "Create and edit quotations" },
+  { key: "quotations.convert", module: "sales", description: "Convert accepted quotations into sales" },
+
+  // Commission & targets (routes enforce these keys)
+  { key: "commission.view", module: "commission", description: "View commission entries and performance" },
+  { key: "commission.manage", module: "commission", description: "Approve, pay and reassign commissions" },
+  { key: "targets.manage", module: "commission", description: "Create and manage sales targets" },
+
   // Products
   { key: "products.view", module: "products", description: "View products and variants" },
   { key: "products.create", module: "products", description: "Create products" },
@@ -88,6 +98,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "taxes.manage", module: "taxes", description: "Manage tax rates and product tax assignments" },
   { key: "loyalty.view", module: "loyalty", description: "View customer loyalty balances and history" },
   { key: "loyalty.manage", module: "loyalty", description: "Configure the loyalty program (earn/redeem rates)" },
+  { key: "loyalty.adjust", module: "loyalty", description: "Manually correct a customer's loyalty point balance (reason mandatory)" },
   { key: "promotions.view", module: "promotions", description: "View coupons and promotions" },
   { key: "promotions.manage", module: "promotions", description: "Manage coupons and promotions" },
   { key: "attendance.view", module: "attendance", description: "Clock in/out and view own attendance" },
@@ -203,6 +214,10 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "backups.delete", module: "backup", description: "Delete backups subject to retention rules" },
   { key: "backups.restore", module: "backup", description: "Restore business data from a backup package (owner-level)" },
 
+  // Customer communication (WhatsApp / SMS / email receipts & reminders)
+  { key: "comms.view", module: "settings", description: "View message history and delivery status" },
+  { key: "comms.manage", module: "settings", description: "Configure providers/templates and send messages" },
+
   // Warranty management
   { key: "warranty.view", module: "warranty", description: "View the warranty registry and warranty details" },
   { key: "warranty.claim.create", module: "warranty", description: "Create customer warranty claims" },
@@ -275,8 +290,20 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "taxes.manage",
     "loyalty.view",
     "loyalty.manage",
+    "loyalty.adjust",
     "promotions.view",
     "promotions.manage",
+    // Quotations: managers run the quotation pipeline end to end.
+    "quotations.view",
+    "quotations.create",
+    "quotations.convert",
+    // Commission & targets: managers manage salespeople compensation.
+    "commission.view",
+    "commission.manage",
+    "targets.manage",
+    // Messages: managers configure providers and send receipts/reminders.
+    "comms.view",
+    "comms.manage",
     "attendance.view",
     "attendance.manage",
     "customers.view",
@@ -404,6 +431,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "reports.expense.view",
     "reports.financial.view",
     "reports.online_profitability.view",
+    // Quotations & commission: accountant reads pipelines and commission.
+    "quotations.view",
+    "commission.view",
+    "comms.view",
     "orders.view",
     "receipt_settings.view",
     "backups.view",

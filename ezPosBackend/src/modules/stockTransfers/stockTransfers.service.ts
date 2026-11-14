@@ -4,7 +4,9 @@ import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
 import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { locations } from "../../db/schema/locations.js";
+import { products } from "../../db/schema/products.js";
 import { productVariants } from "../../db/schema/productVariants.js";
+import { serialNumbers } from "../../db/schema/serialNumbers.js";
 import { variantOptions } from "../../db/schema/variantOptions.js";
 import { variantValues } from "../../db/schema/variantValues.js";
 import { stockTransferItems } from "../../db/schema/stockTransfers.js";
@@ -43,6 +45,8 @@ export interface TransferItemView {
   quantityShipped: number;
   quantityReceived: number;
   unitCost: number;
+  /** C1-02: serial numbers shipped for serial-tracked variants. */
+  serialNumbers?: string[] | null;
 }
 
 export interface TransferDetail {
@@ -263,6 +267,7 @@ async function listTransferItemsInTx(
       quantityShipped: stockTransferItems.quantityShipped,
       quantityReceived: stockTransferItems.quantityReceived,
       unitCost: stockTransferItems.unitCost,
+      serialNumbers: stockTransferItems.serialNumbers,
     })
     .from(stockTransferItems)
     .innerJoin(
@@ -407,6 +412,51 @@ export async function shipTransfer(
         item.quantity,
       );
 
+      // C1-02: serial-tracked units travel with their serial numbers. Ship
+      // picks the needed in-stock serials at the source (oldest first — the
+      // same deterministic order the sale path consumes them), marks them
+      // 'in_transit' and records them on the transfer item so receiving can
+      // re-point them. Without this the serials stayed 'in_stock' at the
+      // SOURCE while the destination counted units whose serials were
+      // elsewhere.
+      let shippedSerialNumbers: string[] | undefined;
+      const [variantRow] = await tx
+        .select({ trackingType: products.trackingType })
+        .from(productVariants)
+        .innerJoin(products, eq(products.id, productVariants.productId))
+        .where(eq(productVariants.id, item.variantId));
+      if (variantRow?.trackingType === "serial") {
+        const toShip = await tx
+          .select({ id: serialNumbers.id, serialNumber: serialNumbers.serialNumber })
+          .from(serialNumbers)
+          .where(
+            and(
+              eq(serialNumbers.variantId, item.variantId),
+              eq(serialNumbers.businessId, businessId),
+              eq(serialNumbers.locationId, transfer.fromLocationId),
+              eq(serialNumbers.status, "in_stock"),
+            ),
+          )
+          .orderBy(asc(serialNumbers.id))
+          .for("update")
+          .limit(item.quantity);
+        if (toShip.length < item.quantity) {
+          throw new ConflictError(
+            `Variant ${item.variantId} has ${toShip.length} in-stock serial(s) at the source but the transfer ships ${item.quantity} — reconcile the serial ledger before shipping.`,
+          );
+        }
+        await tx
+          .update(serialNumbers)
+          .set({ status: "in_transit" })
+          .where(
+            inArray(
+              serialNumbers.id,
+              toShip.map((serial) => serial.id),
+            ),
+          );
+        shippedSerialNumbers = toShip.map((serial) => serial.serialNumber);
+      }
+
       await tx
         .update(stockTransferItems)
         .set({
@@ -414,6 +464,9 @@ export async function shipTransfer(
           unitCost: consumed.quantity > 0
             ? roundMoney(consumed.totalCost / consumed.quantity)
             : 0,
+          ...(shippedSerialNumbers !== undefined
+            ? { serialNumbers: shippedSerialNumbers }
+            : {}),
         })
         .where(eq(stockTransferItems.id, item.id));
 
@@ -630,6 +683,51 @@ export async function receiveTransfer(
           quantityRemaining: receiveNow,
         })
         .returning({ id: inventoryBatches.id });
+
+      // C1-02: re-point the received serials to the destination — location,
+      // batch and status ('in_transit' → 'in_stock'). The shipped serials
+      // are recorded on the item in FIFO ship order; a partial receive
+      // takes the next unreceived slice of that list.
+      const shippedSerials = item.serialNumbers ?? [];
+      if (shippedSerials.length > 0 && receiveNow > 0) {
+        const start = item.quantityReceived;
+        const slice = shippedSerials.slice(start, start + receiveNow);
+        if (slice.length < receiveNow) {
+          throw new ConflictError(
+            `Transfer item ${item.id} recorded ${shippedSerials.length} serial(s) but ${item.quantityReceived + receiveNow} have been received — the serial ledger is short.`,
+          );
+        }
+        const movingSerials = await tx
+          .select({ id: serialNumbers.id })
+          .from(serialNumbers)
+          .where(
+            and(
+              eq(serialNumbers.variantId, item.variantId),
+              eq(serialNumbers.businessId, businessId),
+              eq(serialNumbers.status, "in_transit"),
+              inArray(serialNumbers.serialNumber, slice),
+            ),
+          )
+          .for("update");
+        if (movingSerials.length !== slice.length) {
+          throw new ConflictError(
+            `Some serials for transfer item ${item.id} are not in transit — reconcile the serial ledger before receiving.`,
+          );
+        }
+        await tx
+          .update(serialNumbers)
+          .set({
+            status: "in_stock",
+            locationId: transfer.toLocationId,
+            batchId: batch?.id ?? null,
+          })
+          .where(
+            inArray(
+              serialNumbers.id,
+              movingSerials.map((serial) => serial.id),
+            ),
+          );
+      }
 
       await tx.insert(inventoryMovements).values({
         businessId,

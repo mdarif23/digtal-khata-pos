@@ -26,6 +26,7 @@ import { products } from "../../db/schema/products.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { variantValues } from "../../db/schema/variantValues.js";
 import { serialNumbers } from "../../db/schema/serialNumbers.js";
+import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
 import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
 import type { PgTransaction } from "drizzle-orm/pg-core";
 import type { NodePgQueryResultHKT } from "drizzle-orm/node-postgres";
@@ -422,7 +423,13 @@ async function insertBatch(
       variantId,
       locationId,
       purchaseItemId: null,
-      batchNumber: variant.batchNumber ?? null,
+      // Non-batch opening rows still need a valuation batch (B1-07): fall
+      // back to the same AUTO- convention the import path uses instead of
+      // the form's empty string.
+      batchNumber:
+        variant.batchNumber && variant.batchNumber.trim() !== ""
+          ? variant.batchNumber
+          : `AUTO-${variantId}-${Date.now()}`,
       purchasePrice: variant.purchasePrice,
       quantityReceived: variant.quantity,
       quantityRemaining: variant.quantity,
@@ -530,6 +537,20 @@ export async function createProduct(
               createdVariant.id,
               batch.id,
             );
+          }
+          // C1-01: opening stock MUST leave an inventory_movements row — it
+          // is the audit trail the Stock Movement report reads; without it
+          // the initial quantities are unexplainable in reconciliation.
+          if (Number(variant.quantity) > 0) {
+            await tx.insert(inventoryMovements).values({
+              businessId,
+              variantId: createdVariant.id,
+              locationId,
+              movementType: "adjustment",
+              quantity: Number(variant.quantity),
+              referenceType: "product_opening",
+              referenceId: product.id,
+            });
           }
         }
       }

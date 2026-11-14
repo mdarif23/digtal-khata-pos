@@ -743,7 +743,7 @@ export async function recordSupplierPayment(
 
     const nextStatus = calculatePaymentStatus(
       paymentMath.updatedPaidAmount,
-      purchase.totalAmount,
+      paymentMath.updatedDueAmount,
     );
 
     await tx

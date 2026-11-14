@@ -760,8 +760,13 @@ export async function redeemLoyaltyPointsInTx(
 
 /**
  * Reverses the points earned on refunded value (refundTotal × earnRate).
- * The balance may go negative when points were already spent — the clawback
- * is recorded honestly; redemption still cannot overdraw.
+ * The reversal CONSUMES the earn batches FIFO (same consumption as
+ * redemption) — otherwise the daily expiry sweep would expire the SAME
+ * points again after the refund (earn 100 → refund −100 with the batch
+ * still at 100 → sweep −100 → balance −100). When the batches run short
+ * the clawback still records in full — the customer owes the points back.
+ * The balance may go negative when points were already spent; redemption
+ * still cannot overdraw.
  */
 export async function reverseLoyaltyPointsInTx(
   tx: Tx,
@@ -776,6 +781,44 @@ export async function reverseLoyaltyPointsInTx(
   if (!program || !program.isActive || program.earnRate <= 0) return 0;
   const points = roundMoney(input.refundedAmount * program.earnRate);
   if (points <= 0) return 0;
+
+  // Consume expiry batches FIFO — soonest expiry first, never-expiring
+  // last, mirroring redeemLoyaltyPointsInTx so ledger and batches stay
+  // consistent and the sweep only ever expires points still held.
+  let remaining = points;
+  const batches = await tx
+    .select()
+    .from(loyaltyPointsBatches)
+    .where(
+      and(
+        eq(loyaltyPointsBatches.businessId, input.businessId),
+        eq(loyaltyPointsBatches.customerId, input.customerId),
+        gt(loyaltyPointsBatches.pointsRemaining, 0),
+      ),
+    )
+    .orderBy(
+      sql`${loyaltyPointsBatches.expiresAt} ASC NULLS LAST`,
+      asc(loyaltyPointsBatches.earnedAt),
+    )
+    .for("update");
+  for (const batch of batches) {
+    if (remaining <= 0) break;
+    const available = Number(batch.pointsRemaining);
+    if (available <= 0) continue;
+    const take = Math.min(available, remaining);
+    await tx
+      .update(loyaltyPointsBatches)
+      .set({
+        pointsRemaining: roundMoney(available - take),
+        updatedAt: new Date(),
+      })
+      .where(eq(loyaltyPointsBatches.id, batch.id));
+    remaining = roundMoney(remaining - take);
+  }
+  // remaining > 0 here means the customer had already redeemed those
+  // points — the ledger clawback below records the debt honestly; do NOT
+  // fail the refund over the batch gap.
+
   await insertLedgerRow(tx, {
     businessId: input.businessId,
     customerId: input.customerId,

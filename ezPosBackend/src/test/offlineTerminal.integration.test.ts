@@ -290,6 +290,35 @@ describe("offline terminals (Phase 3)", { skip: !runIntegration, concurrency: 1 
     assert.equal(conflict.rows[0].reason, "allocation_exceeded");
   });
 
+  it("accepts a bare sale payload (pre-contract outbox back-compat)", async () => {
+    // Outboxes recorded before the browser client adopted the wrapped
+    // { sale } contract hold the bare CreateSalePayload — those entries
+    // must still sync instead of failing with "requires a sale payload".
+    // Uses its own product so the shared fixtures' stock stays untouched.
+    const bareVariantId = await createProduct("Off Bare", 60, 3, "none");
+    await dbClient.query(`UPDATE products SET offline_policy = 'open' WHERE name = 'Off Bare'`);
+
+    const key = `off-bare-${Date.now()}`;
+    const res = await syncOps(terminalB, [
+      {
+        opId: key,
+        type: "sale.create",
+        payload: saleOpPayload(key, bareVariantId, 1).sale,
+      },
+    ]);
+    assert.equal(res.results[0].status, "applied", JSON.stringify(res.results));
+    const saleRow = await dbClient.query(
+      `SELECT id FROM sales WHERE idempotency_key = $1`,
+      [key],
+    );
+    assert.equal(saleRow.rows.length, 1);
+    const stock = await dbClient.query(
+      `SELECT quantity FROM inventory_stock WHERE variant_id = $1 AND business_id = $2`,
+      [bareVariantId, businessId],
+    );
+    assert.equal(Number(stock.rows[0].quantity), 2);
+  });
+
   it("open mode: selling beyond stock applies with negative stock + conflict", async () => {
     // Stock is 2; terminal B has no allocation gate on 'open' products.
     const grantB = await api(

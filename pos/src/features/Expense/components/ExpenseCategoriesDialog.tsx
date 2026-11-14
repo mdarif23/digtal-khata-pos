@@ -1,4 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getAccountsApi } from "@/features/finance/finance.api";
 import {
   Archive,
   ArchiveRestore,
@@ -40,15 +42,24 @@ interface DraftState {
   categoryName: string;
   description: string;
   color: string;
+  /** Mapped GL account id as a select-friendly string ("" = 5900 default). */
+  glAccountId: string;
 }
 
-const EMPTY_DRAFT: DraftState = { categoryName: "", description: "", color: "#2563eb" };
+const EMPTY_DRAFT: DraftState = {
+  categoryName: "",
+  description: "",
+  color: "#2563eb",
+  glAccountId: "",
+};
 
 function toDraft(category: ExpenseCategory | null): DraftState {
   return {
     categoryName: category?.categoryName ?? "",
     description: category?.description ?? "",
     color: category?.color ?? "",
+    glAccountId:
+      category?.glAccountId != null ? String(category.glAccountId) : "",
   };
 }
 
@@ -60,6 +71,7 @@ function CategoryForm({
   onCancel,
   saving,
   submitLabel,
+  glAccounts,
 }: {
   value: DraftState;
   onChange: (draft: DraftState) => void;
@@ -68,6 +80,7 @@ function CategoryForm({
   onCancel: () => void;
   saving: boolean;
   submitLabel: string;
+  glAccounts: { id: number; code: string; name: string }[];
 }) {
   return (
     <form
@@ -135,6 +148,31 @@ function CategoryForm({
             </div>
           </Field>
         </div>
+        <Field>
+          <FieldLabel htmlFor="category-gl-account">
+            GL account (optional)
+          </FieldLabel>
+          <select
+            id="category-gl-account"
+            className="w-full rounded-md border bg-background p-2 text-sm"
+            value={value.glAccountId}
+            onChange={(event) =>
+              onChange({ ...value, glAccountId: event.target.value })
+            }
+          >
+            <option value="">Default — Other Expenses (5900)</option>
+            {glAccounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.code} — {account.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Expenses in this category post to this ledger account instead of
+            the Other Expenses default (used once the finance ledger is
+            activated).
+          </p>
+        </Field>
       </FieldGroup>
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onCancel}>
@@ -173,6 +211,15 @@ export function ExpenseCategoriesDialog({
   );
 
   const categoriesQuery = useExpenseCategories(true);
+  // Expense-type chart accounts for the GL mapping select (J1-01).
+  const accountsQuery = useQuery({
+    queryKey: ["finance", "accounts", "expense-mapping"],
+    queryFn: () => getAccountsApi(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const glAccounts = (accountsQuery.data ?? [])
+    .filter((account) => account.type === "expense" && !account.archivedAt)
+    .map((account) => ({ id: account.id, code: account.code, name: account.name }));
   const createCategory = useCreateExpenseCategory();
   const updateCategory = useUpdateExpenseCategory();
   const archiveCategory = useArchiveExpenseCategory();
@@ -224,6 +271,7 @@ export function ExpenseCategoriesDialog({
       description: draft.description.trim() || null,
       color: /^#[0-9a-fA-F]{6}$/.test(draft.color) ? draft.color : null,
       icon: null,
+      glAccountId: draft.glAccountId === "" ? null : Number(draft.glAccountId),
     };
     try {
       await createEntityPromiseToast({
@@ -313,6 +361,7 @@ export function ExpenseCategoriesDialog({
                 onCancel={() => setMode("closed")}
                 saving={saving}
                 submitLabel="Create category"
+                glAccounts={glAccounts}
               />
             ) : (
               <PermissionButton
@@ -352,6 +401,7 @@ export function ExpenseCategoriesDialog({
                           onCancel={() => setMode("closed")}
                           saving={saving}
                           submitLabel="Save changes"
+                          glAccounts={glAccounts}
                         />
                       </li>
                     ) : (

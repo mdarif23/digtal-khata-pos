@@ -2,7 +2,10 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { publishRealtime } from "../realtime/realtime.service.js";
 import { notifyRegisterDiscrepancy } from "../../services/notifications.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
-import { consumeApprovalInTx } from "../../services/managerApproval.js";
+import {
+  consumeApprovalInTx,
+  isApprovalRequired,
+} from "../../services/managerApproval.js";
 import { db } from "../../db/schema/index.js";
 import { registerSessions } from "../../db/schema/registers.js";
 import { registerTransactions } from "../../db/schema/registers.js";
@@ -558,9 +561,18 @@ export async function addCashMovement(
     }
     assertSessionMayBeOperated(session, callerUserId, callerIsOwner);
 
-    // Manager approval when the business requires it for cash movements —
-    // consumed inside this transaction so a rollback un-burns the token.
-    if (opts.approvalToken) {
+    // G1-01: manager approval when the business requires it for cash
+    // movements — the policy used to be a silent no-op (a token was
+    // consumed IF one was sent, but the policy was never consulted, so any
+    // cashier could post a movement with no token at all). Same contract as
+    // refunds: required → missing token is 403; consumed inside this
+    // transaction so a rollback un-burns the token.
+    if (await isApprovalRequired(businessId, "cash_movement")) {
+      if (!opts.approvalToken) {
+        throw new ForbiddenError(
+          "A manager approval is required for this cash movement.",
+        );
+      }
       await consumeApprovalInTx(tx, businessId, {
         token: opts.approvalToken,
         opType: "cash_movement",
@@ -1364,6 +1376,40 @@ export async function recordDueCollectionInTx(
     amount: roundMoney(cashAmount),
     referenceType: "sale_payment",
     referenceId: paymentId,
+  });
+}
+
+/**
+ * Cash taken for a PAID gift-card issuance lands in the issuer's open
+ * register session (same attribution rules as due collections; no-op when
+ * no drawer is open — the GL entry still records the money). The source
+ * record is the gift card itself; the reference unique index makes retries
+ * idempotent.
+ */
+export async function recordGiftCardIssueCashInTx(
+  tx: Tx,
+  businessId: number,
+  userId: number | null,
+  locationId: number | null,
+  cashAmount: number,
+  giftCardId: number,
+): Promise<void> {
+  if (cashAmount <= 0 || userId === null || locationId === null) return;
+  const session = await findOpenSessionForAttribution(
+    tx,
+    businessId,
+    userId,
+    locationId,
+  );
+  if (!session) return;
+  await tx.insert(registerTransactions).values({
+    businessId,
+    sessionId: session.id,
+    userId,
+    type: "cash_in",
+    amount: roundMoney(cashAmount),
+    referenceType: "gift_card_issue",
+    referenceId: giftCardId,
   });
 }
 

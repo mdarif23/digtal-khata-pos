@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import * as giftCardsService from "../../services/giftCards.js";
 import { getBusinessId } from "../../middleware/business.js";
+import { getLocationId } from "../../middleware/location.js";
 import { sendSafeError } from "../../utils/safeError.js";
 
 const issueSchema = z.object({
@@ -9,6 +10,10 @@ const issueSchema = z.object({
   expiresAt: z.string().datetime().nullable().optional(),
   customerId: z.number().int().positive().nullable().optional(),
   note: z.string().trim().max(300).optional(),
+  // Paid issuance (F1-01): how the customer paid — absent = complimentary
+  // card with no money movement.
+  paymentMethod: z.enum(["cash", "bangla_qr", "card"]).nullish(),
+  reference: z.string().trim().max(100).nullish(),
 });
 
 const lookupSchema = z.object({ code: z.string().trim().min(8).max(40) });
@@ -43,6 +48,9 @@ export async function issueGiftCard(req: Request, res: Response) {
       expiresAt: parsed.data.expiresAt ?? null,
       customerId: parsed.data.customerId ?? null,
       note: parsed.data.note ?? null,
+      paymentMethod: parsed.data.paymentMethod ?? null,
+      reference: parsed.data.reference ?? null,
+      locationId: getLocationId(req),
     });
     return res.status(201).json({ success: true, data: card });
   } catch (err) {

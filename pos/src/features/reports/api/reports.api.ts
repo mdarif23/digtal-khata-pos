@@ -146,11 +146,29 @@ export const reportsApi = {
       { params: buildParams(filters) },
     ),
 
-  getRegisterSessions: (filters: Partial<ReportFilters> = {}) =>
-    api.get<{ success: boolean; data: RegisterSessionReportData }>(
-      "/reports/registers",
-      { params: buildParams(filters) },
-    ),
+  // I1-01: this tab used to call /reports/registers — an endpoint that
+  // never existed (404 on every load). The register-close report already
+  // returns exactly the per-session shape this page renders, so the call
+  // goes there and maps { sessions, totals } onto the page's contract.
+  getRegisterSessions: async (filters: Partial<ReportFilters> = {}) => {
+    const res = await api.get<{
+      success: boolean;
+      data: {
+        sessions: RegisterSessionReportData["rows"];
+        totals: RegisterSessionReportData["totals"];
+      };
+    }>("/reports/financial/register-close", { params: buildParams(filters) });
+    return {
+      ...res,
+      data: {
+        ...res.data,
+        data: {
+          rows: res.data.data.sessions,
+          totals: res.data.data.totals,
+        } satisfies RegisterSessionReportData,
+      },
+    };
+  },
 
   // Sales
   getSalesSummary: (filters: Partial<ReportFilters> = {}) =>

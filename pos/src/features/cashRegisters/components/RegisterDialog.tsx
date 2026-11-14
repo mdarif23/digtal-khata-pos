@@ -80,6 +80,16 @@ export function RegisterDialog() {
   const [movementNote, setMovementNote] = useState("");
   const [dropReference, setDropReference] = useState("");
   const [countedCash, setCountedCash] = useState("");
+  // G1-01: when the business requires manager approval for cash movements,
+  // the backend 403s the movement — stash the submission and raise the
+  // approval dialog; the approved token retries it.
+  const [movementApprovalOpen, setMovementApprovalOpen] = useState(false);
+  const [pendingMovement, setPendingMovement] = useState<{
+    type: ManualMovementType;
+    amount: number;
+    note?: string;
+    referenceNo?: string;
+  } | null>(null);
   const [closeCounts, setCloseCounts] = useState<Record<number, string>>({});
   const [reconcileOpen, setReconcileOpen] = useState(false);
   const [reconcileAmount, setReconcileAmount] = useState("");
@@ -136,6 +146,45 @@ export function RegisterDialog() {
     }
   }
 
+  async function submitMovement(
+    opts: { approvalToken?: string } = {},
+  ): Promise<{ ok: boolean; error?: unknown }> {
+    if (!session || !pendingMovement) return { ok: false };
+    setActing(true);
+    try {
+      const updated = await addCashMovementApi(
+        session.id,
+        pendingMovement.type,
+        pendingMovement.amount,
+        pendingMovement.note,
+        {
+          ...(pendingMovement.referenceNo
+            ? { referenceNo: pendingMovement.referenceNo }
+            : {}),
+          ...(opts.approvalToken ? { approvalToken: opts.approvalToken } : {}),
+        },
+      );
+      toast.add({
+        title: `${MOVEMENT_LABELS[pendingMovement.type]} recorded — expected ${formatCurrency(updated.expectedCash)}`,
+        type: "success",
+      });
+      setMovementAmount("");
+      setMovementNote("");
+      setDropReference("");
+      setSession(updated);
+      setPendingMovement(null);
+      return { ok: true };
+    } catch (error) {
+      toast.add({
+        title: extractError(error, "Unable to record the movement."),
+        type: "error",
+      });
+      return { ok: false, error };
+    } finally {
+      setActing(false);
+    }
+  }
+
   async function handleMovement() {
     if (!session) return;
     const amount = Number(movementAmount);
@@ -143,29 +192,26 @@ export function RegisterDialog() {
       toast.add({ title: "Amount must be greater than zero.", type: "error" });
       return;
     }
-    setActing(true);
-    try {
-      const updated = await addCashMovementApi(
-        session.id,
-        movementType,
-        amount,
-        movementNote.trim() || undefined,
-        movementType === "safe_deposit" && dropReference.trim()
-          ? { referenceNo: dropReference.trim() }
-          : undefined,
-      );
-      toast.add({
-        title: `${MOVEMENT_LABELS[movementType]} recorded — expected ${formatCurrency(updated.expectedCash)}`,
-        type: "success",
-      });
-      setMovementAmount("");
-      setMovementNote("");
-      setDropReference("");
-      setSession(updated);
-    } catch (error) {
-      toast.add({ title: extractError(error, "Unable to record the movement."), type: "error" });
-    } finally {
-      setActing(false);
+    const referenceNo =
+      movementType === "safe_deposit" && dropReference.trim()
+        ? dropReference.trim()
+        : undefined;
+    setPendingMovement({
+      type: movementType,
+      amount,
+      ...(movementNote.trim() ? { note: movementNote.trim() } : {}),
+      ...(referenceNo ? { referenceNo } : {}),
+    });
+    const { ok, error } = await submitMovement();
+    if (
+      !ok &&
+      extractError(error, "")
+        .toLowerCase()
+        .includes("manager approval is required")
+    ) {
+      // The server requires a manager approval for cash movements — raise
+      // the PIN dialog; the minted token retries the stashed submission.
+      setMovementApprovalOpen(true);
     }
   }
 
@@ -539,6 +585,28 @@ export function RegisterDialog() {
         entityType="register_session"
         {...(session?.id !== undefined ? { entityId: session.id } : {})}
         onApproved={(token) => void handleReopened(token)}
+      />
+
+      <ManagerApprovalDialog
+        open={movementApprovalOpen}
+        onOpenChange={setMovementApprovalOpen}
+        opType="cash_movement"
+        opLabel={
+          pendingMovement
+            ? `record a ${MOVEMENT_LABELS[pendingMovement.type].toLowerCase()} of ${formatCurrency(pendingMovement.amount)}`
+            : "record a cash movement"
+        }
+        {...(pendingMovement
+          ? {
+              payload: {
+                type: pendingMovement.type,
+                amount: pendingMovement.amount,
+              },
+            }
+          : {})}
+        onApproved={(token) =>
+          void submitMovement({ approvalToken: token })
+        }
       />
     </>
   );

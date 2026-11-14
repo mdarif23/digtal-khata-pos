@@ -4,7 +4,11 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { toast } from "@/components/ui/toast";
 import type { InputValue, CustomerStore } from "../types/customers.types.js";
-import { createCustomerApi, getCustomersApi } from "../api/customer.api.js";
+import {
+  createCustomerApi,
+  getCustomersApi,
+  updateCustomerApi,
+} from "../api/customer.api.js";
 const initialCustomerInfo: InputValue = {
   id: 0,
   name: "",
@@ -90,6 +94,15 @@ export const useCustomerStore = create<CustomerStore>((set, get) => ({
     const customer = await createCustomerApi(customerInfo);
     set((state) => ({
       customers: [...state.customers, customer],
+    }));
+    return customer;
+  },
+  updateCustomer: async (id, customerInfo) => {
+    const customer = await updateCustomerApi(id, customerInfo);
+    set((state) => ({
+      customers: state.customers.map((existing) =>
+        existing.id === id ? customer : existing,
+      ),
     }));
     return customer;
   },

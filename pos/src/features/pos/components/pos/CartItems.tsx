@@ -32,6 +32,7 @@ import { Label } from "@/components/ui/label.js";
 import { getCartTotals, getLinePricing, money } from "../../cartPricing.js";
 import { quoteSaleApi, type QuoteTotals } from "../../quote.api.js";
 import { SerialPickerDialog } from "./SerialPickerDialog.js";
+import { SaveQuotationDialog } from "./SaveQuotationDialog.js";
 import { toast } from "@/components/ui/toast.js";
 import { Button } from "@/components/ui/button.js";
 import { ShoppingCart } from "lucide-react";
@@ -297,8 +298,7 @@ function CartItemRow({ item }: { item: CartItem }) {
   // Sold-by-weight lines carry fractional base-unit quantities (kg) — scale
   // scans and the quantity input write decimals; the server re-enforces the
   // per-variant rule at checkout.
-  const isWeightLine =
-    (variant as { soldByWeight?: boolean }).soldByWeight === true;
+  const isWeightLine = variant.soldByWeight === true;
   const cartSerials =
     useCartStore(
       (state) =>
@@ -532,6 +532,8 @@ export function CartCalculation({
   totals,
 }: ShowCustomerInfoProps & { totals: CartTotalsView }) {
 const [discountSignal, setDiscountSignal] = useState(0);
+  const [quoteOpen, setQuoteOpen] = useState(false);
+  const { hasPermission } = usePermissions();
   // Phase 3 hotkey: F4 opens the discount dialog.
   useHotkeyAction("discount", () => setDiscountSignal((n) => n + 1));
 
@@ -549,18 +551,34 @@ const [discountSignal, setDiscountSignal] = useState(0);
           {/* discount is applied on the amount after item discounts */}
           <DiscountModal form={form} subTotal={totals.itemsTotal} openSignal={discountSignal} />
         </div>
+        {hasPermission("quotations.create") && (
+          <div className="col-span-2">
+            {/* E1-002: capture the cart as a quotation draft */}
+            <SaveQuotationDialog open={quoteOpen} onOpenChange={setQuoteOpen} totals={totals} />
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 w-full"
+              disabled={cart.length === 0}
+              onClick={() => setQuoteOpen(true)}
+            >
+              Save as quotation
+            </Button>
+          </div>
+        )}
         {/* full-width row: a 1/6 cell clipped the placeholder text */}
         <div className="col-span-6">
           <CouponInput form={form} />
         </div>
         <div className="col-span-6">
-          {/* payment gets the amount after discount, plus VAT */}
+          {/* payment charges the authoritative quote total — it already
+              includes the coupon discount and the inclusive/exclusive tax
+              split; deriving it from afterDiscount + vat double-counts */}
           <PaymentModal
             isPaymentDialogOpen={isPaymentDialogOpen}
             setIsPaymentDialogOpen={setIsPaymentDialogOpen}
             form={form}
-            subTotal={totals.afterDiscount}
-            vat={totals.vat}
+            finalTotal={totals.finalTotal}
           />
         </div>
       </div>

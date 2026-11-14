@@ -112,6 +112,29 @@ export function PromotionsPage() {
     setStackGroup(promo.canStackWithGroupDiscount);
     setStackCoupons(promo.canStackWithCoupons);
     setIsActive(promo.isActive);
+    // Phase 3 state must round-trip on edit — save() always emits these
+    // fields, and the backend merges them over the row (H1-01: an edit used
+    // to convert every BOGO/mix-match/tier promotion into a plain discount
+    // with priority 0).
+    setPromoKind(promo.promoKind);
+    const rule = (promo.rule ?? {}) as Record<string, unknown>;
+    setRuleBuyQty(String(rule.buyQty ?? 1));
+    setRuleGetQty(String(rule.getQty ?? 1));
+    setRuleComboSize(String(rule.comboSize ?? 2));
+    setRuleDiscountPercent(String(rule.discountPercent ?? 20));
+    const tier = Array.isArray(rule.tiers)
+      ? (rule.tiers[0] as Record<string, unknown> | undefined)
+      : undefined;
+    setRuleTierMinQty(String(tier?.minQty ?? 3));
+    setRuleTierPercent(String(tier?.discountPercent ?? 10));
+    setFlashDays(promo.daysOfWeek ?? []);
+    setFlashStart(promo.startTime ?? "");
+    setFlashEnd(promo.endTime ?? "");
+    setUsageLimit(promo.usageLimit != null ? String(promo.usageLimit) : "");
+    setPerCustomerLimit(
+      promo.perCustomerLimit != null ? String(promo.perCustomerLimit) : "",
+    );
+    setPriority(String(promo.priority ?? 0));
     setDialogOpen(true);
   }
 
@@ -129,6 +152,19 @@ export function PromotionsPage() {
     setStackGroup(false);
     setStackCoupons(false);
     setIsActive(true);
+    setPromoKind("discount");
+    setRuleBuyQty("1");
+    setRuleGetQty("1");
+    setRuleComboSize("2");
+    setRuleDiscountPercent("20");
+    setRuleTierMinQty("3");
+    setRuleTierPercent("10");
+    setFlashDays([]);
+    setFlashStart("");
+    setFlashEnd("");
+    setUsageLimit("");
+    setPerCustomerLimit("");
+    setPriority("0");
   }
 
   async function save() {

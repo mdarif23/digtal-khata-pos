@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Mail, MapPin, Phone } from "lucide-react";
 import { useNavigate } from "react-router";
 import type { Supplier } from "../../contact.type";
+import { SupplierDialog } from "./SuppliersDialog";
 
 interface SuppliersTableProps {
   suppliers: Supplier[];
@@ -93,19 +94,27 @@ export function SuppliersTable({ suppliers, loading }: SuppliersTableProps) {
                   )}
                 </TableCell>
                 <TableCell>
-                  <Badge
-                    variant={supplier.status === "active" ? "secondary" : "outline"}
-                    className={
-                      supplier.status === "active"
-                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                        : ""
-                    }
+                  <div
+                    className="flex items-center gap-2"
+                    // The row navigates to the supplier detail page — clicks
+                    // on the Edit control belong to the dialog.
+                    onClick={(event) => event.stopPropagation()}
                   >
-                    {supplier.status
-                      ? supplier.status.charAt(0).toUpperCase() +
-                        supplier.status.slice(1)
-                      : "Unknown"}
-                  </Badge>
+                    <Badge
+                      variant={supplier.status === "active" ? "secondary" : "outline"}
+                      className={
+                        supplier.status === "active"
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                          : ""
+                      }
+                    >
+                      {supplier.status
+                        ? supplier.status.charAt(0).toUpperCase() +
+                          supplier.status.slice(1)
+                        : "Unknown"}
+                    </Badge>
+                    <SupplierDialog editSupplier={supplier} />
+                  </div>
                 </TableCell>
               </TableRow>
             ))

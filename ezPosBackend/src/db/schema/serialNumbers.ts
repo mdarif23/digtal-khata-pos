@@ -21,8 +21,9 @@ export const serialStatusEnum = pgEnum("serial_status", [
   "sold", // 3. Sold to a customer and left the store.
   "returned", // 4. Customer brought it back (needs inspection before it can be 'in_stock' again).
   "in_repair", // 5. Sent to the manufacturer or IT department for fixing.
-  "damaged", // 6. Broken, cannot be sold, waiting to be written off.
-  "lost", // 7. Missing during stocktake (inventory shrinkage).
+  "in_transit", // 6. On a stock transfer between locations (migration 0079).
+  "damaged", // 7. Broken, cannot be sold, waiting to be written off.
+  "lost", // 8. Missing during stocktake (inventory shrinkage).
 ]);
 export const serialNumbers = pgTable(
   "serial_numbers",

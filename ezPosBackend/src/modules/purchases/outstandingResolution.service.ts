@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DbTransaction } from "./purchase.types.js";
 import { db } from "../../db/schema/index.js";
 import { purchaseReturns } from "../../db/schema/purchaseReturns.js";
@@ -495,8 +495,13 @@ export async function getPurchaseReturnedValueInTx(
   businessId: number,
   purchaseId: number,
 ): Promise<number> {
+  // SUM over ALL returns: a purchase can be returned in several sessions,
+  // and the payment cap must see the full credited-back value (picking one
+  // arbitrary row let the supplier be overpaid after a second return).
   const [row] = await tx
-    .select({ total: purchaseReturns.totalAmount })
+    .select({
+      total: sql<string>`COALESCE(SUM(${purchaseReturns.totalAmount}), 0)`,
+    })
     .from(purchaseReturns)
     .where(
       and(

@@ -1,0 +1,11 @@
+-- 0079: C1-02 — transfers must move serial numbers. Shipping a
+-- serial-tracked variant now marks its serials 'in_transit' at the source;
+-- receiving re-points them to the destination batch/location and restores
+-- 'in_stock'. Without the intermediate state, shipped serials stayed
+-- 'in_stock' at the SOURCE location while the destination's stock row
+-- counted units whose serials were elsewhere — serial truth diverged from
+-- stock truth and per-location serial views were wrong.
+-- Rollback: UPDATE serial_numbers SET status='in_stock' WHERE
+-- status='in_transit'; then the value remains (enum values cannot be
+-- dropped without type recreation).
+ALTER TYPE "serial_status" ADD VALUE IF NOT EXISTS 'in_transit';

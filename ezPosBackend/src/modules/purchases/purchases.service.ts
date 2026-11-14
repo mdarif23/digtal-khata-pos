@@ -989,7 +989,7 @@ export async function createReceivePurchase(
 
     const paymentStatus = calculatePaymentStatus(
       updatedPaidAmount,
-      purchase.totalAmount,
+      updatedDueAmount,
     );
 
     // =========================================================

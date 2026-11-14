@@ -5,6 +5,8 @@ import { giftCards, giftCardTransactions } from "../db/schema/giftCards.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../utils/handleError.js";
 import { roundMoney } from "../utils/roundMoney.js";
 import type { DbTransaction } from "../modules/purchases/purchase.types.js";
+import { postJournalEntry, isLedgerActivatedInTx, resolveCashAccountForMethod } from "./ledger.js";
+import { recordGiftCardIssueCashInTx } from "../modules/cashRegisters/cashRegisters.service.js";
 
 /**
  * Gift cards (Module 7): issue → redeem (partially, at checkout) → track.
@@ -51,6 +53,11 @@ export async function issueGiftCard(input: {
   expiresAt?: string | null;
   customerId?: number | null;
   note?: string | null;
+  /** Paid issuance (F1-01): how the customer paid. Absent = complimentary card. */
+  paymentMethod?: "cash" | "bangla_qr" | "card" | null;
+  reference?: string | null;
+  /** Issuer's active location — where the cash physically landed. */
+  locationId?: number | null;
 }): Promise<IssuedGiftCard> {
   const amount = roundMoney(input.initialAmount);
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -87,6 +94,48 @@ export async function issueGiftCard(input: {
       sourceType: "issue",
       note: "Issued",
     });
+
+    // Paid issuance (F1-01): selling a card is a liability sale — the money
+    // must reach the GL (DR cash/bank / CR 2040) and the drawer when paid
+    // in cash. Redemption then debits 2040 instead of sinking it negative.
+    // Complimentary issues (no paymentMethod) post nothing — no money moved.
+    if (input.paymentMethod) {
+      if (await isLedgerActivatedInTx(tx, input.businessId)) {
+        const { account } = await resolveCashAccountForMethod(
+          tx,
+          input.businessId,
+          input.paymentMethod,
+        );
+        const description = `Gift card sale — ····${code.slice(-4)}`;
+        await postJournalEntry(tx, {
+          businessId: input.businessId,
+          memo: description,
+          sourceType: "gift_card_issue",
+          sourceId: created.id,
+          cashFlowCategory: "operating",
+          actorUserId: input.actorUserId,
+          lines: [
+            {
+              accountId: account.id,
+              debit: amount,
+              locationId: input.locationId ?? null,
+              description,
+            },
+            { accountCode: "2040", credit: amount, description },
+          ],
+        });
+      }
+      if (input.paymentMethod === "cash") {
+        await recordGiftCardIssueCashInTx(
+          tx,
+          input.businessId,
+          input.actorUserId,
+          input.locationId ?? null,
+          amount,
+          created.id,
+        );
+      }
+    }
     return created;
   });
 

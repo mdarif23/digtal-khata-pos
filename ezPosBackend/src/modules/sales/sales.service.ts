@@ -182,7 +182,23 @@ function isDuplicatePaymentReferenceError(error: unknown): boolean {
   );
 }
 
-export async function getSalesData(businessId: number) {
+export async function getSalesData(
+  businessId: number,
+  opts: { accessibleLocationIds?: number[] | null } = {},
+) {
+  // L1-2: location-restricted staff must not read sales from locations they
+  // are not assigned to — the route checked ACCESS but never applied it to
+  // the query. Null = unrestricted caller (owner wildcard) sees all
+  // locations; an empty assignment list yields no rows, never all rows.
+  // `undefined` (not an empty fragment!) — and() skips undefined entries;
+  // an empty sql`` emits a dangling "and" and 500s the query.
+  const locationScope =
+    opts.accessibleLocationIds === undefined || opts.accessibleLocationIds === null
+      ? undefined
+      : opts.accessibleLocationIds.length === 0
+        ? sql`1 = 0`
+        : inArray(sales.locationId, opts.accessibleLocationIds);
+
   const rows = await db
     .select({
       saleId: sales.id,
@@ -225,6 +241,8 @@ export async function getSalesData(businessId: number) {
       and(
         inArray(sales.status, ["completed", "refunded"]),
         eq(sales.businessId, businessId),
+        // Location scope (L1-2): an empty fragment when unrestricted.
+        locationScope,
       ),
     );
 

@@ -196,6 +196,10 @@ export const productSchema = z
 export const variantDbSchema = variantSchema.safeExtend({
   id: z.number().optional(),
   purchaseCost: z.number().nullable().optional(),
+  // Server-side weight-selling flag (Phase 4): the catalog projection
+  // includes it so the POS weight gates (fractional quantity input, scale
+  // scans) activate. Managed by the backend — never edited from the form.
+  soldByWeight: z.boolean().optional(),
 });
 export const productDbSchema = productSchema.safeExtend({
   id: z.number(),

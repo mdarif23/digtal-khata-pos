@@ -87,24 +87,35 @@ export function CustomersTable({
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {dueStatus === "loading" ? (
-                      <span className="text-sm text-muted-foreground">
-                        Loading…
-                      </span>
-                    ) : dueStatus === "error" ? (
-                      <span className="text-sm text-muted-foreground">
-                        Unavailable
-                      </span>
-                    ) : due > 0 ? (
-                      <Badge
-                        variant="secondary"
-                        className="bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                      >
-                        {money.format(due)}
-                      </Badge>
-                    ) : (
-                      <span className="text-sm text-muted-foreground">No due</span>
-                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      {dueStatus === "loading" ? (
+                        <span className="text-sm text-muted-foreground">
+                          Loading…
+                        </span>
+                      ) : dueStatus === "error" ? (
+                        <span className="text-sm text-muted-foreground">
+                          Unavailable
+                        </span>
+                      ) : due > 0 ? (
+                        <Badge
+                          variant="secondary"
+                          className="bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                        >
+                          {money.format(due)}
+                        </Badge>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">No due</span>
+                      )}
+                      {/* E1-004: correct the customer's contact details. */}
+                      <CustomerDialog
+                        editCustomer={{
+                          id: customer.id,
+                          name: customer.name,
+                          phone: customer.phone ?? "",
+                          address: customer.address ?? "",
+                        }}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               );

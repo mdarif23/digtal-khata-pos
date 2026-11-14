@@ -156,12 +156,14 @@ export async function createExpenseCategoryApi(payload: {
   description?: string | null;
   color?: string | null;
   icon?: string | null;
+  glAccountId?: number | null;
 }) {
   const { data } = await axios.post<ExpenseCategory>("/expense_categories", {
     categoryName: payload.categoryName,
     description: payload.description ?? null,
     color: payload.color ?? null,
     icon: payload.icon ?? null,
+    glAccountId: payload.glAccountId ?? null,
   });
   return data;
 }
@@ -173,6 +175,7 @@ export async function updateExpenseCategoryApi(
     description?: string | null;
     color?: string | null;
     icon?: string | null;
+    glAccountId?: number | null;
   },
 ) {
   const { data } = await axios.patch<ExpenseCategory>(
@@ -182,6 +185,7 @@ export async function updateExpenseCategoryApi(
       description: payload.description ?? null,
       color: payload.color ?? null,
       icon: payload.icon ?? null,
+      glAccountId: payload.glAccountId ?? null,
     },
   );
   return data;

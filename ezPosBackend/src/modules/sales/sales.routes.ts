@@ -8,7 +8,7 @@ import {
 } from "../../middleware/business.js";
 import { requireLocationAccess } from "../../middleware/location.js";
 import { requireTerminalContext } from "../../middleware/terminalContext.js";
-import { requirePermission } from "../../middleware/permissions.js";
+import { requireAnyPermission, requirePermission } from "../../middleware/permissions.js";
 
 const router = express.Router();
 // Location-aware: the X-Location-Id header (or the business default) is
@@ -78,7 +78,12 @@ router.get(
 router.get(
   "/api/variants/:variantId/serials",
   ...read,
-  requirePermission("inventory.view"),
+  // A1-021: the POS serial picker routes serial products here at add-to-cart
+  // time — gating it on inventory.view alone meant cashiers could not sell
+  // serial-tracked items AT ALL. pos.create_sale holders may read the
+  // AVAILABLE serial list (read-only, business-scoped); inventory.view
+  // keeps working for stock screens.
+  requireAnyPermission(["pos.create_sale", "inventory.view"]),
   salesController.getAvailableSerials,
 );
 router.patch(

@@ -57,6 +57,7 @@ export const FINANCE_SOURCE_TYPES = [
   "sale",
   "sale_refund",
   "sale_due_collection",
+  "gift_card_issue",
   "purchase_receive",
   "purchase_payment",
   "purchase_return",

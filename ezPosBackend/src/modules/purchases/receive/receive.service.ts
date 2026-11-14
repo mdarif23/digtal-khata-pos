@@ -8,7 +8,10 @@ import { purchases } from "../../../db/schema/purchases.js";
 import { purchasePayments } from "../../../db/schema/purchasePayments.js";
 import { productVariants } from "../../../db/schema/productVariants.js";
 import { purchaseReceivingRecords } from "../../../db/schema/purchaseReceivingRecords.js";
-import { receivedAmountFromBatches } from "./receive.calculations.js";
+import {
+  invoiceAdjustedReceivedAmount,
+  receivedAmountFromBatches,
+} from "./receive.calculations.js";
 
 // Every function takes the caller's server-verified businessId (from
 // requireBusinessContext) and scopes all reads and writes to it.
@@ -160,6 +163,8 @@ export async function getAllPurchaseItems(
       receivedQuantity: purchaseItems.receivedQuantity,
       cancelledQuantity: purchaseItems.cancelledQuantity,
       unitCost: purchaseItems.unitCost,
+      discount: purchaseItems.discount,
+      tax: purchaseItems.tax,
     })
     .from(purchaseItems)
     .where(
@@ -231,9 +236,11 @@ export async function insertReceivingRecords(
 
 /**
  * Value of goods received, batch-authoritative (D1): Σ quantity_received ×
- * purchase_price over this purchase's batches. Legacy fallback (received
- * units with no batch rows at all) uses the line costs — see
- * receivedAmountFromBatches in receive.calculations.ts.
+ * purchase_price over this purchase's batches, adjusted to the INVOICE
+ * basis (D1-01) — line tax/discount and order-level discount/tax/shipping
+ * are not in batch rows, so they are allocated over the received share.
+ * Legacy fallback (received units with no batch rows at all) uses the line
+ * costs — see receivedAmountFromBatches in receive.calculations.ts.
  */
 export async function getPurchaseReceivedAmountInTx(
   tx: DbTransaction,
@@ -259,9 +266,29 @@ export async function getPurchaseReceivedAmountInTx(
       ),
     );
 
+  const [purchaseRow] = await tx
+    .select({
+      discount: purchases.discount,
+      tax: purchases.tax,
+      shippingCost: purchases.shippingCost,
+    })
+    .from(purchases)
+    .where(
+      and(eq(purchases.id, purchaseId), eq(purchases.businessId, businessId)),
+    );
+
   const lineItems = await getAllPurchaseItems(tx, businessId, purchaseId);
 
-  return receivedAmountFromBatches(Number(batchTotal?.total ?? 0), lineItems);
+  return invoiceAdjustedReceivedAmount({
+    baseReceivedAmount: receivedAmountFromBatches(
+      Number(batchTotal?.total ?? 0),
+      lineItems,
+    ),
+    lineItems,
+    orderDiscount: Number(purchaseRow?.discount ?? 0),
+    orderTax: Number(purchaseRow?.tax ?? 0),
+    shippingCost: Number(purchaseRow?.shippingCost ?? 0),
+  });
 }
 export async function updatePurchase(
   tx: DbTransaction,

@@ -32,7 +32,7 @@ import {
   type PermissionCatalogEntry,
   type RoleSummary,
 } from "../roles.api";
-import { PERMISSION_CATALOG, PERMISSIONS_BY_MODULE } from "@/lib/rbac";
+import { PERMISSION_CATALOG } from "@/lib/rbac";
 import { refreshSessionContext } from "@/api/axios";
 
 const MODULE_LABELS: Record<string, string> = {
@@ -101,12 +101,18 @@ export function RolesPage() {
     void load();
   }, [load]);
 
-  // Prefer server grouping when available; fall back to the client catalog.
+  // Server catalog only (R1-3): a partial client-side fallback would render
+  // an incomplete matrix and a save could strip keys the admin thinks they
+  // granted. On fetch failure, block editing with an explicit error state.
   const [catalog, setCatalog] = useState<PermissionCatalogEntry[] | null>(null);
+  const [catalogError, setCatalogError] = useState(false);
   useEffect(() => {
     getPermissionCatalogApi()
-      .then(setCatalog)
-      .catch(() => setCatalog(null));
+      .then((entries) => {
+        setCatalog(entries);
+        setCatalogError(false);
+      })
+      .catch(() => setCatalogError(true));
   }, []);
 
   const grouped = useMemo(() => {
@@ -118,10 +124,6 @@ export function RolesPage() {
         (byModule.get(mod) ?? byModule.set(mod, []).get(mod)!).push(entry);
       }
       for (const [mod, entries] of byModule) {
-        source.push({ module: mod, entries });
-      }
-    } else {
-      for (const [mod, entries] of Object.entries(PERMISSIONS_BY_MODULE)) {
         source.push({ module: mod, entries });
       }
     }
@@ -163,9 +165,12 @@ export function RolesPage() {
   function setModule(moduleKey: string, selected: boolean) {
     setForm((prev) => {
       if (!prev) return prev;
-      const moduleKeys = (PERMISSIONS_BY_MODULE[moduleKey] ?? []).map(
-        (entry) => entry.key,
-      );
+      // Keys come from the SERVER catalog grouping — a client mirror that
+      // lags the backend would select-all only a subset of the module.
+      const moduleKeys =
+        grouped
+          .find((group) => group.module === moduleKey)
+          ?.entries.map((entry) => entry.key) ?? [];
       const next = selected
         ? [...new Set([...prev.selectedKeys, ...moduleKeys])]
         : prev.selectedKeys.filter((key) => !moduleKeys.includes(key));
@@ -177,6 +182,12 @@ export function RolesPage() {
     if (!form) return;
     if (form.name.trim() === "") {
       setFormError("Role name is required.");
+      return;
+    }
+    if (catalogError && !catalog) {
+      setFormError(
+        "The permission catalog is unavailable — editing is disabled until it loads.",
+      );
       return;
     }
     if (removedKeys.length > 0) {
@@ -373,8 +384,15 @@ export function RolesPage() {
                 />
               </div>
 
-              <div className="grid gap-3">
-                {grouped.map(({ module: moduleKey, entries }) => {
+              {catalogError && !catalog ? (
+                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+                  Could not load the permission catalog — the matrix below
+                  would be incomplete and a save could strip permissions.
+                  Close this dialog and retry once the server responds.
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {grouped.map(({ module: moduleKey, entries }) => {
                   const selectedCount = entries.filter((entry) =>
                     form.selectedKeys.includes(entry.key),
                   ).length;
@@ -434,7 +452,8 @@ export function RolesPage() {
                     </div>
                   );
                 })}
-              </div>
+                </div>
+              )}
 
               <p className="text-sm text-muted-foreground">
                 {form.selectedKeys.length} permission

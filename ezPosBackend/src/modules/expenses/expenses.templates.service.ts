@@ -5,6 +5,7 @@ import { db } from "../../db/schema/index.js";
 import { and, asc, eq, lte, sql } from "drizzle-orm";
 import { BadRequestError, NotFoundError } from "../../utils/handleError.js";
 import { recordAudit, recordAuditInTx } from "../../services/audit.js";
+import { postExpenseLedgerEntry } from "./expenses.ledger.js";
 import type { ExpenseTemplateWriteInput } from "./expenses.schema.js";
 
 /**
@@ -311,6 +312,23 @@ export async function generateForTemplate(
       if (!expense) {
         throw new NotFoundError("Generated expense could not be created.");
       }
+      // GL accrual (F1-03): generated expenses are unpaid dues — without
+      // the accrual posting, recurring costs (rent!) stayed invisible in
+      // P&L until paid and left 2010 sinking negative on settlement. Same
+      // hook as manual creation; no-op before ledger activation.
+      await postExpenseLedgerEntry(tx, {
+        businessId,
+        expense: {
+          id: expense.id,
+          amount: Number(template.amount),
+          paidAmount: 0,
+          categoryId: template.categoryId,
+          locationId: template.locationId,
+          title: template.title,
+        },
+        initialPayment: null,
+        actorUserId: template.createdBy,
+      });
       await recordAuditInTx(tx, {
         businessId,
         actorUserId: template.createdBy,

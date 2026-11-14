@@ -65,6 +65,13 @@ export function ExchangeDialog({
   const [disposition, setDisposition] = useState<"restock" | "inspection" | "damaged">("restock");
   const [busy, setBusy] = useState(false);
   const [replacementTotal, setReplacementTotal] = useState<number | null>(null);
+  // Settlement inputs (E1-001): the backend requires unequal exchanges to
+  // fully settle — collect the difference (cash/QR/card, no due) or choose
+  // how the surplus goes back. Even exchanges (|diff| ≤ 0.01) skip this.
+  const [payMethod, setPayMethod] = useState<"cash" | "bangla_qr" | "card">("cash");
+  const [payAmount, setPayAmount] = useState<number | null>(null);
+  const [payReference, setPayReference] = useState("");
+  const [refundMethod, setRefundMethod] = useState<"cash" | "original_payment">("cash");
 
   const returnableItems = useMemo(
     () =>
@@ -138,6 +145,26 @@ export function ExchangeDialog({
 
   const estimatedDifference =
     replacementTotal === null ? null : replacementTotal - selectedReturnValue;
+
+  const collectDue = estimatedDifference !== null && estimatedDifference > 0.01;
+  const refundDue = estimatedDifference !== null && estimatedDifference < -0.01;
+  // Confirm stays locked until the collected amount matches the quoted
+  // difference (the backend requires the exact sum; a stale estimate that
+  // diverges surfaces as a 400 with the amount to collect).
+  const settlementValid =
+    estimatedDifference === null
+      ? false
+      : collectDue
+        ? Math.abs((Number(payAmount) || 0) - estimatedDifference) <= 0.01
+        : true;
+
+  // Keep the collected amount in lockstep with the quoted difference; a
+  // manual edit survives until the replacement cart changes again.
+  useEffect(() => {
+    if (estimatedDifference !== null && estimatedDifference > 0.01) {
+      setPayAmount(Number(estimatedDifference.toFixed(2)));
+    }
+  }, [estimatedDifference]);
 
   /**
    * Module scan handler — the scanner service only IDENTIFIES a barcode;
@@ -226,9 +253,25 @@ export function ExchangeDialog({
           variantId: r.variantId,
           quantity: r.quantity,
         })),
+        // Settlement (E1-001): unequal exchanges must settle both directions.
+        ...(collectDue && (Number(payAmount) || 0) > 0
+          ? {
+              additionalPayments: [
+                {
+                  method: payMethod,
+                  amount: Number((Number(payAmount) || 0).toFixed(2)),
+                  reference: payReference.trim() || null,
+                },
+              ],
+            }
+          : {}),
+        ...(refundDue ? { refundMethod } : {}),
         reason,
         notes: notes.trim() || undefined,
         disposition,
+        // Idempotent replay (E1-019): a network retry can never record the
+        // exchange twice.
+        idempotencyKey: crypto.randomUUID(),
       });
       toast.add({
         type: "success",
@@ -490,11 +533,73 @@ export function ExchangeDialog({
             {estimatedDifference !== null && estimatedDifference !== 0 && (
               <p className="mt-1 text-xs text-muted-foreground">
                 {estimatedDifference > 0
-                  ? "Collect the difference at the register (cash/QR/card) — the backend confirms the exact amount."
-                  : "The surplus goes back to the customer (cash by default)."}
+                  ? "Collect the difference now — the backend confirms the exact amount."
+                  : "Choose how the surplus goes back to the customer."}
               </p>
             )}
           </div>
+
+          {/* Step 4 — settlement (only for unequal exchanges) */}
+          {collectDue && (
+            <div className="rounded-md border p-3 text-sm">
+              <div className="mb-2 text-sm font-medium">
+                Collect difference — {tk(Math.abs(estimatedDifference ?? 0))}
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <select
+                  aria-label="Difference payment method"
+                  className="rounded-md border bg-background p-2 text-sm"
+                  value={payMethod}
+                  onChange={(e) =>
+                    setPayMethod(e.target.value as "cash" | "bangla_qr" | "card")
+                  }
+                >
+                  <option value="cash">Cash</option>
+                  <option value="bangla_qr">Bangla QR</option>
+                  <option value="card">Card</option>
+                </select>
+                <Input
+                  aria-label="Difference amount"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  className="text-right"
+                  value={payAmount ?? ""}
+                  onChange={(e) => setPayAmount(Number(e.target.value))}
+                />
+                {payMethod !== "cash" && (
+                  <Input
+                    aria-label="Transaction ID"
+                    placeholder="Transaction ID"
+                    maxLength={100}
+                    value={payReference}
+                    onChange={(e) => setPayReference(e.target.value)}
+                  />
+                )}
+              </div>
+              {payMethod === "cash" ? null : (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Exchange payments settle immediately — due is not allowed.
+                </p>
+              )}
+            </div>
+          )}
+          {refundDue && (
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Refund surplus via</span>
+              <select
+                aria-label="Refund method for the surplus"
+                className="w-full rounded-md border bg-background p-2 text-sm"
+                value={refundMethod}
+                onChange={(e) =>
+                  setRefundMethod(e.target.value as "cash" | "original_payment")
+                }
+              >
+                <option value="cash">Cash</option>
+                <option value="original_payment">Original payment method</option>
+              </select>
+            </label>
+          )}
 
           <div className="flex justify-end gap-2">
             <Button
@@ -508,7 +613,8 @@ export function ExchangeDialog({
               disabled={
                 busy ||
                 selectedReturnIds.length === 0 ||
-                replacements.length === 0
+                replacements.length === 0 ||
+                !settlementValid
               }
               onClick={() => void submit()}
             >

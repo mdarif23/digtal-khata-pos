@@ -11,7 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Plus, Save } from "lucide-react";
+import { Pencil, Plus, Save } from "lucide-react";
 import {
   Field,
   FieldError,
@@ -32,8 +32,16 @@ import {
   SupplierSchemaTypeOutput,
 } from "../../schemas/supplier.schema";
 import { useContactStore } from "../../useContactStore";
+import type { Supplier } from "../../contact.type";
 
-export function SupplierDialog() {
+/**
+ * Create + edit supplier contact dialog (D1-05: supplier details were
+ * permanently uncorrectable). Without `editSupplier` it renders the page
+ * header's "Add Supplier" trigger; with one it renders a per-row Edit
+ * trigger that prefills and PUTs the changes.
+ */
+export function SupplierDialog({ editSupplier }: { editSupplier?: Supplier }) {
+  const isEdit = editSupplier !== undefined;
   const [open, setOpen] = useState(false);
   const form = useForm<
     SupplierSchemaTypeInput,
@@ -42,26 +50,40 @@ export function SupplierDialog() {
   >({
     resolver: zodResolver(supplierSchema),
     defaultValues: {
-      supplierName: "",
-      phone: "",
-      email: "",
-      address: "",
-      status: "active",
+      supplierName: editSupplier?.name ?? "",
+      phone: editSupplier?.phone ?? "",
+      email: editSupplier?.email ?? "",
+      address: editSupplier?.address ?? "",
+      status: (editSupplier?.status as "active" | "inactive") ?? "active",
     },
   });
-  const { createSupplier } = useContactStore();
+  const { createSupplier, updateSupplier, getSuppliers } = useContactStore();
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen);
     if (!nextOpen) {
       form.reset();
+    } else if (isEdit) {
+      form.reset({
+        supplierName: editSupplier.name,
+        phone: editSupplier.phone ?? "",
+        email: editSupplier.email ?? "",
+        address: editSupplier.address ?? "",
+        status: (editSupplier.status as "active" | "inactive") ?? "active",
+      });
     }
   }
   async function onSubmit(data: SupplierSchemaTypeOutput) {
     try {
       await createEntityPromiseToast({
         data,
-        apiCall: createSupplier,
-        entityName: "Supplier",
+        apiCall: isEdit
+          ? async (payload: SupplierSchemaTypeOutput) => {
+              await updateSupplier(editSupplier.id, payload);
+              await getSuppliers();
+              return { data: { supplierId: editSupplier.id } };
+            }
+          : createSupplier,
+        entityName: isEdit ? "Supplier updated" : "Supplier",
         displayName: data.supplierName,
       });
       form.reset();
@@ -75,16 +97,25 @@ export function SupplierDialog() {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
-          <Button variant="outline">
-            <Plus />
-            Add Supplier
-          </Button>
+          isEdit ? (
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
+              <Pencil />
+              Edit
+            </Button>
+          ) : (
+            <Button variant="outline">
+              <Plus />
+              Add Supplier
+            </Button>
+          )
         }
       />
       <DialogContent className="sm:max-w-sm">
         <form id="supplier-form" onSubmit={form.handleSubmit(onSubmit)}>
           <DialogHeader>
-            <DialogTitle>Add Supplier</DialogTitle>
+            <DialogTitle>
+              {isEdit ? "Edit Supplier" : "Add Supplier"}
+            </DialogTitle>
           </DialogHeader>
           <FieldGroup>
             <InputField
@@ -124,12 +155,12 @@ export function SupplierDialog() {
             <Button disabled={isSubmitting} form="supplier-form" type="submit">
               {isSubmitting ? (
                 <>
-                  <Spinner /> Creating
+                  <Spinner /> {isEdit ? "Saving" : "Creating"}
                 </>
               ) : (
                 <>
                   <Save />
-                  Create Supplier
+                  {isEdit ? "Save changes" : "Create Supplier"}
                 </>
               )}
             </Button>

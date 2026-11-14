@@ -200,6 +200,9 @@ export const expenseCategorySchema = z.object({
     .nullable()
     .optional(),
   icon: z.string().trim().max(50).nullable().optional(),
+  // GL mapping (J1-01): the expense accrual debits this chart account
+  // instead of falling back to 5900. Null = unmapped (5900 default).
+  glAccountId: z.coerce.number().int().positive().nullable().optional(),
 });
 
 export const expenseCategoryIdSchema = z.coerce.number().int().positive();

@@ -172,7 +172,19 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
                 }[];
               };
             }>("/offline/sync", {
-              ops: [{ opId: entry.clientSaleId, type: opType, payload: entry.payload }],
+              ops: [
+                {
+                  opId: entry.clientSaleId,
+                  type: opType,
+                  // The offline op contract wraps each op's domain payload —
+                  // sale ops carry { sale: CreateSalePayload }, the same
+                  // shape the LAN sync agent pushes.
+                  payload:
+                    opType === "sale.create"
+                      ? { sale: entry.payload }
+                      : entry.payload,
+                },
+              ],
             });
             const result = res.data?.data?.results?.[0];
             if (!result) throw new Error("The sync endpoint returned no result.");
