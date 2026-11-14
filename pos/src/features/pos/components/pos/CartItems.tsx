@@ -36,6 +36,7 @@ import { toast } from "@/components/ui/toast.js";
 import { Button } from "@/components/ui/button.js";
 import { ProductImage } from "@/components/common/ProductCard.js";
 import { EmptyState } from "@/components/common/EmptyState.js";
+import { ShortcutsHint } from "../../hotkeys/ShortcutsHint.js";
 import { formatCurrency, formatNumber } from "@/lib/format.js";
 import { usePermissions } from "@/hooks/usePermissions.js";
 import {
@@ -290,12 +291,17 @@ export default function CartItems() {
     <>
       <CartCustomerInfo />
       {cart.length === 0 ? (
-        <EmptyState
-          icon={ShoppingCart}
-          title="Cart is empty"
-          description="Scan a barcode or click products to start a sale."
-          className="border-none bg-transparent"
-        />
+        <div className="flex h-full flex-col items-center justify-center">
+          <EmptyState
+            icon={ShoppingCart}
+            title="Cart is empty"
+            description="Scan a barcode or click products to start a sale."
+            className="border-none bg-transparent"
+          />
+          {/* First-time guidance — only ever visible while the cart is
+              empty, so it never sits between a cashier and checkout. */}
+          <ShortcutsHint />
+        </div>
       ) : (
         <div className="flex flex-col gap-3">
           {cart.map((item) => (

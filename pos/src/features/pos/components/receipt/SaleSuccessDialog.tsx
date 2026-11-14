@@ -8,6 +8,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog.js";
 import { Button } from "@/components/ui/button.js";
+import { Kbd } from "@/components/common/Kbd.js";
 import { CheckCircle2, Printer, Eye, PlusCircle, Check, Copy, ShieldCheck, Send } from "lucide-react";
 import type { SaleReceiptData } from "../../types/receipt.types.js";
 import { resolveReceiptConfig, usePrintReceipt } from "../../hooks/usePrintReceipt.js";
@@ -193,6 +194,7 @@ export function SaleSuccessDialog({
               >
                 <Printer className="size-4" />
                 Print Receipt
+                <Kbd keys={["F7"]} className="opacity-70" />
               </Button>
 
               <Button

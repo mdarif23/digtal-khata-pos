@@ -12,6 +12,7 @@ import {
 import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Kbd } from "@/components/common/Kbd";
 import { formatCurrency } from "@/lib/format";
 import { useEffect, useState } from "react";
 import { useWatch, type UseFormReturn } from "react-hook-form";
@@ -116,10 +117,11 @@ export function DiscountModal({
         render={
           <Button
             type="button"
-            className="w-full"
+            className="w-full justify-between"
             onClick={() => setOpen(true)}
           >
             Discount
+            <Kbd keys={["F4"]} className="opacity-70" />
           </Button>
         }
       />

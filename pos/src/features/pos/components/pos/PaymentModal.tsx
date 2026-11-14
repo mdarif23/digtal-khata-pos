@@ -19,6 +19,7 @@ import { CartSchemaType, PaymentSchemaType } from "../../schemas/cart.schema";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
 import { useEffect, useState } from "react";
 import { formatCurrency, formatNumber } from "@/lib/format";
+import { Kbd } from "@/components/common/Kbd";
 import {
   Banknote,
   Clock3,
@@ -291,7 +292,10 @@ export function PaymentModal({
             disabled={cart.length === 0}
             className="h-14 w-full justify-between px-4 text-base font-semibold"
           >
-            <span>Charge customer</span>
+            <span className="flex items-center gap-2">
+              Charge customer
+              <Kbd keys={["F6"]} className="opacity-70" />
+            </span>
             <span className="tabular-nums">{formatCurrency(finalTotal)}</span>
           </Button>
         }

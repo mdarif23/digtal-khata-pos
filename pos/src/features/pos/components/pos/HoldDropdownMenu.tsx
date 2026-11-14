@@ -13,6 +13,7 @@ import {
   useHoldCartStore,
 } from "@/features/pos/stores/useCartStore";
 import { HeldItemsDialog } from "./HeldItemsDialog";
+import { Kbd } from "@/components/common/Kbd";
 import { useHotkeyAction } from "../../hotkeys/hotkeyBus";
 
 export function HoldDropdownMenu() {
@@ -38,8 +39,9 @@ export function HoldDropdownMenu() {
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <Button type="button" className="w-full">
+            <Button type="button" className="w-full justify-between">
               Hold
+              <Kbd keys={["F2"]} className="opacity-70" />
             </Button>
           }
         ></DropdownMenuTrigger>
@@ -58,10 +60,12 @@ export function HoldDropdownMenu() {
             }}
           >
             Hold
+            <Kbd keys={["F2"]} className="ml-auto opacity-70" />
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setOpen(true)}>
             Held Items
+            <Kbd keys={["F3"]} className="ml-auto opacity-70" />
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
