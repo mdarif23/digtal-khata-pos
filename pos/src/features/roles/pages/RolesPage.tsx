@@ -280,7 +280,7 @@ export function RolesPage() {
     <div className="flex flex-1 flex-col gap-4 p-4 lg:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Roles &amp; Permissions</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Roles &amp; Permissions</h1>
           <p className="text-sm text-muted-foreground">
             Roles group permissions. A user's effective access is the union of
             all their roles.

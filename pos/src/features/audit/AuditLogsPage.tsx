@@ -103,7 +103,7 @@ export function AuditLogsPage() {
     <div className="grid gap-4 p-4 lg:p-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Audit log</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
           <p className="text-sm text-muted-foreground">
             Append-only activity trail — cash, registers, sales, users, roles
             and more.

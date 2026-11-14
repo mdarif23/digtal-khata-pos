@@ -171,7 +171,7 @@ export function CommsSettingsPage() {
   return (
     <div className="grid gap-5 p-4 lg:p-6">
       <div>
-        <h1 className="text-xl font-semibold">Customer communication</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Customer communication</h1>
         <p className="text-sm text-muted-foreground">
           WhatsApp / SMS / email providers, templates, consent policy and the
           delivery log. Provider secrets are encrypted and never leave the
