@@ -26,11 +26,7 @@ import {
 import { DataTableColumnHeader } from "@/features/products/components/ProductsPage/Table/data-table-column-header.js";
 import type { AllSoldProduct } from "../../types/sales.types.js";
 
-const currencyFormatter = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 2,
-});
+import { formatCurrency as currencyFormatter } from "@/lib/format";
 
 function createColumns(
   onViewSale: (id: number) => void,
@@ -82,7 +78,7 @@ function createColumns(
       ),
       cell: ({ row }) => (
         <span className="font-medium">
-          {currencyFormatter.format(row.original.totalAmount)}
+          {currencyFormatter(row.original.totalAmount)}
         </span>
       ),
     },

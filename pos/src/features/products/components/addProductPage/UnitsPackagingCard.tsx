@@ -81,14 +81,10 @@ import type {
  * line and the "Add packaging unit" button (zero-touch rule 2).
  */
 
-const moneyFormatter = new Intl.NumberFormat("en-BD", {
-  style: "currency",
-  currency: "BDT",
-  maximumFractionDigits: 2,
-});
+import { formatCurrency as moneyFormatter } from "@/lib/format";
 
 function formatMoney(value: number): string {
-  return moneyFormatter.format(value);
+  return moneyFormatter(value);
 }
 
 function formatFactor(value: number): string {

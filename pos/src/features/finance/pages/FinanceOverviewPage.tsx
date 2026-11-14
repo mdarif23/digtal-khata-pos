@@ -12,7 +12,6 @@ import {
   Wallet,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -39,9 +38,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { SummaryCard } from "@/components/common/SummaryCard";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
-import { formatCurrency, formatDate } from "@/features/reports/utils/reportUtils";
-import { ReportMetricCard } from "@/features/reports/components/ReportMetricCard";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { ReportDateFilter } from "@/features/reports/components/ReportDateFilter";
 import type { ReportFilters } from "@/features/reports/types/report.types";
 import {
@@ -106,27 +108,18 @@ export function FinanceOverviewPage() {
   const balances = overview.data?.balances;
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-            Finance &amp; Growth
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
-            Financial Overview
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Ledger activated {formatDate(status.data?.activatedAt)} ·{" "}
-            {status.data?.journalEntryCount ?? 0} journal entries ·{" "}
-            {status.data?.accountCount ?? 0} accounts
-          </p>
-        </div>
-        <ReportDateFilter filters={filters} onFiltersChange={setFilters} showLocationFilter={false} />
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="Financial Overview"
+        description={`Ledger activated ${formatDate(status.data?.activatedAt)} · ${status.data?.journalEntryCount ?? 0} journal entries · ${status.data?.accountCount ?? 0} accounts`}
+        actions={
+          <ReportDateFilter filters={filters} onFiltersChange={setFilters} showLocationFilter={false} />
+        }
+      />
 
       {overview.isError && (
         <Card>
-          <CardContent className="flex items-center gap-2 py-4 text-sm text-amber-700">
+          <CardContent className="flex items-center gap-2 py-4 text-sm text-warning">
             <TriangleAlert className="size-4" />
             Could not load the overview for {dateRange.startDate} → {dateRange.endDate}.
           </CardContent>
@@ -134,10 +127,10 @@ export function FinanceOverviewPage() {
       )}
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Profit &amp; Loss · {dateRange.startDate} → {dateRange.endDate}
         </h2>
-        <p className="-mt-2 mb-3 text-xs text-slate-400">
+        <p className="-mt-2 mb-3 text-xs text-muted-foreground">
           Figures come from the posted general ledger: revenue excludes VAT, owner
           investments/withdrawals are financing (never revenue or expense), and
           GL-only items such as shrinkage and depreciation are included — so
@@ -145,73 +138,65 @@ export function FinanceOverviewPage() {
           sale totals incl. VAT.
         </p>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <ReportMetricCard
+          <SummaryCard
             title="Net Revenue"
-            value={profit?.netRevenue}
-            icon={ArrowUpRight}
-            accent="bg-emerald-50 text-emerald-700"
+            value={profit ? formatCurrency(profit.netRevenue) : "—"}
+            icon={<ArrowUpRight className="size-4 text-muted-foreground" />}
           />
-          <ReportMetricCard
+          <SummaryCard
             title="Gross Profit"
-            value={profit?.grossProfit}
-            subtitle={profit ? `COGS ${formatCurrency(profit.cogs)}` : undefined}
-            icon={Scale}
-            accent="bg-sky-50 text-sky-700"
+            value={profit ? formatCurrency(profit.grossProfit) : "—"}
+            description={profit ? `COGS ${formatCurrency(profit.cogs)}` : undefined}
+            icon={<Scale className="size-4 text-muted-foreground" />}
           />
-          <ReportMetricCard
+          <SummaryCard
             title="Net Profit"
-            value={profit?.netProfit}
-            subtitle={profit ? `Opex ${formatCurrency(profit.operatingExpenses)}` : undefined}
-            icon={Coins}
-            accent="bg-violet-50 text-violet-700"
+            value={profit ? formatCurrency(profit.netProfit) : "—"}
+            description={profit ? `Opex ${formatCurrency(profit.operatingExpenses)}` : undefined}
+            icon={<Coins className="size-4 text-muted-foreground" />}
           />
-          <ReportMetricCard
+          <SummaryCard
             title="Loan Interest"
-            value={profit?.interest}
-            icon={Banknote}
-            accent="bg-amber-50 text-amber-700"
+            value={profit ? formatCurrency(profit.interest) : "—"}
+            icon={<Banknote className="size-4 text-muted-foreground" />}
           />
         </div>
       </section>
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Balance Sheet Position (all time)
         </h2>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <ReportMetricCard
+          <SummaryCard
             title="Cash on Hand"
-            value={balances?.cash}
-            icon={Wallet}
-            accent="bg-emerald-50 text-emerald-700"
+            value={balances ? formatCurrency(balances.cash) : "—"}
+            icon={<Wallet className="size-4 text-muted-foreground" />}
           />
-          <ReportMetricCard
+          <SummaryCard
             title="Bank + MFS"
             value={
               balances
-                ? Number(balances.bank) + Number(balances.mfs)
-                : undefined
+                ? formatCurrency(Number(balances.bank) + Number(balances.mfs))
+                : "—"
             }
-            icon={Landmark}
-            accent="bg-sky-50 text-sky-700"
+            icon={<Landmark className="size-4 text-muted-foreground" />}
           />
-          <ReportMetricCard
+          <SummaryCard
             title="Inventory (GL)"
-            value={balances?.inventory}
-            subtitle={
+            value={balances ? formatCurrency(balances.inventory) : "—"}
+            description={
               overview.data
                 ? `Batch valuation ${formatCurrency(overview.data.inventoryBatchValuation)}`
                 : undefined
             }
-            icon={Boxes}
-            accent="bg-indigo-50 text-indigo-700"
+            icon={<Boxes className="size-4 text-muted-foreground" />}
           />
-          <ReportMetricCard
+          <SummaryCard
             title="Receivables"
-            value={balances?.accountsReceivable}
-            subtitle={balances ? `Payables ${formatCurrency(balances.accountsPayable)}` : undefined}
-            icon={ArrowDownRight}
-            accent="bg-rose-50 text-rose-700"
+            value={balances ? formatCurrency(balances.accountsReceivable) : "—"}
+            description={balances ? `Payables ${formatCurrency(balances.accountsPayable)}` : undefined}
+            icon={<ArrowDownRight className="size-4 text-muted-foreground" />}
           />
         </div>
       </section>
@@ -250,7 +235,7 @@ export function FinanceOverviewPage() {
           />
         </section>
       )}
-    </div>
+    </PageContainer>
   );
 }
 
@@ -265,8 +250,14 @@ function Row({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-slate-500">{label}</span>
-      <span className={strong ? "font-semibold text-slate-950" : "text-slate-800"}>
+      <span className="text-muted-foreground">{label}</span>
+      <span
+        className={
+          strong
+            ? "font-semibold text-foreground tabular-nums"
+            : "text-foreground tabular-nums"
+        }
+      >
         {formatCurrency(value)}
       </span>
     </div>
@@ -286,29 +277,29 @@ function ReconciliationCard({
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">Reconciliation</CardTitle>
           {allReconciled ? (
-            <Badge className="gap-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
+            <StatusBadge tone="success" dot={false} className="gap-1">
               <CheckCircle2 className="size-3.5" /> Balanced
-            </Badge>
+            </StatusBadge>
           ) : (
-            <Badge variant="outline" className="gap-1 border-amber-300 text-amber-700">
+            <StatusBadge tone="warning" dot={false} className="gap-1">
               <TriangleAlert className="size-3.5" /> Variances
-            </Badge>
+            </StatusBadge>
           )}
         </div>
         <CardDescription>GL vs operational ledgers</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        {checks.length === 0 && <p className="text-slate-400">No checks yet.</p>}
+        {checks.length === 0 && <p className="text-muted-foreground">No checks yet.</p>}
         {checks.map((check) => (
           <div key={check.key} className="flex items-center justify-between gap-3">
-            <span className="capitalize text-slate-500">
+            <span className="text-muted-foreground capitalize">
               {check.key.replace(/([A-Z])/g, " $1").trim()}
             </span>
             <span
               className={
                 check.reconciled
-                  ? "font-medium text-emerald-700"
-                  : "font-medium text-amber-700"
+                  ? "font-medium text-success tabular-nums"
+                  : "font-medium text-warning tabular-nums"
               }
             >
               {formatCurrency(check.variance)}
@@ -368,20 +359,11 @@ function ActivationWizard() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 py-6">
-      <header>
-        <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-          Finance &amp; Growth
-        </p>
-        <h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight text-slate-950">
-          <Landmark className="size-6" /> Activate the Finance Ledger
-        </h1>
-        <p className="mt-2 text-sm text-slate-500">
-          The double-entry ledger starts here. Enter what the business owns and owes
-          today — one balanced opening entry is posted and every future transaction
-          flows through the general ledger.
-        </p>
-      </header>
+    <PageContainer className="max-w-3xl">
+      <PageHeader
+        title="Activate the Finance Ledger"
+        description="The double-entry ledger starts here. Enter what the business owns and owes today — one balanced opening entry is posted and every future transaction flows through the general ledger."
+      />
 
       <Card>
         <CardHeader>
@@ -489,19 +471,19 @@ function ActivationWizard() {
 
       <Card>
         <CardContent className="flex flex-col gap-2 py-4 text-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 text-slate-600">
+          <div className="flex items-center gap-2 text-muted-foreground">
             <Scale className="size-4" />
-            <span>
+            <span className="tabular-nums">
               Debits {formatCurrency(totalDebits)} · Credits {formatCurrency(totalCredits)}
             </span>
           </div>
-          <span className="text-slate-500">
+          <span className="text-muted-foreground">
             {plug !== 0
               ? `Retained earnings plug: ${formatCurrency(Math.abs(plug))} ${plug > 0 ? "(credit)" : "(debit)"}`
               : "Balanced exactly"}
           </span>
           {plug !== 0 && num(ownerCapital) === 0 && (
-            <span className="block text-xs text-amber-700">
+            <span className="block text-xs text-warning">
               Tip: this plug books the difference as opening equity. If that
               money is YOURS, enter it under "Owner capital invested to date"
               instead — the Finance Growth module tracks owner money there.
@@ -516,6 +498,6 @@ function ActivationWizard() {
           Activate &amp; Post Opening Entry
         </Button>
       </div>
-    </div>
+    </PageContainer>
   );
 }

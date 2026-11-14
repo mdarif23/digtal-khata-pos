@@ -25,8 +25,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { SummaryCard } from "@/components/common/SummaryCard";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
-import { formatCurrency } from "@/features/reports/utils/reportUtils";
+import { formatCurrency } from "@/lib/format";
 import { ReportTable, type ReportColumn } from "@/features/reports/components/ReportTable";
 import {
   createOwnerApi,
@@ -72,24 +76,25 @@ export function OwnersPage() {
       key: "type",
       header: "Type",
       render: (row) => (
-        <Badge
-          variant="outline"
-          className={
+        <StatusBadge
+          tone={
             row.type === "investment"
-              ? "text-xs text-emerald-700"
+              ? "success"
               : row.type === "distribution"
-                ? "text-xs text-violet-700"
-                : "text-xs text-amber-700"
+                ? "primary"
+                : "warning"
           }
         >
           {row.type}
-        </Badge>
+        </StatusBadge>
       ),
     },
     {
       key: "amount",
       header: "Amount",
-      render: (row) => <span>{formatCurrency(row.amount)}</span>,
+      render: (row) => <span className="tabular-nums">{formatCurrency(row.amount)}</span>,
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
     },
     {
       key: "method",
@@ -104,36 +109,41 @@ export function OwnersPage() {
   ];
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-            Finance &amp; Growth
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-            Owner Capital
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Investments, withdrawals and distributions — every movement is
-            GL-posted (contributions → 3010, drawings → 3020).
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setTxnDialog("withdrawal")}>
-            <ArrowDownRight className="size-4" /> Record Withdrawal
-          </Button>
-          <Button onClick={() => setTxnDialog("investment")}>
-            <ArrowUpRight className="size-4" /> Record Investment
-          </Button>
-        </div>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="Owner Capital"
+        description="Investments, withdrawals and distributions — every movement is GL-posted (contributions → 3010, drawings → 3020)."
+        actions={
+          <>
+            <Button variant="outline" onClick={() => setTxnDialog("withdrawal")}>
+              <ArrowDownRight className="size-4" /> Record Withdrawal
+            </Button>
+            <Button onClick={() => setTxnDialog("investment")}>
+              <ArrowUpRight className="size-4" /> Record Investment
+            </Button>
+          </>
+        }
+      />
 
       {summary.data && (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <SummaryCard label="Contributed" value={summary.data.totals.contributed} />
-          <SummaryCard label="Returned" value={summary.data.totals.returned} />
-          <SummaryCard label="Distributed" value={summary.data.totals.distributed} />
-          <SummaryCard label="Position" value={summary.data.totals.position} strong />
+          <SummaryCard
+            title="Contributed"
+            value={formatCurrency(summary.data.totals.contributed)}
+          />
+          <SummaryCard
+            title="Returned"
+            value={formatCurrency(summary.data.totals.returned)}
+          />
+          <SummaryCard
+            title="Distributed"
+            value={formatCurrency(summary.data.totals.distributed)}
+          />
+          <SummaryCard
+            title="Position"
+            value={formatCurrency(summary.data.totals.position)}
+            valueClassName="text-success"
+          />
         </div>
       )}
 
@@ -149,24 +159,24 @@ export function OwnersPage() {
             {(owners.data ?? []).map((owner) => (
               <div
                 key={owner.id}
-                className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5"
+                className="flex items-center justify-between rounded-xl border px-3 py-2.5"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-900">{owner.name}</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="truncate text-sm font-medium text-foreground">{owner.name}</p>
+                  <p className="text-xs text-muted-foreground">
                     {owner.ownershipPercent != null
                       ? `${Number(owner.ownershipPercent)}% ownership`
                       : "Owner"}{" "}
                     · in {formatCurrency(owner.totals?.invested ?? "0")}
                   </p>
                 </div>
-                <Badge variant="outline" className="shrink-0 text-xs">
+                <Badge variant="outline" className="shrink-0 text-xs tabular-nums">
                   {formatCurrency(owner.capitalPosition ?? "0")}
                 </Badge>
               </div>
             ))}
             {owners.data?.length === 0 && (
-              <p className="py-4 text-center text-sm text-slate-400">
+              <p className="py-4 text-center text-sm text-muted-foreground">
                 No owner profiles yet — add the first owner.
               </p>
             )}
@@ -218,28 +228,7 @@ export function OwnersPage() {
         owners={owners.data ?? []}
         onClose={() => setTxnDialog(null)}
       />
-    </div>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  strong,
-}: {
-  label: string;
-  value: string;
-  strong?: boolean;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white p-4">
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p
-        className={`mt-1 text-xl font-semibold ${strong ? "text-emerald-700" : "text-slate-950"}`}
-      >
-        {formatCurrency(value)}
-      </p>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -271,7 +260,7 @@ function AddOwnerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add owner profile</DialogTitle>
           <DialogDescription>
@@ -358,7 +347,7 @@ function RecordTransactionDialog({
 
   return (
     <Dialog open={kind != null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
             {isInvestment ? "Record owner investment" : "Record owner withdrawal"}

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,8 +23,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
-import { formatCurrency, formatDate } from "@/features/reports/utils/reportUtils";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { ReportTable, type ReportColumn } from "@/features/reports/components/ReportTable";
 import { createAssetApi, runDepreciationApi } from "../finance.api";
 import { useAssets, useInvalidateFinance } from "../hooks/useFinance";
@@ -59,49 +61,52 @@ export function AssetsPage() {
     { key: "name", header: "Asset", render: (row) => <span className="font-medium">{row.name}</span> },
     { key: "category", header: "Category", render: (row) => <span className="capitalize">{row.category}</span> },
     { key: "acquiredAt", header: "Acquired", render: (row) => formatDate(row.acquiredAt) },
-    { key: "cost", header: "Cost", render: (row) => formatCurrency(row.cost) },
-    { key: "accumulatedDepreciation", header: "Depreciated", render: (row) => formatCurrency(row.accumulatedDepreciation) },
-    { key: "bookValue", header: "Book value", render: (row) => <strong>{formatCurrency(row.bookValue ?? "0")}</strong> },
+    {
+      key: "cost",
+      header: "Cost",
+      render: (row) => formatCurrency(row.cost),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "accumulatedDepreciation",
+      header: "Depreciated",
+      render: (row) => formatCurrency(row.accumulatedDepreciation),
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
+    {
+      key: "bookValue",
+      header: "Book value",
+      render: (row) => <strong>{formatCurrency(row.bookValue ?? "0")}</strong>,
+      className: "text-right tabular-nums",
+      headerClassName: "text-right",
+    },
     {
       key: "status",
       header: "Status",
       render: (row) => (
-        <Badge
-          variant="outline"
-          className={
-            row.status === "active"
-              ? "text-xs text-emerald-700"
-              : "text-xs text-slate-500"
-          }
-        >
+        <StatusBadge tone={row.status === "active" ? "success" : "neutral"}>
           {row.status.replace("_", " ")}
-        </Badge>
+        </StatusBadge>
       ),
     },
   ];
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-            Finance &amp; Growth
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-            Assets &amp; Depreciation
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Straight-line monthly depreciation: DR depreciation expense / CR
-            accumulated depreciation (contra-asset), idempotent per month.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={runDepreciation} disabled={running}>
-            {running ? "Running…" : "Run previous-month depreciation"}
-          </Button>
-          <Button onClick={() => setCreateOpen(true)}>Add Asset</Button>
-        </div>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="Assets & Depreciation"
+        description="Straight-line monthly depreciation: DR depreciation expense / CR accumulated depreciation (contra-asset), idempotent per month."
+        actions={
+          <>
+            <Button variant="outline" onClick={runDepreciation} disabled={running}>
+              {running ? "Running…" : "Run previous-month depreciation"}
+            </Button>
+            <Button onClick={() => setCreateOpen(true)}>Add Asset</Button>
+          </>
+        }
+      />
 
       <Card>
         <CardContent>
@@ -116,7 +121,7 @@ export function AssetsPage() {
       </Card>
 
       <CreateAssetDialog open={createOpen} onOpenChange={setCreateOpen} />
-    </div>
+    </PageContainer>
   );
 }
 
@@ -154,7 +159,7 @@ function CreateAssetDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Add business asset</DialogTitle>
           <DialogDescription>

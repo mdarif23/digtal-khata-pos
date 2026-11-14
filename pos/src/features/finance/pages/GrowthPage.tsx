@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { ArrowDownRight, ArrowUpRight, Lightbulb } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -14,8 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ReportMetricCard } from "@/features/reports/components/ReportMetricCard";
-import { formatCurrency } from "@/features/reports/utils/reportUtils";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { SummaryCard } from "@/components/common/SummaryCard";
+import { PageContainer } from "@/components/common/PageContainer";
+import { PageHeader } from "@/components/common/PageHeader";
+import { formatCurrency } from "@/lib/format";
 import { useGrowth } from "../hooks/useFinance";
 import type { GrowthMetrics } from "../finance.types";
 
@@ -38,22 +40,15 @@ const PERIOD_OPTIONS = [
  * the whole page with "changeBadge is not defined"). */
 function renderChangeBadge(value: number | null | undefined) {
   if (value == null) {
-    return (
-      <Badge variant="outline" className="text-xs text-slate-500">
-        insufficient data
-      </Badge>
-    );
+    return <StatusBadge tone="neutral">insufficient data</StatusBadge>;
   }
   const up = value >= 0;
   return (
-    <Badge
-      variant="outline"
-      className={`gap-1 text-xs ${up ? "text-emerald-700" : "text-rose-700"}`}
-    >
+    <StatusBadge tone={up ? "success" : "danger"} dot={false} className="gap-1">
       {up ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
       {up ? "+" : ""}
       {value}%
-    </Badge>
+    </StatusBadge>
   );
 }
 
@@ -66,33 +61,25 @@ export function GrowthPage() {
   const changes = growth.data?.changes;
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-            Finance &amp; Growth
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-            Business Growth
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Verified figures only — every KPI comes from the posted ledger, with
-            rule-based insights. Zero denominators show as insufficient data.
-          </p>
-        </div>
-        <Select value={period} onValueChange={setPeriod}>
-          <SelectTrigger className="w-64">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PERIOD_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="Business Growth"
+        description="Verified figures only — every KPI comes from the posted ledger, with rule-based insights. Zero denominators show as insufficient data."
+        actions={
+          <Select value={period} onValueChange={setPeriod}>
+            <SelectTrigger className="w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PERIOD_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricWithChange
@@ -152,12 +139,14 @@ export function GrowthPage() {
           change={changes?.newCustomersPercent}
           isCount
         />
-        <ReportMetricCard
+        <SummaryCard
           title="Employee Cost Ratio"
-          value={current?.employeeCostRatioPercent}
-          isPercentage
-          subtitle={current ? `Salaries ${formatCurrency(current.employeeCost)}` : undefined}
-          accent="bg-amber-50 text-amber-700"
+          value={
+            current?.employeeCostRatioPercent != null
+              ? `${Number(current.employeeCostRatioPercent).toFixed(2)}%`
+              : "—"
+          }
+          description={current ? `Salaries ${formatCurrency(current.employeeCost)}` : undefined}
         />
       </div>
 
@@ -168,16 +157,16 @@ export function GrowthPage() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-slate-500">Turnover (period)</span>
+              <span className="text-muted-foreground">Turnover (period)</span>
               <span>{current?.inventoryTurnover != null ? `${current.inventoryTurnover}×` : "—"}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Stock holding days</span>
+              <span className="text-muted-foreground">Stock holding days</span>
               <span>
                 {current?.stockHoldingDays != null ? `${current.stockHoldingDays} days` : "—"}
               </span>
             </div>
-            <p className="pt-1 text-xs text-slate-400">
+            <p className="pt-1 text-xs text-muted-foreground">
               Point-in-time batch valuation approximation.
             </p>
           </CardContent>
@@ -188,14 +177,14 @@ export function GrowthPage() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-slate-500">ROIC (annualized)</span>
+              <span className="text-muted-foreground">ROIC (annualized)</span>
               <span>
                 {current?.returnOnInvestedCapitalPercent != null
                   ? `${current.returnOnInvestedCapitalPercent}%`
                   : "—"}
               </span>
             </div>
-            <p className="pt-1 text-xs text-slate-400">
+            <p className="pt-1 text-xs text-muted-foreground">
               Net profit annualized over owner position + loans.
             </p>
           </CardContent>
@@ -203,27 +192,22 @@ export function GrowthPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-1.5 text-base">
-              <Lightbulb className="size-4 text-amber-500" /> Insights
+              <Lightbulb className="size-4 text-warning" /> Insights
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             {(growth.data?.insights ?? []).length === 0 && (
-              <p className="text-slate-400">No notable signals for this period.</p>
+              <p className="text-muted-foreground">No notable signals for this period.</p>
             )}
             {(growth.data?.insights ?? []).map((insight, index) => (
-              <div key={index} className="rounded-xl border border-slate-200 px-3 py-2">
-                <Badge
-                  variant="outline"
-                  className={`mb-1 text-xs ${
-                    insight.type === "positive"
-                      ? "text-emerald-700"
-                      : "text-amber-700"
-                  }`}
-                >
-                  {insight.type}
-                </Badge>
-                <p className="text-slate-800">{insight.message}</p>
-                <p className="mt-0.5 text-xs text-slate-400">{insight.evidence}</p>
+              <div key={index} className="rounded-xl border px-3 py-2">
+                <div className="mb-1">
+                  <StatusBadge tone={insight.type === "positive" ? "success" : "warning"}>
+                    {insight.type}
+                  </StatusBadge>
+                </div>
+                <p className="text-foreground">{insight.message}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{insight.evidence}</p>
               </div>
             ))}
           </CardContent>
@@ -231,11 +215,11 @@ export function GrowthPage() {
       </div>
 
       {current?.partial && (
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-muted-foreground">
           The current period is still in progress — comparisons reflect partial data.
         </p>
       )}
-    </div>
+    </PageContainer>
   );
 }
 
@@ -248,26 +232,23 @@ function MetricWithChange({
   isCount,
 }: {
   title: string;
-  value?: string | number;
-  previous?: string | number;
-  change?: number | null;
-  subtitle?: string;
+  value?: string | number | undefined;
+  previous?: string | number | undefined;
+  change?: number | null | undefined;
+  subtitle?: string | undefined;
   isCount?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-medium text-slate-500">{title}</p>
-        {renderChangeBadge(change)}
-      </div>
-      <p className="mt-1.5 text-xl font-semibold text-slate-950">
-        {isCount ? (value ?? "—") : formatCurrency(value as string | undefined)}
-      </p>
-      <p className="mt-0.5 text-xs text-slate-400">
-        Previous:{" "}
-        {isCount ? (previous ?? "—") : formatCurrency(previous as string | undefined)}
-        {subtitle ? ` · ${subtitle}` : ""}
-      </p>
-    </div>
+    <SummaryCard
+      title={title}
+      value={isCount ? (value ?? "—") : formatCurrency(value)}
+      icon={renderChangeBadge(change)}
+      description={
+        <>
+          Previous: {isCount ? (previous ?? "—") : formatCurrency(previous)}
+          {subtitle ? ` · ${subtitle}` : ""}
+        </>
+      }
+    />
   );
 }
