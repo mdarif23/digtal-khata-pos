@@ -422,7 +422,7 @@ export function StockCountPage() {
                           <span
                             className={`font-mono ${
                               line.countedQuantity !== line.expectedQuantity
-                                ? "text-amber-600"
+                                ? "text-warning"
                                 : ""
                             }`}
                           >

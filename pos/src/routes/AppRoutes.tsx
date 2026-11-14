@@ -753,28 +753,31 @@ const routes = [
         ),
       },
       {
+        // Add/edit product render inside the app shell (previously they were
+        // standalone full-screen pages — the user lost all navigation in the
+        // middle of the most complex form in the app).
+        path: "/product/addproduct",
+        element: (
+          <RequirePermission permission="products.create">
+            <ProductStockForm />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/product/:id/edit",
+        element: (
+          <RequirePermission permission="products.edit">
+            <ProductStockForm />
+          </RequirePermission>
+        ),
+      },
+      {
         // P1-6: catch-all — unknown URLs render the layout with a clear
         // not-found state instead of a blank content area.
         path: "*",
         element: <RouteErrorBoundary />,
       },
     ],
-  },
-  {
-    path: "/product/addproduct",
-    element: (
-      <RequirePermission permission="products.create">
-        <ProductStockForm />
-      </RequirePermission>
-    ),
-  },
-  {
-    path: "/product/:id/edit",
-    element: (
-      <RequirePermission permission="products.edit">
-        <ProductStockForm />
-      </RequirePermission>
-    ),
   },
   {
     path: "/403",

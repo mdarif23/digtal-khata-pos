@@ -218,7 +218,7 @@ const ProductStockForm = () => {
 
   if (isEditing && (isLoadingProduct || loadError)) {
     return (
-      <div className="min-h-screen bg-muted/20 p-4 md:p-8">
+      <div className="bg-muted/20 p-4 md:p-8">
         <Card className="mx-auto max-w-3xl">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -265,7 +265,7 @@ const ProductStockForm = () => {
   }
 
   return (
-    <div className="min-h-screen bg-muted/20 p-4 md:p-8">
+    <div className="bg-muted/20 p-4 md:p-8">
       <div className="mx-auto max-w-7xl space-y-6">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
