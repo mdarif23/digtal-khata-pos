@@ -149,6 +149,7 @@ export interface CategoryWritePayload {
   description?: string | null;
   color?: string | null;
   icon?: string | null;
+  glAccountId?: number | null;
 }
 
 export function useCreateExpenseCategory() {

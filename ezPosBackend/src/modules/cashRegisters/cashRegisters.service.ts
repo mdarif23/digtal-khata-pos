@@ -1368,6 +1368,40 @@ export async function recordDueCollectionInTx(
 }
 
 /**
+ * Cash taken for a PAID gift-card issuance lands in the issuer's open
+ * register session (same attribution rules as due collections; no-op when
+ * no drawer is open — the GL entry still records the money). The source
+ * record is the gift card itself; the reference unique index makes retries
+ * idempotent.
+ */
+export async function recordGiftCardIssueCashInTx(
+  tx: Tx,
+  businessId: number,
+  userId: number | null,
+  locationId: number | null,
+  cashAmount: number,
+  giftCardId: number,
+): Promise<void> {
+  if (cashAmount <= 0 || userId === null || locationId === null) return;
+  const session = await findOpenSessionForAttribution(
+    tx,
+    businessId,
+    userId,
+    locationId,
+  );
+  if (!session) return;
+  await tx.insert(registerTransactions).values({
+    businessId,
+    sessionId: session.id,
+    userId,
+    type: "cash_in",
+    amount: roundMoney(cashAmount),
+    referenceType: "gift_card_issue",
+    referenceId: giftCardId,
+  });
+}
+
+/**
  * The actor's open session — or, when the request came from a bound
  * terminal, that terminal's open session (the drawer the cash physically
  * reached, regardless of which cashier opened it). Only sessions whose

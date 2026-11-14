@@ -6,6 +6,7 @@ import {
   requireFullAccess,
 } from "../../middleware/business.js";
 import { requirePermission } from "../../middleware/permissions.js";
+import { requireLocationAccess } from "../../middleware/location.js";
 
 const router = express.Router();
 
@@ -18,10 +19,13 @@ router.get(
   requirePermission("pos.view"),
   giftCardsController.listGiftCards,
 );
-// Issues a card; the monetary side is the register's gift-card sale.
+// Issues a card. Paid issues (paymentMethod given) post the money side —
+// GL cash/bank vs 2040 plus a drawer cash_in — so the route resolves the
+// caller's location for the drawer attribution.
 router.post(
   "/api/gift-cards",
   ...write,
+  requireLocationAccess(),
   requirePermission("pos.create_sale"),
   giftCardsController.issueGiftCard,
 );

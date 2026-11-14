@@ -57,6 +57,8 @@ export function GiftCardsPage() {
   const [issueOpen, setIssueOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [expiry, setExpiry] = useState("");
+  /** How the customer paid (F1-01) — empty = complimentary card. */
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "bangla_qr" | "card" | "">("cash");
   const [issuedCode, setIssuedCode] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detail, setDetail] = useState<GiftCardDetail | null>(null);
@@ -100,10 +102,15 @@ export function GiftCardsPage() {
       const res = await axios.post<{ data: { code: string } }>("/gift-cards", {
         initialAmount: parsed,
         expiresAt: expiry ? new Date(expiry).toISOString() : null,
+        // Paid issue: the money posts to the GL (cash/bank vs gift-card
+        // liability) and lands in the open drawer when paid in cash.
+        // Empty method = complimentary card — no money movement.
+        paymentMethod: paymentMethod === "" ? null : paymentMethod,
       });
       setIssuedCode(res.data.data.code);
       setAmount("");
       setExpiry("");
+      setPaymentMethod("cash");
       await load();
     } catch (err) {
       toast.add({
@@ -248,6 +255,27 @@ export function GiftCardsPage() {
                     value={expiry}
                     onChange={(e) => setExpiry(e.target.value)}
                   />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium">Paid via</span>
+                  <select
+                    className="w-full rounded-md border bg-background p-2 text-sm"
+                    value={paymentMethod}
+                    onChange={(e) =>
+                      setPaymentMethod(
+                        e.target.value as "cash" | "bangla_qr" | "card" | "",
+                      )
+                    }
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="bangla_qr">Bangla QR</option>
+                    <option value="card">Card</option>
+                    <option value="">Complimentary (no payment)</option>
+                  </select>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Paid issues record the money (ledger + drawer);
+                    complimentary cards move no money.
+                  </span>
                 </label>
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setIssueOpen(false)}>
