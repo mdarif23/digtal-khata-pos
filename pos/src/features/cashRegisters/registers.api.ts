@@ -18,6 +18,17 @@ export const MOVEMENT_LABELS: Record<ManualMovementType, string> = {
   adjustment_out: "Adjustment −",
 };
 
+/** i18n keys (register namespace) backing the same labels — Phase 5. The
+ *  English MOVEMENT_LABELS values above are the render-time defaultValue. */
+export const MOVEMENT_LABEL_KEYS: Record<ManualMovementType, string> = {
+  cash_in: "register:movement.cash_in",
+  cash_out: "register:movement.cash_out",
+  safe_deposit: "register:movement.safe_deposit",
+  safe_withdrawal: "register:movement.safe_withdrawal",
+  adjustment_in: "register:movement.adjustment_in",
+  adjustment_out: "register:movement.adjustment_out",
+};
+
 /** One row of a counted cash sheet (Phase 1). */
 export interface DenominationCount {
   value: number;

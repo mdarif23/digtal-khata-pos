@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import "@/i18n/index.js";
 import { RefreshCcw, Wallet } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -28,6 +30,7 @@ import {
   getDenominationsApi,
   getRegistersApi,
   MOVEMENT_LABELS,
+  MOVEMENT_LABEL_KEYS,
   openRegisterApi,
   reconcileRegisterApi,
   reopenRegisterApi,
@@ -65,6 +68,7 @@ function extractError(error: unknown, fallback: string): string {
  * attributes cash sales automatically.
  */
 export function RegisterDialog() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState<RegisterSession | null>(null);
   const [registers, setRegisters] = useState<RegisterSummary[]>([]);
@@ -108,7 +112,12 @@ export function RegisterDialog() {
       setRegisters(registerList);
       setDenominations(denominationList);
     } catch {
-      toast.add({ title: "Unable to load register state", type: "error" });
+      toast.add({
+        title: t("register:toasts.loadFailed", {
+          defaultValue: "Unable to load register state",
+        }),
+        type: "error",
+      });
     } finally {
       setLoading(false);
     }
@@ -120,12 +129,20 @@ export function RegisterDialog() {
 
   async function handleOpen() {
     if (registerId === "") {
-      toast.add({ title: "Choose a register.", type: "error" });
+      toast.add({
+        title: t("register:toasts.chooseRegister", { defaultValue: "Choose a register." }),
+        type: "error",
+      });
       return;
     }
     const amount = Number(openingCash);
     if (!Number.isFinite(amount) || amount < 0) {
-      toast.add({ title: "Opening cash must be zero or more.", type: "error" });
+      toast.add({
+        title: t("register:toasts.openingCashInvalid", {
+          defaultValue: "Opening cash must be zero or more.",
+        }),
+        type: "error",
+      });
       return;
     }
     const sheet = sheetToPayload(denominations, openCounts);
@@ -133,14 +150,23 @@ export function RegisterDialog() {
     try {
       const opened = await openRegisterApi(Number(registerId), amount, sheet);
       toast.add({
-        title: `Register opened with ${formatCurrency(opened.openingCash)}`,
+        title: t("register:toasts.openedWith", {
+          defaultValue: "Register opened with {{amount}}",
+          amount: formatCurrency(opened.openingCash),
+        }),
         type: "success",
       });
       setSession(opened);
       setOpenCounts({});
       void load();
     } catch (error) {
-      toast.add({ title: extractError(error, "Unable to open the register."), type: "error" });
+      toast.add({
+        title: extractError(
+          error,
+          t("register:toasts.openFailed", { defaultValue: "Unable to open the register." }),
+        ),
+        type: "error",
+      });
     } finally {
       setActing(false);
     }
@@ -165,7 +191,13 @@ export function RegisterDialog() {
         },
       );
       toast.add({
-        title: `${MOVEMENT_LABELS[pendingMovement.type]} recorded — expected ${formatCurrency(updated.expectedCash)}`,
+        title: t("register:toasts.movementRecorded", {
+          defaultValue: "{{label}} recorded — expected {{amount}}",
+          label: t(MOVEMENT_LABEL_KEYS[pendingMovement.type], {
+            defaultValue: MOVEMENT_LABELS[pendingMovement.type],
+          }),
+          amount: formatCurrency(updated.expectedCash),
+        }),
         type: "success",
       });
       setMovementAmount("");
@@ -176,7 +208,10 @@ export function RegisterDialog() {
       return { ok: true };
     } catch (error) {
       toast.add({
-        title: extractError(error, "Unable to record the movement."),
+        title: extractError(
+          error,
+          t("register:toasts.movementFailed", { defaultValue: "Unable to record the movement." }),
+        ),
         type: "error",
       });
       return { ok: false, error };
@@ -189,7 +224,12 @@ export function RegisterDialog() {
     if (!session) return;
     const amount = Number(movementAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
-      toast.add({ title: "Amount must be greater than zero.", type: "error" });
+      toast.add({
+        title: t("register:toasts.amountInvalid", {
+          defaultValue: "Amount must be greater than zero.",
+        }),
+        type: "error",
+      });
       return;
     }
     const referenceNo =
@@ -219,7 +259,12 @@ export function RegisterDialog() {
     if (!session) return;
     const amount = Number(reconcileAmount);
     if (!Number.isFinite(amount) || amount < 0) {
-      toast.add({ title: "Counted cash must be zero or more.", type: "error" });
+      toast.add({
+        title: t("register:toasts.countedInvalid", {
+          defaultValue: "Counted cash must be zero or more.",
+        }),
+        type: "error",
+      });
       return;
     }
     setActing(true);
@@ -232,15 +277,29 @@ export function RegisterDialog() {
       toast.add({
         title:
           result.difference === 0
-            ? "Blind count balanced"
-            : `Blind count — ${result.difference > 0 ? "over" : "short"} by ${formatCurrency(Math.abs(result.difference))} (expected cash unchanged)`,
+            ? t("register:blindBalanced", { defaultValue: "Blind count balanced" })
+            : t("register:blindVariance", {
+                defaultValue:
+                  "Blind count — {{direction}} by {{amount}} (expected cash unchanged)",
+                direction: t(
+                  result.difference > 0 ? "register:over" : "register:short",
+                  { defaultValue: result.difference > 0 ? "over" : "short" },
+                ),
+                amount: formatCurrency(Math.abs(result.difference)),
+              }),
         type: result.difference === 0 ? "success" : "error",
       });
       setReconcileOpen(false);
       setReconcileAmount("");
       setReconcileCounts({});
     } catch (error) {
-      toast.add({ title: extractError(error, "Unable to reconcile the drawer."), type: "error" });
+      toast.add({
+        title: extractError(
+          error,
+          t("register:toasts.reconcileFailed", { defaultValue: "Unable to reconcile the drawer." }),
+        ),
+        type: "error",
+      });
     } finally {
       setActing(false);
     }
@@ -250,7 +309,12 @@ export function RegisterDialog() {
     if (!session) return;
     const amount = Number(countedCash);
     if (!Number.isFinite(amount) || amount < 0) {
-      toast.add({ title: "Counted cash must be zero or more.", type: "error" });
+      toast.add({
+        title: t("register:toasts.countedInvalid", {
+          defaultValue: "Counted cash must be zero or more.",
+        }),
+        type: "error",
+      });
       return;
     }
     setActing(true);
@@ -265,8 +329,14 @@ export function RegisterDialog() {
       toast.add({
         title:
           difference === 0
-            ? "Register closed — balanced"
-            : `Register closed — ${difference > 0 ? "over" : "short"} by ${formatCurrency(Math.abs(difference))}`,
+            ? t("register:closedBalanced", { defaultValue: "Register closed — balanced" })
+            : t("register:closedVariance", {
+                defaultValue: "Register closed — {{direction}} by {{amount}}",
+                direction: t(difference > 0 ? "register:over" : "register:short", {
+                  defaultValue: difference > 0 ? "over" : "short",
+                }),
+                amount: formatCurrency(Math.abs(difference)),
+              }),
         type: difference === 0 ? "success" : "error",
       });
       setSession(closed);
@@ -274,7 +344,13 @@ export function RegisterDialog() {
       // Stay open on the closed summary so a manager can reopen under
       // approval without hunting for the session.
     } catch (error) {
-      toast.add({ title: extractError(error, "Unable to close the register."), type: "error" });
+      toast.add({
+        title: extractError(
+          error,
+          t("register:toasts.closeFailed", { defaultValue: "Unable to close the register." }),
+        ),
+        type: "error",
+      });
     } finally {
       setActing(false);
     }
@@ -285,13 +361,22 @@ export function RegisterDialog() {
     try {
       const reopened = await reopenRegisterApi(session.id, token);
       toast.add({
-        title: `Session reopened — opening float ${formatCurrency(reopened.openingCash)}`,
+        title: t("register:toasts.reopened", {
+          defaultValue: "Session reopened — opening float {{amount}}",
+          amount: formatCurrency(reopened.openingCash),
+        }),
         type: "success",
       });
       setSession(reopened);
       void load();
     } catch (error) {
-      toast.add({ title: extractError(error, "Unable to reopen the session."), type: "error" });
+      toast.add({
+        title: extractError(
+          error,
+          t("register:toasts.reopenFailed", { defaultValue: "Unable to reopen the session." }),
+        ),
+        type: "error",
+      });
     }
   }
 
@@ -308,7 +393,7 @@ export function RegisterDialog() {
         onClick={() => setOpen(true)}
       >
         <Wallet className="size-4" />
-        Register
+        {t("register:toolbar", { defaultValue: "Register" })}
         {session && session.status === "open" ? (
           <Badge variant="secondary" className="ml-1">
             {formatCurrency(session.expectedCash)}
@@ -319,39 +404,60 @@ export function RegisterDialog() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cash register</DialogTitle>
+            <DialogTitle>
+              {t("register:title", { defaultValue: "Cash register" })}
+            </DialogTitle>
             <DialogDescription>
               {session
                 ? session.status === "open"
-                  ? `Open at ${session.registerName} (${session.locationName})`
-                  : `Closed at ${session.registerName} — variance ${formatCurrency(session.difference ?? 0)}`
-                : "Open a drawer to start taking cash payments."}
+                  ? t("register:openAt", {
+                      defaultValue: "Open at {{name}} ({{location}})",
+                      name: session.registerName,
+                      location: session.locationName,
+                    })
+                  : t("register:closedAt", {
+                      defaultValue: "Closed at {{name}} — variance {{variance}}",
+                      name: session.registerName,
+                      variance: formatCurrency(session.difference ?? 0),
+                    })
+                : t("register:openDrawerHint", {
+                    defaultValue: "Open a drawer to start taking cash payments.",
+                  })}
             </DialogDescription>
           </DialogHeader>
 
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
-              <Spinner className="size-4" /> Loading…
+              <Spinner className="size-4" />{" "}
+              {t("common:loading", { defaultValue: "Loading…" })}
             </div>
           ) : session && session.status === "open" ? (
             <div className="grid gap-4">
               <div className="grid grid-cols-3 gap-2 rounded-md border p-3 text-center">
                 <div>
-                  <div className="text-xs text-muted-foreground">Opening</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("register:statOpening", { defaultValue: "Opening" })}
+                  </div>
                   <div className="font-semibold">{formatCurrency(session.openingCash)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">Expected</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("register:expected", { defaultValue: "Expected" })}
+                  </div>
                   <div className="font-semibold">{formatCurrency(session.expectedCash)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">Cashier</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("register:cashier", { defaultValue: "Cashier" })}
+                  </div>
                   <div className="truncate font-semibold">{session.userName}</div>
                 </div>
               </div>
 
               <div className="grid gap-2">
-                <Label>Cash movement</Label>
+                <Label>
+                  {t("register:cashMovement", { defaultValue: "Cash movement" })}
+                </Label>
                 <div className="flex items-center gap-2">
                   <Select
                     value={movementType}
@@ -376,24 +482,36 @@ export function RegisterDialog() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="cash_in">Cash in</SelectItem>
-                      <SelectItem value="cash_out">Cash out</SelectItem>
-                      <SelectItem value="safe_deposit">Safe deposit (drop)</SelectItem>
-                      <SelectItem value="safe_withdrawal">Safe withdrawal</SelectItem>
-                      <SelectItem value="adjustment_in">Adjustment +</SelectItem>
-                      <SelectItem value="adjustment_out">Adjustment −</SelectItem>
+                      {(
+                        [
+                          "cash_in",
+                          "cash_out",
+                          "safe_deposit",
+                          "safe_withdrawal",
+                          "adjustment_in",
+                          "adjustment_out",
+                        ] as ManualMovementType[]
+                      ).map((movement) => (
+                        <SelectItem key={movement} value={movement}>
+                          {t(MOVEMENT_LABEL_KEYS[movement], {
+                            defaultValue: MOVEMENT_LABELS[movement],
+                          })}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Input
                     type="number"
                     min={0}
-                    placeholder="Amount"
+                    placeholder={t("common:amount", { defaultValue: "Amount" })}
                     className="w-28"
                     value={movementAmount}
                     onChange={(event) => setMovementAmount(event.target.value)}
                   />
                   <Input
-                    placeholder="Note (optional)"
+                    placeholder={t("register:notePlaceholder", {
+                      defaultValue: "Note (optional)",
+                    })}
                     className="flex-1"
                     value={movementNote}
                     onChange={(event) => setMovementNote(event.target.value)}
@@ -404,12 +522,14 @@ export function RegisterDialog() {
                     disabled={acting}
                     onClick={() => void handleMovement()}
                   >
-                    Record
+                    {t("register:record", { defaultValue: "Record" })}
                   </Button>
                 </div>
                 {movementType === "safe_deposit" ? (
                   <Input
-                    placeholder="Drop reference / slip number (optional)"
+                    placeholder={t("register:dropReferencePlaceholder", {
+                      defaultValue: "Drop reference / slip number (optional)",
+                    })}
                     value={dropReference}
                     onChange={(event) => setDropReference(event.target.value)}
                   />
@@ -418,7 +538,9 @@ export function RegisterDialog() {
 
               <div className="grid gap-2 rounded-md border p-3">
                 <div className="flex items-center justify-between">
-                  <Label>Close register</Label>
+                  <Label>
+                    {t("register:closeRegisterLabel", { defaultValue: "Close register" })}
+                  </Label>
                   <Button
                     variant="outline"
                     size="sm"
@@ -426,18 +548,22 @@ export function RegisterDialog() {
                     onClick={() => setReconcileOpen((v) => !v)}
                   >
                     <RefreshCcw className="size-3.5" />
-                    Mid-shift count
+                    {t("register:midShiftCount", { defaultValue: "Mid-shift count" })}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Count the drawer and enter the amount. Expected cash:{" "}
-                  <span className="font-medium">{formatCurrency(session.expectedCash)}</span>
+                  {t("register:countDrawerHint", {
+                    defaultValue: "Count the drawer and enter the amount. Expected cash: {{amount}}",
+                    amount: formatCurrency(session.expectedCash),
+                  })}
                 </p>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number"
                     min={0}
-                    placeholder="Counted cash"
+                    placeholder={t("register:countedCashPlaceholder", {
+                      defaultValue: "Counted cash",
+                    })}
                     className="w-32"
                     value={countedCash}
                     onChange={(event) => setCountedCash(event.target.value)}
@@ -447,7 +573,9 @@ export function RegisterDialog() {
                     disabled={acting}
                     onClick={() => void handleClose()}
                   >
-                    {acting ? "Closing…" : "Close register"}
+                    {acting
+                      ? t("register:closing", { defaultValue: "Closing…" })
+                      : t("register:closeRegisterButton", { defaultValue: "Close register" })}
                   </Button>
                 </div>
                 <DenominationSheet
@@ -459,15 +587,21 @@ export function RegisterDialog() {
 
               {reconcileOpen ? (
                 <div className="grid gap-2 rounded-md border border-dashed p-3">
-                  <Label>Mid-shift blind count</Label>
+                  <Label>
+                    {t("register:blindCountLabel", { defaultValue: "Mid-shift blind count" })}
+                  </Label>
                   <p className="text-xs text-muted-foreground">
-                    Records an interim variance without changing expected cash.
+                    {t("register:blindCountHint", {
+                      defaultValue: "Records an interim variance without changing expected cash.",
+                    })}
                   </p>
                   <div className="flex items-center gap-2">
                     <Input
                       type="number"
                       min={0}
-                      placeholder="Counted cash"
+                      placeholder={t("register:countedCashPlaceholder", {
+                        defaultValue: "Counted cash",
+                      })}
                       className="w-32"
                       value={reconcileAmount}
                       onChange={(event) => setReconcileAmount(event.target.value)}
@@ -478,7 +612,7 @@ export function RegisterDialog() {
                       disabled={acting}
                       onClick={() => void handleReconcile()}
                     >
-                      Record count
+                      {t("register:recordCount", { defaultValue: "Record count" })}
                     </Button>
                   </div>
                   <DenominationSheet
@@ -493,15 +627,21 @@ export function RegisterDialog() {
             <div className="grid gap-3">
               <div className="grid grid-cols-3 gap-2 rounded-md border p-3 text-center">
                 <div>
-                  <div className="text-xs text-muted-foreground">Expected</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("register:expected", { defaultValue: "Expected" })}
+                  </div>
                   <div className="font-semibold">{formatCurrency(session.expectedCash)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">Counted</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("register:counted", { defaultValue: "Counted" })}
+                  </div>
                   <div className="font-semibold">{formatCurrency(session.countedCash ?? 0)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">Difference</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("register:difference", { defaultValue: "Difference" })}
+                  </div>
                   <div
                     className={`font-semibold ${(session.difference ?? 0) === 0 ? "" : (session.difference ?? 0) > 0 ? "text-emerald-600" : "text-red-600"}`}
                   >
@@ -510,22 +650,28 @@ export function RegisterDialog() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                Reopening needs a manager approval — the counted cash becomes
-                the new opening float and the variance stays in the audit log.
+                {t("register:reopenHint", {
+                  defaultValue:
+                    "Reopening needs a manager approval — the counted cash becomes the new opening float and the variance stays in the audit log.",
+                })}
               </p>
               <DialogFooter>
                 <Button
                   variant="outline"
                   onClick={() => setReopenApprovalOpen(true)}
                 >
-                  Reopen with manager approval
+                  {t("register:reopenButton", {
+                    defaultValue: "Reopen with manager approval",
+                  })}
                 </Button>
               </DialogFooter>
             </div>
           ) : (
             <div className="grid gap-3">
               <div className="grid gap-1.5">
-                <Label>Register</Label>
+                <Label>
+                  {t("register:registerLabel", { defaultValue: "Register" })}
+                </Label>
                 <Select
                   value={registerId || undefined}
                   onValueChange={(value) => setRegisterId(value ?? "")}
@@ -535,7 +681,11 @@ export function RegisterDialog() {
                   }))}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Choose a register" />
+                    <SelectValue
+                      placeholder={t("register:chooseRegister", {
+                        defaultValue: "Choose a register",
+                      })}
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {availableRegisters.map((register) => (
@@ -547,13 +697,17 @@ export function RegisterDialog() {
                 </Select>
                 {registers.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
-                    No registers yet — ask your manager to create one for this
-                    location.
+                    {t("register:noRegisters", {
+                      defaultValue:
+                        "No registers yet — ask your manager to create one for this location.",
+                    })}
                   </p>
                 ) : null}
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="opening-cash">Opening cash</Label>
+                <Label htmlFor="opening-cash">
+                  {t("register:openingCashLabel", { defaultValue: "Opening cash" })}
+                </Label>
                 <Input
                   id="opening-cash"
                   type="number"
@@ -569,7 +723,9 @@ export function RegisterDialog() {
               />
               <DialogFooter>
                 <Button onClick={() => void handleOpen()} disabled={acting}>
-                  {acting ? "Opening…" : "Open register"}
+                  {acting
+                    ? t("register:openingInProgress", { defaultValue: "Opening…" })
+                    : t("register:openRegisterButton", { defaultValue: "Open register" })}
                 </Button>
               </DialogFooter>
             </div>
@@ -581,7 +737,9 @@ export function RegisterDialog() {
         open={reopenApprovalOpen}
         onOpenChange={setReopenApprovalOpen}
         opType="register.reopen"
-        opLabel="reopen this register session"
+        opLabel={t("register:opReopen", {
+          defaultValue: "reopen this register session",
+        })}
         entityType="register_session"
         {...(session?.id !== undefined ? { entityId: session.id } : {})}
         onApproved={(token) => void handleReopened(token)}
@@ -593,8 +751,16 @@ export function RegisterDialog() {
         opType="cash_movement"
         opLabel={
           pendingMovement
-            ? `record a ${MOVEMENT_LABELS[pendingMovement.type].toLowerCase()} of ${formatCurrency(pendingMovement.amount)}`
-            : "record a cash movement"
+            ? t("register:opRecordMovement", {
+                defaultValue: "record a {{movement}} of {{amount}}",
+                movement: t(MOVEMENT_LABEL_KEYS[pendingMovement.type], {
+                  defaultValue: MOVEMENT_LABELS[pendingMovement.type],
+                }).toLowerCase(),
+                amount: formatCurrency(pendingMovement.amount),
+              })
+            : t("register:opRecordMovementFallback", {
+                defaultValue: "record a cash movement",
+              })
         }
         {...(pendingMovement
           ? {
