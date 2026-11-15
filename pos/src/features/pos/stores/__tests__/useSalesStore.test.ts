@@ -1,17 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Regression contract for ExchangeDialog's post-exchange refresh: the store
-// exposes getSales (an earlier revision of the dialog selected the
-// nonexistent getSalesData, so the committed exchange surfaced as an error
-// toast and the dialog never closed). These tests pin the selector the
-// dialog relies on.
+// Regression contracts after Phase 6 Feature 1: the sales LIST moved to
+// useSalesQuery (TanStack Query); the store keeps the checkout/refund
+// actions. The historical ExchangeDialog regression (selecting the
+// nonexistent getSalesData, which surfaced a committed exchange as an error
+// toast) stays pinned.
 
 vi.mock("../../../../api/axios.js", () => ({
   default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
+  getActiveBusinessId: () => 1,
+  getActiveLocationId: () => 2,
 }));
 
+const { invalidateQueries } = vi.hoisted(() => ({
+  invalidateQueries: vi.fn(),
+}));
 vi.mock("@/lib/queryClient", () => ({
-  queryClient: { invalidateQueries: vi.fn() },
+  queryClient: { invalidateQueries: invalidateQueries },
 }));
 
 vi.mock("@/features/products/hooks/useProducts.js", () => ({
@@ -19,37 +24,57 @@ vi.mock("@/features/products/hooks/useProducts.js", () => ({
   readProductsCache: () => [],
 }));
 
+vi.mock("../hooks/useSellUnits.js", () => ({
+  clearSellUnitsCache: vi.fn(),
+  sellUnitsKeys: { all: ["sell-units"] },
+}));
+
 import axios from "../../../../api/axios.js";
 import { useSalesStore } from "../useSalesStore.js";
+import { saleKeys } from "../../hooks/useSales.js";
 
-const mockedGet = vi.mocked(axios.get);
+const mockedPost = vi.mocked(axios.post);
 
-describe("useSalesStore (ExchangeDialog refresh contract)", () => {
+describe("useSalesStore (actions after the list moved to TanStack Query)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useSalesStore.setState({ sales: [], loading: false, error: null });
+    invalidateQueries.mockResolvedValue(undefined);
   });
 
-  it("exposes getSales as a callable store action", () => {
-    const action = useSalesStore.getState().getSales;
-    expect(typeof action).toBe("function");
-    // The broken selector the dialog must never go back to:
+  it("exposes the checkout/refund actions and never getSales/getSalesData", () => {
+    expect(typeof useSalesStore.getState().createSale).toBe("function");
+    expect(typeof useSalesStore.getState().returnProducts).toBe("function");
+    expect(typeof useSalesStore.getState().returnSingleItems).toBe("function");
+    expect(
+      (useSalesStore.getState() as unknown as Record<string, unknown>).getSales,
+    ).toBeUndefined();
     expect(
       (useSalesStore.getState() as unknown as Record<string, unknown>)
         .getSalesData,
     ).toBeUndefined();
   });
 
-  it("getSales loads the sales list and never throws on API failure", async () => {
-    mockedGet.mockResolvedValueOnce({ data: [{ id: 1 }] });
-    await useSalesStore.getState().getSales();
-    expect(useSalesStore.getState().sales).toEqual([{ id: 1 }]);
-    expect(useSalesStore.getState().error).toBeNull();
+  it("createSale's list refresh stays best-effort: a failed invalidate must not reject the sale", async () => {
+    mockedPost.mockResolvedValueOnce({
+      data: { sale: { id: 1, invoiceNumber: "INV-1" } },
+    } as never);
+    invalidateQueries.mockRejectedValueOnce(new Error("network down"));
+    await expect(
+      useSalesStore.getState().createSale({} as never),
+    ).resolves.toBeDefined();
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: saleKeys.list(),
+    });
+  });
 
-    // A refresh failure must not reject — the dialog awaits it AFTER the
-    // exchange committed, so a rejection would present success as failure.
-    mockedGet.mockRejectedValueOnce(new Error("network down"));
-    await expect(useSalesStore.getState().getSales()).resolves.toBeUndefined();
-    expect(useSalesStore.getState().error).toBe("network down");
+  it("returnProducts keeps the strict refresh: a failed invalidate rejects (as the old list refetch did)", async () => {
+    mockedPost.mockResolvedValueOnce({ data: {} } as never);
+    invalidateQueries.mockRejectedValueOnce(new Error("network down"));
+    await expect(
+      useSalesStore.getState().returnProducts(5, {} as never),
+    ).rejects.toThrow("network down");
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: saleKeys.list(),
+    });
   });
 });

@@ -69,10 +69,6 @@ export type CreateSaleResponse = {
   };
 };
 export interface SalesStore {
-  sales: SalesStoreType[];
-  loading: boolean;
-  error: null | string;
-  getSales: () => Promise<void>;
   createSale: (data: CreateSalePayload) => Promise<CreateSaleResponse>;
   returnSingleItems: (
     item: SalesStoreType,

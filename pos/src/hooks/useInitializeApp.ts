@@ -1,5 +1,8 @@
 import { useEffect } from "react";
-import { useSalesStore } from "../features/pos/stores/useSalesStore";
+import {
+  saleKeys,
+} from "@/features/pos/hooks/useSales.js";
+import { getSalesApi } from "@/features/pos/sales.api.js";
 import {
   fetchProductSelectOptions,
   fetchProductVariantOptions,
@@ -52,14 +55,13 @@ function enforceSessionScope(): void {
 // `enabled` gates the startup data fetches on the session bootstrap: firing
 // them without a restored token produces doomed 401s and redirect cascades.
 export function useInitializeApp(enabled: boolean) {
-  const { getSales } = useSalesStore();
   const { getPurchases, getPurchaseItems, getPurchasesReturnItems } =
     usePurchasesStore();
   useEffect(() => {
     if (!enabled) return;
     enforceSessionScope();
-    // Products + customers lists: TanStack Query warm-starts (same fetch +
-    // offline fallback the old store actions performed, same order position).
+    // Products + customers + sales lists: TanStack Query warm-starts (same
+    // fetch the old store actions performed, same order position).
     void queryClient.prefetchQuery({
       queryKey: productKeys.catalog(),
       queryFn: fetchProductsWithOfflineCache,
@@ -76,7 +78,10 @@ export function useInitializeApp(enabled: boolean) {
       queryKey: productKeys.variantOptions(),
       queryFn: fetchProductVariantOptions,
     });
-    getSales();
+    void queryClient.prefetchQuery({
+      queryKey: saleKeys.list(),
+      queryFn: getSalesApi,
+    });
     getPurchases();
     getPurchaseItems();
     getPurchasesReturnItems();

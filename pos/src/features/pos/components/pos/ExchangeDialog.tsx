@@ -13,7 +13,9 @@ import { Input } from "@/components/ui/input.js";
 import { toast } from "@/components/ui/toast.js";
 import { createExchangeApi } from "../../sales.api.js";
 import { quoteSaleApi } from "../../quote.api.js";
-import { useSalesStore, refreshStockAfterTransaction } from "../../stores/useSalesStore.js";
+import { refreshStockAfterTransaction } from "../../stores/useSalesStore.js";
+import { saleKeys } from "../../hooks/useSales.js";
+import { queryClient } from "@/lib/queryClient.js";
 import { useProductsQuery } from "@/features/products/hooks/useProducts.js";
 import type { ProductType } from "@/features/products/product.types.js";
 
@@ -55,9 +57,10 @@ export function ExchangeDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const products = useProductsQuery().data ?? EMPTY_PRODUCT_LIST;
-  // The store exposes getSales (NOT getSalesData — selecting a missing field
-  // used to crash the post-exchange refresh behind a generic error toast).
-  const getSales = useSalesStore((s) => s.getSales);
+  // Sales-list refresh — Phase 6: invalidate the query cache (the old store
+  // getSales caught internally; the invalidate is wrapped the same way below).
+  const refreshSales = () =>
+    queryClient.invalidateQueries({ queryKey: saleKeys.list() });
   const [selectedReturnIds, setSelectedReturnIds] = useState<number[]>([]);
   const [replacements, setReplacements] = useState<
     { variantId: number; name: string; quantity: number; unitPrice: number }[]
@@ -282,10 +285,10 @@ export function ExchangeDialog({
         priority: "high",
       });
       // The exchange is COMMITTED at this point — refresh failures must never
-      // present it as failed. getSales catches internally (error lands on the
-      // store), and the stock refresh is best-effort by design.
+      // present it as failed (the invalidate rejects only on refetch failure;
+      // the try/catch below preserves the old swallow).
       try {
-        await getSales();
+        await refreshSales();
         await refreshStockAfterTransaction();
       } catch {
         // Swallow: the sales list / grid refetch on their next trigger.

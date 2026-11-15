@@ -46,6 +46,8 @@ import { getErrorMessage } from "@/utils/getErrorMessage";
 import { toast } from "@/components/ui/toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSalesStore } from "../stores/useSalesStore.js";
+import { saleKeys, useSalesQuery } from "../hooks/useSales.js";
+import { queryClient } from "@/lib/queryClient.js";
 import type {
   AllSoldProduct,
   SaleRefundRequest,
@@ -200,10 +202,14 @@ function remainingOf(item: SalesStoreType): number {
 
 export function Sales() {
   const { hasPermission } = usePermissions();
-  const sales = useSalesStore((state) => state.sales);
-  const loading = useSalesStore((state) => state.loading);
-  const error = useSalesStore((state) => state.error);
-  const getSales = useSalesStore((state) => state.getSales);
+  const salesQuery = useSalesQuery();
+  const sales = salesQuery.data ?? [];
+  const loading = salesQuery.isPending;
+  const error = salesQuery.error
+    ? salesQuery.error instanceof Error
+      ? salesQuery.error.message
+      : String(salesQuery.error)
+    : null;
   const returnProducts = useSalesStore((state) => state.returnProducts);
   const returnSingleItems = useSalesStore((state) => state.returnSingleItems);
   const [query, setQuery] = useState("");
@@ -328,7 +334,9 @@ export function Sales() {
       setVoidReason("");
       setApprovalToken(null);
       setSelectedSaleId(null);
-      await getSales();
+      await queryClient
+        .invalidateQueries({ queryKey: saleKeys.list() })
+        .catch(() => undefined);
     } catch (err: unknown) {
       const message = getErrorMessage(err);
       if (/manager approval is required/i.test(message)) {
@@ -448,7 +456,7 @@ export function Sales() {
         </div>
         <Button
           variant="outline"
-          onClick={() => void getSales()}
+          onClick={() => void salesQuery.refetch()}
           disabled={loading}
         >
           <RefreshCw className={loading ? "animate-spin" : ""} />
@@ -466,7 +474,7 @@ export function Sales() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void getSales()}
+            onClick={() => void salesQuery.refetch()}
             disabled={loading}
           >
             Try again
