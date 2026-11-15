@@ -601,6 +601,13 @@
       "when": 1794500035000,
       "tag": "0085_pos_batch_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1794500036000,
+      "tag": "0086_sale_void",
+      "breakpoints": true
     }
   ]
 }

@@ -101,4 +101,12 @@ router.get(
   requireAnyPermission(["pos.create_sale", "inventory.view"]),
   salesController.getAvailableBatches,
 );
+// P3 Phase 3 (E1-003): sale void — atomic batch-aware reversal. Backend
+// permission enforcement (sales.void); UI visibility is not authorization.
+router.post(
+  "/api/sales/:id/cancel",
+  ...write,
+  requirePermission("sales.void"),
+  salesController.cancelSale,
+);
 export default router;

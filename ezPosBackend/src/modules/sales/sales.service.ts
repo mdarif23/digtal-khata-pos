@@ -36,6 +36,7 @@ import {
   postRefundLedgerEntry,
   postSaleLedgerEntry,
 } from "./sales.ledger.js";
+import { commissionEntries } from "../../db/schema/commission.js";
 import {
   type DashboardPeriod,
   getExpensesSummary,
@@ -56,7 +57,7 @@ import {
   getTopItemsByGross,
   getTopSellingProducts,
 } from "./dashboardMatrix.service.js";
-import type { CreateSalePayload } from "./schemas/sales.schema.js";
+import type { CancelSaleRequest, CreateSalePayload } from "./schemas/sales.schema.js";
 import { normalizeSaleItemsToBase } from "./sales.uom.js";
 import type { SaleRefundRequest } from "./schemas/sales.schema.js";
 import { customers } from "../../db/schema/customers.js";
@@ -74,6 +75,7 @@ import {
   consumeStoreCreditInTx,
   grantStoreCreditInTx,
 } from "../../services/storeCredit.js";
+import { customerCredits } from "../../db/schema/customerCredits.js";
 import { promotionUsage } from "../../db/schema/pricing.js";
 import { businessMemberships } from "../../db/schema/businessMemberships.js";
 import { getBomsForVariants } from "../bom/bom.service.js";
@@ -91,6 +93,10 @@ import {
   reverseLoyaltyPointsInTx,
 } from "../../services/loyalty.js";
 import { redeemGiftCardInTx } from "../../services/giftCards.js";
+import { giftCardTransactions } from "../../db/schema/giftCards.js";
+import { journalEntries } from "../../db/schema/journalEntries.js";
+import { reverseEntry } from "../../services/ledger.js";
+import { couponRedemptions, coupons } from "../../db/schema/coupons.js";
 import {
   evaluateCouponInTx,
   recordCouponRedemptionInTx,
@@ -111,6 +117,7 @@ import {
   assertOpenDrawerForCashInTx,
   recordCashRefundInTx,
   recordCashSaleInTx,
+  recordSaleVoidCashOutInTx,
 } from "../cashRegisters/cashRegisters.service.js";
 import {
   consumeApprovalInTx,
@@ -246,7 +253,7 @@ export async function getSalesData(
     .leftJoin(customers, eq(sales.customerId, customers.id))
     .where(
       and(
-        inArray(sales.status, ["completed", "refunded"]),
+        inArray(sales.status, ["completed", "refunded", "cancelled"]),
         eq(sales.businessId, businessId),
         // Location scope (L1-2): an empty fragment when unrestricted.
         locationScope,
@@ -4361,6 +4368,431 @@ export async function quoteSaleTotals(
       ...(coupon === null && couponCode
         ? { couponError: "Coupon is not valid." }
         : {}),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// P3 Phase 3 (E1-003): sale void — atomic, batch-aware full reversal (D11).
+// Only completed sales with ZERO prior refunds may be voided; the reason is
+// mandatory and permanent; the invoice number is never released. Every
+// reversal happens exactly once inside one transaction: original batches
+// (provenance replay), serials, drawer cash-out, loyalty earn/redeem,
+// gift-card + store-credit instrument ledgers (positive void_restore rows —
+// never deletions), commissions (100%), coupon + promotion usage release,
+// warranties, and the finance journal via the tested reverseEntry primitive.
+// Reports already exclude 'cancelled' (verified enumeration in the plan) —
+// only the sales LIST gains cancelled visibility, not the metrics.
+// ---------------------------------------------------------------------------
+export async function cancelSale(
+  businessId: number,
+  saleId: number,
+  locationId: number,
+  actorUserId: number | null,
+  request: CancelSaleRequest,
+  terminalId: number | null = null,
+): Promise<{ saleId: number; invoiceNumber: string; status: string }> {
+  const reason = request.reason.trim();
+  return db.transaction(async (tx) => {
+    // 1. Lock the sale row — simultaneous duplicate voids serialize here and
+    //    the status check makes the loser a conflict, never a double void.
+    const [sale] = await tx
+      .select({
+        id: sales.id,
+        invoiceNumber: sales.invoiceNumber,
+        status: sales.status,
+        locationId: sales.locationId,
+        customerId: sales.customerId,
+        finalTotal: sales.finalTotal,
+        dueAmount: sales.dueAmount,
+        paymentStatus: sales.paymentStatus,
+      })
+      .from(sales)
+      .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
+      .for("update");
+    if (!sale) throw new NotFoundError(`Sale #${saleId} not found`);
+    if (sale.locationId !== locationId) {
+      throw new ForbiddenError("This sale belongs to another location.");
+    }
+    const [priorRefund] = await tx
+      .select({ id: saleRefunds.id })
+      .from(saleRefunds)
+      .where(
+        and(eq(saleRefunds.saleId, saleId), eq(saleRefunds.businessId, businessId)),
+      )
+      .limit(1);
+    if (priorRefund) {
+      throw new ConflictError(
+        "This sale has refunds and can no longer be voided — use returns instead.",
+      );
+    }
+    if (sale.status !== "completed") {
+      throw new ConflictError(
+        `Only completed sales can be voided (this sale is ${sale.status}).`,
+      );
+    }
+    if (await isApprovalRequired(businessId, "sale.cancel")) {
+      if (!request.approvalToken) {
+        throw new ForbiddenError(
+          "A manager approval is required to void a sale.",
+        );
+      }
+      await consumeApprovalInTx(tx, businessId, {
+        token: request.approvalToken,
+        opType: "sale.cancel",
+      });
+    }
+
+    // 2. Inventory restoration from provenance — the SAME machinery refunds
+    //    use (Phase 2). A void has zero prior refunds, so every consumed lot
+    //    is still outstanding and gets restored in full.
+    const items = await tx
+      .select({ id: saleItems.id, variantId: saleItems.variantId, quantity: saleItems.quantity })
+      .from(saleItems)
+      .where(and(eq(saleItems.saleId, saleId), eq(saleItems.businessId, businessId)))
+      .for("update");
+    const variantRestores = new Map<number, number>();
+    const lotRestores: { batchId: number; quantity: number }[] = [];
+    let fallbackQuantity = 0;
+    for (const item of items) {
+      variantRestores.set(
+        item.variantId,
+        (variantRestores.get(item.variantId) ?? 0) + Number(item.quantity),
+      );
+      const consumptionRows = await tx
+        .select({
+          batchId: saleItemBatchConsumptions.batchId,
+          quantity: saleItemBatchConsumptions.quantity,
+        })
+        .from(saleItemBatchConsumptions)
+        .where(eq(saleItemBatchConsumptions.saleItemId, item.id))
+        .orderBy(desc(saleItemBatchConsumptions.quantity));
+      let unallocated = Number(item.quantity);
+      for (const row of consumptionRows) {
+        if (unallocated <= 0) break;
+        const take = Math.min(Number(row.quantity), unallocated);
+        lotRestores.push({ batchId: row.batchId, quantity: take });
+        unallocated = roundMoney(unallocated - take);
+      }
+      fallbackQuantity = roundMoney(fallbackQuantity + unallocated);
+    }
+    const existingBatches =
+      lotRestores.length > 0
+        ? await tx
+            .select({ id: inventoryBatches.id })
+            .from(inventoryBatches)
+            .where(
+              and(
+                eq(inventoryBatches.businessId, businessId),
+                inArray(inventoryBatches.id, lotRestores.map((r) => r.batchId)),
+              ),
+            )
+            .for("update")
+        : [];
+    let fallbackBatchId: number | null = null;
+    if (fallbackQuantity > 0.0000001) {
+      const [voidBatch] = await tx
+        .insert(inventoryBatches)
+        .values({
+          businessId,
+          variantId: items[0]?.variantId ?? 0,
+          locationId,
+          batchNumber: `VOID-${saleId}`,
+          purchasePrice: 0,
+          quantityReceived: fallbackQuantity,
+          quantityRemaining: fallbackQuantity,
+        })
+        .returning({ id: inventoryBatches.id });
+      fallbackBatchId = voidBatch?.id ?? null;
+    }
+    const restoredBatches: { batchId: number; quantity: number }[] = [];
+    for (const lot of lotRestores) {
+      const batch = existingBatches.find((b) => b.id === lot.batchId);
+      if (!batch) {
+        // Missing batch rows land in the VOID batch (movement still truthful).
+        if (fallbackBatchId !== null) {
+          restoredBatches.push({ batchId: fallbackBatchId, quantity: lot.quantity });
+        }
+        continue;
+      }
+      await tx
+        .update(inventoryBatches)
+        .set({
+          quantityRemaining: sql`${inventoryBatches.quantityRemaining} + ${lot.quantity}`,
+        })
+        .where(
+          and(
+            eq(inventoryBatches.id, lot.batchId),
+            eq(inventoryBatches.businessId, businessId),
+          ),
+        );
+      restoredBatches.push(lot);
+    }
+    // Variant-level stock + movements (one row per restored batch).
+    for (const [variantId, qty] of variantRestores) {
+      await tx
+        .update(inventoryStock)
+        .set({ quantity: sql`${inventoryStock.quantity} + ${qty}` })
+        .where(
+          and(
+            eq(inventoryStock.variantId, variantId),
+            eq(inventoryStock.businessId, businessId),
+            eq(inventoryStock.locationId, locationId),
+          ),
+        );
+    }
+    for (const restored of restoredBatches) {
+      await tx.insert(inventoryMovements).values({
+        businessId,
+        variantId:
+          items.find((i) => i.variantId !== undefined)!.variantId,
+        locationId,
+        batchId: restored.batchId,
+        movementType: "return",
+        quantity: restored.quantity,
+        referenceType: "sale_cancel",
+        referenceId: saleId,
+      });
+    }
+
+    // 3. Serials return to in_stock at their sale-time batch.
+    const saleItemIds = items.map((i) => i.id);
+    if (saleItemIds.length > 0) {
+      await tx
+        .update(serialNumbers)
+        .set({ status: "in_stock" })
+        .where(
+          and(
+            eq(serialNumbers.businessId, businessId),
+            inArray(serialNumbers.saleItemId, saleItemIds),
+            eq(serialNumbers.status, "sold"),
+          ),
+        );
+    }
+
+    // 4. Gift-card redemptions on this sale — positive void_restore rows
+    //    (append-only reversal, never deletion).
+    const giftRedemptions = await tx
+      .select({ amount: giftCardTransactions.amount, giftCardId: giftCardTransactions.giftCardId })
+      .from(giftCardTransactions)
+      .where(
+        and(
+          eq(giftCardTransactions.businessId, businessId),
+          eq(giftCardTransactions.sourceType, "redeem"),
+          eq(giftCardTransactions.sourceId, saleId),
+        ),
+      );
+    for (const redemption of giftRedemptions) {
+      await tx.insert(giftCardTransactions).values({
+        businessId,
+        giftCardId: redemption.giftCardId,
+        amount: roundMoney(Math.abs(Number(redemption.amount))),
+        sourceType: "void_restore",
+        sourceId: saleId,
+        actorUserId,
+        note: `Sale ${sale.invoiceNumber} voided — restored`,
+      });
+    }
+
+    // 5. Store-credit spends on this sale — same append-only reversal.
+    const creditSpends = await tx
+      .select({ amount: customerCredits.amount, customerId: customerCredits.customerId })
+      .from(customerCredits)
+      .where(
+        and(
+          eq(customerCredits.businessId, businessId),
+          eq(customerCredits.sourceType, "sale_payment"),
+          eq(customerCredits.sourceId, saleId),
+        ),
+      );
+    for (const spend of creditSpends) {
+      await tx.insert(customerCredits).values({
+        businessId,
+        customerId: spend.customerId,
+        amount: roundMoney(Math.abs(Number(spend.amount))),
+        sourceType: "void_restore",
+        sourceId: saleId,
+        actorUserId,
+        note: `Sale ${sale.invoiceNumber} voided — restored`,
+      });
+    }
+
+    // 6. Loyalty: earned points reversed on the PAID portion (the earn base
+    //    never exceeded it); redeemed points restored in full — exactly once
+    //    because the void itself is once-only.
+    if (sale.customerId !== null) {
+      const paidAmount = roundMoney(
+        Number(sale.finalTotal) - Number(sale.dueAmount),
+      );
+      if (paidAmount > 0) {
+        await reverseLoyaltyPointsInTx(tx, {
+          businessId,
+          customerId: sale.customerId,
+          refundedAmount: paidAmount,
+          sourceId: saleId,
+        });
+      }
+      await restoreRedeemedPointsInTx(tx, {
+        businessId,
+        customerId: sale.customerId,
+        saleId,
+        refundId: saleId,
+        refundTotal: Number(sale.finalTotal),
+        saleFinalTotal: Number(sale.finalTotal),
+      });
+    }
+
+    // 7. Commissions: pending entries reversed at 100% (mirrors the refund
+    //    engine's proportional pattern; approved+paid money stays manual).
+    const pendingCommissions = await tx
+      .select()
+      .from(commissionEntries)
+      .where(
+        and(
+          eq(commissionEntries.businessId, businessId),
+          eq(commissionEntries.saleId, saleId),
+          eq(commissionEntries.status, "pending"),
+          sql`${commissionEntries.refundId} IS NULL`,
+        ),
+      )
+      .for("update");
+    for (const original of pendingCommissions) {
+      await tx.insert(commissionEntries).values({
+        businessId,
+        saleId,
+        salespersonUserId: original.salespersonUserId,
+        ruleId: original.ruleId,
+        ruleNameSnapshot: original.ruleNameSnapshot,
+        calcMethod: original.calcMethod,
+        rate: original.rate,
+        baseAmount: original.baseAmount,
+        amount: -roundMoney(Number(original.amount)),
+        status: "reversed",
+        refundId: saleId,
+        reason: "Sale voided",
+      });
+    }
+
+    // 8. Coupon + promotion usage counters — the voided sale never happened,
+    //    so its usage is released (counter tables, not financial history).
+    //    The coupon's denormalized used_count is decremented alongside the
+    //    redemption-row delete — evaluateCouponInTx limits on usedCount.
+    const voidedRedemptions = await tx
+      .select({ couponId: couponRedemptions.couponId })
+      .from(couponRedemptions)
+      .where(
+        and(
+          eq(couponRedemptions.saleId, saleId),
+          eq(couponRedemptions.businessId, businessId),
+        ),
+      );
+    for (const redemption of voidedRedemptions) {
+      await tx
+        .update(coupons)
+        .set({
+          usedCount: sql`greatest(0, ${coupons.usedCount} - 1)`,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(coupons.id, redemption.couponId), eq(coupons.businessId, businessId)));
+    }
+    await tx.delete(couponRedemptions).where(
+      and(
+        eq(couponRedemptions.saleId, saleId),
+        eq(couponRedemptions.businessId, businessId),
+      ),
+    );
+    await tx.delete(promotionUsage).where(
+      and(eq(promotionUsage.saleId, saleId), eq(promotionUsage.businessId, businessId)),
+    );
+
+    // 9. Drawer: the cash portion leaves the open session (idempotent by the
+    //    reference-unique index; no session = GL-only reversal, honest).
+    const cashPayments = await tx
+      .select({ amount: salePayments.amount })
+      .from(salePayments)
+      .where(
+        and(
+          eq(salePayments.saleId, saleId),
+          eq(salePayments.businessId, businessId),
+          eq(salePayments.paymentMethod, "cash"),
+        ),
+      );
+    const cashTotal = roundMoney(
+      cashPayments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0),
+    );
+    if (cashTotal > 0 && actorUserId !== null) {
+      await recordSaleVoidCashOutInTx(
+        tx,
+        businessId,
+        actorUserId,
+        locationId,
+        cashTotal,
+        saleId,
+        terminalId,
+      );
+    }
+
+    // 10. Warranties of the voided sale end (coverage never existed).
+    await voidWarrantiesForSale(tx, {
+      businessId,
+      saleId,
+      refundId: saleId,
+      reason: `sale_void:${saleId}`,
+    });
+
+    // 11. Mark voided — the invoice number stays reserved forever.
+    await tx
+      .update(sales)
+      .set({
+        status: "cancelled",
+        cancelReason: reason,
+        cancelledByUserId: actorUserId,
+        cancelledAt: new Date(),
+      })
+      .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)));
+
+    // 12. Finance journal: exact mirrored reversal via the tested primitive
+    //     (original marked reversed; duplicates blocked). No silent deletion.
+    const [saleEntry] = await tx
+      .select({ id: journalEntries.id, status: journalEntries.status })
+      .from(journalEntries)
+      .where(
+        and(
+          eq(journalEntries.businessId, businessId),
+          eq(journalEntries.sourceType, "sale"),
+          eq(journalEntries.sourceId, saleId),
+          eq(journalEntries.status, "posted"),
+        ),
+      )
+      .limit(1);
+    if (saleEntry) {
+      await reverseEntry(tx, {
+        businessId,
+        entryId: saleEntry.id,
+        reason: `Sale ${sale.invoiceNumber} voided: ${reason}`,
+        actorUserId,
+      });
+    }
+
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId,
+      action: "sale.void",
+      entityType: "sale",
+      entityId: saleId,
+      metadata: {
+        invoiceNumber: sale.invoiceNumber,
+        reason,
+        finalTotal: Number(sale.finalTotal),
+        itemCount: items.length,
+      },
+    });
+
+    publishRealtime(businessId, locationId, { kind: "stock.changed", locationId });
+    return {
+      saleId,
+      invoiceNumber: sale.invoiceNumber,
+      status: "cancelled",
     };
   });
 }

@@ -22,9 +22,11 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ManagerApprovalDialog } from "@/features/cashRegisters/components/ManagerApprovalDialog";
 import {
   Select,
   SelectContent,
@@ -41,6 +43,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getErrorMessage } from "@/utils/getErrorMessage";
+import { toast } from "@/components/ui/toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSalesStore } from "../stores/useSalesStore.js";
 import type {
@@ -49,7 +52,7 @@ import type {
   SalesStoreType,
 } from "../types/sales.types.js";
 import { SalesDataTable } from "../components/sales/SalesDataTable.js";
-import { getSaleReceiptApi } from "../sales.api.js";
+import { getSaleReceiptApi, voidSaleApi } from "../sales.api.js";
 import type { SaleReceiptData } from "../types/receipt.types.js";
 import { ReceiptPrintDialog } from "../components/receipt/ReceiptPrintDialog.js";
 import { ExchangeDialog } from "../components/pos/ExchangeDialog.js";
@@ -235,6 +238,13 @@ export function Sales() {
   const [isFetchingReceipt, setIsFetchingReceipt] = useState(false);
   const [exchangeTarget, setExchangeTarget] = useState<SalesStoreType | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<SalesStoreType | null>(null);
+  // P3 Phase 3 (E1-003): void flow — reason mandatory; approval_required
+  // .sale_cancel surfaces a one-time manager PIN dialog and retries.
+  const [voidTarget, setVoidTarget] = useState<AllSoldProduct | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [voidError, setVoidError] = useState<string | null>(null);
+  const [approvalToken, setApprovalToken] = useState<string | null>(null);
+  const [isApprovalOpen, setIsApprovalOpen] = useState(false);
 
   const handlePrintReceipt = async (saleId: number) => {
     try {
@@ -295,6 +305,41 @@ export function Sales() {
       ),
     );
     setRefundTarget({ type: "sale", sale });
+  };
+
+  /** P3 Phase 3 (E1-003): void the sale — 403 with approval_required
+   * .sale_cancel opens the manager PIN dialog; the minted token retries. */
+  const submitVoid = async () => {
+    if (!voidTarget) return;
+    if (voidReason.trim().length < 3) {
+      setVoidError("Give a reason of at least 3 characters.");
+      return;
+    }
+    setBusySaleId(voidTarget.id);
+    setVoidError(null);
+    try {
+      await voidSaleApi(voidTarget.id, voidReason.trim(), approvalToken ?? undefined);
+      toast.add({
+        title: "Sale voided",
+        description: `${voidTarget.invoiceNumber} reversed — stock, drawer, loyalty and ledger updated.`,
+        type: "success",
+      });
+      setVoidTarget(null);
+      setVoidReason("");
+      setApprovalToken(null);
+      setSelectedSaleId(null);
+      await getSales();
+    } catch (err: unknown) {
+      const message = getErrorMessage(err);
+      if (/manager approval is required/i.test(message)) {
+        setIsApprovalOpen(true);
+        setVoidError(null);
+      } else {
+        setVoidError(message);
+      }
+    } finally {
+      setBusySaleId(null);
+    }
   };
 
   const openItemRefund = (item: SalesStoreType) => {
@@ -689,11 +734,89 @@ export function Sales() {
                   <RotateCcw />
                   Refund entire sale
                 </Button>
+                {hasPermission("sales.void") &&
+                  selectedSale.saleStatus === "completed" && (
+                    <Button
+                      variant="destructive"
+                      disabled={busySaleId !== null}
+                      onClick={() => {
+                        setVoidTarget(selectedSale);
+                        setVoidReason("");
+                        setVoidError(null);
+                        setApprovalToken(null);
+                      }}
+                    >
+                      Void sale
+                    </Button>
+                  )}
               </div>
             </>
           )}
         </DialogContent>
       </Dialog>
+      {/* P3 Phase 3: void reason dialog */}
+      <Dialog
+        open={voidTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && busySaleId === null) {
+            setVoidTarget(null);
+            setVoidError(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Void sale</DialogTitle>
+            <DialogDescription>
+              {voidTarget?.invoiceNumber} — every reversal happens atomically:
+              stock, original batches, serials, drawer cash, loyalty, coupon
+              usage and the finance ledger. The invoice number is never
+              reused. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">Reason (required)</span>
+            <Input
+              value={voidReason}
+              maxLength={500}
+              placeholder="Why is this sale being voided?"
+              onChange={(e) => setVoidReason(e.target.value)}
+            />
+          </label>
+          {voidError && (
+            <p className="text-sm text-destructive">{voidError}</p>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busySaleId !== null}
+              onClick={() => setVoidTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={busySaleId !== null || voidReason.trim().length < 3}
+              onClick={() => void submitVoid()}
+            >
+              {busySaleId !== null ? "Voiding…" : "Void sale"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ManagerApprovalDialog
+        open={isApprovalOpen}
+        onOpenChange={setIsApprovalOpen}
+        opType="sale.cancel"
+        opLabel="Void a sale"
+        reason={voidReason}
+        onApproved={(token) => {
+          setApprovalToken(token);
+          setIsApprovalOpen(false);
+        }}
+      />
       <Dialog
         open={refundTarget !== null}
         onOpenChange={(open) => {

@@ -81,6 +81,7 @@ function sanitizeEmbeddedConfig(
 
 const APPROVAL_KEYS = [
   "sale_refund",
+  "sale_cancel",
   "cash_movement",
   "below_minimum_price",
 ] as const;

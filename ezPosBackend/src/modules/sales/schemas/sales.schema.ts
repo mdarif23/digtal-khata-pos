@@ -138,6 +138,18 @@ export const updateAvailableSerialSchema = z.object({
   serialNumber: z.string().trim().min(1).max(100),
 });
 
+/**
+ * P3 Phase 3 (E1-003): sale void. Only completed sales with zero prior
+ * refunds may be voided (D11); the reason is mandatory and recorded
+ * permanently on the sale row.
+ */
+export const cancelSaleRequestSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+  /** One-time manager approval token when approval_required.sale_cancel is on. */
+  approvalToken: z.string().max(120).optional(),
+});
+export type CancelSaleRequest = z.infer<typeof cancelSaleRequestSchema>;
+
 export const saleRefundRequestSchema = z.object({
   reason: z.enum([
     "customer_request",

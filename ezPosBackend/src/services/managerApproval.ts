@@ -37,6 +37,7 @@ export const APPROVAL_TTL_MINUTES = 10;
 export const APPROVAL_OPS = {
   "register.reopen": { permission: "cash_register.manage" },
   "sale.refund": { permission: "sales.return" },
+  "sale.cancel": { permission: "sales.void" },
   "cash_movement": { permission: "cash_movement.create" },
   "pricing.below_minimum": { permission: "pricing.below_minimum_override" },
   /**
@@ -327,6 +328,7 @@ const CONFIG_KEY_BY_OP: Partial<
   Record<Exclude<ManagerOpType, "register.reopen">, keyof ApprovalRequiredConfig>
 > = {
   "sale.refund": "sale_refund",
+  "sale.cancel": "sale_cancel",
   "cash_movement": "cash_movement",
   "pricing.below_minimum": "below_minimum_price",
 };

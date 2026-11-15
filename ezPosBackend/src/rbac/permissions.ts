@@ -42,6 +42,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "sales.view", module: "sales", description: "View sales records" },
   { key: "sales.edit", module: "sales", description: "Edit sales records" },
   { key: "sales.return", module: "sales", description: "Process sale returns and refunds" },
+  { key: "sales.void", module: "sales", description: "Void completed sales with full inventory, drawer, loyalty and ledger reversal" },
 
   // Quotations (sales documents; routes enforce these keys)
   { key: "quotations.view", module: "sales", description: "View quotations and their lifecycle" },
@@ -269,6 +270,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "sales.view",
     "sales.edit",
     "sales.return",
+    "sales.void",
     "products.view",
     "products.create",
     "products.edit",

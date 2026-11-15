@@ -107,6 +107,15 @@ function createColumns(
         const someReturned = row.original.items.some(
           (item) => item.returnedQuantity > 0,
         );
+        // P3 Phase 3: voided sales show their own badge (row history stays
+        // visible in the list; metrics queries already exclude 'cancelled').
+        if (row.original.saleStatus === "cancelled") {
+          return (
+            <Badge variant="destructive">
+              Voided
+            </Badge>
+          );
+        }
         const status = allReturned
           ? "Refunded"
           : someReturned

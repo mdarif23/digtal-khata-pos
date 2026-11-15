@@ -71,7 +71,7 @@ export const customerCredits = pgTable(
     check("customer_credits_amount_nonzero", sql`${t.amount} <> 0`),
     check(
       "customer_credits_source_valid",
-      sql`${t.sourceType} in ('refund','sale_payment','manual','expiry')`,
+      sql`${t.sourceType} in ('refund','sale_payment','manual','expiry','void_restore')`,
     ),
   ],
 );

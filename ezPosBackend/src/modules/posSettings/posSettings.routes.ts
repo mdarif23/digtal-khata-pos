@@ -33,6 +33,7 @@ const manage = [
 const approvalRequiredSchema = z
   .object({
     sale_refund: z.boolean().optional(),
+    sale_cancel: z.boolean().optional(),
     cash_movement: z.boolean().optional(),
     below_minimum_price: z.boolean().optional(),
   })

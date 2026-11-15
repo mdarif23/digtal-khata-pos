@@ -94,7 +94,7 @@ export const giftCardTransactions = pgTable(
     check("gift_card_transactions_amount_nonzero", sql`${t.amount} <> 0`),
     check(
       "gift_card_transactions_source_valid",
-      sql`${t.sourceType} in ('issue','redeem','reload')`,
+      sql`${t.sourceType} in ('issue','redeem','reload','void_restore')`,
     ),
   ],
 );

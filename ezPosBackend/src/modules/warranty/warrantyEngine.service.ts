@@ -399,9 +399,15 @@ export async function applyRefundWarrantyEffects(
  */
 export async function voidWarrantiesForSale(
   tx: DbTransaction,
-  params: { businessId: number; saleId: number; refundId: number },
+  params: {
+    businessId: number;
+    saleId: number;
+    refundId: number;
+    /** P3 Phase 3: void passes `sale_void:<saleId>` instead of the default. */
+    reason?: string;
+  },
 ): Promise<void> {
-  const reason = `sale_return:${params.refundId}`.slice(0, 200);
+  const reason = (params.reason ?? `sale_return:${params.refundId}`).slice(0, 200);
   await tx
     .update(customerWarranties)
     .set({

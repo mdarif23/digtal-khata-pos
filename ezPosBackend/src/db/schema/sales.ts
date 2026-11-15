@@ -169,6 +169,17 @@ export const sales = pgTable(
     customerId: integer("customer_id").references(() => customers.id),
     /** Shopper account that placed a storefront order (nullable; guest = null). */
     shopperId: integer("shopper_id"),
+    /**
+     * P3 Phase 3 (E1-003, migration 0086): void bookkeeping. The invoice
+     * number is NEVER released — its per-business unique index keeps it
+     * reserved forever, and the cancelled row stays fully auditable.
+     */
+    cancelReason: varchar("cancel_reason", { length: 500 }),
+    cancelledByUserId: integer("cancelled_by_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
   },
   (table) => [
     foreignKey({

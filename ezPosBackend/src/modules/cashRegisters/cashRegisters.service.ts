@@ -1347,6 +1347,42 @@ export async function recordCashRefundInTx(
 }
 
 /**
+ * P3 Phase 3 (E1-003): the cash portion of a VOIDED sale leaves the drawer
+ * — same attribution rules as refunds (no-op without an open session; the
+ * GL still reverses via reverseEntry). The reference unique index
+ * (referenceType 'sale_cancel', referenceId saleId) makes retries
+ * idempotent.
+ */
+export async function recordSaleVoidCashOutInTx(
+  tx: Tx,
+  businessId: number,
+  userId: number | null,
+  locationId: number | null,
+  cashAmount: number,
+  saleId: number,
+  terminalId: number | null = null,
+): Promise<void> {
+  if (cashAmount <= 0 || userId === null || locationId === null) return;
+  const session = await findOpenSessionForAttribution(
+    tx,
+    businessId,
+    userId,
+    locationId,
+    terminalId,
+  );
+  if (!session) return;
+  await tx.insert(registerTransactions).values({
+    businessId,
+    sessionId: session.id,
+    userId,
+    type: "cash_out",
+    amount: roundMoney(cashAmount),
+    referenceType: "sale_cancel",
+    referenceId: saleId,
+  });
+}
+
+/**
  * Auto-records a cash due collection (customer invoice payment taken at the
  * counter) into the collector's open register session — same transaction as
  * the payment row. The source record is the sale_payment itself; the
