@@ -1,4 +1,5 @@
 import i18next from "i18next";
+import { setActiveFormatLocale } from "../lib/format.js";
 
 export type AppLanguage = "en" | "bn";
 
@@ -29,4 +30,5 @@ export function storeLanguage(lang: AppLanguage): void {
 export async function setAppLanguage(lang: AppLanguage): Promise<void> {
   await i18next.changeLanguage(lang);
   storeLanguage(lang);
+  setActiveFormatLocale(lang);
 }

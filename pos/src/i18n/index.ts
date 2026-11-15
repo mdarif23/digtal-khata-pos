@@ -12,6 +12,7 @@ import enPos from "./locales/en/pos.json";
 import enRegister from "./locales/en/register.json";
 import enSaleSuccess from "./locales/en/saleSuccess.json";
 import { getStoredLanguage } from "./language.js";
+import { setActiveFormatLocale } from "../lib/format.js";
 
 /**
  * Bangla localization (Phase 5).
@@ -54,6 +55,8 @@ export function initI18n(): void {
     returnNull: false,
     react: { useSuspense: false }, // dialogs render synchronously — mid-checkout included
   });
+  // Date formatters (formatDate/formatDateTime) follow the active language.
+  setActiveFormatLocale(getStoredLanguage());
 }
 
 initI18n();

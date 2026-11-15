@@ -1,4 +1,6 @@
 import { format as formatDateFns } from "date-fns";
+import type { Locale } from "date-fns";
+import { bn } from "date-fns/locale";
 
 /**
  * Canonical presentation formatters for the whole app.
@@ -38,18 +40,55 @@ export function formatQty(value: number | string | null | undefined): string {
   return String(Math.round(num * 1000) / 1000);
 }
 
-/** "14 Nov 2026"; empty/invalid → "—". */
-export function formatDate(value: string | Date | null | undefined): string {
-  if (!value) return "—";
-  const d = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(d.getTime()) ? "—" : formatDateFns(d, "dd MMM yyyy");
+// ---- locale-aware dates (Phase 5 Bangla localization) ----------------------
+// Additive only: an optional `locale` parameter on the date formatters,
+// defaulting to a module-level active locale that the i18n language layer
+// (setAppLanguage) keeps in sync. The default ("en") output is byte-identical
+// to the pre-i18n behavior; money/quantity formatters stay Latin-digit
+// deterministic (Bangla numerals are explicitly out of scope).
+export type FormatLocale = "en" | "bn";
+
+let activeFormatLocale: FormatLocale = "en";
+
+/** Called by the i18n language layer on init and every language switch. */
+export function setActiveFormatLocale(locale: FormatLocale): void {
+  activeFormatLocale = locale;
 }
 
-/** "14 Nov 2026, 03:25 PM"; empty/invalid → "—". */
-export function formatDateTime(value: string | Date | null | undefined): string {
+/** date-fns options per FormatLocale — "en" stays undefined (current output). */
+const LOCALE_OPTIONS: Record<FormatLocale, { locale: Locale } | undefined> = {
+  en: undefined,
+  bn: { locale: bn },
+};
+
+/** "14 Nov 2026" (en) / "15 জানু 2026" (bn); empty/invalid → "—". */
+export function formatDate(
+  value: string | Date | null | undefined,
+  locale?: FormatLocale,
+): string {
   if (!value) return "—";
   const d = value instanceof Date ? value : new Date(value);
   return Number.isNaN(d.getTime())
     ? "—"
-    : formatDateFns(d, "dd MMM yyyy, hh:mm a");
+    : formatDateFns(
+        d,
+        "dd MMM yyyy",
+        LOCALE_OPTIONS[locale ?? activeFormatLocale],
+      );
+}
+
+/** "14 Nov 2026, 03:25 PM" (en) / bn month names; empty/invalid → "—". */
+export function formatDateTime(
+  value: string | Date | null | undefined,
+  locale?: FormatLocale,
+): string {
+  if (!value) return "—";
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime())
+    ? "—"
+    : formatDateFns(
+        d,
+        "dd MMM yyyy, hh:mm a",
+        LOCALE_OPTIONS[locale ?? activeFormatLocale],
+      );
 }
