@@ -19,10 +19,11 @@ vi.mock("../usePurchaseStore", () => ({
     }),
   },
 }));
-vi.mock("@/features/products/useProductStore", () => ({
-  default: {
-    getState: () => ({ getProducts: vi.fn().mockResolvedValue(undefined) }),
-  },
+// Phase 6: the catalog refresh is a TanStack invalidateQueries — the real
+// products hook module runs against the harness QueryClient.
+vi.mock("@/features/products/hooks/useProducts", () => ({
+  productKeys: { all: ["products"], catalog: () => ["products", 1, 2, "catalog"] },
+  readProductsCache: () => [],
 }));
 
 const mockedPost = vi.mocked(axios.post);

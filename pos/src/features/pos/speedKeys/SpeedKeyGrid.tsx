@@ -19,7 +19,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import useProductStore from "@/features/products/useProductStore";
+import { useProductsQuery } from "@/features/products/hooks/useProducts.js";
+import type { ProductType } from "@/features/products/product.types.js";
+
+const EMPTY_PRODUCT_LIST: ProductType[] = [];
 import { useCartStore } from "@/features/pos/stores/useCartStore";
 import { resolveDefaultSaleUnit } from "@/features/pos/hooks/useSellUnits";
 import {
@@ -55,7 +58,7 @@ export function SpeedKeyGrid() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState<SpeedKeyTile[]>([]);
   const [saving, setSaving] = useState(false);
-  const products = useProductStore((state) => state.products);
+  const products = useProductsQuery().data ?? EMPTY_PRODUCT_LIST;
   // Variant picker options built from the loaded catalog (variantId →
   // "Product · SKU") — no dependency on the add-product option groups.
   const variantPickerOptions = useMemo(

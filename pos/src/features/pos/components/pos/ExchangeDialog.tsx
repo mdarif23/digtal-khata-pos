@@ -14,7 +14,10 @@ import { toast } from "@/components/ui/toast.js";
 import { createExchangeApi } from "../../sales.api.js";
 import { quoteSaleApi } from "../../quote.api.js";
 import { useSalesStore, refreshStockAfterTransaction } from "../../stores/useSalesStore.js";
-import useProductStore from "@/features/products/useProductStore.js";
+import { useProductsQuery } from "@/features/products/hooks/useProducts.js";
+import type { ProductType } from "@/features/products/product.types.js";
+
+const EMPTY_PRODUCT_LIST: ProductType[] = [];
 import type {
   AllSoldProduct,
   SalesStoreType,
@@ -51,7 +54,7 @@ export function ExchangeDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const products = useProductStore((s) => s.products);
+  const products = useProductsQuery().data ?? EMPTY_PRODUCT_LIST;
   // The store exposes getSales (NOT getSalesData — selecting a missing field
   // used to crash the post-exchange refresh behind a generic error toast).
   const getSales = useSalesStore((s) => s.getSales);

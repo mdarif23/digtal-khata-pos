@@ -4,7 +4,6 @@ import {
   VariantOptionData,
   VariantTypeData,
 } from "@/features/products/product.types";
-import { getErrorMessage } from "@/utils/getErrorMessage";
 import { create } from "zustand";
 import {
   createBrandApi,
@@ -14,7 +13,6 @@ import {
   createVariantOptionApi,
   createVariantTypeApi,
   updateProductApi,
-  getProductsApi,
   getProductSelectOptionsApi,
   getProductVariantOptionsApi,
   adjustVariantStockApi,
@@ -29,9 +27,27 @@ import {
   updateVariantOptionApi,
   updateVariantTypeApi,
 } from "./product.api";
+import { queryClient } from "@/lib/queryClient.js";
+import {
+  productKeys,
+  type ProductsCache,
+} from "@/features/products/hooks/useProducts.js";
 
-const useProductStore = create<ProductStoreType>((set, get) => ({
-  products: [],
+/**
+ * The product catalog LIST moved to TanStack Query (useProductsQuery) in
+ * Phase 6 Feature 1 — useProducts.fetchProductsWithOfflineCache owns the
+ * IndexedDB cache contract. This store keeps the option groups
+ * (brands/categories/suppliers/units, variant types/options) and the
+ * stock-mutating actions, which now patch the catalog query cache with the
+ * same in-place math (same clamping, same local-patch-no-refetch semantics).
+ */
+function patchCatalogCache(map: (rows: ProductType[]) => ProductType[]): void {
+  queryClient.setQueryData<ProductsCache>(productKeys.catalog(), (current) =>
+    current ? { ...current, data: map(current.data) } : current,
+  );
+}
+
+const useProductStore = create<ProductStoreType>((set) => ({
   productSelectOptions: {
     brands: [],
     categories: [],
@@ -39,32 +55,13 @@ const useProductStore = create<ProductStoreType>((set, get) => ({
     units: [],
   },
   productVariantOptions: [],
-  loading: false,
-  error: null,
-  getProducts: async () => {
-    set({ loading: true, error: null });
-    try {
-      // Offline POS (P2): the canonical catalog owns the IndexedDB cache —
-      // the same fallback contract the legacy store had, so offline checkout
-      // keeps working with one source of truth.
-      const { loadProductsWithCache } = await import(
-        "../pos/offline/catalog.js"
-      );
-      const { data: productsData } = await loadProductsWithCache<ProductType>(
-        getProductsApi,
-      );
-      set({ products: productsData, loading: false, error: null });
-    } catch (err: unknown) {
-      set({ error: getErrorMessage(err), loading: false });
-    }
-  },
   // P2: per-variant stock adjustments for POS carting — these hit the SAME
   // catalog the product grid reads (fixes the legacy store-drift bug where
   // carting mutated a catalog the grid never saw). Clamped at 0 to match
   // backend behavior (FIFO sales can never drive stock negative).
   returnVariantStock: (variantId, quantity) =>
-    set((state) => ({
-      products: state.products.map((product) => ({
+    patchCatalogCache((rows) =>
+      rows.map((product) => ({
         ...product,
         variants: product.variants.map((variant) =>
           variant.id === variantId
@@ -72,10 +69,10 @@ const useProductStore = create<ProductStoreType>((set, get) => ({
             : variant,
         ),
       })),
-    })),
+    ),
   takeVariantStock: (variantId, quantity) =>
-    set((state) => ({
-      products: state.products.map((product) => ({
+    patchCatalogCache((rows) =>
+      rows.map((product) => ({
         ...product,
         variants: product.variants.map((variant) =>
           variant.id === variantId
@@ -86,11 +83,11 @@ const useProductStore = create<ProductStoreType>((set, get) => ({
             : variant,
         ),
       })),
-    })),
+    ),
   adjustVariantStock: async (variantId, data) => {
     const result = await adjustVariantStockApi(variantId, data);
-    set((state) => ({
-      products: state.products.map((product) => ({
+    patchCatalogCache((rows) =>
+      rows.map((product) => ({
         ...product,
         variants: product.variants.map((variant) =>
           variant.id === variantId
@@ -98,32 +95,22 @@ const useProductStore = create<ProductStoreType>((set, get) => ({
             : variant,
         ),
       })),
-    }));
+    );
     return result;
   },
   getProductSelectOptions: async () => {
-    set({ loading: true });
-    try {
-      const data = await getProductSelectOptionsApi();
-      set({ productSelectOptions: data, loading: false });
-    } catch (err: unknown) {
-      set({ error: getErrorMessage(err), loading: false });
-    }
+    const data = await getProductSelectOptionsApi();
+    set({ productSelectOptions: data });
   },
   getProductVariantOptions: async () => {
-    set({ loading: true });
-    try {
-      const data = await getProductVariantOptionsApi();
-      set({ productVariantOptions: data, loading: false });
-    } catch (err: unknown) {
-      set({ error: getErrorMessage(err), loading: false });
-    }
+    const data = await getProductVariantOptionsApi();
+    set({ productVariantOptions: data });
   },
   createProduct: async (data) => {
     const response = await createProductApi(data);
     // The POST returns only { productId } — refresh the catalog so the new
     // product is visible immediately (P3: create-cache synchronization).
-    await get().getProducts();
+    await queryClient.invalidateQueries({ queryKey: productKeys.catalog() });
     return response.data;
   },
   updateProduct: async (id, data) => {
@@ -137,8 +124,8 @@ const useProductStore = create<ProductStoreType>((set, get) => ({
       );
     }
 
-    set((state) => ({
-      products: state.products.map((product) => {
+    patchCatalogCache((rows) =>
+      rows.map((product) => {
         if (product.id !== id) {
           return product;
         }
@@ -190,7 +177,7 @@ const useProductStore = create<ProductStoreType>((set, get) => ({
           ],
         };
       }),
-    }));
+    );
   },
   createCategory: async (data) => {
     const response = await createCategoryApi(data);

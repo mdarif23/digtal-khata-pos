@@ -286,10 +286,12 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
       // so they are in place the moment the connection drops.
       try {
         const { prepareOffline } = await import("./allocations.js");
-        const { default: useProductStore } = await import(
-          "@/features/products/useProductStore.js"
+        // Lazy import keeps the offlineStore → catalog → offlineStore cycle
+        // broken (the catalog hook module must not load statically here).
+        const { readProductsCache } = await import(
+          "@/features/products/hooks/useProducts.js"
         );
-        const products = useProductStore.getState().products ?? [];
+        const products = readProductsCache();
         const variantIds = products
           .flatMap((p: { variants?: { id: number }[] }) => (p.variants ?? []).map((v) => v.id))
           .filter(Boolean);

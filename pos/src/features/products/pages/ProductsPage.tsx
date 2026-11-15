@@ -8,6 +8,12 @@ import ProductOverview from "../components/ProductsPage/Table.js";
 import { DataTable } from "../components/ProductsPage/Table/data-table.js";
 import { columns } from "../components/ProductsPage/Table/columns.js";
 import useProductStore from "../useProductStore.js";
+import {
+  productKeys,
+  readProductsCache,
+  useProductsQuery,
+} from "@/features/products/hooks/useProducts.js";
+import { queryClient } from "@/lib/queryClient.js";
 import type { ProductType } from "../product.schema.js";
 import { calculateProductStats } from "../utils/calculateProductStats.js";
 import { getProductStockState } from "../utils/getProductStockState.js";
@@ -116,10 +122,14 @@ const stockFilters: { value: StockFilter; label: string }[] = [
 ];
 
 export function Products() {
-  const products = useProductStore((state) => state.products);
-  const loading = useProductStore((state) => state.loading);
-  const error = useProductStore((state) => state.error);
-  const getProducts = useProductStore((state) => state.getProducts);
+  const productsQuery = useProductsQuery();
+  const products = productsQuery.data ?? [];
+  const loading = productsQuery.isPending;
+  const error = productsQuery.error
+    ? productsQuery.error instanceof Error
+      ? productsQuery.error.message
+      : String(productsQuery.error)
+    : null;
   const productSelectOptions = useProductStore(
     (state) => state.productSelectOptions,
   );
@@ -145,10 +155,11 @@ export function Products() {
           )
           .find(({ variant }) => variant.id === match.variantId);
 
-      let row = findRow(useProductStore.getState().products);
+      let row = findRow(readProductsCache());
       if (!row) {
-        await useProductStore.getState().getProducts();
-        row = findRow(useProductStore.getState().products);
+        // Scanned variant newer than the loaded catalog — refresh once.
+        await queryClient.invalidateQueries({ queryKey: productKeys.catalog() });
+        row = findRow(readProductsCache());
       }
       if (!row) {
         throw new Error(`${match.productName} is not in the loaded catalog.`);
@@ -163,7 +174,7 @@ export function Products() {
   const scanner = useBarcodeScanner({
     capture: "window",
     lookup: useCallback(
-      createCatalogLookup(() => useProductStore.getState().products),
+      createCatalogLookup(readProductsCache),
       [],
     ),
     onResolve: handleResolved,
@@ -308,16 +319,14 @@ export function Products() {
                     // Exact codes open the scanned variant; text stays a filter.
                     const query = search.trim().toLowerCase();
                     const isExactCode = query
-                      ? useProductStore
-                          .getState()
-                          .products.some((product) =>
-                            product.variants.some(
-                              (variant) =>
-                                variant.barcode?.trim().toLowerCase() ===
-                                  query ||
-                                variant.sku.trim().toLowerCase() === query,
-                            ),
-                          )
+                      ? products.some((product) =>
+                          product.variants.some(
+                            (variant) =>
+                              variant.barcode?.trim().toLowerCase() ===
+                                query ||
+                              variant.sku.trim().toLowerCase() === query,
+                          ),
+                        )
                       : false;
                     if (isExactCode) {
                       event.preventDefault();
@@ -433,7 +442,7 @@ export function Products() {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => void getProducts()}
+              onClick={() => void productsQuery.refetch()}
               disabled={loading}
             >
               Try again

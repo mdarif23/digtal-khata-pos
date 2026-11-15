@@ -20,8 +20,10 @@ vi.mock("../../../../api/axios.js", () => ({
 
 const catalogState = vi.hoisted(() => ({ products: [] as any[] }));
 
-vi.mock("@/features/products/useProductStore.js", () => ({
-  default: { getState: () => catalogState },
+// Phase 6: the cart rebuild reads the catalog from the TanStack Query cache
+// (readProductsCache) instead of the removed Zustand products array.
+vi.mock("@/features/products/hooks/useProducts.js", () => ({
+  readProductsCache: () => catalogState.products,
 }));
 
 import {

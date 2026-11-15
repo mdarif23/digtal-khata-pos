@@ -10,7 +10,7 @@ import {
   type SwitchUnitResult,
 } from "../types/cart.types.js";
 import { HoldCartItems } from "@/features/pos/types/cart.types.js";
-import useProductStore from "@/features/products/useProductStore.js";
+import { readProductsCache } from "@/features/products/hooks/useProducts.js";
 import { fetchSellUnits } from "../hooks/useSellUnits.js";
 import { useSessionStore } from "@/auth/sessionStore.js";
 
@@ -519,7 +519,7 @@ export async function resumeHeldItems(
     batchId?: number | null;
   }[],
 ): Promise<{ lines: CartType[]; missing: string[] }> {
-  const products = useProductStore.getState().products;
+  const products = readProductsCache();
   const lines: CartType[] = [];
   const missing: string[] = [];
 

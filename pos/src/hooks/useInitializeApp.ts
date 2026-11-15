@@ -10,6 +10,10 @@ import {
   customerKeys,
   fetchCustomersWithOfflineCache,
 } from "@/features/customers/hooks/useCustomers.js";
+import {
+  productKeys,
+  fetchProductsWithOfflineCache,
+} from "@/features/products/hooks/useProducts.js";
 
 const LAST_SESSION_KEY = "ezpos-last-session";
 
@@ -48,19 +52,22 @@ export function useInitializeApp(enabled: boolean) {
   const { getSales } = useSalesStore();
   const { getPurchases, getPurchaseItems, getPurchasesReturnItems } =
     usePurchasesStore();
-  const { getProductSelectOptions, getProductVariantOptions, getProducts } =
+  const { getProductSelectOptions, getProductVariantOptions } =
     useProductStore();
   useEffect(() => {
     if (!enabled) return;
     enforceSessionScope();
-    getProducts();
-    getSales();
-    // Customers list: TanStack Query warm-start (same fetch + offline
-    // fallback the old store action performed, same effect-order position).
+    // Products + customers lists: TanStack Query warm-starts (same fetch +
+    // offline fallback the old store actions performed, same order position).
+    void queryClient.prefetchQuery({
+      queryKey: productKeys.catalog(),
+      queryFn: fetchProductsWithOfflineCache,
+    });
     void queryClient.prefetchQuery({
       queryKey: customerKeys.list(),
       queryFn: fetchCustomersWithOfflineCache,
     });
+    getSales();
     getPurchases();
     getPurchaseItems();
     getPurchasesReturnItems();

@@ -5,6 +5,14 @@ import { ProductHeader } from "./ProductHeader";
 import api from "../../../../api/axios.js";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
 import useProductStore from "@/features/products/useProductStore";
+import {
+  productKeys,
+  readProductsCache,
+  useProductsQuery,
+} from "@/features/products/hooks/useProducts.js";
+import { queryClient } from "@/lib/queryClient.js";
+
+const EMPTY_PRODUCT_LIST: ProductType[] = [];
 import { ProductCard } from "../../../../components/common/ProductCard";
 import { ShowVariants } from "../../../../components/common/ShowVariants";
 import { SerialPickerDialog } from "./SerialPickerDialog";
@@ -51,7 +59,10 @@ export function ProductList({
   scannerEnabled?: boolean;
 }) {
   const { addToCart } = useCartStore();
-  const { products, productSelectOptions } = useProductStore();
+  const products = useProductsQuery().data ?? EMPTY_PRODUCT_LIST;
+  const productSelectOptions = useProductStore(
+    (state) => state.productSelectOptions,
+  );
   const [searchProducts, setSearchProducts] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [activeSerialProduct, setActiveSerialProduct] =
@@ -140,10 +151,11 @@ export function ProductList({
 
       // The cart entry is built from the full local catalog row; refresh
       // it when the scanned variant is newer than the loaded catalog.
-      let row = findRow(useProductStore.getState().products);
+      let row = findRow(readProductsCache());
       if (!row) {
-        await useProductStore.getState().getProducts();
-        row = findRow(useProductStore.getState().products);
+        // Scanned variant newer than the loaded catalog — refresh once.
+        await queryClient.invalidateQueries({ queryKey: productKeys.catalog() });
+        row = findRow(readProductsCache());
       }
       if (!row) {
         throw new Error(`${match.productName} is not in the loaded catalog.`);
@@ -252,10 +264,7 @@ export function ProductList({
   // Local-first identification: loaded catalog matches never hit the
   // network; everything else resolves against the server (alias barcodes,
   // codes newer than the catalog).
-  const lookup = useCallback(
-    createCatalogLookup(() => useProductStore.getState().products),
-    [],
-  );
+  const lookup = useCallback(createCatalogLookup(readProductsCache), []);
 
   // Phase 4 (Feature 10-B): embedded price/weight barcodes — parse first,
   // fall back to normal identification when the shape doesn't match. The

@@ -83,7 +83,6 @@ export type StockAdjustmentResult = {
 export type { ProductType };
 
 export interface ProductStoreType {
-  products: ProductType[];
   productSelectOptions: {
     brands: BrandOption[];
     units: UnitOption[];
@@ -94,9 +93,6 @@ export interface ProductStoreType {
     }[];
   };
   productVariantOptions: VariantOptionGroup[];
-  loading: boolean;
-  error: string | null;
-  getProducts: () => void;
   returnVariantStock: (variantId: number, quantity: number) => void;
   takeVariantStock: (variantId: number, quantity: number) => void;
   adjustVariantStock: (

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { getErrorMessage } from "../../../utils/getErrorMessage.js";
 import { queryClient } from "@/lib/queryClient";
-import useProductStore from "@/features/products/useProductStore";
+import { productKeys } from "@/features/products/hooks/useProducts.js";
 import {
   clearSellUnitsCache,
   sellUnitsKeys,
@@ -23,7 +23,7 @@ import type { SaleRefundRequest } from "../types/sales.types.js";
  */
 export async function refreshStockAfterTransaction(): Promise<void> {
   try {
-    await useProductStore.getState().getProducts();
+    await queryClient.invalidateQueries({ queryKey: productKeys.catalog() });
   } catch {
     // Stock refresh is best-effort; the transaction itself already succeeded.
   }

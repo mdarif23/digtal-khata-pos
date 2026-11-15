@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePurchasesStore } from "../usePurchaseStore";
-import useProductStore from "@/features/products/useProductStore";
+import { productKeys } from "@/features/products/hooks/useProducts.js";
 import { landedCostKeys } from "@/features/landed-cost/hooks/useLandedCost";
 import type {
   ReceiveItemsFormValues,
@@ -27,8 +27,11 @@ export function useReceivePurchase() {
     onSuccess: async () => {
       const { getPurchases, getPurchaseItems } =
         usePurchasesStore.getState();
-      const { getProducts } = useProductStore.getState();
-      await Promise.all([getPurchases(), getPurchaseItems(), getProducts()]);
+      await Promise.all([
+        getPurchases(),
+        getPurchaseItems(),
+        queryClient.invalidateQueries({ queryKey: productKeys.catalog() }),
+      ]);
       await queryClient.invalidateQueries({ queryKey: landedCostKeys.all });
       await queryClient.invalidateQueries({ queryKey: ["due-management"] });
       await queryClient.invalidateQueries({

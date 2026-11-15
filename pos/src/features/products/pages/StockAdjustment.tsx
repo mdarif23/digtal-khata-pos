@@ -17,6 +17,12 @@ import { ProductType } from "@/features/products/product.schema";
 import { ProductVariantType } from "@/features/products/product.schema";
 import { StockAdjustmentInput } from "@/features/products/product.types";
 import useProductStore from "@/features/products/useProductStore";
+import {
+  productKeys,
+  readProductsCache,
+  useProductsQuery,
+} from "@/features/products/hooks/useProducts.js";
+import { queryClient } from "@/lib/queryClient.js";
 import { buildVariantOptionsLabel } from "@/lib/variantDisplay";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
@@ -52,10 +58,14 @@ function getRequestErrorMessage(error: unknown) {
 }
 
 export function StockAdjustment() {
-  const products = useProductStore((state) => state.products);
-  const loading = useProductStore((state) => state.loading);
-  const loadError = useProductStore((state) => state.error);
-  const getProducts = useProductStore((state) => state.getProducts);
+  const productsQuery = useProductsQuery();
+  const products = productsQuery.data ?? [];
+  const loading = productsQuery.isPending;
+  const loadError = productsQuery.error
+    ? productsQuery.error instanceof Error
+      ? productsQuery.error.message
+      : String(productsQuery.error)
+    : null;
   const adjustVariantStock = useProductStore(
     (state) => state.adjustVariantStock,
   );
@@ -75,12 +85,6 @@ export function StockAdjustment() {
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const newQuantityRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (products.length === 0 && !loading && !loadError) {
-      getProducts();
-    }
-  }, [getProducts, loadError, loading, products.length]);
 
   useEffect(() => {
     function handleOutsidePointerDown(event: PointerEvent) {
@@ -221,11 +225,11 @@ export function StockAdjustment() {
         )
         .find(({ variant }) => variant.id === match.variantId);
 
-    let row = findRow(useProductStore.getState().products);
+    let row = findRow(readProductsCache());
     if (!row) {
       // Scanned variant newer than the loaded catalog — refresh once.
-      await useProductStore.getState().getProducts();
-      row = findRow(useProductStore.getState().products);
+      await queryClient.invalidateQueries({ queryKey: productKeys.catalog() });
+      row = findRow(readProductsCache());
     }
     if (!row) {
       throw new Error(`${match.productName} is not in the loaded catalog.`);
@@ -239,7 +243,7 @@ export function StockAdjustment() {
   const scanner = useBarcodeScanner({
     capture: "window",
     lookup: useCallback(
-      createCatalogLookup(() => useProductStore.getState().products),
+      createCatalogLookup(readProductsCache),
       [],
     ),
     onResolve: handleResolved,
@@ -377,7 +381,7 @@ export function StockAdjustment() {
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6">
           <h1 className="text-xl font-semibold">Could not load products</h1>
           <p className="mt-2 text-sm text-muted-foreground">{loadError}</p>
-          <Button className="mt-4" onClick={getProducts}>
+          <Button className="mt-4" onClick={() => void productsQuery.refetch()}>
             Try again
           </Button>
         </div>

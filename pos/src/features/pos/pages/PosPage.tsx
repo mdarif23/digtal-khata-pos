@@ -27,6 +27,7 @@ import { buildCfdCartPayload, buildCfdPaidPayload } from "../cfd/cfdPayload";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
 import { queryClient } from "@/lib/queryClient.js";
 import { customerKeys } from "@/features/customers/hooks/useCustomers.js";
+import { productKeys } from "@/features/products/hooks/useProducts.js";
 import {
   Card,
   CardContent,
@@ -75,7 +76,7 @@ function Pos() {
   }, []);
   useEffect(() => {
     if (stockRevision > 0 || productRevision > 0) {
-      void useProductStore.getState().getProducts();
+      void queryClient.invalidateQueries({ queryKey: productKeys.catalog() });
     }
   }, [stockRevision, productRevision]);
   useEffect(() => {
