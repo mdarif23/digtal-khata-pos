@@ -1,5 +1,8 @@
 import { Button } from "@/components/ui/button";
+import i18next from "i18next";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
+import "@/i18n/index.js";
 import {
   Dialog,
   DialogClose,
@@ -191,12 +194,20 @@ function storeCreditIssue(
   tender: TenderBalances,
 ): string | null {
   if (customerId == null || customerId <= 0)
-    return "Select a customer to pay with store credit.";
-  if (!(amount > 0)) return "Nothing to pay.";
+    return i18next.t("payment:storeCredit.noCustomer", {
+      defaultValue: "Select a customer to pay with store credit.",
+    });
+  if (!(amount > 0))
+    return i18next.t("payment:storeCredit.nothing", { defaultValue: "Nothing to pay." });
   if (tender.storeCredit === null)
-    return "Store credit balance unavailable — check the connection.";
+    return i18next.t("payment:storeCredit.balanceUnavailable", {
+      defaultValue: "Store credit balance unavailable — check the connection.",
+    });
   if (amount > tender.storeCredit + 0.005)
-    return `Insufficient store credit — ৳${(amount - tender.storeCredit).toFixed(2)} short.`;
+    return i18next.t("payment:storeCredit.insufficient", {
+      defaultValue: "Insufficient store credit — ৳{{short}} short.",
+      short: (amount - tender.storeCredit).toFixed(2),
+    });
   return null;
 }
 
@@ -207,23 +218,46 @@ function loyaltyIssue(
   tender: TenderBalances,
 ): string | null {
   if (customerId == null || customerId <= 0)
-    return "Select a customer to pay with points.";
+    return i18next.t("payment:loyalty.noCustomer", {
+      defaultValue: "Select a customer to pay with points.",
+    });
   const config = tender.loyaltyConfig;
   if (!config || !(config.redeemValue > 0))
-    return "Loyalty redemption is not available for this business.";
+    return i18next.t("payment:loyalty.unavailable", {
+      defaultValue: "Loyalty redemption is not available for this business.",
+    });
   const points = money(amount / config.redeemValue);
-  if (points <= 0) return "This total converts to zero points.";
+  if (points <= 0)
+    return i18next.t("payment:loyalty.zeroPoints", {
+      defaultValue: "This total converts to zero points.",
+    });
   if (
     config.maxRedemptionPointsPerSale !== null &&
     points > config.maxRedemptionPointsPerSale
   )
-    return `Capped at ${config.maxRedemptionPointsPerSale} points per sale (needs ${points.toFixed(2)}).`;
+    return i18next.t("payment:loyalty.capped", {
+      defaultValue:
+        "Capped at {{max}} points per sale (needs {{points}}).",
+      max: config.maxRedemptionPointsPerSale,
+      points: points.toFixed(2),
+    });
   if (config.minRedemptionPoints > 0 && points < config.minRedemptionPoints)
-    return `Redemption needs at least ${config.minRedemptionPoints} points (this is ${points.toFixed(2)}).`;
+    return i18next.t("payment:loyalty.min", {
+      defaultValue:
+        "Redemption needs at least {{min}} points (this is {{points}}).",
+      min: config.minRedemptionPoints,
+      points: points.toFixed(2),
+    });
   if (tender.loyaltyBalance === null)
-    return "Points balance unavailable — check the connection.";
+    return i18next.t("payment:loyalty.balanceUnavailable", {
+      defaultValue: "Points balance unavailable — check the connection.",
+    });
   if (points > tender.loyaltyBalance + 0.01)
-    return `Insufficient points — balance ${tender.loyaltyBalance.toFixed(2)}, needs ${points.toFixed(2)}.`;
+    return i18next.t("payment:loyalty.insufficient", {
+      defaultValue: "Insufficient points — balance {{balance}}, needs {{points}}.",
+      balance: tender.loyaltyBalance.toFixed(2),
+      points: points.toFixed(2),
+    });
   return null;
 }
 
@@ -305,6 +339,7 @@ export function PaymentModal({
   isPaymentDialogOpen: boolean;
   setIsPaymentDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
+  const { t } = useTranslation();
   const cart = useCartStore((state) => state.cart);
   // The server quote is the authoritative charge target: it already includes
   // the coupon discount and the exclusive/inclusive tax split. Deriving the
@@ -338,7 +373,9 @@ export function PaymentModal({
             className="h-14 w-full justify-between px-4 text-base font-semibold"
           >
             <span className="flex items-center gap-2">
-              Charge customer
+              {t("payment:chargeCustomer", {
+                defaultValue: "Charge customer",
+              })}
               <Kbd keys={["F6"]} className="opacity-70" />
             </span>
             <span className="tabular-nums">{formatCurrency(finalTotal)}</span>
@@ -347,9 +384,12 @@ export function PaymentModal({
       />
       <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Payment</DialogTitle>
+          <DialogTitle>
+            {t("payment:paymentTitle", { defaultValue: "Payment" })}
+          </DialogTitle>
           <DialogDescription className="text-base font-semibold text-foreground">
-            Total due: <span className="tabular-nums">{formatCurrency(finalTotal)}</span>
+            {t("payment:totalDue", { defaultValue: "Total due:" })}{" "}
+            <span className="tabular-nums">{formatCurrency(finalTotal)}</span>
           </DialogDescription>
         </DialogHeader>
 
@@ -369,21 +409,29 @@ export function PaymentModal({
               <DigitalCashPayment
                 finalTotal={finalTotal}
                 form={form}
-                paymentInstruction={`Bangla QR: ${QR_NUMBER}`}
+                sendTo
+                paymentInstruction={t("payment:banglaQrInstruction", {
+                  defaultValue: "Bangla QR: {{number}}",
+                  number: QR_NUMBER,
+                })}
               />
             )}
             {mode === "card" && (
               <DigitalCashPayment
                 finalTotal={finalTotal}
                 form={form}
-                paymentInstruction="Insert / tap card on POS terminal"
+                paymentInstruction={t("payment:instructionCard", {
+                  defaultValue: "Insert / tap card on POS terminal",
+                })}
               />
             )}
             {mode === "gift_card" && (
               <DigitalCashPayment
                 finalTotal={finalTotal}
                 form={form}
-                paymentInstruction="Enter the customer's gift card code"
+                paymentInstruction={t("payment:instructionGiftCard", {
+                  defaultValue: "Enter the customer's gift card code",
+                })}
               />
             )}
             {mode === "store_credit" && (
@@ -418,7 +466,7 @@ export function PaymentModal({
           <DialogClose
             render={
               <Button type="button" variant="outline">
-                Cancel
+                {t("common:cancel", { defaultValue: "Cancel" })}
               </Button>
             }
           />
@@ -427,7 +475,7 @@ export function PaymentModal({
             type="submit"
             disabled={!valid || isSubmitting}
           >
-            Confirm Payment
+            {t("payment:confirmPayment", { defaultValue: "Confirm Payment" })}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -447,20 +495,23 @@ function PaymentMethod({
   mode: string | undefined;
   customerId: number | null;
 }) {
+  const { t } = useTranslation();
   const options = [
-    { label: "Cash", value: "cash", icon: Banknote },
-    { label: "Bangla QR", value: "bangla_qr", icon: QrCode },
-    { label: "Card", value: "card", icon: CreditCard },
-    { label: "Store credit", value: "store_credit", icon: Wallet },
-    { label: "Loyalty points", value: "loyalty_points", icon: Coins },
-    { label: "Gift card", value: "gift_card", icon: Gift },
-    { label: "Due", value: "due", icon: Clock3 },
-    { label: "Split", value: "split", icon: Layers },
+    { label: "Cash", labelKey: "payment:method.cash", value: "cash", icon: Banknote },
+    { label: "Bangla QR", labelKey: "payment:method.banglaQr", value: "bangla_qr", icon: QrCode },
+    { label: "Card", labelKey: "payment:method.card", value: "card", icon: CreditCard },
+    { label: "Store credit", labelKey: "payment:method.storeCredit", value: "store_credit", icon: Wallet },
+    { label: "Loyalty points", labelKey: "payment:method.loyaltyPoints", value: "loyalty_points", icon: Coins },
+    { label: "Gift card", labelKey: "payment:method.giftCard", value: "gift_card", icon: Gift },
+    { label: "Due", labelKey: "payment:method.due", value: "due", icon: Clock3 },
+    { label: "Split", labelKey: "payment:method.split", value: "split", icon: Layers },
   ];
 
   return (
     <div className="flex flex-col gap-3">
-      <span className="text-sm font-medium">Select method</span>
+      <span className="text-sm font-medium">
+        {t("payment:selectMethod", { defaultValue: "Select method" })}
+      </span>
       <ToggleGroup
         value={mode ? [mode] : []}
         onValueChange={(value: string[]) => {
@@ -486,7 +537,7 @@ function PaymentMethod({
             className="col-span-1 justify-start gap-2 px-3 data-pressed:bg-primary data-pressed:text-primary-foreground"
           >
             <m.icon className="size-4" aria-hidden="true" />
-            {m.label}
+            {t(m.labelKey, { defaultValue: m.label })}
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
@@ -502,6 +553,7 @@ function CashPayment({
   finalTotal: number;
   form: UseFormReturn<CartSchemaType>;
 }) {
+  const { t } = useTranslation();
   // amount = what is applied to the sale (always finalTotal)
   // tendered = what the customer handed over
   const tendered = useWatch({
@@ -514,7 +566,7 @@ function CashPayment({
   const isOwed = owed > 0;
 
   const shortcuts = [
-    { label: "Exact", value: finalTotal },
+    { label: t("payment:cashExact", { defaultValue: "Exact" }), value: finalTotal },
     { label: "100", value: 100 },
     { label: "200", value: 200 },
     { label: "300", value: 300 },
@@ -529,7 +581,9 @@ function CashPayment({
         control={form.control}
         render={({ field }) => (
           <Field>
-            <FieldLabel htmlFor={field.name}>Cash Receive</FieldLabel>
+            <FieldLabel htmlFor={field.name}>
+              {t("payment:cashReceive", { defaultValue: "Cash Receive" })}
+            </FieldLabel>
             <Input
               id={field.name}
               type="number"
@@ -563,7 +617,9 @@ function CashPayment({
       >
         <CardContent className="flex flex-col items-center gap-0.5 py-4">
           <span className="text-sm text-muted-foreground">
-            {isOwed ? "Still owed" : "Change to give"}
+            {isOwed
+              ? t("payment:stillOwed", { defaultValue: "Still owed" })
+              : t("payment:changeToGive", { defaultValue: "Change to give" })}
           </span>
           <span
             className={cn(
@@ -584,18 +640,26 @@ function DigitalCashPayment({
   paymentInstruction,
   finalTotal,
   form,
+  sendTo = false,
 }: {
   paymentInstruction: string;
   finalTotal: number;
   form: UseFormReturn<CartSchemaType>;
+  /** Bangla QR carries a merchant number to pay TO; other methods show an
+   *  instruction. Explicit flag — the old startsWith("Bangla QR") string
+   *  sniffing breaks once the instruction is translated. */
+  sendTo?: boolean;
 }) {
+  const { t } = useTranslation();
   // amount is already set to finalTotal by buildPayments, no useEffect needed
   return (
     <>
       <Card>
         <CardContent className="flex flex-col gap-1 py-4">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {paymentInstruction.startsWith("Bangla QR") ? "Send to" : "Instruction"}
+            {sendTo
+              ? t("payment:sendTo", { defaultValue: "Send to" })
+              : t("payment:instruction", { defaultValue: "Instruction" })}
           </span>
           <span className="font-medium">{paymentInstruction}</span>
         </CardContent>
@@ -607,7 +671,9 @@ function DigitalCashPayment({
         render={({ field }) => (
           <Field>
             <FieldLabel htmlFor={field.name}>
-              Transaction ID (last 6+ chars)
+              {t("payment:transactionId", {
+                defaultValue: "Transaction ID (last 6+ chars)",
+              })}
             </FieldLabel>
             <Input
               id={field.name}
@@ -622,7 +688,7 @@ function DigitalCashPayment({
 
       <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
         <span className="text-sm text-muted-foreground">
-          Amount to charge
+          {t("payment:amountToCharge", { defaultValue: "Amount to charge" })}
         </span>
         <span className="text-base font-semibold tabular-nums">
           {formatCurrency(finalTotal)}
@@ -642,6 +708,7 @@ function StoreCreditPayment({
   customerId: number | null;
   tender: TenderBalances;
 }) {
+  const { t } = useTranslation();
   const issue = storeCreditIssue(finalTotal, customerId, tender);
   const available = tender.storeCredit;
 
@@ -649,16 +716,22 @@ function StoreCreditPayment({
     <Card>
       <CardContent className="flex flex-col gap-1.5 py-4">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Store credit
+          {t("payment:method.storeCredit", { defaultValue: "Store credit" })}
         </span>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Available</span>
+          <span className="text-sm text-muted-foreground">
+            {t("payment:available", { defaultValue: "Available" })}
+          </span>
           <span className="font-medium tabular-nums">
-            {available === null ? "checking…" : formatCurrency(available)}
+            {available === null
+              ? t("payment:checking", { defaultValue: "checking…" })
+              : formatCurrency(available)}
           </span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Amount applied</span>
+          <span className="text-sm text-muted-foreground">
+            {t("payment:amountApplied", { defaultValue: "Amount applied" })}
+          </span>
           <span className="font-semibold tabular-nums">
             {formatCurrency(finalTotal)}
           </span>
@@ -681,6 +754,7 @@ function LoyaltyPointsPayment({
   customerId: number | null;
   tender: TenderBalances;
 }) {
+  const { t } = useTranslation();
   const config = tender.loyaltyConfig;
   const points =
     config && config.redeemValue > 0
@@ -693,28 +767,46 @@ function LoyaltyPointsPayment({
     <Card>
       <CardContent className="flex flex-col gap-1.5 py-4">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Loyalty points
+          {t("payment:method.loyaltyPoints", { defaultValue: "Loyalty points" })}
         </span>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Balance</span>
+          <span className="text-sm text-muted-foreground">
+            {t("payment:balance", { defaultValue: "Balance" })}
+          </span>
           <span className="font-medium tabular-nums">
-            {balance === null ? "checking…" : formatNumber(balance)}
+            {balance === null
+              ? t("payment:checking", { defaultValue: "checking…" })
+              : formatNumber(balance)}
           </span>
         </div>
         {points !== null && (
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">
-              Redeems {formatCurrency(finalTotal)}
-              {config ? ` (৳${config.redeemValue}/point)` : ""}
+              {t("payment:redeems", {
+                defaultValue: "Redeems {{amount}}{{rate}}",
+                amount: formatCurrency(finalTotal),
+                rate: config
+                  ? t("payment:ratePerPoint", {
+                      defaultValue: " (৳{{value}}/point)",
+                      value: config.redeemValue,
+                    })
+                  : "",
+              })}
             </span>
             <span className="font-semibold tabular-nums">
-              {formatNumber(points)} pts
+              {t("payment:pointsSuffix", {
+                defaultValue: "{{points}} pts",
+                points: formatNumber(points),
+              })}
             </span>
           </div>
         )}
         {config && config.maxRedemptionPointsPerSale !== null && (
           <span className="text-xs text-muted-foreground">
-            Max {formatNumber(config.maxRedemptionPointsPerSale)} points per sale
+            {t("payment:maxPointsPerSale", {
+              defaultValue: "Max {{points}} points per sale",
+              points: formatNumber(config.maxRedemptionPointsPerSale),
+            })}
           </span>
         )}
         {issue && (
@@ -730,19 +822,19 @@ function LoyaltyPointsPayment({
 // methods. The old positional cash/digital/due builder is gone — rows are
 // added, switched, filled and removed individually; the backend's
 // distinct-method constraint is preserved by the row picker (no duplicates).
-const SPLIT_METHODS: { value: PaymentSchemaType["method"]; label: string }[] = [
-  { value: "cash", label: "Cash" },
-  { value: "bangla_qr", label: "Bangla QR" },
-  { value: "card", label: "Card" },
-  { value: "store_credit", label: "Store credit" },
-  { value: "loyalty_points", label: "Loyalty points" },
-  { value: "gift_card", label: "Gift card" },
-  { value: "due", label: "Due" },
+const SPLIT_METHODS: {
+  value: PaymentSchemaType["method"];
+  label: string;
+  labelKey: string;
+}[] = [
+  { value: "cash", label: "Cash", labelKey: "payment:method.cash" },
+  { value: "bangla_qr", label: "Bangla QR", labelKey: "payment:method.banglaQr" },
+  { value: "card", label: "Card", labelKey: "payment:method.card" },
+  { value: "store_credit", label: "Store credit", labelKey: "payment:method.storeCredit" },
+  { value: "loyalty_points", label: "Loyalty points", labelKey: "payment:method.loyaltyPoints" },
+  { value: "gift_card", label: "Gift card", labelKey: "payment:method.giftCard" },
+  { value: "due", label: "Due", labelKey: "payment:method.due" },
 ];
-
-function methodLabel(method: string | undefined): string {
-  return SPLIT_METHODS.find((m) => m.value === method)?.label ?? method ?? "";
-}
 
 function SplitPayment({
   form,
@@ -755,6 +847,13 @@ function SplitPayment({
   customerId: number | null;
   tender: TenderBalances;
 }) {
+  const { t } = useTranslation();
+  // Localized method label — falls back to the raw enum (same as the old
+  // methodLabel helper) for unknown methods.
+  const methodLabel = (method: string | undefined): string => {
+    const found = SPLIT_METHODS.find((m) => m.value === method);
+    return found ? t(found.labelKey, { defaultValue: found.label }) : (method ?? "");
+  };
   const payments = useWatch({ control: form.control, name: "payments" }) ?? [];
   const allocated = money(
     payments.reduce((acc, p) => acc + money(p?.amount), 0),
@@ -830,16 +929,20 @@ function SplitPayment({
       <Card>
         <CardContent className="flex flex-col gap-1 py-4">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Split payment
+            {t("payment:splitPayment", { defaultValue: "Split payment" })}
           </span>
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Total</span>
+            <span className="text-sm text-muted-foreground">
+              {t("common:total", { defaultValue: "Total" })}
+            </span>
             <span className="font-medium tabular-nums">
               {formatCurrency(finalTotal)}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Remaining</span>
+            <span className="text-sm text-muted-foreground">
+              {t("payment:remaining", { defaultValue: "Remaining" })}
+            </span>
             <span
               className={cn(
                 "font-semibold tabular-nums",
@@ -862,7 +965,10 @@ function SplitPayment({
           <div key={index} className="rounded-lg border p-3">
             <div className="flex items-center justify-between gap-2">
               <select
-                aria-label={`Tender method ${index + 1}`}
+                aria-label={t("payment:tenderMethodAria", {
+                  defaultValue: "Tender method {{index}}",
+                  index: index + 1,
+                })}
                 className="min-w-0 flex-1 rounded-md border bg-background p-2 text-sm"
                 value={payment.method}
                 onChange={(e) =>
@@ -886,7 +992,7 @@ function SplitPayment({
                           m.value === "loyalty_points"))
                     }
                   >
-                    {m.label}
+                    {t(m.labelKey, { defaultValue: m.label })}
                   </option>
                 ))}
               </select>
@@ -894,7 +1000,10 @@ function SplitPayment({
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label={`Remove ${methodLabel(payment.method)} row`}
+                aria-label={t("payment:removeRowAria", {
+                  defaultValue: "Remove {{method}} row",
+                  method: methodLabel(payment.method),
+                })}
                 disabled={payments.length <= 1}
                 onClick={() => removeRow(index)}
               >
@@ -909,7 +1018,10 @@ function SplitPayment({
                   <Input
                     id={field.name}
                     type="number"
-                    aria-label={`${methodLabel(payment.method)} amount`}
+                    aria-label={t("payment:methodAmountAria", {
+                      defaultValue: "{{method}} amount",
+                      method: methodLabel(payment.method),
+                    })}
                     {...field}
                     value={field.value ?? ""}
                     disabled={isDue && customerId == null}
@@ -924,7 +1036,7 @@ function SplitPayment({
                 disabled={isDue && customerId == null}
                 onClick={() => fill(index)}
               >
-                Fill
+                {t("payment:fill", { defaultValue: "Fill" })}
               </Button>
             </div>
             {needsReference && (
@@ -940,8 +1052,12 @@ function SplitPayment({
                     type="text"
                     placeholder={
                       payment.method === "gift_card"
-                        ? "Full gift card code"
-                        : "Transaction ID (6+ chars)"
+                        ? t("payment:fullGiftCardCode", {
+                            defaultValue: "Full gift card code",
+                          })
+                        : t("payment:referencePlaceholder", {
+                            defaultValue: "Transaction ID (6+ chars)",
+                          })
                     }
                   />
                 )}
@@ -957,16 +1073,23 @@ function SplitPayment({
         onClick={addRow}
         disabled={payments.length >= SPLIT_METHODS.length}
       >
-        + Add payment method
+        {t("payment:addMethod", { defaultValue: "+ Add payment method" })}
       </Button>
 
       {creditShort && (
         <span className="text-sm text-destructive">
-          Due ৳{dueAmount.toFixed(2)} exceeds the customer's available credit
           {tender.creditAvailable != null
-            ? ` (৳${tender.creditAvailable.toFixed(2)})`
-            : ""}
-          .
+            ? t("payment:creditShortWith", {
+                defaultValue:
+                  "Due ৳{{due}} exceeds the customer's available credit (৳{{available}}).",
+                due: dueAmount.toFixed(2),
+                available: tender.creditAvailable.toFixed(2),
+              })
+            : t("payment:creditShortWithout", {
+                defaultValue:
+                  "Due ৳{{due}} exceeds the customer's available credit.",
+                due: dueAmount.toFixed(2),
+              })}
         </span>
       )}
 
@@ -998,6 +1121,7 @@ function Due({
   form: UseFormReturn<CartSchemaType>;
   tender: TenderBalances;
 }) {
+  const { t } = useTranslation();
   const customerId = useWatch({ control: form.control, name: "customerId" });
   const { customers } = useCustomerStore();
   const customer = customers.find((c) => c.id === customerId);
@@ -1012,17 +1136,25 @@ function Due({
     <Card>
       <CardContent className="flex flex-col gap-1.5 py-4">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Recording as due (baki)
+          {t("payment:recordingAsDue", { defaultValue: "Recording as due (baki)" })}
         </span>
         <p className="text-sm">
-          {formatCurrency(finalTotal)} will be added to{" "}
+          {t("payment:dueAddBefore", {
+            defaultValue: "{{total}} will be added to",
+            total: formatCurrency(finalTotal),
+          })}{" "}
           <span className="font-medium">
-            {customer?.name ?? "this customer's"}
+            {customer?.name ?? t("payment:dueUnnamedCustomer", {
+              defaultValue: "this customer's",
+            })}
           </span>{" "}
-          outstanding balance.
+          {t("payment:dueAddAfter", { defaultValue: "outstanding balance." })}
         </p>
         <span className="text-sm text-muted-foreground">
-          Phone: {customer?.phone ?? "N/A"}
+          {t("payment:duePhone", {
+            defaultValue: "Phone: {{phone}}",
+            phone: customer?.phone ?? "N/A",
+          })}
         </span>
         {tender.creditLimit != null && (
           <span
@@ -1031,13 +1163,21 @@ function Due({
               overLimit ? "text-destructive" : "text-success",
             )}
           >
-            Credit available: {formatCurrency(Math.max(0, tender.creditAvailable ?? 0))}{" "}
-            / {formatCurrency(tender.creditLimit)}
+            {t("payment:dueCreditAvailable", {
+              defaultValue: "Credit available: {{available}} / {{limit}}",
+              available: formatCurrency(
+                Math.max(0, tender.creditAvailable ?? 0),
+              ),
+              limit: formatCurrency(tender.creditLimit),
+            })}
           </span>
         )}
         {overLimit && (
           <span className="text-sm text-destructive">
-            This due exceeds the customer's credit limit and will be rejected.
+            {t("payment:dueOverLimit", {
+              defaultValue:
+                "This due exceeds the customer's credit limit and will be rejected.",
+            })}
           </span>
         )}
       </CardContent>
