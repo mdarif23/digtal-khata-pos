@@ -10,12 +10,9 @@ export type InputValue = {
   creditLimit?: number | null;
 };
 export interface CustomerStore {
-  customers: InputValue[];
   customerInfo: InputValue;
   customerInputValue: InputValue;
   showCustomerInfo: InputValue | null;
-  loading: boolean;
-  error: string | null;
   handleOnchange: (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => void;
@@ -27,7 +24,6 @@ export interface CustomerStore {
   resetCustomerInfo: () => void;
   resetShowCustomerInfo: () => void;
   handleAddCustomer: () => Promise<void>;
-  getCustomers: () => Promise<void>;
   addCustomer: (customerInfo: InputValue) => Promise<InputValue>;
   /** E1-004: correct a customer's contact details. */
   updateCustomer: (id: number, customerInfo: InputValue) => Promise<InputValue>;

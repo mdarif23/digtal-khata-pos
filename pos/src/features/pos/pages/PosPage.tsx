@@ -25,6 +25,8 @@ import { SalespersonSelect } from "../components/pos/SalespersonSelect";
 import { pushCfdPayloadApi } from "../cfd/cfd.api";
 import { buildCfdCartPayload, buildCfdPaidPayload } from "../cfd/cfdPayload";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
+import { queryClient } from "@/lib/queryClient.js";
+import { customerKeys } from "@/features/customers/hooks/useCustomers.js";
 import {
   Card,
   CardContent,
@@ -78,7 +80,7 @@ function Pos() {
   }, [stockRevision, productRevision]);
   useEffect(() => {
     if (customerRevision > 0) {
-      void useCustomerStore.getState().getCustomers();
+      void queryClient.invalidateQueries({ queryKey: customerKeys.all });
     }
   }, [customerRevision]);
   useEffect(() => {

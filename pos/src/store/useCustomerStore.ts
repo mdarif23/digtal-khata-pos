@@ -1,4 +1,3 @@
-import axios from "../api/axios.js";
 import { isAxiosError } from "axios";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -6,9 +5,14 @@ import { toast } from "@/components/ui/toast";
 import type { InputValue, CustomerStore } from "../types/customers.types.js";
 import {
   createCustomerApi,
-  getCustomersApi,
   updateCustomerApi,
 } from "../api/customer.api.js";
+import { queryClient } from "@/lib/queryClient.js";
+import {
+  customerKeys,
+  type CustomersCache,
+} from "@/features/customers/hooks/useCustomers.js";
+
 const initialCustomerInfo: InputValue = {
   id: 0,
   name: "",
@@ -16,13 +20,28 @@ const initialCustomerInfo: InputValue = {
   address: "",
 };
 
+/**
+ * The customers LIST moved to TanStack Query (useCustomersQuery) in Phase 6
+ * Feature 1. This store keeps only the customer DIALOG/SELECTION state
+ * (customerInfo / customerInputValue / showCustomerInfo) — checkout state,
+ * not data-fetching. addCustomer/updateCustomer keep their exact contract
+ * (API call → local patch, NO refetch) but patch the query cache instead of
+ * the removed Zustand array.
+ */
+function patchCustomersCache(
+  updater: (rows: InputValue[]) => InputValue[],
+): void {
+  queryClient.setQueryData<CustomersCache>(customerKeys.list(), (current) =>
+    current
+      ? { ...current, data: updater(current.data) }
+      : { data: updater([]), fromCache: false },
+  );
+}
+
 export const useCustomerStore = create<CustomerStore>((set, get) => ({
-  customers: [],
   customerInfo: initialCustomerInfo,
   customerInputValue: initialCustomerInfo,
   showCustomerInfo: initialCustomerInfo,
-  loading: false,
-  error: null,
   handleOnchange: (e) => {
     const { id, value } = e.target;
     set((state) => ({
@@ -77,33 +96,16 @@ export const useCustomerStore = create<CustomerStore>((set, get) => ({
       });
     }
   },
-  getCustomers: async () => {
-    set({ loading: true, error: null });
-    try {
-      const { loadCustomersWithCache } = await import(
-        "@/features/pos/offline/catalog.js"
-      );
-      const { data: customersData } = await loadCustomersWithCache(getCustomersApi);
-      set({ customers: customersData, loading: false });
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      set({ error: errorMessage, loading: false });
-    }
-  },
   addCustomer: async (customerInfo) => {
     const customer = await createCustomerApi(customerInfo);
-    set((state) => ({
-      customers: [...state.customers, customer],
-    }));
+    patchCustomersCache((rows) => [...rows, customer]);
     return customer;
   },
   updateCustomer: async (id, customerInfo) => {
     const customer = await updateCustomerApi(id, customerInfo);
-    set((state) => ({
-      customers: state.customers.map((existing) =>
-        existing.id === id ? customer : existing,
-      ),
-    }));
+    patchCustomersCache((rows) =>
+      rows.map((existing) => (existing.id === id ? customer : existing)),
+    );
     return customer;
   },
 }));

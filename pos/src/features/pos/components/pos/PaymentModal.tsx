@@ -16,7 +16,8 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useCustomerStore } from "@/store/useCustomerStore";
+import { useCustomersQuery } from "@/features/customers/hooks/useCustomers.js";
+import type { InputValue } from "@/types/customers.types.js";
 import { Controller, UseFormReturn, useWatch } from "react-hook-form";
 import { CartSchemaType, PaymentSchemaType } from "../../schemas/cart.schema";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
@@ -44,6 +45,8 @@ const QR_NUMBER =
     (window as { ezposConfig?: { qrNumber?: string } }).ezposConfig?.qrNumber) ||
   (import.meta.env.VITE_QR_NUMBER as string | undefined) ||
   "01870707900";
+
+const EMPTY_CUSTOMER_LIST: InputValue[] = [];
 
 // ---------- helpers ----------
 const money = (n: number | undefined) =>
@@ -1123,7 +1126,7 @@ function Due({
 }) {
   const { t } = useTranslation();
   const customerId = useWatch({ control: form.control, name: "customerId" });
-  const { customers } = useCustomerStore();
+  const customers = useCustomersQuery().data ?? EMPTY_CUSTOMER_LIST;
   const customer = customers.find((c) => c.id === customerId);
   // P3 Phase 1 (F2): display-only credit context — the backend rejects a due
   // over the limit with 409 and the message surfaces verbatim.

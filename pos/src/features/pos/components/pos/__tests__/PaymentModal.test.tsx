@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -81,15 +82,24 @@ function Harness({
     } as any,
   });
   (window as unknown as Record<string, unknown>).__cartForm = form;
+  // Phase 6: the Due panel reads the customers LIST from TanStack Query —
+  // the harness provides a client (retry off, frozen cache: no refetch
+  // noise). Assertions below are unchanged.
   return (
-    <PaymentModal
-      finalTotal={finalTotal}
-      form={form}
-      isPaymentDialogOpen
-      setIsPaymentDialogOpen={() => {}}
-    />
+    <QueryClientProvider client={paymentTestQueryClient}>
+      <PaymentModal
+        finalTotal={finalTotal}
+        form={form}
+        isPaymentDialogOpen
+        setIsPaymentDialogOpen={() => {}}
+      />
+    </QueryClientProvider>
   );
 }
+
+const paymentTestQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+});
 
 const confirm = () => screen.getByRole("button", { name: "Confirm Payment" });
 

@@ -1,11 +1,15 @@
 import { useEffect } from "react";
-import { useCustomerStore } from "../store/useCustomerStore";
 import { useSalesStore } from "../features/pos/stores/useSalesStore";
 import useProductStore from "@/features/products/useProductStore";
 import { usePurchasesStore } from "@/features/purchases/usePurchaseStore";
 import { getActiveBusinessId, getActiveLocationId, getSessionUser } from "@/api/axios";
 import { useHoldCartStore } from "@/features/pos/stores/useCartStore";
 import { useReceiptSettingsStore } from "@/features/pos/stores/useReceiptSettingsStore";
+import { queryClient } from "@/lib/queryClient.js";
+import {
+  customerKeys,
+  fetchCustomersWithOfflineCache,
+} from "@/features/customers/hooks/useCustomers.js";
 
 const LAST_SESSION_KEY = "ezpos-last-session";
 
@@ -41,7 +45,6 @@ function enforceSessionScope(): void {
 // `enabled` gates the startup data fetches on the session bootstrap: firing
 // them without a restored token produces doomed 401s and redirect cascades.
 export function useInitializeApp(enabled: boolean) {
-  const { getCustomers } = useCustomerStore();
   const { getSales } = useSalesStore();
   const { getPurchases, getPurchaseItems, getPurchasesReturnItems } =
     usePurchasesStore();
@@ -52,7 +55,12 @@ export function useInitializeApp(enabled: boolean) {
     enforceSessionScope();
     getProducts();
     getSales();
-    getCustomers();
+    // Customers list: TanStack Query warm-start (same fetch + offline
+    // fallback the old store action performed, same effect-order position).
+    void queryClient.prefetchQuery({
+      queryKey: customerKeys.list(),
+      queryFn: fetchCustomersWithOfflineCache,
+    });
     getPurchases();
     getPurchaseItems();
     getPurchasesReturnItems();
