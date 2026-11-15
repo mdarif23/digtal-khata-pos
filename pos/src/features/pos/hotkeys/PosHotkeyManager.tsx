@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import "@/i18n/index.js";
 import { Keyboard } from "lucide-react";
 import {
   Dialog,
@@ -47,6 +49,7 @@ function isInsideDialog(target: EventTarget | null): boolean {
 
 export function PosHotkeyManager() {
   const [helpOpen, setHelpOpen] = useState(false);
+  const { t } = useTranslation();
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -106,28 +109,39 @@ export function PosHotkeyManager() {
         type="button"
         variant="outline"
         size="sm"
-        aria-label="Keyboard shortcuts"
+        aria-label={t("pos:hotkeys.managerAriaLabel", {
+          defaultValue: "Keyboard shortcuts",
+        })}
         onClick={() => setHelpOpen(true)}
       >
         <Keyboard className="size-4" aria-hidden="true" />
-        <span className="hidden md:inline">Shortcuts</span>
+        <span className="hidden md:inline">
+          {t("pos:hotkeys.managerButton", { defaultValue: "Shortcuts" })}
+        </span>
         <Kbd keys={["?"]} className="ml-0.5 hidden sm:inline-flex" />
       </Button>
 
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
         <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Keyboard shortcuts</DialogTitle>
+            <DialogTitle>
+              {t("pos:hotkeys.managerTitle", { defaultValue: "Keyboard shortcuts" })}
+            </DialogTitle>
             <DialogDescription>
-              Work at the register without touching the mouse. Press{" "}
-              <Kbd keys={["?"]} /> any time to show or hide this sheet.
+              {t("pos:hotkeys.managerDescBefore", {
+                defaultValue: "Work at the register without touching the mouse. Press",
+              })}{" "}
+              <Kbd keys={["?"]} />{" "}
+              {t("pos:hotkeys.managerDescAfter", {
+                defaultValue: "any time to show or hide this sheet.",
+              })}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {SHORTCUT_GROUPS.map((group) => (
               <section key={group.title}>
                 <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {group.title}
+                  {t(group.titleKey, { defaultValue: group.title })}
                 </h3>
                 <ul className="divide-y divide-border overflow-hidden rounded-lg border">
                   {group.items.map((item) => (
@@ -137,11 +151,13 @@ export function PosHotkeyManager() {
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">
-                          {item.label}
+                          {t(item.labelKey, { defaultValue: item.label })}
                         </p>
-                        {item.description ? (
+                        {item.description && item.descriptionKey ? (
                           <p className="truncate text-xs text-muted-foreground">
-                            {item.description}
+                            {t(item.descriptionKey, {
+                              defaultValue: item.description,
+                            })}
                           </p>
                         ) : null}
                       </div>

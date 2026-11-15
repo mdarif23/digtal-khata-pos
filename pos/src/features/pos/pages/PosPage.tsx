@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import "@/i18n/index.js";
+import { LanguageToggle } from "@/i18n/LanguageToggle.js";
 import { ProductList } from "@/features/pos/components/pos/ProductList.js";
 import { SpeedKeyGrid } from "@/features/pos/speedKeys/SpeedKeyGrid";
 import { CartHeader } from "@/features/pos/components/pos/CartHeader.js";
@@ -46,6 +49,7 @@ import useProductStore from "@/features/products/useProductStore.js";
 import { TerminalBindingDialog } from "@/features/pos/components/pos/TerminalBindingDialog.js";
 
 function Pos() {
+  const { t } = useTranslation();
   const { cart, resetCart } = useCartStore();
   const { setShowCustomerInfo } = useCustomerStore();
   const { createSale } = useSalesStore();
@@ -201,7 +205,9 @@ function Pos() {
       console.error("Payload validation failed:", result.error.flatten());
       toast.add({
         type: "error",
-        description: "Cart data is invalid. Please refresh and try again.",
+        description: t("pos:cartInvalid", {
+          defaultValue: "Cart data is invalid. Please refresh and try again.",
+        }),
         priority: "high",
       });
       return;
@@ -229,8 +235,10 @@ function Pos() {
       });
       toast.add({
         type: "info",
-        description:
-          "No connection — the sale is recorded offline and will sync automatically (duplicates are impossible).",
+        description: t("pos:offlineRecorded", {
+          defaultValue:
+            "No connection — the sale is recorded offline and will sync automatically (duplicates are impossible).",
+        }),
         priority: "high",
       });
       // Clear checkout inputs and modal
@@ -280,7 +288,9 @@ function Pos() {
               }
               if (!result.opened && result.error) {
                 toast.add({
-                  title: "Drawer did not open",
+                  title: t("pos:drawerDidNotOpen", {
+                    defaultValue: "Drawer did not open",
+                  }),
                   description: result.error,
                   type: "info",
                 });
@@ -331,7 +341,11 @@ function Pos() {
               .message
           : null;
       toast.add({
-        title: serverMessage ?? "The sale could not be completed.",
+        title:
+          serverMessage ??
+          t("pos:saleFailed", {
+            defaultValue: "The sale could not be completed.",
+          }),
         type: "error",
       });
     }
@@ -345,6 +359,7 @@ function Pos() {
           <div className="flex flex-wrap items-center justify-end gap-2">
             <NotificationBell revision={notificationRevision} />
             <SyncStatusIndicator />
+            <LanguageToggle />
             <RegisterDialog />
             <SalespersonSelect
               value={salespersonUserId}

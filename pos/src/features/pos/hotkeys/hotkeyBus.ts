@@ -60,102 +60,135 @@ export interface ShortcutEntry {
   keys: string[];
   action: PosHotkeyAction | null;
   label: string;
+  /** i18n key in the pos namespace (Phase 5) — the English `label` above is
+   *  the render-time defaultValue. */
+  labelKey: string;
   description?: string;
+  descriptionKey?: string;
 }
 
 export const SHORTCUT_GROUPS: {
   title: string;
+  titleKey: string;
   items: ShortcutEntry[];
 }[] = [
   {
     title: "Product search & scanning",
+    titleKey: "pos:hotkeys.groupProducts",
     items: [
       {
         keys: ["F1"],
         action: "product-search",
         label: "Product search",
+        labelKey: "pos:hotkeys.productSearch",
         description: "Focus the product search field",
+        descriptionKey: "pos:hotkeys.productSearchDesc",
       },
       {
         keys: ["F8"],
         action: "barcode-focus",
         label: "Barcode focus",
+        labelKey: "pos:hotkeys.barcodeFocus",
         description: "Jump back to search to scan the next item",
+        descriptionKey: "pos:hotkeys.barcodeFocusDesc",
       },
       {
         keys: ["Ctrl", "K"],
         action: null,
         label: "Search focus",
+        labelKey: "pos:hotkeys.searchFocus",
         description: "Also focuses search (⌘K on Mac)",
+        descriptionKey: "pos:hotkeys.searchFocusDesc",
       },
       {
         keys: ["/"],
         action: null,
         label: "Quick search",
+        labelKey: "pos:hotkeys.quickSearch",
         description: "Focus search when not typing in a field",
+        descriptionKey: "pos:hotkeys.quickSearchDesc",
       },
     ],
   },
   {
     title: "Cart & customer",
+    titleKey: "pos:hotkeys.groupCart",
     items: [
       {
         keys: ["F5"],
         action: "customer",
         label: "Select customer",
+        labelKey: "pos:hotkeys.selectCustomer",
         description: "Focus the customer selector",
+        descriptionKey: "pos:hotkeys.selectCustomerDesc",
       },
       {
         keys: ["F2"],
         action: "hold-sale",
         label: "Hold sale",
+        labelKey: "pos:hotkeys.holdSale",
         description: "Save the current cart to held sales",
+        descriptionKey: "pos:hotkeys.holdSaleDesc",
       },
       {
         keys: ["F3"],
         action: "retrieve-held",
         label: "Retrieve held sale",
+        labelKey: "pos:hotkeys.retrieveHeld",
         description: "Open held sales to restore a cart",
+        descriptionKey: "pos:hotkeys.retrieveHeldDesc",
       },
     ],
   },
   {
     title: "Discount & payment",
+    titleKey: "pos:hotkeys.groupPayment",
     items: [
       {
         keys: ["F4"],
         action: "discount",
         label: "Discount",
+        labelKey: "pos:hotkeys.discount",
         description: "Open the discount & VAT dialog",
+        descriptionKey: "pos:hotkeys.discountDesc",
       },
       {
         keys: ["F6"],
         action: "payment",
         label: "Payment",
+        labelKey: "pos:hotkeys.payment",
         description: "Open the payment dialog to charge the customer",
+        descriptionKey: "pos:hotkeys.paymentDesc",
       },
       {
         keys: ["F7"],
         action: "print-receipt",
         label: "Print last receipt",
+        labelKey: "pos:hotkeys.printLastReceipt",
         description: "Reprint the most recent receipt",
+        descriptionKey: "pos:hotkeys.printLastReceiptDesc",
       },
     ],
   },
   {
     title: "General",
+    titleKey: "pos:hotkeys.groupGeneral",
     items: [
       {
         keys: ["?"],
         action: "shortcuts-help",
         label: "Shortcut help",
+        labelKey: "pos:hotkeys.shortcutHelp",
         description: "Show or hide this cheat sheet",
+        descriptionKey: "pos:hotkeys.shortcutHelpDesc",
       },
       {
         keys: ["Esc"],
         action: null,
         label: "Close dialog",
+        labelKey: "pos:hotkeys.closeDialog",
         description: "Closes the active dialog (standard behavior)",
+        descriptionKey: "pos:hotkeys.closeDialogDesc",
       },
     ],
   },

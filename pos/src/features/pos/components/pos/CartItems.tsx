@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import "@/i18n/index.js";
 import { Minus, Plus, ShoppingCart, Trash2 } from "lucide-react";
 import { useWatch } from "react-hook-form";
 import { ClearCartDialog } from "./ClearCartDialog.js";
@@ -186,6 +188,7 @@ export function useCartTotals(
 
 // ---------- customer info ----------
 function CartCustomerInfo() {
+  const { t } = useTranslation();
   const showCustomerInfo = useCustomerStore((state) => state.showCustomerInfo);
   const [dueByCustomers, setDueByCustomers] = useState<CustomerDue[]>([]);
   const { name, phone, address, id } = showCustomerInfo || {};
@@ -246,46 +249,60 @@ function CartCustomerInfo() {
     <Card className="my-2">
       <CardContent className="grid grid-cols-2 gap-x-3 gap-y-1.5 px-4 py-3 text-sm">
         <div className="min-w-0">
-          <span className="text-xs text-muted-foreground">Name</span>
+          <span className="text-xs text-muted-foreground">
+            {t("common:name", { defaultValue: "Name" })}
+          </span>
           <p className="truncate font-medium">{name}</p>
         </div>
         <div className="min-w-0">
-          <span className="text-xs text-muted-foreground">Phone</span>
+          <span className="text-xs text-muted-foreground">
+            {t("common:phone", { defaultValue: "Phone" })}
+          </span>
           <p className="truncate">{phone}</p>
         </div>
         {address ? (
           <div className="col-span-2 min-w-0">
-            <span className="text-xs text-muted-foreground">Address</span>
+            <span className="text-xs text-muted-foreground">
+              {t("common:address", { defaultValue: "Address" })}
+            </span>
             <p className="truncate">{address}</p>
           </div>
         ) : null}
         {customerDue ? (
           <div className="col-span-2 rounded-md bg-muted/50 px-3 py-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Total due</span>
+              <span className="text-xs text-muted-foreground">
+                {t("pos:totalDue", { defaultValue: "Total due" })}
+              </span>
               <span className="font-semibold tabular-nums text-destructive">
                 {formatCurrency(customerDue.totalDue ?? 0)}
               </span>
             </div>
             <div className="mt-0.5 flex items-center justify-between text-xs text-muted-foreground">
               <span>
-                Billed {formatCurrency(Number(customerDue.totalAmount ?? 0))}
+                {t("pos:billed", {
+                  defaultValue: "Billed {{amount}}",
+                  amount: formatCurrency(Number(customerDue.totalAmount ?? 0)),
+                })}
               </span>
               <span>
-                Paid {formatCurrency(Number(customerDue.totalPaid ?? 0))}
+                {t("pos:paid", {
+                  defaultValue: "Paid {{amount}}",
+                  amount: formatCurrency(Number(customerDue.totalPaid ?? 0)),
+                })}
               </span>
             </div>
           </div>
         ) : (
           <div className="col-span-2 flex items-center gap-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2 py-0.5 font-medium text-success">
-              No due
+              {t("pos:noDue", { defaultValue: "No due" })}
             </span>
           </div>
         )}
         {loyaltyBalance !== null && (
           <div className="col-span-2 flex items-center justify-between text-xs text-muted-foreground">
-            <span>Loyalty points</span>
+            <span>{t("pos:loyaltyPoints", { defaultValue: "Loyalty points" })}</span>
             <span className="font-medium text-foreground">
               {formatNumber(loyaltyBalance)}
             </span>
@@ -293,7 +310,7 @@ function CartCustomerInfo() {
         )}
         {storeCreditBalance !== null && (
           <div className="col-span-2 flex items-center justify-between text-xs text-muted-foreground">
-            <span>Store credit</span>
+            <span>{t("pos:storeCredit", { defaultValue: "Store credit" })}</span>
             <span className="font-medium text-foreground">
               {formatCurrency(storeCreditBalance)}
             </span>
@@ -307,7 +324,7 @@ function CartCustomerInfo() {
                 : "text-muted-foreground"
             }`}
           >
-            <span>Credit available</span>
+            <span>{t("pos:creditAvailable", { defaultValue: "Credit available" })}</span>
             <span className="font-medium tabular-nums">
               {formatCurrency(Math.max(0, creditSummary.available ?? 0))}
               <span className="ml-1 text-muted-foreground">
@@ -323,10 +340,13 @@ function CartCustomerInfo() {
 
 // ---------- coupon entry (Module 6) ----------
 function CouponInput({ form }: { form: ShowCustomerInfoProps["form"] }) {
+  const { t } = useTranslation();
   const value = useWatch({ control: form.control, name: "couponCode" });
   return (
     <Input
-      placeholder="Coupon code (optional)"
+      placeholder={t("pos:couponPlaceholder", {
+        defaultValue: "Coupon code (optional)",
+      })}
       maxLength={60}
       value={value ?? ""}
       onChange={(e) =>
@@ -341,6 +361,7 @@ function CouponInput({ form }: { form: ShowCustomerInfoProps["form"] }) {
 // Post-VAT additive extras (delivery, service, packing) that the backend
 // prices identically on quote and checkout and stores on sale_charges.
 function ChargesEditor({ form }: { form: ShowCustomerInfoProps["form"] }) {
+  const { t } = useTranslation();
   const charges = useWatch({ control: form.control, name: "charges" }) ?? [];
   const cart = useCartStore((state) => state.cart);
   const [open, setOpen] = useState(false);
@@ -355,15 +376,30 @@ function ChargesEditor({ form }: { form: ShowCustomerInfoProps["form"] }) {
     const trimmed = label.trim();
     const value = Number(amount);
     if (!trimmed) {
-      toast.add({ type: "error", description: "Enter a charge label." });
+      toast.add({
+        type: "error",
+        description: t("pos:enterChargeLabel", {
+          defaultValue: "Enter a charge label.",
+        }),
+      });
       return;
     }
     if (!Number.isFinite(value) || value < 0) {
-      toast.add({ type: "error", description: "Enter a valid amount." });
+      toast.add({
+        type: "error",
+        description: t("pos:enterValidAmount", {
+          defaultValue: "Enter a valid amount.",
+        }),
+      });
       return;
     }
     if (charges.length >= 20) {
-      toast.add({ type: "error", description: "Up to 20 charges per sale." });
+      toast.add({
+        type: "error",
+        description: t("pos:maxCharges", {
+          defaultValue: "Up to 20 charges per sale.",
+        }),
+      });
       return;
     }
     form.setValue("charges", [
@@ -392,17 +428,25 @@ function ChargesEditor({ form }: { form: ShowCustomerInfoProps["form"] }) {
             disabled={cart.length === 0}
           >
             {charges.length > 0
-              ? `Charges (${charges.length}) · ${tk(chargesTotal)}`
-              : "Add charges"}
+              ? t("pos:chargesWithCount", {
+                  defaultValue: "Charges ({{count}}) · {{total}}",
+                  count: charges.length,
+                  total: tk(chargesTotal),
+                })
+              : t("pos:addCharges", { defaultValue: "Add charges" })}
           </Button>
         }
       />
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Sale charges</DialogTitle>
+          <DialogTitle>
+            {t("pos:saleCharges", { defaultValue: "Sale charges" })}
+          </DialogTitle>
           <DialogDescription>
-            Named extras added to the final total after VAT (e.g. delivery,
-            service). They are never discounted.
+            {t("pos:chargesDescription", {
+              defaultValue:
+                "Named extras added to the final total after VAT (e.g. delivery, service). They are never discounted.",
+            })}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
@@ -419,7 +463,10 @@ function ChargesEditor({ form }: { form: ShowCustomerInfoProps["form"] }) {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    aria-label={`Remove ${c.label}`}
+                    aria-label={t("pos:removeCharge", {
+                      defaultValue: "Remove {{label}}",
+                      label: c.label,
+                    })}
                     onClick={() => remove(i)}
                   >
                     <Trash2 className="size-4" />
@@ -429,23 +476,29 @@ function ChargesEditor({ form }: { form: ShowCustomerInfoProps["form"] }) {
             ))
           ) : (
             <p className="py-2 text-center text-sm text-muted-foreground">
-              No charges added.
+              {t("pos:noChargesAdded", { defaultValue: "No charges added." })}
             </p>
           )}
         </div>
         <div className="flex items-end gap-2">
           <div className="min-w-0 flex-1 space-y-1">
-            <Label htmlFor="charge-label">Label</Label>
+            <Label htmlFor="charge-label">
+              {t("common:label", { defaultValue: "Label" })}
+            </Label>
             <Input
               id="charge-label"
-              placeholder="Delivery"
+              placeholder={t("pos:chargePlaceholderDelivery", {
+                defaultValue: "Delivery",
+              })}
               maxLength={120}
               value={label}
               onChange={(e) => setLabel(e.target.value)}
             />
           </div>
           <div className="w-28 space-y-1">
-            <Label htmlFor="charge-amount">Amount</Label>
+            <Label htmlFor="charge-amount">
+              {t("common:amount", { defaultValue: "Amount" })}
+            </Label>
             <Input
               id="charge-amount"
               inputMode="decimal"
@@ -460,7 +513,7 @@ function ChargesEditor({ form }: { form: ShowCustomerInfoProps["form"] }) {
         </div>
         <DialogFooter>
           <Button type="button" onClick={() => setOpen(false)}>
-            Done
+            {t("common:done", { defaultValue: "Done" })}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -470,6 +523,7 @@ function ChargesEditor({ form }: { form: ShowCustomerInfoProps["form"] }) {
 
 // ---------- cart list ----------
 export default function CartItems() {
+    const { t } = useTranslation();
     const cart = useCartStore((state) => state.cart);
 
   return (
@@ -479,8 +533,10 @@ export default function CartItems() {
         <div className="flex h-full flex-col items-center justify-center">
           <EmptyState
             icon={ShoppingCart}
-            title="Cart is empty"
-            description="Scan a barcode or click products to start a sale."
+            title={t("pos:cartEmpty", { defaultValue: "Cart is empty" })}
+            description={t("pos:cartEmptyHint", {
+              defaultValue: "Scan a barcode or click products to start a sale.",
+            })}
             className="border-none bg-transparent"
           />
           {/* First-time guidance — only ever visible while the cart is
@@ -505,6 +561,7 @@ export default function CartItems() {
 
 // ---------- one cart row ----------
 function CartItemRow({ item }: { item: CartItem }) {
+  const { t } = useTranslation();
   // P2: stock returns/units now adjust the CANONICAL catalog's variant
   // quantity — the same store the POS grid reads (fixes the store-drift bug).
   // Packaging lines convert entered units to BASE deltas with the line's
@@ -573,8 +630,14 @@ function CartItemRow({ item }: { item: CartItem }) {
         type: "error",
         description:
           result.reason === "below-one-package"
-            ? `That is less than 1 ${unit.unitName} — line left unchanged.`
-            : "Could not switch the unit.",
+            ? t("pos:belowOnePackage", {
+                defaultValue:
+                  "That is less than 1 {{unit}} — line left unchanged.",
+                unit: unit.unitName,
+              })
+            : t("pos:unitSwitchFailed", {
+                defaultValue: "Could not switch the unit.",
+              }),
       });
       return;
     }
@@ -641,7 +704,11 @@ function CartItemRow({ item }: { item: CartItem }) {
                   setLineBatch(variantId, batch);
                   if (batch) {
                     toast.add({
-                      description: `${item.name} ← batch ${batch.batchNumber}`,
+                      description: t("pos:batchSelected", {
+                        defaultValue: "{{name}} ← batch {{batch}}",
+                        name: item.name,
+                        batch: batch.batchNumber,
+                      }),
                     });
                   }
                 }}
@@ -654,7 +721,10 @@ function CartItemRow({ item }: { item: CartItem }) {
                     setIsBatchOpen(true);
                   }}
                 >
-                  Batch: {item.batchNumber ?? "FEFO"}
+                  {t("pos:batchLabel", {
+                    defaultValue: "Batch: {{batch}}",
+                    batch: item.batchNumber ?? "FEFO",
+                  })}
                 </Button>
               </div>
             </>
@@ -672,7 +742,10 @@ function CartItemRow({ item }: { item: CartItem }) {
                     serials,
                   );
                   toast.add({
-                    description: `${item.name} added to cart!`,
+                    description: t("pos:serialAdded", {
+                      defaultValue: "{{name}} added to cart!",
+                      name: item.name,
+                    }),
                   });
                 }}
               />
@@ -684,13 +757,16 @@ function CartItemRow({ item }: { item: CartItem }) {
                   }}
                 >
                   {" "}
-                  Serials ({item.serialNumbers?.length ?? 0})
+                  {t("pos:serialsCount", {
+                    defaultValue: "Serials ({{count}})",
+                    count: item.serialNumbers?.length ?? 0,
+                  })}
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Remove item"
+                  aria-label={t("pos:removeItem", { defaultValue: "Remove item" })}
                   onClick={() => {
                     returnVariantStock(variantId, quantity * conversionFactor);
                     removeCartItem(variantId, lineUnit);
@@ -707,7 +783,9 @@ function CartItemRow({ item }: { item: CartItem }) {
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Decrease quantity"
+                aria-label={t("pos:decreaseQuantity", {
+                  defaultValue: "Decrease quantity",
+                })}
                 disabled={!isWeightLine && quantity <= 1}
                 onClick={() => {
                   // Weight lines: −1 kg with exact pool adjustment; below the
@@ -755,7 +833,9 @@ function CartItemRow({ item }: { item: CartItem }) {
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Increase quantity"
+                aria-label={t("pos:increaseQuantity", {
+                  defaultValue: "Increase quantity",
+                })}
                 onClick={() => {
                   takeVariantStock(variantId, conversionFactor);
                   addCartQuantity(variantId, lineUnit);
@@ -768,7 +848,7 @@ function CartItemRow({ item }: { item: CartItem }) {
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Remove item"
+                aria-label={t("pos:removeItem", { defaultValue: "Remove item" })}
                 onClick={() => {
                   returnVariantStock(variantId, quantity * conversionFactor);
                   removeCartItem(variantId, lineUnit);
@@ -800,6 +880,7 @@ export function CartCalculation({
   const [discountSignal, setDiscountSignal] = useState(0);
   const [quoteOpen, setQuoteOpen] = useState(false);
   const { hasPermission } = usePermissions();
+  const { t } = useTranslation();
   // Phase 3 hotkey: F4 opens the discount dialog.
   useHotkeyAction("discount", () => setDiscountSignal((n) => n + 1));
 
@@ -828,7 +909,7 @@ export function CartCalculation({
               disabled={cart.length === 0}
               onClick={() => setQuoteOpen(true)}
             >
-              Save as quotation
+              {t("pos:saveAsQuotation", { defaultValue: "Save as quotation" })}
             </Button>
           </div>
         )}
@@ -860,6 +941,7 @@ function CartTextModal({
 }: {
   totals: CartTotalsView;
 }) {
+  const { t } = useTranslation();
   const cart = useCartStore((state) => state.cart);
   const totalItemsCount = cart.length;
   const totalQuantityCount = cart.reduce(
@@ -871,30 +953,42 @@ function CartTextModal({
     <>
       <div className="flex justify-between border-b pb-2 text-sm text-muted-foreground">
         <span>
-          {totalItemsCount} {totalItemsCount === 1 ? "line item" : "line items"}
+          {totalItemsCount === 1
+            ? t("pos:lineItemOne", { defaultValue: "1 line item" })
+            : t("pos:lineItemsCount", {
+                defaultValue: "{{count}} line items",
+                count: totalItemsCount,
+              })}
         </span>
         {/* Neutral label: mixed Box/Pcs lines make "units" ambiguous. */}
-        <span>Qty: {totalQuantityCount}</span>
+        <span>
+          {t("pos:qtyLabel", { defaultValue: "Qty:" })} {totalQuantityCount}
+        </span>
       </div>
       <div className="flex justify-between py-1.5 text-sm">
-        <span>Subtotal</span>
+        <span>{t("common:subtotal", { defaultValue: "Subtotal" })}</span>
         <span>{tk(totals.itemsBase)}</span>
       </div>
       {totals.itemDiscount > 0 && (
         <div className="flex justify-between py-1.5 text-sm text-success">
-          <span>Item discounts</span>
+          <span>{t("pos:itemDiscounts", { defaultValue: "Item discounts" })}</span>
           <span>-{tk(totals.itemDiscount)}</span>
         </div>
       )}
       {totals.cartDiscountAmount > 0 && (
         <div className="flex justify-between py-1.5 text-sm text-success">
-          <span>Discount</span>
+          <span>{t("common:discount", { defaultValue: "Discount" })}</span>
           <span>-{tk(totals.cartDiscountAmount)}</span>
         </div>
       )}
       {"group" in totals && totals.group && totals.group.discountAmount > 0 && (
         <div className="flex justify-between py-1.5 text-sm text-success">
-          <span>{totals.group.name} pricing</span>
+          <span>
+            {t("pos:groupPricing", {
+              defaultValue: "{{name}} pricing",
+              name: totals.group.name,
+            })}
+          </span>
           <span>-{tk(totals.group.discountAmount)}</span>
         </div>
       )}
@@ -903,7 +997,10 @@ function CartTextModal({
           <span>
             {totals.promotions.applied.length === 1
               ? totals.promotions.applied[0]!.name
-              : `${totals.promotions.applied.length} promotions`}
+              : t("pos:promotionsCount", {
+                  defaultValue: "{{count}} promotions",
+                  count: totals.promotions.applied.length,
+                })}
           </span>
           <span>-{tk(totals.promotions.total)}</span>
         </div>
@@ -920,7 +1017,12 @@ function CartTextModal({
       )}
       {"coupon" in totals && totals.coupon && (
         <div className="flex justify-between py-1.5 text-sm text-success">
-          <span>Coupon {totals.coupon.code}</span>
+          <span>
+            {t("pos:couponLabel", {
+              defaultValue: "Coupon {{code}}",
+              code: totals.coupon.code,
+            })}
+          </span>
           <span>-{tk(totals.coupon.discountAmount)}</span>
         </div>
       )}
@@ -939,8 +1041,13 @@ function CartTextModal({
         <div className="flex justify-between py-1.5 text-sm">
           <span>
             {"usesTaxRules" in totals && totals.usesTaxRules
-              ? "VAT / Tax (product rules)"
-              : `VAT: ${totals.vatPercent}%`}
+              ? t("pos:vatProductRules", {
+                  defaultValue: "VAT / Tax (product rules)",
+                })
+              : t("pos:vatPercent", {
+                  defaultValue: "VAT: {{percent}}%",
+                  percent: totals.vatPercent,
+                })}
           </span>
           <span>{tk(totals.vat)}</span>
         </div>
@@ -956,7 +1063,7 @@ function CartTextModal({
         </div>
       ))}
       <div className="flex items-center justify-between border-t pt-2 font-semibold">
-        <span>Total due</span>
+        <span>{t("pos:totalDue", { defaultValue: "Total due" })}</span>
         <span className="text-lg tracking-tight tabular-nums">
           {tk(totals.finalTotal)}
         </span>
@@ -976,6 +1083,7 @@ function PriceOverrideDialog({
   lineUnit: number | null;
 }) {
   const { hasPermission } = usePermissions();
+  const { t } = useTranslation();
   const setOverride = useCartStore((s) => s.setLinePriceOverride);
   const current = item.priceOverride ?? null;
   const [open, setOpen] = useState(false);
@@ -992,7 +1100,12 @@ function PriceOverrideDialog({
   const commit = () => {
     const value = Number(price);
     if (!Number.isFinite(value) || value < 0) {
-      toast.add({ type: "error", description: "Enter a valid unit price." });
+      toast.add({
+        type: "error",
+        description: t("pos:enterValidUnitPrice", {
+          defaultValue: "Enter a valid unit price.",
+        }),
+      });
       return;
     }
     setOverride(variantId, lineUnit, {
@@ -1007,22 +1120,30 @@ function PriceOverrideDialog({
       <DialogTrigger asChild>
         <Button type="button" variant="outline" size="sm" className="h-7 w-fit px-2 text-xs">
           {current
-            ? `Price set ৳${current.unitPrice.toFixed(2)}`
-            : "Override price"}
+            ? t("pos:priceSet", {
+                defaultValue: "Price set ৳{{price}}",
+                price: current.unitPrice.toFixed(2),
+              })
+            : t("pos:overridePrice", { defaultValue: "Override price" })}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Override line price</DialogTitle>
+          <DialogTitle>
+            {t("pos:overrideTitle", { defaultValue: "Override line price" })}
+          </DialogTitle>
           <DialogDescription>
-            Charges this line at your price — the product's selling price is
-            not changed. The server re-checks your permission and the minimum
-            price floors.
+            {t("pos:overrideDescription", {
+              defaultValue:
+                "Charges this line at your price — the product's selling price is not changed. The server re-checks your permission and the minimum price floors.",
+            })}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor={`override-price-${variantId}`}>Unit price</Label>
+            <Label htmlFor={`override-price-${variantId}`}>
+              {t("pos:unitPriceLabel", { defaultValue: "Unit price" })}
+            </Label>
             <Input
               id={`override-price-${variantId}`}
               type="number"
@@ -1034,13 +1155,17 @@ function PriceOverrideDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={`override-reason-${variantId}`}>
-              Reason (required when below the minimum)
+              {t("pos:reasonBelowMinimum", {
+                defaultValue: "Reason (required when below the minimum)",
+              })}
             </Label>
             <Input
               id={`override-reason-${variantId}`}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. damaged box, manager approved"
+              placeholder={t("pos:reasonPlaceholder", {
+                defaultValue: "e.g. damaged box, manager approved",
+              })}
             />
           </div>
         </div>
@@ -1054,11 +1179,11 @@ function PriceOverrideDialog({
                 setOpen(false);
               }}
             >
-              Reset to list price
+              {t("pos:resetToListPrice", { defaultValue: "Reset to list price" })}
             </Button>
           )}
           <Button type="button" onClick={commit}>
-            Apply
+            {t("common:apply", { defaultValue: "Apply" })}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1069,13 +1194,17 @@ function PriceOverrideDialog({
 // ---------- below-minimum approval reason (Phase 6) ----------
 function BelowMinimumReasonInput() {
   const { hasPermission } = usePermissions();
+  const { t } = useTranslation();
   const canApprove = hasPermission("pricing.below_minimum_override");
   const reason = useCartStore((s) => s.belowMinimumReason);
   const setReason = useCartStore((s) => s.setBelowMinimumReason);
   if (!canApprove) {
     return (
       <p className="text-warning">
-        A sale below the minimum needs a manager with below-minimum approval.
+        {t("pos:managerApprovalRequired", {
+          defaultValue:
+            "A sale below the minimum needs a manager with below-minimum approval.",
+        })}
       </p>
     );
   }
@@ -1083,7 +1212,9 @@ function BelowMinimumReasonInput() {
     <Input
       value={reason}
       onChange={(e) => setReason(e.target.value)}
-      placeholder="Reason for selling below the minimum (required)"
+      placeholder={t("pos:belowMinimumReasonPlaceholder", {
+        defaultValue: "Reason for selling below the minimum (required)",
+      })}
       className="h-8 text-xs"
     />
   );
@@ -1107,6 +1238,7 @@ export function CartItemDiscount({
   hasDiscount,
   addDiscount,
 }: CartItemDiscountProps) {
+  const { t } = useTranslation();
   const [value, setValue] = useState(discount ? String(discount.value) : "");
   const [type, setType] = useState<DiscountType>(
     discount?.type ?? "percentage",
@@ -1149,8 +1281,12 @@ export function CartItemDiscount({
         className="h-8 w-20"
         type="number"
         min={0}
-        placeholder={`${type === "percentage" ? "%" : "৳"} off`}
-        aria-label="Item discount"
+        placeholder={
+          type === "percentage"
+            ? t("pos:percentOff", { defaultValue: "% off" })
+            : t("pos:fixedOff", { defaultValue: "৳ off" })
+        }
+        aria-label={t("pos:itemDiscountAria", { defaultValue: "Item discount" })}
       />
       <Switch
         checked={type === "fixed"}
@@ -1160,7 +1296,9 @@ export function CartItemDiscount({
           if (value) commit(value, nextType);
         }}
         id={`discount-mode-${variantId}`}
-        aria-label="Fixed amount discount"
+        aria-label={t("pos:fixedAmountDiscountAria", {
+          defaultValue: "Fixed amount discount",
+        })}
       />
       {hasDiscount && (
         <span className="text-sm font-medium text-green-600">
@@ -1191,6 +1329,7 @@ export function CartQuantityInput({
   allowDecimals = false,
   addCustomCartQuantity,
 }: CartQuantityInputProps) {
+  const { t } = useTranslation();
   const [inputValue, setInputValue] = useState(String(quantity));
 
   // changes from the +/- buttons or the product grid update the input
@@ -1243,7 +1382,7 @@ export function CartQuantityInput({
       min={allowDecimals ? 0.001 : 1}
       step={allowDecimals ? 0.001 : 1}
       value={inputValue}
-      aria-label="Quantity"
+      aria-label={t("common:quantity", { defaultValue: "Quantity" })}
       onChange={(e) => setInputValue(e.target.value)}
       onFocus={(e) => e.target.select()}
       onBlur={(e) => commitChange(e.target.value)}
