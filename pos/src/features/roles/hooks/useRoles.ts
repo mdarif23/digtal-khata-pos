@@ -1,21 +1,52 @@
 import { useQuery } from "@tanstack/react-query";
 import { getActiveBusinessId } from "@/api/axios.js";
-import { getRolesApi } from "../roles.api.js";
+import {
+  getPermissionCatalogApi,
+  getRoleUsersApi,
+  getRolesApi,
+  type PermissionCatalogEntry,
+  type RoleSummary,
+} from "../roles.api.js";
 
 /**
- * Role summaries (Phase 6 Feature 1). Shared by the Users page (role
- * filters + assignment dialogs) and the Roles page. The old pages soft-
- * failed to an empty list when the roles fetch errored — the queryFn keeps
- * that contract so a roles outage never blocks user management.
+ * Role data (Phase 6 Feature 1, domain 4). Shared by the Users page and the
+ * Roles page. The two pages historically had DIFFERENT failure semantics:
+ * the Users page soft-failed to an empty list (a roles outage must not
+ * block user management), while the Roles page hard-failed with a toast.
+ * `softFail` preserves each page's contract on the same cache key.
  */
 export const roleKeys = {
   all: ["roles"] as const,
   list: () => ["roles", getActiveBusinessId(), "list"] as const,
+  users: (roleId: number) => ["roles", getActiveBusinessId(), roleId, "users"] as const,
+  permissionCatalog: () => ["permissions-catalog"] as const,
 };
 
-export function useRolesListQuery() {
+export function useRolesListQuery(options: { softFail?: boolean } = {}) {
+  const softFail = options.softFail ?? true;
   return useQuery({
     queryKey: roleKeys.list(),
-    queryFn: () => getRolesApi().catch(() => []),
+    queryFn: () =>
+      softFail ? getRolesApi().catch(() => [] as RoleSummary[]) : getRolesApi(),
   });
 }
+
+/** Server catalog only (R1-3): a partial client fallback would let a save
+ *  strip permissions. The Roles page blocks editing while this errors. */
+export function usePermissionCatalogQuery() {
+  return useQuery({
+    queryKey: roleKeys.permissionCatalog(),
+    queryFn: getPermissionCatalogApi,
+  });
+}
+
+/** Users holding a role — fetched only while the dialog is open. */
+export function useRoleUsersQuery(roleId: number | null) {
+  return useQuery({
+    queryKey: roleKeys.users(roleId ?? 0),
+    queryFn: () => getRoleUsersApi(roleId as number),
+    enabled: roleId !== null,
+  });
+}
+
+export type { PermissionCatalogEntry, RoleSummary };
