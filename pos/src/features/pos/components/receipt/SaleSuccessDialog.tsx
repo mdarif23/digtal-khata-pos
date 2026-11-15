@@ -9,7 +9,8 @@ import {
 } from "@/components/ui/dialog.js";
 import { Button } from "@/components/ui/button.js";
 import { Kbd } from "@/components/common/Kbd.js";
-import { CheckCircle2, Printer, Eye, PlusCircle, Check, Copy, ShieldCheck, Send } from "lucide-react";
+import { CheckCircle2, Printer, Eye, PlusCircle, Check, Copy, Link2, ShieldCheck, Send } from "lucide-react";
+import axios from "../../../../api/axios.js";
 import type { SaleReceiptData } from "../../types/receipt.types.js";
 import { resolveReceiptConfig, usePrintReceipt } from "../../hooks/usePrintReceipt.js";
 import { ReceiptPrintDialog } from "./ReceiptPrintDialog.js";
@@ -257,6 +258,29 @@ export function SaleSuccessDialog({
 function SendReceiptButton({ receipt }: { receipt: SaleReceiptData }) {
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState<CommChannel>("sms");
+  // P3 Phase 4 (N1-10, D12): expiring share link — the plaintext token is
+  // shown/copied once and never recoverable.
+  const [sharingLink, setSharingLink] = useState(false);
+  const [shareLinkUrl, setShareLinkUrl] = useState<string | null>(null);
+  const { hasPermission } = usePermissions();
+  const canShare = hasPermission("sales.view");
+  const createShareLink = async () => {
+    setSharingLink(true);
+    try {
+      const res = await axios.post<{ data: { url: string } }>(
+        `/sales/${receipt.saleId}/receipt-link`,
+        {},
+      );
+      setShareLinkUrl(`${window.location.origin}${res.data.data.url}`);
+    } catch (err) {
+      toast.add({
+        description: err instanceof Error ? err.message : "Link failed.",
+        type: "error",
+      });
+    } finally {
+      setSharingLink(false);
+    }
+  };
   const [sending, setSending] = useState(false);
   const [outcome, setOutcome] = useState<SendReceiptOutcome | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -311,6 +335,45 @@ function SendReceiptButton({ receipt }: { receipt: SaleReceiptData }) {
         <Send className="size-4" />
         Send Receipt
       </Button>
+      {canShare && (
+        <Button
+          type="button"
+          variant="ghost"
+          className="w-full gap-2"
+          disabled={sharingLink}
+          onClick={() => void createShareLink()}
+        >
+          <Link2 className="size-4" />
+          {sharingLink
+            ? "Creating link…"
+            : shareLinkUrl
+              ? "Link created (copy it below)"
+              : "Create share link"}
+        </Button>
+      )}
+      {shareLinkUrl && (
+        <div className="rounded-md border bg-muted/40 p-2">
+          <p className="mb-1 break-all font-mono text-xs">{shareLinkUrl}</p>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                void navigator.clipboard.writeText(shareLinkUrl);
+                toast.add({ description: "Share link copied.", type: "success" });
+              }}
+            >
+              Copy
+            </Button>
+            <a href={shareLinkUrl} target="_blank" rel="noreferrer">
+              <Button type="button" size="sm" variant="outline">
+                Open
+              </Button>
+            </a>
+          </div>
+        </div>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-sm">

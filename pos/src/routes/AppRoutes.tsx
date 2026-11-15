@@ -51,6 +51,7 @@ import { AuditLogsPage } from "@/features/audit/AuditLogsPage";
 import { LoyaltySettingsPage } from "@/features/loyalty/LoyaltySettingsPage";
 import { QuotationsPage } from "@/features/quotations/QuotationsPage";
 import { CommsSettingsPage } from "@/features/comms/CommsSettingsPage";
+import { ReceiptSharePage } from "@/features/receipt-share/ReceiptSharePage";
 import { CfdDisplayPage } from "@/features/pos/cfd/CfdDisplayPage";
 import { CommissionPage } from "@/features/commission/CommissionPage";
 import { TargetsPage } from "@/features/commission/TargetsPage";
@@ -114,6 +115,12 @@ const routes = [
     // own pairing/token auth — deliberately OUTSIDE the authed layout.
     path: "/cfd",
     element: <CfdDisplayPage />,
+  },
+  {
+    // P3 Phase 4 (N1-10): the public receipt-share page — token in the URL,
+    // no account, expiring/revocable. Deliberately OUTSIDE the authed layout.
+    path: "/receipt/t/:token",
+    element: <ReceiptSharePage />,
   },
   {
     path: "/",

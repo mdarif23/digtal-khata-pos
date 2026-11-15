@@ -156,7 +156,7 @@ describe("saleVoid integration", { skip: !runIntegration }, () => {
       trackingType: string,
       qty: number,
       price: number,
-      serialNumbers?: string[],
+      serialNumbers?: { serial: string }[],
     ) =>
       api(owner, "POST", "/api/product", {
         name,

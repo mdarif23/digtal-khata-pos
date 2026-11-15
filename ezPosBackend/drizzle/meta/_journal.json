@@ -608,6 +608,13 @@
       "when": 1794500036000,
       "tag": "0086_sale_void",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1794500037000,
+      "tag": "0087_receipt_share_tokens",
+      "breakpoints": true
     }
   ]
 }

@@ -136,18 +136,31 @@ export async function revokeDisplay(
 
 // --- SSE fan-out (single-instance registry, like realtime) ----------------
 
-const clients = new Map<number, Response>();
+// P3 Phase 4 (N1-08): a display may legitimately have MULTIPLE live SSE
+// clients (two tabs, a reconnect race) — the registry fans pushes out to
+// all of them and prunes dead sockets on write failure. Still in-memory,
+// single-instance (documented stance, matches the realtime module).
+const clients = new Map<number, Set<Response>>();
 
 export function attachStream(displayId: number, res: Response): void {
-  clients.set(displayId, res);
+  const set = clients.get(displayId) ?? new Set<Response>();
+  set.add(res);
+  clients.set(displayId, set);
 }
 
-export function detachStream(displayId: number): void {
-  clients.delete(displayId);
+export function detachStream(displayId: number, res?: Response): void {
+  const set = clients.get(displayId);
+  if (!set) return;
+  if (res) {
+    set.delete(res);
+    if (set.size === 0) clients.delete(displayId);
+  } else {
+    clients.delete(displayId);
+  }
 }
 
 export function isDisplayConnected(displayId: number): boolean {
-  return clients.has(displayId);
+  return (clients.get(displayId)?.size ?? 0) > 0;
 }
 
 export interface CfdPayload {
@@ -193,15 +206,22 @@ export async function pushPayload(
     .set({ lastPayload: payload, payloadUpdatedAt: new Date() })
     .where(eq(cfdDisplays.id, displayId));
 
-  const client = clients.get(displayId);
-  if (!client) return { delivered: false };
-  try {
-    client.write(`data: ${JSON.stringify({ type: "payload", payload })}\n\n`);
-    return { delivered: true };
-  } catch {
-    clients.delete(displayId);
-    return { delivered: false };
+  const set = clients.get(displayId);
+  if (!set || set.size === 0) return { delivered: false };
+  let delivered = 0;
+  const dead: Response[] = [];
+  const frame = `data: ${JSON.stringify({ type: "payload", payload })}\n\n`;
+  for (const client of set) {
+    try {
+      client.write(frame);
+      delivered += 1;
+    } catch {
+      dead.push(client);
+    }
   }
+  for (const client of dead) set.delete(client);
+  if (set.size === 0) clients.delete(displayId);
+  return { delivered: delivered > 0 };
 }
 
 /** Display-token authentication → the display row (active only). */

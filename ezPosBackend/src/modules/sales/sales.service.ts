@@ -693,7 +693,7 @@ async function assertCustomerCreditWithinLimit(
 }
 
 /** Per-line warranty summary embedded in the receipt payload. */
-interface WarrantyReceiptSummary {
+export interface WarrantyReceiptSummary {
   warrantyNumber: string;
   provider: string;
   warrantyType: string;

@@ -127,7 +127,7 @@ function Pos() {
   // coupon), local fallback otherwise. The display must never disagree with
   // what checkout will charge.
   const cartValue = useCartStore((state) => state.cart);
-  const cfdDisplayId = useCfdDisplayId();
+  const cfdDisplayIds = useCfdDisplayIds();
   const totals = useCartTotals(form);
   const cartKey = JSON.stringify(
     cartValue.map((item) => ({
@@ -151,18 +151,20 @@ function Pos() {
     totals.finalTotal,
   ].join("|");
   useEffect(() => {
-    if (cfdDisplayId === null) return;
+    if (cfdDisplayIds.length === 0) return;
     // The completed sale pushes its own "paid" screen with the receipt's
     // authoritative numbers — suppress the cart-clearing "idle" push while
     // the success dialog is up so the thank-you is never overwritten.
     if (isSuccessDialogOpen) return;
     const timer = setTimeout(() => {
       const payload = buildCfdCartPayload(cartValue, totals);
-      void pushCfdPayloadApi(cfdDisplayId, payload).catch(() => undefined);
+      // P3 Phase 4: fan the payload out to every selected display (one call
+      // carries the list; the backend ownership-checks each target).
+      void pushCfdPayloadApi(payload, cfdDisplayIds).catch(() => undefined);
     }, 250);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- totalsKey stands in for the totals object (identity changes every render)
-  }, [cfdDisplayId, cartKey, cartValue, totalsKey, isSuccessDialogOpen]);
+  }, [cfdDisplayIds, cartKey, cartValue, totalsKey, isSuccessDialogOpen]);
 
   async function onSubmit(data: CartSchemaType) {
     // Claim the checkout key before anything else: every retry of THIS
@@ -297,10 +299,10 @@ function Pos() {
       // Customer display: the authoritative post-payment screen (receipt
       // numbers, not the cart's running estimate). Fire-and-forget — a
       // display problem never touches the completed sale.
-      if (cfdDisplayId !== null && response?.data?.receipt) {
+      if (cfdDisplayIds.length > 0 && response?.data?.receipt) {
         void pushCfdPayloadApi(
-          cfdDisplayId,
           buildCfdPaidPayload(response.data.receipt.items, response.data.receipt),
+          cfdDisplayIds,
         ).catch(() => undefined);
       }
     } catch (error) {
@@ -415,18 +417,44 @@ function Pos() {
 export default Pos;
 
 /** Locally-persisted target display for the POS cart push (Phase 3). */
-function useCfdDisplayId(): number | null {
-  const [displayId, setDisplayId] = useState<number | null>(null);
+/** P3 Phase 4 (N1-08): the register may push to SEVERAL authorized displays
+ * (localStorage `ezpos.cfd.pushDisplayIds`, migrated from the single-id key).
+ * Empty list = no display push (the old null behavior). */
+function useCfdDisplayIds(): number[] {
+  const [displayIds, setDisplayIds] = useState<number[]>([]);
   useEffect(() => {
-    const stored = localStorage.getItem("ezpos.cfd.pushDisplayId");
-    setDisplayId(stored ? Number(stored) : null);
+    const read = () => {
+      const multi = localStorage.getItem("ezpos.cfd.pushDisplayIds");
+      if (multi !== null) {
+        try {
+          const parsed: unknown = JSON.parse(multi);
+          setDisplayIds(
+            Array.isArray(parsed)
+              ? parsed.filter(
+                  (id): id is number =>
+                    typeof id === "number" && Number.isInteger(id) && id > 0,
+                )
+              : [],
+            );
+          return;
+        } catch {
+          // fall through to the legacy key
+        }
+      }
+      const legacy = localStorage.getItem("ezpos.cfd.pushDisplayId");
+      setDisplayIds(legacy ? [Number(legacy)] : []);
+    };
+    read();
     const onChange = (event: StorageEvent) => {
-      if (event.key === "ezpos.cfd.pushDisplayId") {
-        setDisplayId(event.newValue ? Number(event.newValue) : null);
+      if (
+        event.key === "ezpos.cfd.pushDisplayIds" ||
+        event.key === "ezpos.cfd.pushDisplayId"
+      ) {
+        read();
       }
     };
     window.addEventListener("storage", onChange);
     return () => window.removeEventListener("storage", onChange);
   }, []);
-  return displayId;
+  return displayIds;
 }

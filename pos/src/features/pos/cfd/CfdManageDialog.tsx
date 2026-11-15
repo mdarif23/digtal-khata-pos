@@ -26,16 +26,42 @@ export function CfdManageDialog() {
   const [displays, setDisplays] = useState<CfdDisplayRow[]>([]);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
 
-  const [pushTargetId, setPushTargetIdState] = useState<number | null>(null);
+  // P3 Phase 4 (N1-08): multi-display targets — localStorage
+  // `ezpos.cfd.pushDisplayIds` (array), migrated transparently from the old
+  // single-id key. Empty = no display push.
+  const [pushTargetIds, setPushTargetIdsState] = useState<number[]>([]);
   useEffect(() => {
-    const stored = localStorage.getItem("ezpos.cfd.pushDisplayId");
-    setPushTargetIdState(stored ? Number(stored) : null);
+    const read = () => {
+      const multi = localStorage.getItem("ezpos.cfd.pushDisplayIds");
+      if (multi !== null) {
+        try {
+          const parsed: unknown = JSON.parse(multi);
+          setPushTargetIdsState(
+            Array.isArray(parsed)
+              ? parsed.filter(
+                  (id): id is number =>
+                    typeof id === "number" && Number.isInteger(id) && id > 0,
+                )
+              : [],
+            );
+          return;
+        } catch {
+          // fall through to the legacy key
+        }
+      }
+      const legacy = localStorage.getItem("ezpos.cfd.pushDisplayId");
+      setPushTargetIdsState(legacy ? [Number(legacy)] : []);
+    };
+    read();
   }, []);
-  const isPushTarget = (id: number) => pushTargetId === id;
-  const setPushTarget = (id: number) => {
-    localStorage.setItem("ezpos.cfd.pushDisplayId", String(id));
-    setPushTargetIdState(id);
-    toast.add({ title: "This register now pushes its cart to that display.", type: "success" });
+  const isPushTarget = (id: number) => pushTargetIds.includes(id);
+  const togglePushTarget = (id: number) => {
+    const next = isPushTarget(id)
+      ? pushTargetIds.filter((t) => t !== id)
+      : [...pushTargetIds, id];
+    localStorage.setItem("ezpos.cfd.pushDisplayIds", JSON.stringify(next));
+    localStorage.removeItem("ezpos.cfd.pushDisplayId");
+    setPushTargetIdsState(next);
   };
 
   const load = useCallback(async () => {
@@ -126,7 +152,7 @@ export function CfdManageDialog() {
                       <Button
                         variant={isPushTarget(display.id) ? "default" : "outline"}
                         size="sm"
-                        onClick={() => setPushTarget(display.id)}
+                        onClick={() => togglePushTarget(display.id)}
                       >
                         {isPushTarget(display.id) ? "Pushing cart" : "Push here"}
                       </Button>

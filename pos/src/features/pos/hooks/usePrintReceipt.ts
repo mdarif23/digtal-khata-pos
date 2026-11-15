@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import type { SaleReceiptData } from "../types/receipt.types.js";
 import { useReceiptSettingsStore } from "../stores/useReceiptSettingsStore.js";
+import { toast } from "@/components/ui/toast";
 import { useHardwareStore, toPrintPayload } from "@/hardware/deviceManager";
 import {
   renderReceiptHtml,
@@ -194,12 +195,38 @@ export function usePrintReceipt() {
         // or corrupt a receipt. ESC/POS carries a subset of the document.
         const hardware = useHardwareStore.getState();
         if (hardware.mode === "usb") {
-          const result = await hardware.printReceipt(
-            toPrintPayload(receipt, branding.name, config.text.footerMessage),
-            async () => false, // no-op: the browser fallback is below
+          const payload = toPrintPayload(
+            receipt,
+            branding.name,
+            config.text.footerMessage,
           );
-          if (result.ok && result.mode === "usb") {
-            return true;
+          // P3 Phase 4 (N1-02): the ESC/POS encoder degrades every char above
+          // 0xFF to '?' — Bangla (or any non-Latin-1) receipt text would
+          // print as garbage. Detect once; if anything non-Latin-1 is
+          // present, SKIP the USB attempt entirely (never silently print
+          // unreadable characters) and use the browser-print fallback, which
+          // renders full Unicode. The cashier gets a one-line explanation.
+          const usbBlockedByUnicode = [
+            payload.shopName,
+            payload.footer ?? "",
+            payload.cashier ?? "",
+            ...payload.lines.map((l) => l.name),
+          ].some((text) => /[\u0080-\uFFFF]/.test(text));
+          if (usbBlockedByUnicode) {
+            toast.add({
+              title: "USB printer can't render this receipt",
+              description:
+                "The receipt contains characters (e.g. Bangla) the ESC/POS path can't encode — opened the browser print dialog instead. Change the printer language or keep receipts English for USB printing.",
+              type: "warning",
+            });
+          } else {
+            const result = await hardware.printReceipt(
+              payload,
+              async () => false, // no-op: the browser fallback is below
+            );
+            if (result.ok && result.mode === "usb") {
+              return true;
+            }
           }
           // Fall through to the browser print below.
         }
