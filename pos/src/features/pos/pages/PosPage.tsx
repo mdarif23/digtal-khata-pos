@@ -48,7 +48,6 @@ import { requestDrawerOpen } from "@/features/hardware/drawerCommands";
 import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
 import { useRealtimeStore } from "@/features/pos/offline/realtime.js";
 import axios from "../../../api/axios.js";
-import useProductStore from "@/features/products/useProductStore.js";
 import { TerminalBindingDialog } from "@/features/pos/components/pos/TerminalBindingDialog.js";
 
 function Pos() {

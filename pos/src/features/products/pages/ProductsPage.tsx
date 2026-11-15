@@ -7,12 +7,16 @@ import { LocationRequiredNotice } from "@/components/common/LocationRequiredNoti
 import ProductOverview from "../components/ProductsPage/Table.js";
 import { DataTable } from "../components/ProductsPage/Table/data-table.js";
 import { columns } from "../components/ProductsPage/Table/columns.js";
-import useProductStore from "../useProductStore.js";
+
 import {
   productKeys,
   readProductsCache,
   useProductsQuery,
 } from "@/features/products/hooks/useProducts.js";
+import {
+  EMPTY_SELECT_OPTIONS,
+  useProductSelectOptionsQuery,
+} from "@/features/products/hooks/useProductOptions.js";
 import { queryClient } from "@/lib/queryClient.js";
 import type { ProductType } from "../product.schema.js";
 import { calculateProductStats } from "../utils/calculateProductStats.js";
@@ -130,9 +134,8 @@ export function Products() {
       ? productsQuery.error.message
       : String(productsQuery.error)
     : null;
-  const productSelectOptions = useProductStore(
-    (state) => state.productSelectOptions,
-  );
+  const productSelectOptions =
+    useProductSelectOptionsQuery().data ?? EMPTY_SELECT_OPTIONS;
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProductStatusFilter>("all");
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");

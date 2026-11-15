@@ -2,10 +2,10 @@ import { useMemo, useState } from "react";
 import { BrandsTable } from "../components/Brands/BrandsTable";
 import { BrandsDialog } from "../components/Brands/BrandsDialog";
 import { EntityListLayout } from "@/components/common/EntityListLayout";
-import useProductStore from "../useProductStore";
+import { EMPTY_SELECT_OPTIONS, useProductSelectOptionsQuery } from "../hooks/useProductOptions.js";
 
 export function Brands() {
-  const { productSelectOptions } = useProductStore();
+  const productSelectOptions = useProductSelectOptionsQuery().data ?? EMPTY_SELECT_OPTIONS;
   const [searchValue, setSearchValue] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">(
     "all",

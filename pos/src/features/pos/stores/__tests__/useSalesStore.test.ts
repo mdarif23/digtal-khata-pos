@@ -14,8 +14,9 @@ vi.mock("@/lib/queryClient", () => ({
   queryClient: { invalidateQueries: vi.fn() },
 }));
 
-vi.mock("@/features/products/useProductStore.js", () => ({
-  default: { getState: () => ({ getProducts: vi.fn() }) },
+vi.mock("@/features/products/hooks/useProducts.js", () => ({
+  productKeys: { all: ["products"], catalog: () => ["products", 1, 2, "catalog"] },
+  readProductsCache: () => [],
 }));
 
 import axios from "../../../../api/axios.js";

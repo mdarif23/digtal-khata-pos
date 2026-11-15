@@ -43,7 +43,7 @@ import {
 } from "@/components/ui/table";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { toast } from "@/components/ui/toast";
-import useProductStore from "@/features/products/useProductStore";
+import { useProductSelectOptionsQuery } from "@/features/products/hooks/useProductOptions.js";
 import {
   formatCurrency,
   formatNumber,
@@ -100,9 +100,7 @@ export function ReorderDashboardPage() {
     loading: boolean;
   } | null>(null);
 
-  const supplierOptions = useProductStore(
-    (state) => state.productSelectOptions.suppliers,
-  );
+  const supplierOptions = useProductSelectOptionsQuery().data?.suppliers ?? [];
 
   const filters = useMemo<ReorderDashboardFilters>(
     () => ({

@@ -20,7 +20,7 @@ import { MultipleVariantSelector } from "./MultipleVariantSelector";
 import { VariantsTable } from "./VariantsTable";
 import { ProductInfoInput } from "./ProductInfoInput";
 import { AccordionCardProps } from "../../product.types";
-import useProductStore from "../../useProductStore";
+import { useProductVariantOptionsQuery } from "../../hooks/useProductOptions.js";
 
 function getVariantKey(options: ProductTypeInput["variants"][number]["options"]) {
   return (options ?? [])
@@ -47,9 +47,7 @@ export function VariantsInfoCard({
   const variantDrafts = useRef(
     new Map<string, ProductTypeInput["variants"][number]>(),
   );
-  const productVariantOptions = useProductStore(
-    (state) => state.productVariantOptions,
-  );
+  const productVariantOptions = useProductVariantOptionsQuery().data ?? [];
   const hasVariants = form.watch("hasVariants");
   const variants = form.watch("variants") || [];
   const existingTypeNames = Array.from(

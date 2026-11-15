@@ -16,8 +16,8 @@ import { toast } from "@/components/ui/toast";
 import { ProductType } from "@/features/products/product.schema";
 import { ProductVariantType } from "@/features/products/product.schema";
 import { StockAdjustmentInput } from "@/features/products/product.types";
-import useProductStore from "@/features/products/useProductStore";
 import {
+  productCatalogActions,
   productKeys,
   readProductsCache,
   useProductsQuery,
@@ -66,9 +66,7 @@ export function StockAdjustment() {
       ? productsQuery.error.message
       : String(productsQuery.error)
     : null;
-  const adjustVariantStock = useProductStore(
-    (state) => state.adjustVariantStock,
-  );
+  const { adjustVariantStock } = productCatalogActions;
   const [search, setSearch] = useState("");
   const [showProductResults, setShowProductResults] = useState(false);
   const [productId, setProductId] = useState("");

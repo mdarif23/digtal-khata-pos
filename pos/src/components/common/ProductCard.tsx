@@ -9,7 +9,7 @@ import {
   ProductVariantType,
 } from "@/features/products/product.schema";
 import { toast } from "../ui/toast";
-import useProductStore from "@/features/products/useProductStore";
+import { useProductSelectOptionsQuery } from "@/features/products/hooks/useProductOptions.js";
 import { getVariantPurchaseCost } from "@/features/products/utils/getVariantPurchaseCost";
 
 export interface ProductCardProps {
@@ -66,9 +66,7 @@ export function ProductCard({
   type,
   onSerialClick,
 }: ProductCardProps) {
-  const categories = useProductStore(
-    (state) => state.productSelectOptions.categories,
-  );
+  const categories = useProductSelectOptionsQuery().data?.categories ?? [];
   const [serialDialogOpen, setSerialDialogOpen] = useState(false);
   const cartSerials = useCartStore(
     (state) =>

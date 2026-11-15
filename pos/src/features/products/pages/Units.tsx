@@ -2,10 +2,10 @@ import { useMemo, useState } from "react";
 import { EntityListLayout } from "@/components/common/EntityListLayout";
 import { UnitsDialog } from "../components/Units/UnitsDialog";
 import { UnitsTable } from "../components/Units/UnitsTable";
-import useProductStore from "../useProductStore";
+import { EMPTY_SELECT_OPTIONS, useProductSelectOptionsQuery } from "../hooks/useProductOptions.js";
 
 export function Units() {
-  const { productSelectOptions } = useProductStore();
+  const productSelectOptions = useProductSelectOptionsQuery().data ?? EMPTY_SELECT_OPTIONS;
   const [searchValue, setSearchValue] = useState("");
 
   const filteredUnits = useMemo(() => {

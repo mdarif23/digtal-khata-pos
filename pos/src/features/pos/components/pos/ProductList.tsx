@@ -4,7 +4,17 @@ import { buildVariantName } from "@/lib/variantDisplay";
 import { ProductHeader } from "./ProductHeader";
 import api from "../../../../api/axios.js";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
-import useProductStore from "@/features/products/useProductStore";
+import {
+  useProductSelectOptionsQuery,
+  type ProductSelectOptions,
+} from "@/features/products/hooks/useProductOptions.js";
+
+const EMPTY_SELECT_OPTIONS: ProductSelectOptions = {
+  brands: [],
+  categories: [],
+  suppliers: [],
+  units: [],
+};
 import {
   productKeys,
   readProductsCache,
@@ -60,9 +70,8 @@ export function ProductList({
 }) {
   const { addToCart } = useCartStore();
   const products = useProductsQuery().data ?? EMPTY_PRODUCT_LIST;
-  const productSelectOptions = useProductStore(
-    (state) => state.productSelectOptions,
-  );
+  const productSelectOptions =
+    useProductSelectOptionsQuery().data ?? EMPTY_SELECT_OPTIONS;
   const [searchProducts, setSearchProducts] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [activeSerialProduct, setActiveSerialProduct] =

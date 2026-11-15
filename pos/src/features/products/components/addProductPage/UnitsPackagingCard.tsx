@@ -51,7 +51,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { toast } from "@/components/ui/toast";
-import useProductStore from "../../useProductStore";
+import { useProductSelectOptionsQuery } from "../../hooks/useProductOptions.js";
 import type { UnitOption } from "../../product.types";
 import {
   buildAddPackagingUnitPayload,
@@ -107,9 +107,7 @@ type DialogState = { mode: "add" } | { mode: "edit"; row: UomConfigRow } | null;
 export function UnitsPackagingCard({ productId }: { productId: number | null }) {
   const isCreateMode = productId === null;
   const uomQuery = useProductUom(isCreateMode ? null : productId);
-  const unitOptions = useProductStore(
-    (state) => state.productSelectOptions.units,
-  );
+  const unitOptions = useProductSelectOptionsQuery().data?.units ?? [];
   const [dialogState, setDialogState] = useState<DialogState>(null);
 
   const config: ProductUomConfig | undefined = uomQuery.data;

@@ -22,7 +22,7 @@ import {
   ProductType,
   ProductVariantType,
 } from "@/features/products/product.schema";
-import useProductStore from "@/features/products/useProductStore";
+import { useProductSelectOptionsQuery } from "@/features/products/hooks/useProductOptions.js";
 import {
   productKeys,
   readProductsCache,
@@ -86,9 +86,8 @@ export function PurchasesOrder() {
 
   const productsQuery = useProductsQuery();
   const products = productsQuery.data ?? [];
-  const suppliers = useProductStore(
-    (state) => state.productSelectOptions.suppliers,
-  );
+  const suppliers =
+    useProductSelectOptionsQuery().data?.suppliers ?? [];
   const productsLoading = productsQuery.isPending;
   const productError = productsQuery.error
     ? productsQuery.error instanceof Error

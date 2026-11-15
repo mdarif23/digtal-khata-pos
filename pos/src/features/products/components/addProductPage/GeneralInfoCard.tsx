@@ -11,14 +11,14 @@ import { SelectOptions } from "./SelectOptions";
 import { productTypes } from "../../constants/form-status";
 import { UseFormReturn } from "react-hook-form";
 import { ProductTypeInput } from "../../product.schema";
-import useProductStore from "../../useProductStore";
+import { EMPTY_SELECT_OPTIONS, useProductSelectOptionsQuery } from "../../hooks/useProductOptions.js";
 
 export function GeneralInfoCard({
   form,
 }: {
   form: UseFormReturn<ProductTypeInput>;
 }) {
-  const { productSelectOptions } = useProductStore();
+  const productSelectOptions = useProductSelectOptionsQuery().data ?? EMPTY_SELECT_OPTIONS;
   return (
     <Card>
       <CardHeader>

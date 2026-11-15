@@ -11,7 +11,7 @@ import {
   ComboboxValue,
   useComboboxAnchor,
 } from "@/components/ui/combobox";
-import useProductStore from "../../useProductStore";
+import { useProductVariantOptionsQuery } from "../../hooks/useProductOptions.js";
 
 export function MultipleVariantSelector({
   selectedVariantTypeNames,
@@ -23,9 +23,7 @@ export function MultipleVariantSelector({
   disabled?: boolean;
 }) {
   const anchor = useComboboxAnchor();
-  const productVariantOptions = useProductStore(
-    (state) => state.productVariantOptions,
-  );
+  const productVariantOptions = useProductVariantOptionsQuery().data ?? [];
   const variantTypeNames = productVariantOptions.map(
     (option) => option.typeName,
   );

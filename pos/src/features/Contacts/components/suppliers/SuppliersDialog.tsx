@@ -23,7 +23,6 @@ import { Spinner } from "@/components/ui/spinner";
 
 import { createEntityPromiseToast } from "@/lib/toast-utils";
 import { InputField } from "@/components/common/InputField";
-import useProductStore from "@/features/products/useProductStore";
 import { SelectOptions } from "@/components/common/SelectOptions";
 import { entityStatus } from "@/constants/entity-status";
 import {

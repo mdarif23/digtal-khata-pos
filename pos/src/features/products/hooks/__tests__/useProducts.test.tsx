@@ -8,7 +8,7 @@ import {
   readProductsCache,
   useProductsQuery,
 } from "../useProducts.js";
-import useProductStore from "../../useProductStore.js";
+import { productCatalogActions } from "../useProducts.js";
 import { queryClient } from "@/lib/queryClient.js";
 import type { ProductType } from "../../product.types.js";
 
@@ -127,12 +127,12 @@ describe("useProductsQuery (Phase 6 Feature 1 — products catalog domain)", () 
       queryFn: fetchProductsWithOfflineCache,
     });
 
-    useProductStore.getState().takeVariantStock(11, 4);
+    productCatalogActions.takeVariantStock(11, 4);
     expect(readProductsCache()[0]?.variants[0]?.quantity).toBe(6);
     // Clamped at 0 (FIFO sales can never drive stock negative).
-    useProductStore.getState().takeVariantStock(11, 100);
+    productCatalogActions.takeVariantStock(11, 100);
     expect(readProductsCache()[0]?.variants[0]?.quantity).toBe(0);
-    useProductStore.getState().returnVariantStock(11, 2);
+    productCatalogActions.returnVariantStock(11, 2);
     expect(readProductsCache()[0]?.variants[0]?.quantity).toBe(2);
   });
 
@@ -146,7 +146,7 @@ describe("useProductsQuery (Phase 6 Feature 1 — products catalog domain)", () 
       queryFn: fetchProductsWithOfflineCache,
     });
 
-    const result = await useProductStore.getState().adjustVariantStock(11, {
+    const result = await productCatalogActions.adjustVariantStock(11, {
       quantity: 42,
       reason: "count_correction",
     } as never);

@@ -5,7 +5,7 @@ import { Minus, Plus, ShoppingCart, Trash2 } from "lucide-react";
 import { useWatch } from "react-hook-form";
 import { ClearCartDialog } from "./ClearCartDialog.js";
 import type { DiscountType } from "../../types/cart.types.js";
-import useProductStore from "@/features/products/useProductStore.js";
+import { productCatalogActions } from "@/features/products/hooks/useProducts.js";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
 import type {
   CustomerDue,
@@ -566,8 +566,8 @@ function CartItemRow({ item }: { item: CartItem }) {
   // quantity — the same store the POS grid reads (fixes the store-drift bug).
   // Packaging lines convert entered units to BASE deltas with the line's
   // conversionFactor (adding 1 Box takes 12 pcs from the pool).
-  const returnVariantStock = useProductStore((s) => s.returnVariantStock);
-  const takeVariantStock = useProductStore((s) => s.takeVariantStock);
+  const { returnVariantStock, takeVariantStock } = productCatalogActions;
+
   const addCartQuantity = useCartStore((s) => s.addCartQuantity);
   const removeCartQuantity = useCartStore((s) => s.removeCartQuantity);
   const removeCartItem = useCartStore((s) => s.removeCartItem);

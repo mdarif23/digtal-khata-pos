@@ -1,6 +1,9 @@
 import { useEffect } from "react";
 import { useSalesStore } from "../features/pos/stores/useSalesStore";
-import useProductStore from "@/features/products/useProductStore";
+import {
+  fetchProductSelectOptions,
+  fetchProductVariantOptions,
+} from "@/features/products/hooks/useProductOptions.js";
 import { usePurchasesStore } from "@/features/purchases/usePurchaseStore";
 import { getActiveBusinessId, getActiveLocationId, getSessionUser } from "@/api/axios";
 import { useHoldCartStore } from "@/features/pos/stores/useCartStore";
@@ -52,8 +55,6 @@ export function useInitializeApp(enabled: boolean) {
   const { getSales } = useSalesStore();
   const { getPurchases, getPurchaseItems, getPurchasesReturnItems } =
     usePurchasesStore();
-  const { getProductSelectOptions, getProductVariantOptions } =
-    useProductStore();
   useEffect(() => {
     if (!enabled) return;
     enforceSessionScope();
@@ -67,11 +68,17 @@ export function useInitializeApp(enabled: boolean) {
       queryKey: customerKeys.list(),
       queryFn: fetchCustomersWithOfflineCache,
     });
+    void queryClient.prefetchQuery({
+      queryKey: productKeys.selectOptions(),
+      queryFn: fetchProductSelectOptions,
+    });
+    void queryClient.prefetchQuery({
+      queryKey: productKeys.variantOptions(),
+      queryFn: fetchProductVariantOptions,
+    });
     getSales();
     getPurchases();
     getPurchaseItems();
     getPurchasesReturnItems();
-    getProductSelectOptions();
-    getProductVariantOptions();
   }, [enabled]);
 }

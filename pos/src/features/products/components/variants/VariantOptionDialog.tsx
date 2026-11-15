@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import useProductStore from "../../useProductStore";
+import { productOptionActions } from "../../hooks/useProductOptions.js";
 import {
   Dialog,
   DialogClose,
@@ -33,7 +33,7 @@ export function VariantOptionDialog({
   option,
 }: VariantOptionDialogProps) {
   const { createVariantOption, updateVariantOption, deleteVariantOption } =
-    useProductStore();
+    productOptionActions;
   const [inputError, setInputError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [optionInput, setOptionInput] = useState(option?.value ?? "");
