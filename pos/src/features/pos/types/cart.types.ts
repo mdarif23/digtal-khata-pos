@@ -116,7 +116,7 @@ export interface CartStore {
     fromUomConversionId: number | null | undefined,
     unit: SellUnitRef,
   ) => SwitchUnitResult;
-  resetCart: () => void;
+  resetCart: (options?: { restoreStock?: boolean }) => void;
   addHoldItemsToCart: (holdItems: CartType[]) => void;
   addDiscount: (
     variantId: number,
@@ -127,7 +127,7 @@ export interface CartStore {
     product: ProductType,
     variantId: number | undefined,
     serials: string[],
-  ) => void;
+  ) => boolean;
   /**
    * Phase 6: sets/clears the price override on one unit line. The caller is
    * responsible for gating the UI on pricing.price_override; the server

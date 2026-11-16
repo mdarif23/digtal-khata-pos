@@ -14,13 +14,17 @@ import { getVariantPurchaseCost } from "@/features/products/utils/getVariantPurc
 
 export interface ProductCardProps {
   product: ProductType;
-  handleAdd: (product: ProductType) => void;
+  handleAdd: ProductAddHandler;
   defaultVariant: ProductVariantType;
   type: "purchase" | "sale";
   onSerialClick?: (prod: ProductType) => void;
 }
 
 import { formatCurrency as currency } from "@/lib/format";
+
+export type ProductAddHandler = (
+  product: ProductType,
+) => void | boolean | Promise<void | boolean>;
 
 export function ProductImage({
   src,
@@ -108,7 +112,7 @@ export function ProductCard({
   const isSerial = isSale && product.trackingType === "serial";
   const canInteract = !product.hasVariants && !isUnavailable;
 
-  const handleActivate = () => {
+  const handleActivate = async () => {
     if (!canInteract) return;
     if (isSerial) {
       if (onSerialClick) {
@@ -119,8 +123,8 @@ export function ProductCard({
       return;
     }
 
-    handleAdd({ ...product, variants: [defaultVariant] });
-    if (isSale) {
+    const added = await handleAdd({ ...product, variants: [defaultVariant] });
+    if (isSale && added !== false) {
       toast.add({ description: `${product.name} added to cart.` });
     }
   };
@@ -203,8 +207,16 @@ export function ProductCard({
           variantId={defaultVariant.id}
           selected={cartSerials ?? []}
           onConfirm={(serials) => {
-            addSerialItem(product, defaultVariant.id, serials);
+            if (!addSerialItem(product, defaultVariant.id, serials)) {
+              toast.add({
+                type: "error",
+                description: "Not enough stock available for this product.",
+                priority: "high",
+              });
+              return false;
+            }
             toast.add({ description: `${product.name} added to cart.` });
+            return true;
           }}
         />
       )}

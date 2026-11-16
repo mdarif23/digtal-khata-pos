@@ -10,7 +10,10 @@ import {
   type SwitchUnitResult,
 } from "../types/cart.types.js";
 import { HoldCartItems } from "@/features/pos/types/cart.types.js";
-import { readProductsCache } from "@/features/products/hooks/useProducts.js";
+import {
+  productCatalogActions,
+  readProductsCache,
+} from "@/features/products/hooks/useProducts.js";
 import { fetchSellUnits } from "../hooks/useSellUnits.js";
 import { useSessionStore } from "@/auth/sessionStore.js";
 
@@ -287,13 +290,24 @@ export const useCartStore = create<CartStore>((set, get) => ({
     set({ cart });
     return { ok: true, convertedQuantity, merged } as const;
   },
-  resetCart: () =>
-    set((state) => ({
+  resetCart: (options) => {
+    if (options?.restoreStock) {
+      for (const item of get().cart) {
+        const variantId = item.variants[0]?.id;
+        const quantity = item.quantity * (item.conversionFactor ?? 1);
+        if (variantId !== undefined && Number.isFinite(quantity) && quantity > 0) {
+          productCatalogActions.returnVariantStock(variantId, quantity);
+        }
+      }
+    }
+
+    set({
       cart: [],
       // A fresh cart is a fresh checkout — never reuse the old sale's key.
       checkoutIdempotencyKey: null,
       belowMinimumReason: "",
-    })),
+    });
+  },
   addHoldItemsToCart: (holdItems) => {
     set(() => {
       return {
@@ -315,18 +329,31 @@ export const useCartStore = create<CartStore>((set, get) => ({
       };
     });
   },
-  addSerialItem: (product, variantId, serials) =>
-    set((state) => {
-      const variant = product.variants.find((v) => v.id === variantId);
-      if (!variant) {
-        return state; // Safety check
-      }
+  addSerialItem: (product, variantId, serials) => {
+    if (variantId === undefined || serials.length === 0) return false;
+    const variant = product.variants.find((v) => v.id === variantId);
+    if (!variant || new Set(serials).size !== serials.length) return false;
 
-      // 3. Check if this specific variant is already in the cart
-      const exists = state.cart.find((item) =>
+    const existing = get().cart.find((item) =>
+      item.variants.some((v) => v.id === variantId),
+    );
+    const previousQuantity =
+      existing?.serialNumbers?.length ?? existing?.quantity ?? 0;
+    const quantityDelta = serials.length - previousQuantity;
+    if (
+      quantityDelta > 0 &&
+      !productCatalogActions.tryTakeVariantStock(variantId, quantityDelta)
+    ) {
+      return false;
+    }
+    if (quantityDelta < 0) {
+      productCatalogActions.returnVariantStock(variantId, -quantityDelta);
+    }
+
+    set((state) => {
+      const exists = state.cart.some((item) =>
         item.variants.some((v) => v.id === variantId),
       );
-
       if (exists) {
         return {
           cart: state.cart.map((item) =>
@@ -334,26 +361,27 @@ export const useCartStore = create<CartStore>((set, get) => ({
               ? {
                   ...item,
                   serialNumbers: serials,
-                  quantity: serials.length, // Quantity always matches serials count
+                  quantity: serials.length,
                 }
               : item,
           ),
         };
       }
 
-      // 4. If it doesn't exist, add it as a new cart line
       return {
         cart: [
           ...state.cart,
           {
             ...product,
-            variants: [variant], // Only keep the selected variant
+            variants: [variant],
             quantity: serials.length,
-            serialNumbers: serials, // Attach serials here
+            serialNumbers: serials,
           },
         ],
       };
-    }),
+    });
+    return true;
+  },
   setLinePriceOverride: (variantId, uomConversionId, override) =>
     set((state) => ({
       cart: state.cart.map((item) =>

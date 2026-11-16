@@ -17,6 +17,7 @@ const EMPTY_SELECT_OPTIONS: ProductSelectOptions = {
 };
 import {
   productKeys,
+  productCatalogActions,
   readProductsCache,
   useProductsQuery,
 } from "@/features/products/hooks/useProducts.js";
@@ -114,10 +115,10 @@ export function ProductList({
     async (product: ProductType) => {
       const variant = product.variants[0];
       if (!variant || variant.id === undefined) {
-        addToCart(product);
-        return;
+        return false;
       }
       const unit = await resolveDefaultSaleUnit(variant.id);
+      const baseQuantity = unit?.conversionFactor ?? 1;
       // P3 Phase 2 (D10): offline batch selling requires cached batch truth —
       // a batch line without it is blocked (mirrors the serial hard block).
       // The FEFO-first cached batch attaches automatically; the cashier can
@@ -130,16 +131,35 @@ export function ProductList({
             description: `${product.name}: no cached batch info offline.`,
             priority: "high",
           });
-          return;
+          return false;
+        }
+        if (
+          !productCatalogActions.tryTakeVariantStock(variant.id, baseQuantity)
+        ) {
+          toast.add({
+            type: "error",
+            description: `${product.name}: not enough stock available.`,
+            priority: "high",
+          });
+          return false;
         }
         addToCart(product, unit ?? undefined);
         const first = cached[0]!;
         useCartStore
           .getState()
           .setLineBatch(variant.id, { id: first.id, batchNumber: first.batchNumber });
-        return;
+        return true;
+      }
+      if (!productCatalogActions.tryTakeVariantStock(variant.id, baseQuantity)) {
+        toast.add({
+          type: "error",
+          description: `${product.name}: not enough stock available.`,
+          priority: "high",
+        });
+        return false;
       }
       addToCart(product, unit ?? undefined);
+      return true;
     },
     [addToCart],
   );
@@ -514,14 +534,26 @@ export function ProductList({
             if (!open) setActiveSerialProduct(null);
           }}
           onConfirm={(serials) => {
-            useCartStore
+            const added = useCartStore
               .getState()
               .addSerialItem(
                 activeSerialProduct.product,
                 activeSerialProduct.variantId,
                 serials,
               );
+            if (!added) {
+              toast.add({
+                type: "error",
+                description: "Not enough stock available for this product.",
+                priority: "high",
+              });
+              return false;
+            }
+            toast.add({
+              description: `${activeSerialProduct.product.name} added to cart.`,
+            });
             setActiveSerialProduct(null);
+            return true;
           }}
         />
       )}

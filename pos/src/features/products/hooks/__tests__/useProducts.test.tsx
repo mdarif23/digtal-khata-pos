@@ -136,6 +136,22 @@ describe("useProductsQuery (Phase 6 Feature 1 — products catalog domain)", () 
     expect(readProductsCache()[0]?.variants[0]?.quantity).toBe(2);
   });
 
+  it("reserves stock only when the requested quantity is available", async () => {
+    mockedGet.mockResolvedValue({ data: [product(1, 11, 10)] } as never);
+    await queryClient.prefetchQuery({
+      queryKey: productKeys.catalog(),
+      queryFn: fetchProductsWithOfflineCache,
+    });
+
+    expect(productCatalogActions.tryTakeVariantStock(11, 7)).toBe(true);
+    expect(readProductsCache()[0]?.variants[0]?.quantity).toBe(3);
+    expect(productCatalogActions.tryTakeVariantStock(11, 4)).toBe(false);
+    expect(readProductsCache()[0]?.variants[0]?.quantity).toBe(3);
+    expect(productCatalogActions.tryTakeVariantStock(11, 3)).toBe(true);
+    expect(readProductsCache()[0]?.variants[0]?.quantity).toBe(0);
+    expect(productCatalogActions.tryTakeVariantStock(11, 0.1)).toBe(false);
+  });
+
   it("adjustVariantStock patches the cache with the server-returned quantity", async () => {
     vi.mocked(axios.post).mockResolvedValueOnce({
       data: { data: { quantity: 42 } },

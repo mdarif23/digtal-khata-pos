@@ -5,7 +5,10 @@ import { Minus, Plus, ShoppingCart, Trash2 } from "lucide-react";
 import { useWatch } from "react-hook-form";
 import { ClearCartDialog } from "./ClearCartDialog.js";
 import type { DiscountType } from "../../types/cart.types.js";
-import { productCatalogActions } from "@/features/products/hooks/useProducts.js";
+import {
+  productCatalogActions,
+  useProductsQuery,
+} from "@/features/products/hooks/useProducts.js";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
 import type {
   CustomerDue,
@@ -566,7 +569,11 @@ function CartItemRow({ item }: { item: CartItem }) {
   // quantity — the same store the POS grid reads (fixes the store-drift bug).
   // Packaging lines convert entered units to BASE deltas with the line's
   // conversionFactor (adding 1 Box takes 12 pcs from the pool).
-  const { returnVariantStock, takeVariantStock } = productCatalogActions;
+  const {
+    returnVariantStock,
+    takeVariantStock,
+    tryTakeVariantStock,
+  } = productCatalogActions;
 
   const addCartQuantity = useCartStore((s) => s.addCartQuantity);
   const removeCartQuantity = useCartStore((s) => s.removeCartQuantity);
@@ -575,10 +582,16 @@ function CartItemRow({ item }: { item: CartItem }) {
   const switchLineUnit = useCartStore((s) => s.switchLineUnit);
   const addDiscount = useCartStore((s) => s.addDiscount);
   const { addSerialItem } = useCartStore();
+  const catalogProducts = useProductsQuery().data ?? [];
 
   const variant = item.variants[0];
   if (!variant || variant.id === undefined) return null;
   const variantId = variant.id;
+  const availableStock =
+    catalogProducts
+      .flatMap((product) => product.variants)
+      .find((catalogVariant) => catalogVariant.id === variantId)?.quantity ??
+    variant.quantity;
   // Sold-by-weight lines carry fractional base-unit quantities (kg) — scale
   // scans and the quantity input write decimals; the server re-enforces the
   // per-variant rule at checkout.
@@ -611,6 +624,14 @@ function CartItemRow({ item }: { item: CartItem }) {
   const [isSerialOpen, setIsSerialOpen] = useState(false);
   const [isBatchOpen, setIsBatchOpen] = useState(false);
   const { setLineBatch } = useCartStore();
+  const showStockError = () =>
+    toast.add({
+      type: "error",
+      description: t("pos:insufficientStock", {
+        defaultValue: "Not enough stock available.",
+      }),
+      priority: "high",
+    });
 
   // Sell units for the switcher chip — lazily fetched per cart line and
   // cached; single-unit products never render any of this UI.
@@ -693,55 +714,7 @@ function CartItemRow({ item }: { item: CartItem }) {
             <PriceOverrideDialog item={item} variantId={variantId} lineUnit={lineUnit} />
           </div>
 
-          {isBatchLine ? (
-            <>
-              <BatchPickerDialog
-                dialogOpen={isBatchOpen}
-                setDialogOpen={setIsBatchOpen}
-                variantId={variantId}
-                selectedBatchId={item.batchId ?? null}
-                onConfirm={(batch) => {
-                  setLineBatch(variantId, batch);
-                  if (batch) {
-                    toast.add({
-                      description: t("pos:batchSelected", {
-                        defaultValue: "{{name}} ← batch {{batch}}",
-                        name: item.name,
-                        batch: batch.batchNumber,
-                      }),
-                    });
-                  }
-                }}
-              />
-              <div className="ml-auto flex w-full items-center justify-end gap-2 sm:w-auto">
-                <Button
-                  type="button"
-                  variant={item.batchId ? "default" : "outline"}
-                  onClick={() => {
-                    setIsBatchOpen(true);
-                  }}
-                >
-                  {t("pos:batchLabel", {
-                    defaultValue: "Batch: {{batch}}",
-                    batch: item.batchNumber ?? "FEFO",
-                  })}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("pos:removeItem", { defaultValue: "Remove item" })}
-                  onClick={() => {
-                    returnVariantStock(variantId, quantity * conversionFactor);
-                    removeCartItem(variantId, lineUnit);
-                  }}
-                  className="text-muted-foreground hover:text-destructive"
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-            </>
-          ) : isSerial ? (
+          {isSerial ? (
             <>
               <SerialPickerDialog
                 serialDialogOpen={isSerialOpen}
@@ -749,17 +722,23 @@ function CartItemRow({ item }: { item: CartItem }) {
                 variantId={variantId}
                 selected={cartSerials}
                 onConfirm={(serials) => {
-                  addSerialItem(
-                    { ...item, name: item.name },
-                    variantId,
-                    serials,
-                  );
+                  if (
+                    !addSerialItem(
+                      { ...item, name: item.name },
+                      variantId,
+                      serials,
+                    )
+                  ) {
+                    showStockError();
+                    return false;
+                  }
                   toast.add({
                     description: t("pos:serialAdded", {
                       defaultValue: "{{name}} added to cart!",
                       name: item.name,
                     }),
                   });
+                  return true;
                 }}
               />
               <div className="ml-auto flex w-full items-center justify-end gap-2 sm:w-auto">
@@ -791,86 +770,133 @@ function CartItemRow({ item }: { item: CartItem }) {
               </div>
             </>
           ) : (
-            <div className="ml-auto flex w-full items-center justify-end gap-1 sm:w-auto">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t("pos:decreaseQuantity", {
-                  defaultValue: "Decrease quantity",
-                })}
-                disabled={!isWeightLine && quantity <= 1}
-                onClick={() => {
-                  // Weight lines: −1 kg with exact pool adjustment; below the
-                  // minimum weight the line comes off the cart entirely.
-                  if (isWeightLine) {
-                    const next =
-                      Math.round((quantity - 1) * 1000) / 1000;
-                    if (next < 0.001) {
-                      returnVariantStock(variantId, quantity * conversionFactor);
-                      removeCartItem(variantId, lineUnit);
-                    } else {
-                      returnVariantStock(
-                        variantId,
-                        (quantity - next) * conversionFactor,
-                      );
-                      addCustomCartQuantity(variantId, next, lineUnit);
+            <>
+              {isBatchLine && (
+                <BatchPickerDialog
+                  dialogOpen={isBatchOpen}
+                  setDialogOpen={setIsBatchOpen}
+                  variantId={variantId}
+                  selectedBatchId={item.batchId ?? null}
+                  onConfirm={(batch) => {
+                    setLineBatch(variantId, batch);
+                    if (batch) {
+                      toast.add({
+                        description: t("pos:batchSelected", {
+                          defaultValue: "{{name}} ← batch {{batch}}",
+                          name: item.name,
+                          batch: batch.batchNumber,
+                        }),
+                      });
                     }
-                    return;
-                  }
-                  // Steps in ENTERED units (±1 box); the pool moves in base.
-                  returnVariantStock(variantId, conversionFactor);
-                  removeCartQuantity(variantId, lineUnit);
-                }}
+                  }}
+                />
+              )}
+              <div
+                className={`ml-auto flex w-full items-center justify-end gap-1 sm:w-auto ${
+                  isBatchLine ? "flex-wrap" : ""
+                }`}
               >
-                <Minus />
-              </Button>
+                {isBatchLine && (
+                  <Button
+                    type="button"
+                    variant={item.batchId ? "default" : "outline"}
+                    onClick={() => {
+                      setIsBatchOpen(true);
+                    }}
+                  >
+                    {t("pos:batchLabel", {
+                      defaultValue: "Batch: {{batch}}",
+                      batch: item.batchNumber ?? "FEFO",
+                    })}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("pos:decreaseQuantity", {
+                    defaultValue: "Decrease quantity",
+                  })}
+                  disabled={!isWeightLine && quantity <= 1}
+                  onClick={() => {
+                    // Weight lines: −1 kg with exact pool adjustment; below the
+                    // minimum weight the line comes off the cart entirely.
+                    if (isWeightLine) {
+                      const next =
+                        Math.round((quantity - 1) * 1000) / 1000;
+                      if (next < 0.001) {
+                        returnVariantStock(variantId, quantity * conversionFactor);
+                        removeCartItem(variantId, lineUnit);
+                      } else {
+                        returnVariantStock(
+                          variantId,
+                          (quantity - next) * conversionFactor,
+                        );
+                        addCustomCartQuantity(variantId, next, lineUnit);
+                      }
+                      return;
+                    }
+                    // Steps in ENTERED units (±1 box); the pool moves in base.
+                    returnVariantStock(variantId, conversionFactor);
+                    removeCartQuantity(variantId, lineUnit);
+                  }}
+                >
+                  <Minus />
+                </Button>
 
-              <CartQuantityInput
-                itemId={variantId}
-                uomConversionId={lineUnit}
-                quantity={quantity}
-                allowDecimals={isWeightLine}
-                addCustomCartQuantity={(id, newQty) => {
-                  const deltaBase = (newQty - quantity) * conversionFactor;
-                  if (deltaBase > 0) {
-                    takeVariantStock(variantId, deltaBase);
-                  } else if (deltaBase < 0) {
-                    returnVariantStock(variantId, -deltaBase);
-                  }
-                  addCustomCartQuantity(id, newQty, lineUnit);
-                }}
-              />
+                <CartQuantityInput
+                  itemId={variantId}
+                  uomConversionId={lineUnit}
+                  quantity={quantity}
+                  allowDecimals={isWeightLine}
+                  addCustomCartQuantity={(id, newQty) => {
+                    const deltaBase = (newQty - quantity) * conversionFactor;
+                    if (deltaBase > 0) {
+                      if (!tryTakeVariantStock(variantId, deltaBase)) {
+                        showStockError();
+                        return;
+                      }
+                    } else if (deltaBase < 0) {
+                      returnVariantStock(variantId, -deltaBase);
+                    }
+                    addCustomCartQuantity(id, newQty, lineUnit);
+                  }}
+                />
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t("pos:increaseQuantity", {
-                  defaultValue: "Increase quantity",
-                })}
-                onClick={() => {
-                  takeVariantStock(variantId, conversionFactor);
-                  addCartQuantity(variantId, lineUnit);
-                }}
-              >
-                <Plus />
-              </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("pos:increaseQuantity", {
+                    defaultValue: "Increase quantity",
+                  })}
+                  disabled={availableStock < conversionFactor}
+                  onClick={() => {
+                    if (!tryTakeVariantStock(variantId, conversionFactor)) {
+                      showStockError();
+                      return;
+                    }
+                    addCartQuantity(variantId, lineUnit);
+                  }}
+                >
+                  <Plus />
+                </Button>
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t("pos:removeItem", { defaultValue: "Remove item" })}
-                onClick={() => {
-                  returnVariantStock(variantId, quantity * conversionFactor);
-                  removeCartItem(variantId, lineUnit);
-                }}
-                className="text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 />
-              </Button>
-            </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("pos:removeItem", { defaultValue: "Remove item" })}
+                  onClick={() => {
+                    returnVariantStock(variantId, quantity * conversionFactor);
+                    removeCartItem(variantId, lineUnit);
+                  }}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            </>
           )}
         </div>
       </CardContent>

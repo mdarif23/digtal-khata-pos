@@ -108,6 +108,35 @@ export const productCatalogActions = {
         ),
       })),
     ),
+  tryTakeVariantStock: (variantId: number, quantity: number): boolean => {
+    if (!Number.isFinite(quantity) || quantity <= 0) return false;
+
+    let reserved = false;
+    queryClient.setQueryData<ProductsCache>(
+      productKeys.catalog(),
+      (current) => {
+        if (!current) return current;
+        const available = current.data
+          .flatMap((product) => product.variants)
+          .find((variant) => variant.id === variantId)?.quantity;
+        if (available === undefined || available < quantity) return current;
+
+        reserved = true;
+        return {
+          ...current,
+          data: current.data.map((product) => ({
+            ...product,
+            variants: product.variants.map((variant) =>
+              variant.id === variantId
+                ? { ...variant, quantity: variant.quantity - quantity }
+                : variant,
+            ),
+          })),
+        };
+      },
+    );
+    return reserved;
+  },
   adjustVariantStock: async (variantId: number, data: StockAdjustmentInput) => {
     const result = await adjustVariantStockApi(variantId, data);
     patchCatalogCache((rows) =>

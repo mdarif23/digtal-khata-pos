@@ -16,10 +16,7 @@ export function ClearCartDialog() {
   const resetCart = useCartStore((state) => state.resetCart);
   const cart = useCartStore((state) => state.cart);
   const handleClearCart = () => {
-    // cart.map((p) => {
-    //   restoreAllProductQuantityToCart(p.id, p.soldQuantity);
-    // });
-    resetCart();
+    resetCart({ restoreStock: true });
     setOpen(false);
   };
 

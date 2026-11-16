@@ -22,7 +22,7 @@ export function SerialPickerDialog({
 }: {
   variantId: number | undefined;
   selected: string[];
-  onConfirm: (serials: string[]) => void;
+  onConfirm: (serials: string[]) => boolean | void;
   serialDialogOpen:boolean,
   setSerialDialogOpen: (open: boolean) => void
 }) {
@@ -124,7 +124,7 @@ export function SerialPickerDialog({
             type="button"
             disabled={picked.length === 0}
             onClick={() => {
-              onConfirm(picked);
+              if (onConfirm(picked) === false) return;
               setSerialDialogOpen(false);
             }}
           >
