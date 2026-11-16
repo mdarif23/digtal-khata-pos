@@ -22,7 +22,14 @@ import {
   ProductType,
   ProductVariantType,
 } from "@/features/products/product.schema";
-import useProductStore from "@/features/products/useProductStore";
+import { useProductSelectOptionsQuery } from "@/features/products/hooks/useProductOptions.js";
+import {
+  productKeys,
+  readProductsCache,
+  useProductsQuery,
+} from "@/features/products/hooks/useProducts.js";
+import { queryClient } from "@/lib/queryClient.js";
+import type { ProductType as ProductTypeType } from "@/features/products/product.types.js";
 import { getVariantPurchaseCost } from "@/features/products/utils/getVariantPurchaseCost";
 import type { PurchaseCart } from "../purchase.types";
 import { PurchaseTable } from "../components/purchases/PurchaseTable";
@@ -77,12 +84,16 @@ export function PurchasesOrder() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [purchasesCart, setPurchasesCart] = useState<PurchaseCart[]>([]);
 
-  const products = useProductStore((state) => state.products);
-  const suppliers = useProductStore(
-    (state) => state.productSelectOptions.suppliers,
-  );
-  const productsLoading = useProductStore((state) => state.loading);
-  const productError = useProductStore((state) => state.error);
+  const productsQuery = useProductsQuery();
+  const products = productsQuery.data ?? [];
+  const suppliers =
+    useProductSelectOptionsQuery().data?.suppliers ?? [];
+  const productsLoading = productsQuery.isPending;
+  const productError = productsQuery.error
+    ? productsQuery.error instanceof Error
+      ? productsQuery.error.message
+      : String(productsQuery.error)
+    : null;
   const createPurchase = usePurchasesStore((state) => state.createPurchase);
   const getPurchases = usePurchasesStore((state) => state.getPurchases);
 
@@ -305,11 +316,11 @@ export function PurchasesOrder() {
           )
           .find(({ variant }) => variant.id === match.variantId);
 
-      let row = findRow(toActiveProducts(useProductStore.getState().products));
+      let row = findRow(toActiveProducts(readProductsCache()));
       if (!row) {
         // Scanned variant newer than the loaded catalog — refresh once.
-        await useProductStore.getState().getProducts();
-        row = findRow(toActiveProducts(useProductStore.getState().products));
+        await queryClient.invalidateQueries({ queryKey: productKeys.catalog() });
+        row = findRow(toActiveProducts(readProductsCache()));
       }
       if (!row) {
         throw new Error(`${match.productName} is not in the loaded catalog.`);
@@ -380,7 +391,7 @@ export function PurchasesOrder() {
   // else resolves against the server (alias barcodes, newer codes).
   const lookup = useCallback(
     createCatalogLookup(
-      () => toActiveProducts(useProductStore.getState().products),
+      (): ProductTypeType[] => toActiveProducts(readProductsCache()),
     ),
     [],
   );

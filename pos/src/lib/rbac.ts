@@ -43,6 +43,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "sales.view", module: "sales", description: "View sales records" },
   { key: "sales.edit", module: "sales", description: "Edit sales records" },
   { key: "sales.return", module: "sales", description: "Process sale returns and refunds" },
+  { key: "sales.void", module: "sales", description: "Void completed sales with full inventory, drawer, loyalty and ledger reversal" },
 
   // Quotations (sales documents)
   { key: "quotations.view", module: "sales", description: "View quotations and their lifecycle" },

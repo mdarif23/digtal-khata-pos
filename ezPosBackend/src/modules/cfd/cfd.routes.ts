@@ -131,32 +131,39 @@ router.get("/api/cfd/stream", async (req: Request, res: Response) => {
   attachStream(display.displayId, res);
   req.on("close", () => {
     clearInterval(heartbeat);
-    detachStream(display.displayId);
+    detachStream(display.displayId, res);
   });
 });
 
 // ---- POS push (authenticated) -------------------------------------------
 
-const pushSchema = z.object({
-  displayId: z.number().int().positive(),
-  status: z.enum(["idle", "cart", "paid"]),
-  items: z
-    .array(
-      z.object({
-        name: z.string().max(255),
-        variantName: z.string().max(255).nullable().optional(),
-        quantity: z.number().nonnegative(),
-        unitPrice: z.number().nonnegative(),
-        lineTotal: z.number().nonnegative(),
-      }),
-    )
-    .max(200),
-  discountTotal: z.number().nonnegative(),
-  vatTotal: z.number().nonnegative(),
-  grandTotal: z.number().nonnegative(),
-  paidTotal: z.number().nonnegative(),
-  dueTotal: z.number().nonnegative(),
-});
+const pushSchema = z
+  .object({
+    // Legacy single-target field (still accepted for compatibility);
+    // displayIds fans the same payload out to several displays (1-20).
+    displayId: z.number().int().positive(),
+    displayIds: z.array(z.number().int().positive()).max(20).optional(),
+    status: z.enum(["idle", "cart", "paid"]),
+    items: z
+      .array(
+        z.object({
+          name: z.string().max(255),
+          variantName: z.string().max(255).nullable().optional(),
+          quantity: z.number().nonnegative(),
+          unitPrice: z.number().nonnegative(),
+          lineTotal: z.number().nonnegative(),
+        }),
+      )
+      .max(200),
+    discountTotal: z.number().nonnegative(),
+    vatTotal: z.number().nonnegative(),
+    grandTotal: z.number().nonnegative(),
+    paidTotal: z.number().nonnegative(),
+    dueTotal: z.number().nonnegative(),
+    // P3 Phase 1 (F1): named sale-level charges (subset of grandTotal).
+    chargesTotal: z.number().nonnegative().optional(),
+  })
+  .strict();
 
 /** The POS pushes the live cart — the display never computes anything. */
 router.post("/api/cfd/push", ...read, async (req: Request, res: Response) => {
@@ -198,9 +205,33 @@ router.post("/api/cfd/push", ...read, async (req: Request, res: Response) => {
       grandTotal: parsed.data.grandTotal,
       paidTotal: parsed.data.paidTotal,
       dueTotal: parsed.data.dueTotal,
+      ...(parsed.data.chargesTotal !== undefined
+        ? { chargesTotal: parsed.data.chargesTotal }
+        : {}),
     };
-    const result = await pushPayload(businessId, parsed.data.displayId, payload);
-    return res.status(200).json({ success: true, data: result });
+    // P3 Phase 4 (N1-08): fan out — every target is ownership-checked
+    // inside pushPayload (a foreign displayId is a 404, never a leak), so a
+    // mixed list can never push to another business's display.
+    const targetIds = parsed.data.displayIds?.length
+      ? parsed.data.displayIds
+      : [parsed.data.displayId];
+    const results = [];
+    for (const displayId of targetIds) {
+      try {
+        const result = await pushPayload(businessId, displayId, payload);
+        results.push({ displayId, ...result });
+      } catch (err) {
+        results.push({
+          displayId,
+          delivered: false,
+          error: err instanceof Error ? err.message : "Push failed.",
+        });
+      }
+    }
+    return res.status(200).json({
+      success: true,
+      data: { results, delivered: results.some((r) => r.delivered) },
+    });
   } catch (err: unknown) {
     return sendSafeError(res, err, "Unable to push the display payload.");
   }

@@ -19,7 +19,11 @@ import { Card } from "@/components/ui/card";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Button } from "@/components/ui/button";
-import { ProductCard, ProductImage } from "./ProductCard";
+import {
+  ProductCard,
+  ProductImage,
+  type ProductAddHandler,
+} from "./ProductCard";
 import {
   ProductType,
   ProductVariantType,
@@ -39,7 +43,7 @@ import { formatCurrency as currency } from "@/lib/format";
 
 export interface ShowVariantsProps {
   product: ProductType;
-  handleAdd: (product: ProductType) => void;
+  handleAdd: ProductAddHandler;
   defaultVariant: ProductVariantType;
   type: "purchase" | "sale";
 }
@@ -141,7 +145,7 @@ export function ShowVariants({
     selectedVariant !== undefined &&
     (!isSale || selectedVariant.quantity > 0);
 
-  const handleAddVariant = () => {
+  const handleAddVariant = async () => {
     if (!selectedVariant || !canSelectVariant) return;
 
     const { variants: _variants, ...productDetails } = product;
@@ -156,7 +160,8 @@ export function ShowVariants({
       return;
     }
 
-    handleAdd(selectedProduct);
+    const added = await handleAdd(selectedProduct);
+    if (added === false) return;
     if (isSale) {
       toast.add({ description: `${variantName} added to cart.` });
     }
@@ -378,13 +383,23 @@ export function ShowVariants({
           selected={cartSerials}
           onConfirm={(serials) => {
             if (!selectedVariant) return;
-            addSerialItem(
-              { ...product, name: variantName, variants: [selectedVariant] },
-              selectedVariant.id,
-              serials,
-            );
+            if (
+              !addSerialItem(
+                { ...product, name: variantName, variants: [selectedVariant] },
+                selectedVariant.id,
+                serials,
+              )
+            ) {
+              toast.add({
+                type: "error",
+                description: "Not enough stock available for this product.",
+                priority: "high",
+              });
+              return false;
+            }
             toast.add({ description: `${variantName} added to cart.` });
             setDialogOpen(false);
+            return true;
           }}
         />
       )}

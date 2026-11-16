@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,15 +25,19 @@ import {
 import {
   createRoleApi,
   deleteRoleApi,
-  getPermissionCatalogApi,
-  getRoleUsersApi,
-  getRolesApi,
   updateRoleApi,
   type PermissionCatalogEntry,
   type RoleSummary,
 } from "../roles.api";
+import {
+  usePermissionCatalogQuery,
+  useRolesListQuery,
+  useRoleUsersQuery,
+  roleKeys,
+} from "../hooks/useRoles.js";
 import { PERMISSION_CATALOG } from "@/lib/rbac";
 import { refreshSessionContext } from "@/api/axios";
+import { useQueryClient } from "@tanstack/react-query";
 
 const MODULE_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
@@ -72,48 +76,36 @@ const EMPTY_FORM: RoleFormState = {
 };
 
 export function RolesPage() {
-  const [roles, setRoles] = useState<RoleSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  // Hard-fail contract (the old load() toasted): a roles outage must be
+  // visible on THIS page, unlike the Users page's soft-fail.
+  const rolesQuery = useRolesListQuery({ softFail: false });
+  const roles = rolesQuery.data ?? [];
+  const loading = rolesQuery.isPending;
+  const catalogQuery = usePermissionCatalogQuery();
+  const catalog = catalogQuery.data ?? null;
+  const catalogError = catalogQuery.isError;
   const [form, setForm] = useState<RoleFormState | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RoleSummary | null>(null);
   const [usersTarget, setUsersTarget] = useState<RoleSummary | null>(null);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [roleUsers, setRoleUsers] = useState<
-    { userId: number; fullName: string; email: string; isActive: boolean }[]
-  >([]);
+  const roleUsersQuery = useRoleUsersQuery(usersTarget?.id ?? null);
+  const usersLoading = roleUsersQuery.isPending;
+  const roleUsers = roleUsersQuery.data ?? [];
   const [confirmingSave, setConfirmingSave] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getRolesApi();
-      setRoles(data);
-    } catch {
+  useEffect(() => {
+    if (rolesQuery.error) {
       toast.add({ title: "Unable to load roles", type: "error" });
-    } finally {
-      setLoading(false);
     }
-  }, []);
+  }, [rolesQuery.error]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Server catalog only (R1-3): a partial client-side fallback would render
-  // an incomplete matrix and a save could strip keys the admin thinks they
-  // granted. On fetch failure, block editing with an explicit error state.
-  const [catalog, setCatalog] = useState<PermissionCatalogEntry[] | null>(null);
-  const [catalogError, setCatalogError] = useState(false);
-  useEffect(() => {
-    getPermissionCatalogApi()
-      .then((entries) => {
-        setCatalog(entries);
-        setCatalogError(false);
-      })
-      .catch(() => setCatalogError(true));
-  }, []);
+    if (roleUsersQuery.error) {
+      toast.add({ title: "Unable to load the role's users.", type: "error" });
+    }
+  }, [roleUsersQuery.error]);
 
   const grouped = useMemo(() => {
     const source: { module: string; entries: PermissionCatalogEntry[] }[] = [];
@@ -207,15 +199,17 @@ export function RolesPage() {
           name: form.name.trim(),
           permissionKeys: form.selectedKeys,
         });
-        setRoles((prev) => [...prev, created]);
+        queryClient.setQueryData<RoleSummary[]>(roleKeys.list(), (prev) =>
+          prev ? [...prev, created] : [created],
+        );
         toast.add({ title: `Role "${created.name}" created`, type: "success" });
       } else {
         const updated = await updateRoleApi(form.id, {
           ...(form.isSystem ? {} : { name: form.name.trim() }),
           permissionKeys: form.selectedKeys,
         });
-        setRoles((prev) =>
-          prev.map((role) => (role.id === updated.id ? updated : role)),
+        queryClient.setQueryData<RoleSummary[]>(roleKeys.list(), (prev) =>
+          prev?.map((role) => (role.id === updated.id ? updated : role)),
         );
         toast.add({ title: `Role "${updated.name}" updated`, type: "success" });
       }
@@ -244,7 +238,9 @@ export function RolesPage() {
     if (!deleteTarget) return;
     try {
       await deleteRoleApi(deleteTarget.id);
-      setRoles((prev) => prev.filter((role) => role.id !== deleteTarget.id));
+      queryClient.setQueryData<RoleSummary[]>(roleKeys.list(), (prev) =>
+        prev?.filter((role) => role.id !== deleteTarget.id),
+      );
       toast.add({ title: `Role "${deleteTarget.name}" deleted`, type: "success" });
       setDeleteTarget(null);
     } catch (error) {
@@ -262,18 +258,10 @@ export function RolesPage() {
     }
   }
 
-  async function openUsers(role: RoleSummary) {
+  function openUsers(role: RoleSummary) {
+    // The useRoleUsersQuery fetches on enable (dialog open); errors surface
+    // via the error-effect above, matching the old toast.
     setUsersTarget(role);
-    setUsersLoading(true);
-    setRoleUsers([]);
-    try {
-      const data = await getRoleUsersApi(role.id);
-      setRoleUsers(data);
-    } catch {
-      toast.add({ title: "Unable to load the role's users.", type: "error" });
-    } finally {
-      setUsersLoading(false);
-    }
   }
 
   return (

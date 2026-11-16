@@ -92,4 +92,21 @@ router.patch(
   requirePermission("sales.edit"),
   salesController.updateAvailableSerial,
 );
+// P3 Phase 2 (F.1): the POS batch picker — the serial endpoint's access
+// model applied to batches (pos.create_sale holders may read the AVAILABLE
+// batch list for add-to-cart; location-scoped; expiry-policy aware).
+router.get(
+  "/api/variants/:variantId/batches",
+  ...read,
+  requireAnyPermission(["pos.create_sale", "inventory.view"]),
+  salesController.getAvailableBatches,
+);
+// P3 Phase 3 (E1-003): sale void — atomic batch-aware reversal. Backend
+// permission enforcement (sales.void); UI visibility is not authorization.
+router.post(
+  "/api/sales/:id/cancel",
+  ...write,
+  requirePermission("sales.void"),
+  salesController.cancelSale,
+);
 export default router;

@@ -17,7 +17,6 @@ import {
   enteredToBaseQuantity,
   isWholeBaseQuantity,
   roundQuantity,
-  scanStepInLineUnit,
 } from "@/features/purchases/utils/uom";
 import type {
   PaymentsInfoCard,
@@ -37,6 +36,8 @@ import { usePurchaseReturnPreview } from "@/features/purchases/hooks/usePurchase
 import { useReturnableSerials } from "@/features/purchases/hooks/useReturnableSerials";
 import { useScanFailureToast } from "@/features/barcodes/scanning/useScanFailureToast";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
+import { useDebouncedValue } from "@/features/purchases/hooks/useDebouncedValue.js";
+import { ReturnState } from "./ReturnState.js";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
 import { BarcodeScannerInput } from "@/features/barcodes/scanning/BarcodeScannerInput";
 import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFeedback";
@@ -48,14 +49,6 @@ import { BarcodeScanFeedback } from "@/features/barcodes/scanning/BarcodeScanFee
  * loads business-wide stores and can never clamp against the caller's
  * active location. The server stays authoritative at submission.
  */
-function useDebouncedValue<T>(value: T, delay = 300): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debounced;
-}
 
 export const PurchaseViewItems = () => {
   const { id } = useParams();
@@ -792,20 +785,3 @@ export const PurchaseViewItems = () => {
   );
 };
 
-function ReturnState({ title, message }: { title: string; message: string }) {
-  return (
-    <div className="flex min-h-96 flex-col items-center justify-center px-6 text-center">
-      <PackageMinus className="size-10 text-muted-foreground/50" />
-      <h1 className="mt-4 text-xl font-semibold">{title}</h1>
-      <p className="mt-2 max-w-md text-sm text-muted-foreground">{message}</p>
-      <Button
-        nativeButton={false}
-        className="mt-5"
-        variant="outline"
-        render={<Link to="/purchases-list" />}
-      >
-        <ArrowLeft /> Back to purchase orders
-      </Button>
-    </div>
-  );
-}

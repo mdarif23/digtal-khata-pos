@@ -48,7 +48,8 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { PageContainer } from "@/components/common/PageContainer";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SupplierDialog } from "@/features/Contacts/components/suppliers/SuppliersDialog";
-import useProductStore from "@/features/products/useProductStore";
+import { useProductSelectOptionsQuery } from "@/features/products/hooks/useProductOptions.js";
+import { useProductsQuery } from "@/features/products/hooks/useProducts.js";
 import { useContactStore } from "@/features/Contacts/useContactStore";
 import { usePermissions } from "@/hooks/usePermissions";
 import { getErrorMessage } from "@/utils/getErrorMessage";
@@ -133,10 +134,8 @@ export function PriceCheckPage() {
   const { hasPermission } = usePermissions();
   const canManage = hasPermission("purchases.price_check");
 
-  const products = useProductStore((state) => state.products);
-  const unitOptions = useProductStore(
-    (state) => state.productSelectOptions.units,
-  );
+  const products = useProductsQuery().data ?? [];
+  const unitOptions = useProductSelectOptionsQuery().data?.units ?? [];
   const { suppliers, getSuppliers } = useContactStore();
 
   const [variantSearch, setVariantSearch] = useState("");

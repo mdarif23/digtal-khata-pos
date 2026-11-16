@@ -42,3 +42,16 @@ export const getCustomerDueSummaryApi = async () => {
   const { data } = await axios.get<CustomerDue[]>("/due_by_customers");
   return data;
 };
+
+/** P3 Phase 1 (F2): limit / outstanding / available (backend-computed). */
+export interface CustomerCreditSummary {
+  creditLimit: number | null;
+  outstanding: number;
+  available: number | null;
+}
+export const getCustomerCreditSummaryApi = async (customerId: number) => {
+  const { data } = await axios.get<{ data: CustomerCreditSummary }>(
+    `/customers/${customerId}/credit-summary`,
+  );
+  return data.data;
+};

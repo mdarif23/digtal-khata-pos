@@ -37,7 +37,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getErrorMessage } from "@/utils/getErrorMessage";
-import useProductStore from "@/features/products/useProductStore";
+import { useProductSelectOptionsQuery } from "@/features/products/hooks/useProductOptions.js";
 import {
   formatCurrency,
   formatDate,
@@ -59,12 +59,9 @@ export function PriceMonitoringPage() {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   const canManageAlerts = hasPermission("purchases.manage_price_alerts");
-  const categories = useProductStore(
-    (state) => state.productSelectOptions.categories,
-  );
-  const supplierOptions = useProductStore(
-    (state) => state.productSelectOptions.suppliers,
-  );
+  const categories = useProductSelectOptionsQuery().data?.categories ?? [];
+  const supplierOptions =
+    useProductSelectOptionsQuery().data?.suppliers ?? [];
 
   const alertSettings = useAlertSettings();
   const updateAlertSettings = useUpdateAlertSettings();

@@ -18,6 +18,15 @@ const issueSchema = z.object({
 
 const lookupSchema = z.object({ code: z.string().trim().min(8).max(40) });
 
+// P3 Phase 1 (F3): reload an existing card with customer money — same tender
+// set as paid issuance; money must always change hands (no complimentary
+// reloads).
+const reloadSchema = z.object({
+  amount: z.number().positive(),
+  paymentMethod: z.enum(["cash", "bangla_qr", "card"]),
+  reference: z.string().trim().max(100).nullish(),
+});
+
 export async function listGiftCards(req: Request, res: Response) {
   try {
     const cards = await giftCardsService.listGiftCards(getBusinessId(req));
@@ -55,6 +64,40 @@ export async function issueGiftCard(req: Request, res: Response) {
     return res.status(201).json({ success: true, data: card });
   } catch (err) {
     return sendSafeError(res, err, "Unable to issue the gift card.");
+  }
+}
+
+/**
+ * P3 Phase 1 (F3): reloads an active card. The money side (GL + drawer for
+ * cash) posts inside the reload transaction; duplicate references are
+ * rejected with 409 instead of doubling the balance.
+ */
+export async function reloadGiftCard(req: Request, res: Response) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid ID." });
+    }
+    const parsed = reloadSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid reload data.",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const result = await giftCardsService.reloadGiftCard({
+      businessId: getBusinessId(req),
+      giftCardId: id,
+      actorUserId: req.user?.id ?? null,
+      amount: parsed.data.amount,
+      paymentMethod: parsed.data.paymentMethod,
+      reference: parsed.data.reference ?? null,
+      locationId: getLocationId(req),
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to reload the gift card.");
   }
 }
 

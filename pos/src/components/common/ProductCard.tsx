@@ -9,18 +9,22 @@ import {
   ProductVariantType,
 } from "@/features/products/product.schema";
 import { toast } from "../ui/toast";
-import useProductStore from "@/features/products/useProductStore";
+import { useProductSelectOptionsQuery } from "@/features/products/hooks/useProductOptions.js";
 import { getVariantPurchaseCost } from "@/features/products/utils/getVariantPurchaseCost";
 
 export interface ProductCardProps {
   product: ProductType;
-  handleAdd: (product: ProductType) => void;
+  handleAdd: ProductAddHandler;
   defaultVariant: ProductVariantType;
   type: "purchase" | "sale";
   onSerialClick?: (prod: ProductType) => void;
 }
 
 import { formatCurrency as currency } from "@/lib/format";
+
+export type ProductAddHandler = (
+  product: ProductType,
+) => void | boolean | Promise<void | boolean>;
 
 export function ProductImage({
   src,
@@ -66,9 +70,7 @@ export function ProductCard({
   type,
   onSerialClick,
 }: ProductCardProps) {
-  const categories = useProductStore(
-    (state) => state.productSelectOptions.categories,
-  );
+  const categories = useProductSelectOptionsQuery().data?.categories ?? [];
   const [serialDialogOpen, setSerialDialogOpen] = useState(false);
   const cartSerials = useCartStore(
     (state) =>
@@ -110,7 +112,7 @@ export function ProductCard({
   const isSerial = isSale && product.trackingType === "serial";
   const canInteract = !product.hasVariants && !isUnavailable;
 
-  const handleActivate = () => {
+  const handleActivate = async () => {
     if (!canInteract) return;
     if (isSerial) {
       if (onSerialClick) {
@@ -121,8 +123,8 @@ export function ProductCard({
       return;
     }
 
-    handleAdd({ ...product, variants: [defaultVariant] });
-    if (isSale) {
+    const added = await handleAdd({ ...product, variants: [defaultVariant] });
+    if (isSale && added !== false) {
       toast.add({ description: `${product.name} added to cart.` });
     }
   };
@@ -205,8 +207,16 @@ export function ProductCard({
           variantId={defaultVariant.id}
           selected={cartSerials ?? []}
           onConfirm={(serials) => {
-            addSerialItem(product, defaultVariant.id, serials);
+            if (!addSerialItem(product, defaultVariant.id, serials)) {
+              toast.add({
+                type: "error",
+                description: "Not enough stock available for this product.",
+                priority: "high",
+              });
+              return false;
+            }
             toast.add({ description: `${product.name} added to cart.` });
+            return true;
           }}
         />
       )}

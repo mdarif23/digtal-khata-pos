@@ -18,10 +18,20 @@ vi.mock("../../../../api/axios.js", () => ({
   default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
 }));
 
-const catalogState = vi.hoisted(() => ({ products: [] as any[] }));
+const catalogState = vi.hoisted(() => ({
+  products: [] as any[],
+  tryTakeVariantStock: vi.fn(() => true),
+  returnVariantStock: vi.fn(),
+}));
 
-vi.mock("@/features/products/useProductStore.js", () => ({
-  default: { getState: () => catalogState },
+// Phase 6: the cart rebuild reads the catalog from the TanStack Query cache
+// (readProductsCache) instead of the removed Zustand products array.
+vi.mock("@/features/products/hooks/useProducts.js", () => ({
+  readProductsCache: () => catalogState.products,
+  productCatalogActions: {
+    tryTakeVariantStock: catalogState.tryTakeVariantStock,
+    returnVariantStock: catalogState.returnVariantStock,
+  },
 }));
 
 import {
@@ -40,6 +50,7 @@ let uuidCounter = 0;
 beforeEach(() => {
   uuidCounter = 0;
   vi.clearAllMocks();
+  catalogState.tryTakeVariantStock.mockReturnValue(true);
   vi.stubGlobal("crypto", { randomUUID: () => `key-${++uuidCounter}` });
   loadPersistedCart.mockResolvedValue(null);
   useCartStore.setState({ cart: [], checkoutIdempotencyKey: null });
@@ -134,17 +145,32 @@ describe("addDiscount and addSerialItem", () => {
 
   it("syncs quantity to the serial count and replaces serials on re-scan", () => {
     const p = product(1, [variant(11)]);
-    useCartStore.getState().addSerialItem(p, 11, ["SN-1", "SN-2"]);
+    expect(useCartStore.getState().addSerialItem(p, 11, ["SN-1", "SN-2"])).toBe(
+      true,
+    );
     expect(useCartStore.getState().cart[0]).toMatchObject({
       quantity: 2,
       serialNumbers: ["SN-1", "SN-2"],
     });
+    expect(catalogState.tryTakeVariantStock).toHaveBeenCalledWith(11, 2);
 
-    useCartStore.getState().addSerialItem(p, 11, ["SN-3"]);
+    expect(useCartStore.getState().addSerialItem(p, 11, ["SN-3"])).toBe(true);
     expect(useCartStore.getState().cart[0]).toMatchObject({
       quantity: 1,
       serialNumbers: ["SN-3"],
     });
+    expect(catalogState.returnVariantStock).toHaveBeenCalledWith(11, 1);
+  });
+
+  it("does not add serials when stock reservation fails", () => {
+    catalogState.tryTakeVariantStock.mockReturnValueOnce(false);
+
+    expect(
+      useCartStore
+        .getState()
+        .addSerialItem(product(1, [variant(11)]), 11, ["SN-1"]),
+    ).toBe(false);
+    expect(useCartStore.getState().cart).toHaveLength(0);
   });
 
   it("ignores unknown variant ids", () => {
@@ -175,6 +201,31 @@ describe("checkout idempotency key", () => {
     const { cart, checkoutIdempotencyKey } = useCartStore.getState();
     expect(cart).toEqual([]);
     expect(checkoutIdempotencyKey).toBeNull();
+  });
+
+  it("restores each line's base quantity when explicitly clearing the cart", () => {
+    useCartStore.setState({
+      cart: [
+        { ...product(1, [variant(11)]), quantity: 2, conversionFactor: 12 },
+        { ...product(2, [variant(21)]), quantity: 3 },
+      ],
+    });
+
+    useCartStore.getState().resetCart({ restoreStock: true });
+
+    expect(catalogState.returnVariantStock).toHaveBeenNthCalledWith(1, 11, 24);
+    expect(catalogState.returnVariantStock).toHaveBeenNthCalledWith(2, 21, 3);
+    expect(useCartStore.getState().cart).toEqual([]);
+  });
+
+  it("does not restore stock during the normal post-sale reset", () => {
+    useCartStore.setState({
+      cart: [{ ...product(1, [variant(11)]), quantity: 2 }],
+    });
+
+    useCartStore.getState().resetCart();
+
+    expect(catalogState.returnVariantStock).not.toHaveBeenCalled();
   });
 });
 

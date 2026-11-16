@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { inventoryBatches } from "../../db/schema/inventoryBatches.js";
 import { inventoryMovements } from "../../db/schema/inventoryMovements.js";
@@ -523,8 +523,12 @@ async function consumeStockFifoAtLocation(
     );
   }
 
-  // Explicit columns: keeps FIFO stable regardless of new batch columns
-  // (landed cost) added to the schema.
+  // Explicit columns: keeps ordering stable regardless of new batch columns
+  // added to the schema. P3 Phase 2 (D8/F.3): FEFO ordering + expired-
+  // exclusion — transfer truth matches sale truth (shipping expired stock
+  // to another location must not be a way to launder it into sellable
+  // stock there; expired write-offs go through stock-count adjustments).
+  // DB-side boundary — see consumeStockFifo's timezone note.
   const batches = await tx
     .select({
       id: inventoryBatches.id,
@@ -547,9 +551,16 @@ async function consumeStockFifoAtLocation(
         eq(inventoryBatches.businessId, businessId),
         eq(inventoryBatches.locationId, locationId),
         gt(inventoryBatches.quantityRemaining, 0),
+        or(
+          isNull(inventoryBatches.expiryDate),
+          sql`inventory_batches.expiry_date >= CURRENT_DATE`,
+        ),
       ),
     )
-    .orderBy(asc(inventoryBatches.id))
+    .orderBy(
+      sql`inventory_batches.expiry_date ASC NULLS LAST`,
+      asc(inventoryBatches.id),
+    )
     .for("update");
 
   let remaining = quantity;

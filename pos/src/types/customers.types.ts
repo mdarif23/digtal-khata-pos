@@ -6,14 +6,13 @@ export type InputValue = {
   name: string;
   phone: string;
   address: string;
+  /** P3 Phase 1 (F2): max outstanding receivable; null/undefined = unlimited. */
+  creditLimit?: number | null;
 };
 export interface CustomerStore {
-  customers: InputValue[];
   customerInfo: InputValue;
   customerInputValue: InputValue;
   showCustomerInfo: InputValue | null;
-  loading: boolean;
-  error: string | null;
   handleOnchange: (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => void;
@@ -25,7 +24,6 @@ export interface CustomerStore {
   resetCustomerInfo: () => void;
   resetShowCustomerInfo: () => void;
   handleAddCustomer: () => Promise<void>;
-  getCustomers: () => Promise<void>;
   addCustomer: (customerInfo: InputValue) => Promise<InputValue>;
   /** E1-004: correct a customer's contact details. */
   updateCustomer: (id: number, customerInfo: InputValue) => Promise<InputValue>;

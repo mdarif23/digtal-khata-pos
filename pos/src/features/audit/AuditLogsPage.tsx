@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, Search } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -14,12 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  exportAuditLogApi,
-  getAuditLogApi,
-  type AuditLogFilters,
-  type AuditLogRow,
-} from "./audit.api";
+import { exportAuditLogApi, type AuditLogFilters, type AuditLogRow } from "./audit.api";
+import { useAuditLogsQuery } from "./hooks/useAuditLogs.js";
 
 function extractError(error: unknown, fallback: string): string {
   if (
@@ -48,10 +44,7 @@ function formatJson(value: Record<string, unknown> | null): string {
  * Backend gates every row by audit.view; the export needs audit.export.
  */
 export function AuditLogsPage() {
-  const [rows, setRows] = useState<AuditLogRow[] | null>(null);
-  const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [detail, setDetail] = useState<AuditLogRow | null>(null);
 
@@ -69,24 +62,25 @@ export function AuditLogsPage() {
     offset,
   };
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getAuditLogApi(filters);
-      setRows(data.rows);
-      setTotal(data.total);
-    } catch (error) {
-      toast.add({ title: extractError(error, "Unable to load the audit log."), type: "error" });
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actionPrefix, entityType, from, to, offset]);
+  const auditQuery = useAuditLogsQuery(filters);
+  // Failure semantics preserved: an empty list (never a stuck skeleton)
+  // plus the same toast via the error-effect.
+  const rows: AuditLogRow[] | null = auditQuery.data
+    ? auditQuery.data.rows
+    : auditQuery.isError
+      ? []
+      : null;
+  const total = auditQuery.data?.total ?? 0;
+  const loading = auditQuery.isFetching;
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (auditQuery.error) {
+      toast.add({
+        title: extractError(auditQuery.error, "Unable to load the audit log."),
+        type: "error",
+      });
+    }
+  }, [auditQuery.error]);
 
   async function handleExport() {
     setExporting(true);

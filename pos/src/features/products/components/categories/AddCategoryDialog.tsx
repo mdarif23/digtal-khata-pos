@@ -31,7 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import useProductStore from "../../useProductStore";
+import { productOptionActions, EMPTY_SELECT_OPTIONS, useProductSelectOptionsQuery } from "../../hooks/useProductOptions.js";
 import { Spinner } from "@/components/ui/spinner";
 import { useEffect, useState } from "react";
 import { addCategoryStatus } from "../../constants/status";
@@ -70,7 +70,8 @@ export function AddCategoryDialog({
       status: existingCategory?.status ?? "active",
     },
   });
-  const { productSelectOptions, createCategory, updateCategory } = useProductStore();
+  const { createCategory, updateCategory } = productOptionActions;
+  const productSelectOptions = useProductSelectOptionsQuery().data ?? EMPTY_SELECT_OPTIONS;
 
   useEffect(() => {
     form.reset({

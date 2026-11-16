@@ -90,13 +90,16 @@ export function getLinePricing(
 
 // Order: item discounts -> group discounts (whole-cart + line-scoped) ->
 // promotions (whole-cart + line-scoped, on the POST-GROUP bases) ->
-// cart discount (its percentage base is the post-group+promotion total) -> VAT.
+// cart discount (its percentage base is the post-group+promotion total) -> VAT
+// -> sale charges (P3 Phase 1 F1: post-VAT additive, approved decision D1 —
+// never discounted, never taxed, never part of the line-charge floor bases).
 export function getCartTotals(
   items: Items[],
   cartDiscount: DiscountInput,
   vatPercent: number,
   group: CartGroupInput = EMPTY_GROUP_INPUT,
   promotions: CartPromotionInput = EMPTY_PROMOTION_INPUT,
+  chargesTotal = 0,
 ) {
   let itemsBase = 0;
   let itemDiscount = 0;
@@ -193,6 +196,7 @@ export function getCartTotals(
 
   const safeVatPercent = Math.min(Math.max(Number(vatPercent) || 0, 0), 100);
   const vat = roundMoney((afterDiscount * safeVatPercent) / 100);
+  const safeChargesTotal = roundMoney(Math.max(0, Number(chargesTotal) || 0));
 
   return {
     itemsBase,
@@ -208,7 +212,8 @@ export function getCartTotals(
     afterDiscount,
     vatPercent: safeVatPercent,
     vat,
-    finalTotal: roundMoney(afterDiscount + vat),
+    chargesTotal: safeChargesTotal,
+    finalTotal: roundMoney(afterDiscount + vat + safeChargesTotal),
   };
 }
 
@@ -302,8 +307,11 @@ export interface TaxedTotals {
   inclusiveTaxTotal: number;
   /** sales.vat: total tax content = exclusive + inclusive. */
   vat: number;
-  /** Money actually collected: afterDiscount + exclusive tax. Inclusive tax
-   * is already inside afterDiscount and must NOT be added again. */
+  /** P3 Phase 1 F1: named sale-level charges, post-VAT additive (D1). */
+  chargesTotal: number;
+  /** Money actually collected: afterDiscount + exclusive tax + charges.
+   * Inclusive tax is already inside afterDiscount and must NOT be added
+   * again; charges are additive on top (D1). */
   finalTotal: number;
   perLine: LineTax[];
 }
@@ -328,6 +336,7 @@ export function getCartTotalsWithTaxRules(
   rulesByVariant: Map<number, TaxRuleSnapshot[]>,
   group: CartGroupInput = EMPTY_GROUP_INPUT,
   promotions: CartPromotionInput = EMPTY_PROMOTION_INPUT,
+  chargesTotal = 0,
 ): TaxedTotals {
   let itemsBase = 0;
   let itemDiscount = 0;
@@ -500,6 +509,8 @@ export function getCartTotalsWithTaxRules(
     ),
   );
 
+  const safeChargesTotal = roundMoney(Math.max(0, Number(chargesTotal) || 0));
+
   return {
     itemsBase,
     itemDiscount,
@@ -513,7 +524,8 @@ export function getCartTotalsWithTaxRules(
     exclusiveTaxTotal,
     inclusiveTaxTotal,
     vat: roundMoney(exclusiveTaxTotal + inclusiveTaxTotal),
-    finalTotal: roundMoney(afterDiscount + exclusiveTaxTotal),
+    chargesTotal: safeChargesTotal,
+    finalTotal: roundMoney(afterDiscount + exclusiveTaxTotal + safeChargesTotal),
     perLine,
   };
 }

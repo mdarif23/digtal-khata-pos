@@ -9,14 +9,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Pencil, Trash2 } from "lucide-react";
-import useProductStore from "../../useProductStore";
+import { productOptionActions } from "../../hooks/useProductOptions.js";
 import { BrandsDialog } from "./BrandsDialog";
 import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
 import { useState } from "react";
 import type { BrandOption } from "../../product.types";
 
 export function BrandsTable({ brands }: { brands: BrandOption[] }) {
-  const { deleteBrand } = useProductStore();
+  const { deleteBrand } = productOptionActions;
   const [brandToDelete, setBrandToDelete] = useState<BrandOption | null>(null);
 
   return (

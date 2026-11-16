@@ -1,5 +1,8 @@
 import { Button } from "@/components/ui/button";
+import i18next from "i18next";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
+import "@/i18n/index.js";
 import {
   Dialog,
   DialogClose,
@@ -13,7 +16,8 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useCustomerStore } from "@/store/useCustomerStore";
+import { useCustomersQuery } from "@/features/customers/hooks/useCustomers.js";
+import type { InputValue } from "@/types/customers.types.js";
 import { Controller, UseFormReturn, useWatch } from "react-hook-form";
 import { CartSchemaType, PaymentSchemaType } from "../../schemas/cart.schema";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
@@ -28,227 +32,29 @@ import {
   Gift,
   Layers,
   QrCode,
+  Trash2,
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import axios from "../../../../api/axios.js";
 
-// Bangla QR destination: runtime config (public/config.js) → env → legacy
-// default. Was hardcoded; shops have different merchant numbers.
-const QR_NUMBER =
-  (typeof window !== "undefined" &&
-    (window as { ezposConfig?: { qrNumber?: string } }).ezposConfig?.qrNumber) ||
-  (import.meta.env.VITE_QR_NUMBER as string | undefined) ||
-  "01870707900";
+import type { PaymentMode } from "./paymentHelpers.js";
+import { QR_NUMBER } from "./paymentHelpers.js";
+import {
+  buildPayments,
+  EMPTY_CUSTOMER_LIST,
+  getMode,
+  money,
+  toNum,
+  type TenderBalances,
+} from "./paymentHelpers.js";
+import {
+  isPaymentValid,
+  loyaltyIssue,
+  storeCreditIssue,
+} from "./paymentValidation.js";
+import { useTenderBalances } from "./useTenderBalances.js";
 
-// ---------- helpers ----------
-const money = (n: number | undefined) =>
-  Math.round((Number(n) || 0) * 100) / 100;
-
-type PaymentMode = PaymentSchemaType["method"] | "split";
-
-// Fresh payments array for each method. This is what removes stale data.
-function buildPayments(
-  method: PaymentMode,
-  finalTotal: number,
-): PaymentSchemaType[] {
-  switch (method) {
-    case "cash":
-      return [{ method: "cash", amount: finalTotal, tendered: undefined }];
-    case "bangla_qr":
-    case "card":
-      return [{ method, amount: finalTotal, reference: "" }];
-    case "store_credit":
-      return [{ method: "store_credit", amount: finalTotal }];
-    case "loyalty_points":
-      return [{ method: "loyalty_points", amount: finalTotal }];
-    case "gift_card":
-      return [{ method: "gift_card", amount: finalTotal, reference: "" }];
-    case "due":
-      return [{ method: "due", amount: finalTotal }];
-    case "split":
-      return [
-        { method: "cash", amount: undefined },
-        { method: "bangla_qr", amount: undefined, reference: "" },
-        { method: "due", amount: undefined },
-      ];
-    default:
-      return [];
-  }
-}
-
-// Which UI mode are we in? (split = 3 rows, otherwise 1 row)
-function getMode(payments: PaymentSchemaType[] = []) {
-  return payments.length > 1 ? "split" : payments[0]?.method;
-}
-
-// ---------- balance tenders (store credit / loyalty points) ----------
-// The backend is authoritative: it re-checks the customer, the caps and the
-// row-locked balance inside the sale transaction. These checks exist so the
-// Confirm button reflects reality BEFORE the cashier commits — a rejected
-// redemption aborts the whole sale.
-
-interface LoyaltyPosConfig {
-  redeemValue: number;
-  earnRate: number;
-  minRedemptionPoints: number;
-  maxRedemptionPointsPerSale: number | null;
-}
-
-interface TenderBalances {
-  /** Currency balance, null = unknown (loading / fetch failed). */
-  storeCredit: number | null;
-  /** Points balance, null = unknown (loading / fetch failed). */
-  loyaltyBalance: number | null;
-  /** POS redemption config, null = program inactive / not readable. */
-  loyaltyConfig: LoyaltyPosConfig | null;
-}
-
-const EMPTY_TENDER: TenderBalances = {
-  storeCredit: null,
-  loyaltyBalance: null,
-  loyaltyConfig: null,
-};
-
-/** Balance-tender data for the selected customer (fetched while open). */
-function useTenderBalances(
-  customerId: number | null,
-  open: boolean,
-): TenderBalances {
-  const [tender, setTender] = useState<TenderBalances>(EMPTY_TENDER);
-
-  useEffect(() => {
-    if (!open || customerId == null || customerId <= 0) {
-      setTender(EMPTY_TENDER);
-      return;
-    }
-    let ignore = false;
-    const apply = (patch: Partial<TenderBalances>) =>
-      setTender((current) => ({ ...current, ...patch }));
-    // Balance unknown while loading — the Confirm button stays disabled
-    // until the real numbers arrive (never guess a balance).
-    axios
-      .get(`/customers/${customerId}/store-credit`)
-      .then((res) => {
-        if (!ignore)
-          apply({ storeCredit: Number(res.data?.data?.balance ?? 0) });
-      })
-      .catch(() => {
-        if (!ignore) apply({ storeCredit: null });
-      });
-    axios
-      .get(`/customers/${customerId}/loyalty`)
-      .then((res) => {
-        if (!ignore)
-          apply({ loyaltyBalance: Number(res.data?.data?.balance ?? 0) });
-      })
-      .catch(() => {
-        if (!ignore) apply({ loyaltyBalance: null });
-      });
-    axios
-      .get("/loyalty/config")
-      .then((res) => {
-        if (!ignore) apply({ loyaltyConfig: res.data?.data ?? null });
-      })
-      .catch(() => {
-        if (!ignore) apply({ loyaltyConfig: null });
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [customerId, open]);
-
-  return tender;
-}
-
-/** Why the store-credit tender cannot be confirmed right now (null = valid). */
-function storeCreditIssue(
-  amount: number,
-  customerId: number | null,
-  tender: TenderBalances,
-): string | null {
-  if (customerId == null || customerId <= 0)
-    return "Select a customer to pay with store credit.";
-  if (!(amount > 0)) return "Nothing to pay.";
-  if (tender.storeCredit === null)
-    return "Store credit balance unavailable — check the connection.";
-  if (amount > tender.storeCredit + 0.005)
-    return `Insufficient store credit — ৳${(amount - tender.storeCredit).toFixed(2)} short.`;
-  return null;
-}
-
-/** Why the loyalty tender cannot be confirmed right now (null = valid). */
-function loyaltyIssue(
-  amount: number,
-  customerId: number | null,
-  tender: TenderBalances,
-): string | null {
-  if (customerId == null || customerId <= 0)
-    return "Select a customer to pay with points.";
-  const config = tender.loyaltyConfig;
-  if (!config || !(config.redeemValue > 0))
-    return "Loyalty redemption is not available for this business.";
-  const points = money(amount / config.redeemValue);
-  if (points <= 0) return "This total converts to zero points.";
-  if (
-    config.maxRedemptionPointsPerSale !== null &&
-    points > config.maxRedemptionPointsPerSale
-  )
-    return `Capped at ${config.maxRedemptionPointsPerSale} points per sale (needs ${points.toFixed(2)}).`;
-  if (config.minRedemptionPoints > 0 && points < config.minRedemptionPoints)
-    return `Redemption needs at least ${config.minRedemptionPoints} points (this is ${points.toFixed(2)}).`;
-  if (tender.loyaltyBalance === null)
-    return "Points balance unavailable — check the connection.";
-  if (points > tender.loyaltyBalance + 0.01)
-    return `Insufficient points — balance ${tender.loyaltyBalance.toFixed(2)}, needs ${points.toFixed(2)}.`;
-  return null;
-}
-
-function isPaymentValid(
-  payments: PaymentSchemaType[],
-  finalTotal: number,
-  customerId: number | null,
-  tender: TenderBalances,
-) {
-  const mode = getMode(payments);
-  const p0 = payments?.[0];
-
-  if (mode === "cash") return money(p0?.tendered) >= finalTotal;
-
-  if (mode === "bangla_qr" || mode === "card")
-    return (p0?.reference ?? "").trim().length >= 6;
-
-  if (mode === "gift_card") return (p0?.reference ?? "").trim().length >= 8;
-
-  if (mode === "due") return customerId != null;
-
-  if (mode === "store_credit")
-    return storeCreditIssue(money(p0?.amount ?? 0), customerId, tender) === null;
-
-  if (mode === "loyalty_points")
-    return loyaltyIssue(money(p0?.amount ?? 0), customerId, tender) === null;
-
-  if (mode === "split") {
-    const [cash, digital, due] = payments;
-    const sum =
-      money(cash?.amount) + money(digital?.amount) + money(due?.amount);
-    if (money(sum) !== money(finalTotal)) return false;
-    if (
-      money(digital?.amount) > 0 &&
-      (digital?.reference ?? "").trim().length < 6
-    )
-      return false;
-    if (money(due?.amount) > 0 && customerId == null) return false;
-    return true;
-  }
-  return false;
-}
-
-// number input -> undefined when empty
-const toNum = (e: React.ChangeEvent<HTMLInputElement, HTMLInputElement>) =>
-  e.target.value === "" ? undefined : Number(e.target.value);
-
-// ---------- main modal ----------
 export function PaymentModal({
   finalTotal: quotedFinalTotal,
   form,
@@ -260,6 +66,7 @@ export function PaymentModal({
   isPaymentDialogOpen: boolean;
   setIsPaymentDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
+  const { t } = useTranslation();
   const cart = useCartStore((state) => state.cart);
   // The server quote is the authoritative charge target: it already includes
   // the coupon discount and the exclusive/inclusive tax split. Deriving the
@@ -293,7 +100,9 @@ export function PaymentModal({
             className="h-14 w-full justify-between px-4 text-base font-semibold"
           >
             <span className="flex items-center gap-2">
-              Charge customer
+              {t("payment:chargeCustomer", {
+                defaultValue: "Charge customer",
+              })}
               <Kbd keys={["F6"]} className="opacity-70" />
             </span>
             <span className="tabular-nums">{formatCurrency(finalTotal)}</span>
@@ -302,9 +111,12 @@ export function PaymentModal({
       />
       <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Payment</DialogTitle>
+          <DialogTitle>
+            {t("payment:paymentTitle", { defaultValue: "Payment" })}
+          </DialogTitle>
           <DialogDescription className="text-base font-semibold text-foreground">
-            Total due: <span className="tabular-nums">{formatCurrency(finalTotal)}</span>
+            {t("payment:totalDue", { defaultValue: "Total due:" })}{" "}
+            <span className="tabular-nums">{formatCurrency(finalTotal)}</span>
           </DialogDescription>
         </DialogHeader>
 
@@ -324,21 +136,29 @@ export function PaymentModal({
               <DigitalCashPayment
                 finalTotal={finalTotal}
                 form={form}
-                paymentInstruction={`Bangla QR: ${QR_NUMBER}`}
+                sendTo
+                paymentInstruction={t("payment:banglaQrInstruction", {
+                  defaultValue: "Bangla QR: {{number}}",
+                  number: QR_NUMBER,
+                })}
               />
             )}
             {mode === "card" && (
               <DigitalCashPayment
                 finalTotal={finalTotal}
                 form={form}
-                paymentInstruction="Insert / tap card on POS terminal"
+                paymentInstruction={t("payment:instructionCard", {
+                  defaultValue: "Insert / tap card on POS terminal",
+                })}
               />
             )}
             {mode === "gift_card" && (
               <DigitalCashPayment
                 finalTotal={finalTotal}
                 form={form}
-                paymentInstruction="Enter the customer's gift card code"
+                paymentInstruction={t("payment:instructionGiftCard", {
+                  defaultValue: "Enter the customer's gift card code",
+                })}
               />
             )}
             {mode === "store_credit" && (
@@ -360,9 +180,12 @@ export function PaymentModal({
                 finalTotal={finalTotal}
                 form={form}
                 customerId={customerId}
+                tender={tender}
               />
             )}
-            {mode === "due" && <Due form={form} finalTotal={finalTotal} />}
+            {mode === "due" && (
+              <Due form={form} finalTotal={finalTotal} tender={tender} />
+            )}
           </div>
         </div>
 
@@ -370,7 +193,7 @@ export function PaymentModal({
           <DialogClose
             render={
               <Button type="button" variant="outline">
-                Cancel
+                {t("common:cancel", { defaultValue: "Cancel" })}
               </Button>
             }
           />
@@ -379,7 +202,7 @@ export function PaymentModal({
             type="submit"
             disabled={!valid || isSubmitting}
           >
-            Confirm Payment
+            {t("payment:confirmPayment", { defaultValue: "Confirm Payment" })}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -399,20 +222,23 @@ function PaymentMethod({
   mode: string | undefined;
   customerId: number | null;
 }) {
+  const { t } = useTranslation();
   const options = [
-    { label: "Cash", value: "cash", icon: Banknote },
-    { label: "Bangla QR", value: "bangla_qr", icon: QrCode },
-    { label: "Card", value: "card", icon: CreditCard },
-    { label: "Store credit", value: "store_credit", icon: Wallet },
-    { label: "Loyalty points", value: "loyalty_points", icon: Coins },
-    { label: "Gift card", value: "gift_card", icon: Gift },
-    { label: "Due", value: "due", icon: Clock3 },
-    { label: "Split", value: "split", icon: Layers },
+    { label: "Cash", labelKey: "payment:method.cash", value: "cash", icon: Banknote },
+    { label: "Bangla QR", labelKey: "payment:method.banglaQr", value: "bangla_qr", icon: QrCode },
+    { label: "Card", labelKey: "payment:method.card", value: "card", icon: CreditCard },
+    { label: "Store credit", labelKey: "payment:method.storeCredit", value: "store_credit", icon: Wallet },
+    { label: "Loyalty points", labelKey: "payment:method.loyaltyPoints", value: "loyalty_points", icon: Coins },
+    { label: "Gift card", labelKey: "payment:method.giftCard", value: "gift_card", icon: Gift },
+    { label: "Due", labelKey: "payment:method.due", value: "due", icon: Clock3 },
+    { label: "Split", labelKey: "payment:method.split", value: "split", icon: Layers },
   ];
 
   return (
     <div className="flex flex-col gap-3">
-      <span className="text-sm font-medium">Select method</span>
+      <span className="text-sm font-medium">
+        {t("payment:selectMethod", { defaultValue: "Select method" })}
+      </span>
       <ToggleGroup
         value={mode ? [mode] : []}
         onValueChange={(value: string[]) => {
@@ -438,7 +264,7 @@ function PaymentMethod({
             className="col-span-1 justify-start gap-2 px-3 data-pressed:bg-primary data-pressed:text-primary-foreground"
           >
             <m.icon className="size-4" aria-hidden="true" />
-            {m.label}
+            {t(m.labelKey, { defaultValue: m.label })}
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
@@ -454,6 +280,7 @@ function CashPayment({
   finalTotal: number;
   form: UseFormReturn<CartSchemaType>;
 }) {
+  const { t } = useTranslation();
   // amount = what is applied to the sale (always finalTotal)
   // tendered = what the customer handed over
   const tendered = useWatch({
@@ -466,7 +293,7 @@ function CashPayment({
   const isOwed = owed > 0;
 
   const shortcuts = [
-    { label: "Exact", value: finalTotal },
+    { label: t("payment:cashExact", { defaultValue: "Exact" }), value: finalTotal },
     { label: "100", value: 100 },
     { label: "200", value: 200 },
     { label: "300", value: 300 },
@@ -481,7 +308,9 @@ function CashPayment({
         control={form.control}
         render={({ field }) => (
           <Field>
-            <FieldLabel htmlFor={field.name}>Cash Receive</FieldLabel>
+            <FieldLabel htmlFor={field.name}>
+              {t("payment:cashReceive", { defaultValue: "Cash Receive" })}
+            </FieldLabel>
             <Input
               id={field.name}
               type="number"
@@ -515,7 +344,9 @@ function CashPayment({
       >
         <CardContent className="flex flex-col items-center gap-0.5 py-4">
           <span className="text-sm text-muted-foreground">
-            {isOwed ? "Still owed" : "Change to give"}
+            {isOwed
+              ? t("payment:stillOwed", { defaultValue: "Still owed" })
+              : t("payment:changeToGive", { defaultValue: "Change to give" })}
           </span>
           <span
             className={cn(
@@ -536,18 +367,26 @@ function DigitalCashPayment({
   paymentInstruction,
   finalTotal,
   form,
+  sendTo = false,
 }: {
   paymentInstruction: string;
   finalTotal: number;
   form: UseFormReturn<CartSchemaType>;
+  /** Bangla QR carries a merchant number to pay TO; other methods show an
+   *  instruction. Explicit flag — the old startsWith("Bangla QR") string
+   *  sniffing breaks once the instruction is translated. */
+  sendTo?: boolean;
 }) {
+  const { t } = useTranslation();
   // amount is already set to finalTotal by buildPayments, no useEffect needed
   return (
     <>
       <Card>
         <CardContent className="flex flex-col gap-1 py-4">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {paymentInstruction.startsWith("Bangla QR") ? "Send to" : "Instruction"}
+            {sendTo
+              ? t("payment:sendTo", { defaultValue: "Send to" })
+              : t("payment:instruction", { defaultValue: "Instruction" })}
           </span>
           <span className="font-medium">{paymentInstruction}</span>
         </CardContent>
@@ -559,7 +398,9 @@ function DigitalCashPayment({
         render={({ field }) => (
           <Field>
             <FieldLabel htmlFor={field.name}>
-              Transaction ID (last 6+ chars)
+              {t("payment:transactionId", {
+                defaultValue: "Transaction ID (last 6+ chars)",
+              })}
             </FieldLabel>
             <Input
               id={field.name}
@@ -574,7 +415,7 @@ function DigitalCashPayment({
 
       <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
         <span className="text-sm text-muted-foreground">
-          Amount to charge
+          {t("payment:amountToCharge", { defaultValue: "Amount to charge" })}
         </span>
         <span className="text-base font-semibold tabular-nums">
           {formatCurrency(finalTotal)}
@@ -594,6 +435,7 @@ function StoreCreditPayment({
   customerId: number | null;
   tender: TenderBalances;
 }) {
+  const { t } = useTranslation();
   const issue = storeCreditIssue(finalTotal, customerId, tender);
   const available = tender.storeCredit;
 
@@ -601,16 +443,22 @@ function StoreCreditPayment({
     <Card>
       <CardContent className="flex flex-col gap-1.5 py-4">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Store credit
+          {t("payment:method.storeCredit", { defaultValue: "Store credit" })}
         </span>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Available</span>
+          <span className="text-sm text-muted-foreground">
+            {t("payment:available", { defaultValue: "Available" })}
+          </span>
           <span className="font-medium tabular-nums">
-            {available === null ? "checking…" : formatCurrency(available)}
+            {available === null
+              ? t("payment:checking", { defaultValue: "checking…" })
+              : formatCurrency(available)}
           </span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Amount applied</span>
+          <span className="text-sm text-muted-foreground">
+            {t("payment:amountApplied", { defaultValue: "Amount applied" })}
+          </span>
           <span className="font-semibold tabular-nums">
             {formatCurrency(finalTotal)}
           </span>
@@ -633,6 +481,7 @@ function LoyaltyPointsPayment({
   customerId: number | null;
   tender: TenderBalances;
 }) {
+  const { t } = useTranslation();
   const config = tender.loyaltyConfig;
   const points =
     config && config.redeemValue > 0
@@ -645,28 +494,46 @@ function LoyaltyPointsPayment({
     <Card>
       <CardContent className="flex flex-col gap-1.5 py-4">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Loyalty points
+          {t("payment:method.loyaltyPoints", { defaultValue: "Loyalty points" })}
         </span>
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Balance</span>
+          <span className="text-sm text-muted-foreground">
+            {t("payment:balance", { defaultValue: "Balance" })}
+          </span>
           <span className="font-medium tabular-nums">
-            {balance === null ? "checking…" : formatNumber(balance)}
+            {balance === null
+              ? t("payment:checking", { defaultValue: "checking…" })
+              : formatNumber(balance)}
           </span>
         </div>
         {points !== null && (
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">
-              Redeems {formatCurrency(finalTotal)}
-              {config ? ` (৳${config.redeemValue}/point)` : ""}
+              {t("payment:redeems", {
+                defaultValue: "Redeems {{amount}}{{rate}}",
+                amount: formatCurrency(finalTotal),
+                rate: config
+                  ? t("payment:ratePerPoint", {
+                      defaultValue: " (৳{{value}}/point)",
+                      value: config.redeemValue,
+                    })
+                  : "",
+              })}
             </span>
             <span className="font-semibold tabular-nums">
-              {formatNumber(points)} pts
+              {t("payment:pointsSuffix", {
+                defaultValue: "{{points}} pts",
+                points: formatNumber(points),
+              })}
             </span>
           </div>
         )}
         {config && config.maxRedemptionPointsPerSale !== null && (
           <span className="text-xs text-muted-foreground">
-            Max {formatNumber(config.maxRedemptionPointsPerSale)} points per sale
+            {t("payment:maxPointsPerSale", {
+              defaultValue: "Max {{points}} points per sale",
+              points: formatNumber(config.maxRedemptionPointsPerSale),
+            })}
           </span>
         )}
         {issue && (
@@ -678,44 +545,131 @@ function LoyaltyPointsPayment({
 }
 
 // ---------- split ----------
-// payments.0 = cash, payments.1 = digital, payments.2 = due
+// P3 Phase 1 (F5): an arbitrary ordered list of tender rows over ALL backend
+// methods. The old positional cash/digital/due builder is gone — rows are
+// added, switched, filled and removed individually; the backend's
+// distinct-method constraint is preserved by the row picker (no duplicates).
+const SPLIT_METHODS: {
+  value: PaymentSchemaType["method"];
+  label: string;
+  labelKey: string;
+}[] = [
+  { value: "cash", label: "Cash", labelKey: "payment:method.cash" },
+  { value: "bangla_qr", label: "Bangla QR", labelKey: "payment:method.banglaQr" },
+  { value: "card", label: "Card", labelKey: "payment:method.card" },
+  { value: "store_credit", label: "Store credit", labelKey: "payment:method.storeCredit" },
+  { value: "loyalty_points", label: "Loyalty points", labelKey: "payment:method.loyaltyPoints" },
+  { value: "gift_card", label: "Gift card", labelKey: "payment:method.giftCard" },
+  { value: "due", label: "Due", labelKey: "payment:method.due" },
+];
+
 function SplitPayment({
   form,
   finalTotal,
   customerId,
+  tender,
 }: {
   form: UseFormReturn<CartSchemaType>;
   finalTotal: number;
   customerId: number | null;
+  tender: TenderBalances;
 }) {
-  const payments = useWatch({ control: form.control, name: "payments" });
-  const cash = money(payments?.[0]?.amount);
-  const digital = money(payments?.[1]?.amount);
-  const due = money(payments?.[2]?.amount);
-  const remaining = money(finalTotal - cash - digital - due);
+  const { t } = useTranslation();
+  // Localized method label — falls back to the raw enum (same as the old
+  // methodLabel helper) for unknown methods.
+  const methodLabel = (method: string | undefined): string => {
+    const found = SPLIT_METHODS.find((m) => m.value === method);
+    return found ? t(found.labelKey, { defaultValue: found.label }) : (method ?? "");
+  };
+  const payments = useWatch({ control: form.control, name: "payments" }) ?? [];
+  const allocated = money(
+    payments.reduce((acc, p) => acc + money(p?.amount), 0),
+  );
+  const remaining = money(finalTotal - allocated);
 
   // Put whatever is still unpaid into the given row
   const fill = (index: number) => {
-    const current = money(payments?.[index]?.amount);
-    const value = Math.max(0, money(current + remaining));
-    form.setValue(`payments.${index}.amount`, value);
+    const current = money(payments[index]?.amount);
+    form.setValue(`payments.${index}.amount`, Math.max(0, money(current + remaining)));
   };
+
+  // Next unused method (due/store_credit/loyalty need a customer).
+  const addRow = () => {
+    if (payments.length >= SPLIT_METHODS.length) return;
+    const used = new Set(payments.map((p) => p.method));
+    const next =
+      SPLIT_METHODS.find(
+        (m) =>
+          !used.has(m.value) &&
+          (customerId != null || (m.value !== "due" && m.value !== "store_credit" && m.value !== "loyalty_points")),
+      )?.value ?? "cash";
+    form.setValue("payments", [
+      ...payments,
+      {
+        method: next,
+        amount: undefined,
+        ...(next === "bangla_qr" || next === "card" || next === "gift_card"
+          ? { reference: "" }
+          : {}),
+      },
+    ]);
+  };
+
+  const removeRow = (index: number) => {
+    if (payments.length <= 1) return;
+    form.setValue(
+      "payments",
+      payments.filter((_, i) => i !== index),
+    );
+  };
+
+  const changeRowMethod = (index: number, method: PaymentSchemaType["method"]) => {
+    const rows = payments.map((p, i) =>
+      i === index
+        ? {
+            method,
+            amount: p.amount,
+            ...(method === "bangla_qr" || method === "card" || method === "gift_card"
+              ? { reference: "" }
+              : {}),
+          }
+        : p,
+    );
+    form.setValue("payments", rows);
+  };
+
+  // Due rows over the available credit (display-only warning; the backend
+  // authoritatively rejects a sale that exceeds the limit).
+  const dueAmount = money(
+    payments
+      .filter((p) => p.method === "due")
+      .reduce((acc, p) => acc + money(p.amount), 0),
+  );
+  const creditShort =
+    dueAmount > 0 &&
+    tender.creditLimit != null &&
+    tender.creditAvailable != null &&
+    dueAmount > tender.creditAvailable + 0.005;
 
   return (
     <>
       <Card>
         <CardContent className="flex flex-col gap-1 py-4">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Split payment
+            {t("payment:splitPayment", { defaultValue: "Split payment" })}
           </span>
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Total</span>
+            <span className="text-sm text-muted-foreground">
+              {t("common:total", { defaultValue: "Total" })}
+            </span>
             <span className="font-medium tabular-nums">
               {formatCurrency(finalTotal)}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Remaining</span>
+            <span className="text-sm text-muted-foreground">
+              {t("payment:remaining", { defaultValue: "Remaining" })}
+            </span>
             <span
               className={cn(
                 "font-semibold tabular-nums",
@@ -728,143 +682,156 @@ function SplitPayment({
         </CardContent>
       </Card>
 
-      {/* Cash part */}
-      <Controller
-        name="payments.0.amount"
-        control={form.control}
-        render={({ field }) => (
-          <Field>
-            <FieldLabel htmlFor={field.name}>Cash Part</FieldLabel>
-            <Input
-              id={field.name}
-              type="number"
-              {...field}
-              value={field.value ?? ""}
-              onChange={(e) => field.onChange(toNum(e))}
-              placeholder="0.00"
-            />
-          </Field>
-        )}
-      />
-
-      {/* Digital method */}
-      <div className="flex flex-col gap-3">
-        <span>Digital method</span>
-        <Controller
-          name="payments.1.method"
-          control={form.control}
-          render={({ field }) => (
-            <ToggleGroup
-              value={field.value ? [field.value] : []}
-              onValueChange={(value: string[]) => {
-                if (value[0]) field.onChange(value[0]); // keep one always selected
-              }}
-              size="lg"
-              variant="outline"
-              className="grid grid-cols-2 max-h-50"
-            >
-              <ToggleGroupItem value="bangla_qr">Bangla QR</ToggleGroupItem>
-              <ToggleGroupItem value="card">Card</ToggleGroupItem>
-            </ToggleGroup>
-          )}
-        />
-      </div>
-
-      {/* Digital part */}
-      <Controller
-        name="payments.1.amount"
-        control={form.control}
-        render={({ field }) => (
-          <Field>
-            <FieldLabel htmlFor={field.name}>Digital part</FieldLabel>
-            <div className="flex items-center gap-3">
-              <Input
-                id={field.name}
-                type="number"
-                {...field}
-                value={field.value ?? ""}
-                onChange={(e) => field.onChange(toNum(e))}
-                placeholder="0.00"
-              />
-              <Button type="button" variant="outline" onClick={() => fill(1)}>
-                Fill digital
+      {payments.map((payment, index) => {
+        const needsReference =
+          payment.method === "bangla_qr" ||
+          payment.method === "card" ||
+          payment.method === "gift_card";
+        const isDue = payment.method === "due";
+        return (
+          <div key={index} className="rounded-lg border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <select
+                aria-label={t("payment:tenderMethodAria", {
+                  defaultValue: "Tender method {{index}}",
+                  index: index + 1,
+                })}
+                className="min-w-0 flex-1 rounded-md border bg-background p-2 text-sm"
+                value={payment.method}
+                onChange={(e) =>
+                  changeRowMethod(
+                    index,
+                    e.target.value as PaymentSchemaType["method"],
+                  )
+                }
+              >
+                {SPLIT_METHODS.map((m) => (
+                  <option
+                    key={m.value}
+                    value={m.value}
+                    disabled={
+                      // distinct methods (backend constraint) + customer-gated tenders
+                      (m.value !== payment.method &&
+                        payments.some((p) => p.method === m.value)) ||
+                      (customerId == null &&
+                        (m.value === "due" ||
+                          m.value === "store_credit" ||
+                          m.value === "loyalty_points"))
+                    }
+                  >
+                    {t(m.labelKey, { defaultValue: m.label })}
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("payment:removeRowAria", {
+                  defaultValue: "Remove {{method}} row",
+                  method: methodLabel(payment.method),
+                })}
+                disabled={payments.length <= 1}
+                onClick={() => removeRow(index)}
+              >
+                <Trash2 className="size-4" />
               </Button>
             </div>
-          </Field>
-        )}
-      />
-
-      <Controller
-        name="payments.1.reference"
-        control={form.control}
-        render={({ field }) => (
-          <Field>
-            <FieldLabel htmlFor={field.name}>
-              Transaction ID (required if digital part)
-            </FieldLabel>
-            <Input
-              {...field}
-              id={field.name}
-              value={field.value ?? ""}
-              type="text"
-              placeholder="for the digital part"
-            />
-          </Field>
-        )}
-      />
-
-      {/* Due part (only with a customer) */}
-      <Controller
-        name="payments.2.amount"
-        control={form.control}
-        render={({ field }) => (
-          <Field>
-            <FieldLabel htmlFor={field.name}>Due part</FieldLabel>
-            <div className="flex items-center gap-3">
-              <Input
-                id={field.name}
-                type="number"
-                {...field}
-                value={field.value ?? ""}
-                disabled={customerId == null}
-                onChange={(e) => field.onChange(toNum(e))}
-                placeholder="0.00"
+            <div className="mt-2 flex items-center gap-3">
+              <Controller
+                name={`payments.${index}.amount`}
+                control={form.control}
+                render={({ field }) => (
+                  <Input
+                    id={field.name}
+                    type="number"
+                    aria-label={t("payment:methodAmountAria", {
+                      defaultValue: "{{method}} amount",
+                      method: methodLabel(payment.method),
+                    })}
+                    {...field}
+                    value={field.value ?? ""}
+                    disabled={isDue && customerId == null}
+                    onChange={(e) => field.onChange(toNum(e))}
+                    placeholder="0.00"
+                  />
+                )}
               />
               <Button
                 type="button"
                 variant="outline"
-                disabled={customerId == null}
-                onClick={() => fill(2)}
+                disabled={isDue && customerId == null}
+                onClick={() => fill(index)}
               >
-                Fill due
+                {t("payment:fill", { defaultValue: "Fill" })}
               </Button>
             </div>
-          </Field>
-        )}
-      />
+            {needsReference && (
+              <Controller
+                name={`payments.${index}.reference`}
+                control={form.control}
+                render={({ field }) => (
+                  <Input
+                    {...field}
+                    className="mt-2"
+                    id={field.name}
+                    value={field.value ?? ""}
+                    type="text"
+                    placeholder={
+                      payment.method === "gift_card"
+                        ? t("payment:fullGiftCardCode", {
+                            defaultValue: "Full gift card code",
+                          })
+                        : t("payment:referencePlaceholder", {
+                            defaultValue: "Transaction ID (6+ chars)",
+                          })
+                    }
+                  />
+                )}
+              />
+            )}
+          </div>
+        );
+      })}
+
+      <Button
+        type="button"
+        variant="outline"
+        onClick={addRow}
+        disabled={payments.length >= SPLIT_METHODS.length}
+      >
+        {t("payment:addMethod", { defaultValue: "+ Add payment method" })}
+      </Button>
+
+      {creditShort && (
+        <span className="text-sm text-destructive">
+          {tender.creditAvailable != null
+            ? t("payment:creditShortWith", {
+                defaultValue:
+                  "Due ৳{{due}} exceeds the customer's available credit (৳{{available}}).",
+                due: dueAmount.toFixed(2),
+                available: tender.creditAvailable.toFixed(2),
+              })
+            : t("payment:creditShortWithout", {
+                defaultValue:
+                  "Due ৳{{due}} exceeds the customer's available credit.",
+                due: dueAmount.toFixed(2),
+              })}
+        </span>
+      )}
 
       <Card>
         <CardContent className="flex flex-col gap-1 py-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Cash</span>
-            <span className="font-medium tabular-nums">
-              {formatCurrency(cash)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              {payments?.[1]?.method === "card" ? "Card" : "Bangla QR"}
-            </span>
-            <span className="font-medium tabular-nums">
-              {formatCurrency(digital)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Due</span>
-            <span className="font-medium tabular-nums">
-              {formatCurrency(due)}
-            </span>
-          </div>
+          {payments.map((payment, index) => (
+            <div key={index} className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">
+                {methodLabel(payment.method)}
+              </span>
+              <span className="font-medium tabular-nums">
+                {formatCurrency(money(payment.amount))}
+              </span>
+            </div>
+          ))}
         </CardContent>
       </Card>
     </>
@@ -875,30 +842,71 @@ function SplitPayment({
 function Due({
   finalTotal,
   form,
+  tender,
 }: {
   finalTotal: number;
   form: UseFormReturn<CartSchemaType>;
+  tender: TenderBalances;
 }) {
+  const { t } = useTranslation();
   const customerId = useWatch({ control: form.control, name: "customerId" });
-  const { customers } = useCustomerStore();
+  const customers = useCustomersQuery().data ?? EMPTY_CUSTOMER_LIST;
   const customer = customers.find((c) => c.id === customerId);
+  // P3 Phase 1 (F2): display-only credit context — the backend rejects a due
+  // over the limit with 409 and the message surfaces verbatim.
+  const overLimit =
+    tender.creditLimit != null &&
+    tender.creditAvailable != null &&
+    finalTotal > tender.creditAvailable + 0.005;
 
   return (
     <Card>
       <CardContent className="flex flex-col gap-1.5 py-4">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Recording as due (baki)
+          {t("payment:recordingAsDue", { defaultValue: "Recording as due (baki)" })}
         </span>
         <p className="text-sm">
-          {formatCurrency(finalTotal)} will be added to{" "}
+          {t("payment:dueAddBefore", {
+            defaultValue: "{{total}} will be added to",
+            total: formatCurrency(finalTotal),
+          })}{" "}
           <span className="font-medium">
-            {customer?.name ?? "this customer's"}
+            {customer?.name ?? t("payment:dueUnnamedCustomer", {
+              defaultValue: "this customer's",
+            })}
           </span>{" "}
-          outstanding balance.
+          {t("payment:dueAddAfter", { defaultValue: "outstanding balance." })}
         </p>
         <span className="text-sm text-muted-foreground">
-          Phone: {customer?.phone ?? "N/A"}
+          {t("payment:duePhone", {
+            defaultValue: "Phone: {{phone}}",
+            phone: customer?.phone ?? "N/A",
+          })}
         </span>
+        {tender.creditLimit != null && (
+          <span
+            className={cn(
+              "text-sm font-medium",
+              overLimit ? "text-destructive" : "text-success",
+            )}
+          >
+            {t("payment:dueCreditAvailable", {
+              defaultValue: "Credit available: {{available}} / {{limit}}",
+              available: formatCurrency(
+                Math.max(0, tender.creditAvailable ?? 0),
+              ),
+              limit: formatCurrency(tender.creditLimit),
+            })}
+          </span>
+        )}
+        {overLimit && (
+          <span className="text-sm text-destructive">
+            {t("payment:dueOverLimit", {
+              defaultValue:
+                "This due exceeds the customer's credit limit and will be rejected.",
+            })}
+          </span>
+        )}
       </CardContent>
     </Card>
   );

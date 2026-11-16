@@ -63,6 +63,12 @@ export function GiftCardsPage() {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detail, setDetail] = useState<GiftCardDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  // P3 Phase 1 (F3): reload an existing card with customer money.
+  const [reloadCard, setReloadCard] = useState<GiftCardRow | null>(null);
+  const [reloadAmount, setReloadAmount] = useState("");
+  const [reloadMethod, setReloadMethod] = useState<"cash" | "bangla_qr" | "card">("cash");
+  const [reloadReference, setReloadReference] = useState("");
+  const [reloadBusy, setReloadBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -139,6 +145,43 @@ export function GiftCardsPage() {
     }
   }
 
+  /** P3 Phase 1 (F3): adds money to an active card — GL + drawer post inside
+   * the reload transaction; duplicate references are rejected server-side. */
+  async function submitReload() {
+    if (reloadCard === null) return;
+    const parsed = Number(reloadAmount);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      toast.add({ type: "error", description: "Enter a positive amount." });
+      return;
+    }
+    setReloadBusy(true);
+    try {
+      await axios.post(`/gift-cards/${reloadCard.id}/reload`, {
+        amount: parsed,
+        paymentMethod: reloadMethod,
+        reference: reloadReference.trim() || null,
+      });
+      toast.add({
+        type: "success",
+        description: `Card ••${reloadCard.codeLast4} reloaded with ${tk(parsed)}.`,
+      });
+      setReloadCard(null);
+      setReloadAmount("");
+      setReloadReference("");
+      setReloadMethod("cash");
+      await load();
+      if (detailId === reloadCard.id) await loadDetail(reloadCard.id);
+    } catch (err) {
+      toast.add({
+        type: "error",
+        description: getErrorMessage(err),
+        priority: "high",
+      });
+    } finally {
+      setReloadBusy(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-4">
       <Card>
@@ -204,14 +247,25 @@ export function GiftCardsPage() {
                           : "Never"}
                       </td>
                       <td className="p-2 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() => void toggleStatus(card)}
-                        >
-                          {card.status === "active" ? "Deactivate" : "Activate"}
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          {card.status === "active" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setReloadCard(card)}
+                            >
+                              Reload
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => void toggleStatus(card)}
+                          >
+                            {card.status === "active" ? "Deactivate" : "Activate"}
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -309,6 +363,82 @@ export function GiftCardsPage() {
                 >
                   Done
                 </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Reload dialog (P3 Phase 1 F3) */}
+      <Dialog
+        open={reloadCard !== null}
+        onOpenChange={(open) => {
+          if (!open) setReloadCard(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          {reloadCard && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  Reload card ••{reloadCard.codeLast4}
+                </DialogTitle>
+                <DialogDescription>
+                  Balance {tk(reloadCard.balance)}. The money posts to the
+                  ledger (and the drawer when paid in cash) inside the reload —
+                  the balance increases exactly once.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium">Amount</span>
+                  <Input
+                    type="number"
+                    min={0.01}
+                    step={0.01}
+                    value={reloadAmount}
+                    onChange={(e) => setReloadAmount(e.target.value)}
+                    placeholder="500"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium">Paid via</span>
+                  <select
+                    className="w-full rounded-md border bg-background p-2 text-sm"
+                    value={reloadMethod}
+                    onChange={(e) =>
+                      setReloadMethod(
+                        e.target.value as "cash" | "bangla_qr" | "card",
+                      )
+                    }
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="bangla_qr">Bangla QR</option>
+                    <option value="card">Card</option>
+                  </select>
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium">
+                    Reference (optional)
+                  </span>
+                  <Input
+                    value={reloadReference}
+                    maxLength={100}
+                    placeholder="bKash TranID — dedupes retries"
+                    onChange={(e) => setReloadReference(e.target.value)}
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    The same reference can never reload twice.
+                  </span>
+                </label>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setReloadCard(null)}>
+                    Cancel
+                  </Button>
+                  <Button disabled={reloadBusy} onClick={() => void submitReload()}>
+                    {reloadBusy ? "Reloading…" : "Reload card"}
+                  </Button>
+                </div>
               </div>
             </>
           )}

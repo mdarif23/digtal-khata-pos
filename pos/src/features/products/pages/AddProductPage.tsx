@@ -33,7 +33,7 @@ import { UnitsPackagingCard } from "../components/addProductPage/UnitsPackagingC
 import { WarrantyConfigCard } from "../components/addProductPage/WarrantyConfigCard.js";
 import { RightColumnInfoCard } from "../components/addProductPage/RightColumnInfoCard.js";
 import { SaveAndUpdateActionsCard } from "../components/addProductPage/SaveAndUpdateActionsCard.js";
-import useProductStore from "@/features/products/useProductStore.js";
+import { productCatalogActions } from "@/features/products/hooks/useProducts.js";
 import {
   createProductPromiseToast,
   updateProductPromiseToast,
@@ -53,8 +53,7 @@ const ProductStockForm = () => {
     resolver: zodResolver(productSchema),
     mode: "onBlur",
   });
-  const createProduct = useProductStore((state) => state.createProduct);
-  const updateProduct = useProductStore((state) => state.updateProduct);
+  const { createProduct, updateProduct } = productCatalogActions;
   const [isLoadingProduct, setIsLoadingProduct] = useState(isEditing);
   const [editInventory, setEditInventory] = useState<Record<number, { totalStock: number; batches: { batchNumber: string; expiryDate: string | null; quantityRemaining: number }[]; serialCount: number }>>({});
   const [loadError, setLoadError] = useState<string | null>(null);

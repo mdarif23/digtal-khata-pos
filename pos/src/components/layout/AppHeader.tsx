@@ -3,6 +3,7 @@ import { useLocation } from "react-router";
 import { navigation } from "@/config/navigation";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 
 /**
  * Resolve the current page's title from the sidebar navigation config so the
@@ -57,6 +58,9 @@ export function AppHeader() {
       <span className="truncate text-sm font-medium text-muted-foreground">
         {title}
       </span>
+      <div className="ml-auto">
+        <ThemeToggle />
+      </div>
     </header>
   );
 }

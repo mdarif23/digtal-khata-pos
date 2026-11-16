@@ -12,7 +12,7 @@ import { getProductStockState } from "../../../utils/getProductStockState";
 import axios from "../../../../../api/axios";
 import { ViewSerialsDialog } from "./data-table";
 import { hasPermission } from "@/auth/sessionStore";
-import useProductStore from "@/features/products/useProductStore";
+import { readProductSelectOptions } from "@/features/products/hooks/useProductOptions.js";
 
 import { StatusBadge, type StatusTone } from "@/components/common/StatusBadge";
 import { formatCurrency } from "@/lib/format";
@@ -105,11 +105,9 @@ export const columns = columnHelper.columns([
       // The raw quantity IS base units. /api/products only carries unitId,
       // so the abbreviation is resolved from the unit options when available;
       // otherwise the neutral "base units" label keeps the number honest.
-      const unitAbbreviation = useProductStore((state) =>
-        state.productSelectOptions.units.find(
-          (unit) => unit.value === product.unitId,
-        )?.abbreviation,
-      );
+      const unitAbbreviation = readProductSelectOptions().units.find(
+        (unit) => unit.value === product.unitId,
+      )?.abbreviation;
       const stockState = getProductStockState(product);
       const stockLabel = {
         "in-stock": "In stock",

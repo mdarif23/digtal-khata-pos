@@ -1,0 +1,15 @@
+-- 0081: P3 Phase 1 — customer credit limits (F2).
+--
+-- Semantics (approved decision D4): NULL — the default for every existing
+-- customer — means UNLIMITED credit, so migration changes no behavior on
+-- apply. 0 means due sales are blocked outright. A positive value caps the
+-- customer's outstanding receivable, computed authoritatively as
+-- Σ(final_total − payments − refunds) over the customer's completed sales —
+-- the same recomputation the due-management screens use (the denormalized
+-- sales.due_amount is a dual truth, not the authority). One business-wide
+-- limit per customer; the createSale guard locks the customer row FOR UPDATE
+-- so concurrent due purchases serialize and cannot collectively exceed it.
+--
+-- Rollback: ALTER TABLE customers DROP COLUMN credit_limit (NULL-first, no
+-- backfill; dropping loses only the configured limits).
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS credit_limit NUMERIC(14,2);

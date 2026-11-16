@@ -21,23 +21,31 @@ vi.mock("@/features/Contacts/useContactStore", () => ({
   }),
 }));
 
-vi.mock("@/features/products/useProductStore", () => ({
-  default: (selector: (state: unknown) => unknown) =>
-    selector({
-      products: [
-        {
-          id: 7,
-          name: "Rice 25 KG",
-          unitId: 2,
-          variants: [{ id: 42, sku: "SKU-RICE-25" }],
-        },
-      ],
-      productSelectOptions: {
-        units: [{ value: 2, label: "Kg" }],
-        categories: [],
-        suppliers: [],
+// Phase 6: PriceCheckPage reads the catalog + option groups from TanStack
+// Query hooks — same fixtures, new data sources.
+vi.mock("@/features/products/hooks/useProducts", () => ({
+  useProductsQuery: () => ({
+    data: [
+      {
+        id: 7,
+        name: "Rice 25 KG",
+        unitId: 2,
+        variants: [{ id: 42, sku: "SKU-RICE-25" }],
       },
-    }),
+    ],
+    isPending: false,
+    error: null,
+  }),
+}));
+vi.mock("@/features/products/hooks/useProductOptions", () => ({
+  useProductSelectOptionsQuery: () => ({
+    data: {
+      units: [{ value: 2, label: "Kg" }],
+      categories: [],
+      suppliers: [],
+      brands: [],
+    },
+  }),
 }));
 
 const { usePriceCheckObservations } = await import("../hooks/useProcurement");

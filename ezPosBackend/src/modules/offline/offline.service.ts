@@ -13,7 +13,12 @@ import {
   registers,
 } from "../../db/schema/registers.js";
 import { posTerminals } from "../../db/schema/posTerminals.js";
-import { BadRequestError, ConflictError, NotFoundError } from "../../utils/handleError.js";
+import {
+  BadRequestError,
+  ConflictError,
+  ExpiredBatchError,
+  NotFoundError,
+} from "../../utils/handleError.js";
 import { recordAudit } from "../../services/audit.js";
 import {
   createSalePayloadSchema,
@@ -377,14 +382,39 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
 
   // The sale physically happened — it is never dropped at sync time.
   // Oversell surfaces as negative stock + a conflict record for review.
-  const result = await salesService.createSale(
-    ctx.businessId,
-    ctx.locationId,
-    ctx.userId,
-    sale,
-    ctx.terminalId,
-    { channel: "offline", allowNegativeStock: true },
-  );
+  // P3 Phase 2 (D10): an expired-batch selection that the live policy
+  // rejects is an expired_batch_selected conflict — the op FAILS (the sale
+  // is not applied: expired stock must never be sold silently, offline
+  // included), with a manager-reviewable record.
+  let result: Awaited<ReturnType<typeof salesService.createSale>>;
+  try {
+    result = await salesService.createSale(
+      ctx.businessId,
+      ctx.locationId,
+      ctx.userId,
+      sale,
+      ctx.terminalId,
+      { channel: "offline", allowNegativeStock: true },
+    );
+  } catch (err) {
+    if (err instanceof ExpiredBatchError) {
+      const conflictId = await createConflict(
+        ctx,
+        op.opId,
+        op.type,
+        "expired_batch_selected",
+        err.message,
+        { salePayload: op.payload },
+      );
+      return {
+        opId: op.opId,
+        status: "failed",
+        conflictId,
+        error: "Expired batch selected — the sale was not applied.",
+      };
+    }
+    throw err;
+  }
 
   // Batch ledger gaps (batches could not cover the sale) — the sale stands,
   // the gap is flagged for manager review. Negative stock gets its own

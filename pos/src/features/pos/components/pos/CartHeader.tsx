@@ -8,6 +8,8 @@ import {
 } from "@/components/ui/popover";
 import { CustomerDialog } from "@/features/Contacts/components/customers/CustomerDialog";
 import { useCustomerStore } from "@/store/useCustomerStore";
+import { useCustomersQuery } from "@/features/customers/hooks/useCustomers.js";
+import type { InputValue } from "@/types/customers.types.js";
 import { useState } from "react";
 import { Controller, type UseFormReturn } from "react-hook-form";
 import {
@@ -27,6 +29,9 @@ import {
 } from "@/components/ui/combobox";
 import { UserPlus } from "lucide-react";
 import type { CartSchemaType } from "../../schemas/cart.schema";
+
+const EMPTY_CUSTOMER_LIST: InputValue[] = [];
+
 export function CartHeader({
   form,
   cartItemCount,
@@ -92,7 +97,10 @@ export function CustomerInputAndSearch({
 }: {
   form: UseFormReturn<CartSchemaType>;
 }) {
-  const { customers, setShowCustomerInfo } = useCustomerStore();
+  const customers = useCustomersQuery().data ?? EMPTY_CUSTOMER_LIST;
+  const setShowCustomerInfo = useCustomerStore(
+    (state) => state.setShowCustomerInfo,
+  );
 
   const customersValue = customers.map((customer) => ({
     label: customer.name,

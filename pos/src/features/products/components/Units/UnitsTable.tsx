@@ -8,14 +8,14 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Pencil, Trash2 } from "lucide-react";
-import useProductStore from "../../useProductStore";
+import { productOptionActions } from "../../hooks/useProductOptions.js";
 import { UnitsDialog } from "./UnitsDialog";
 import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
 import { useState } from "react";
 import type { UnitOption } from "../../product.types";
 
 export function UnitsTable({ units }: { units: UnitOption[] }) {
-  const { deleteUnit } = useProductStore();
+  const { deleteUnit } = productOptionActions;
   const [unitToDelete, setUnitToDelete] = useState<UnitOption | null>(null);
 
   return (

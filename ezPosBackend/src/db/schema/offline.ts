@@ -99,4 +99,5 @@ export type OfflineConflictReason =
   | "negative_stock_open_mode"
   | "allocation_exceeded"
   | "batch_shortfall"
+  | "expired_batch_selected"
   | "refund_cap_exceeded";

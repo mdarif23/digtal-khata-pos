@@ -182,10 +182,20 @@ export async function renderReceiptHtml(input: ReceiptRenderInput): Promise<Rece
     </table>`;
 
   // ---- totals -------------------------------------------------------
+  // P3 Phase 1 (F1): named sale-level charges print as their own rows
+  // between VAT and the final payable (post-VAT additive; inside finalTotal).
+  const chargeRows = (receipt.charges ?? [])
+    .filter((c) => Number(c.amount) > 0)
+    .map(
+      (c) =>
+        `<div class="row"><span>${escapeHtml(c.label)}:</span><span>+${money(Number(c.amount))}</span></div>`,
+    )
+    .join("");
   const totals = `
     ${v.subtotal ? `<div class="row"><span>Subtotal:</span><span>${money(receipt.subtotal)}</span></div>` : ""}
     ${v.overallDiscount && receipt.discount > 0 ? `<div class="row"><span>Discount:</span><span>-${money(receipt.discount)}</span></div>` : ""}
     ${v.vat && receipt.vat > 0 ? `<div class="row"><span>VAT / Tax:</span><span>+${money(receipt.vat)}</span></div>` : ""}
+    ${chargeRows}
     ${v.grandTotal ? `<div class="total-row"><span>FINAL PAYABLE:</span><span>${money(receipt.finalTotal)}</span></div>` : ""}`;
 
   // ---- payments -----------------------------------------------------

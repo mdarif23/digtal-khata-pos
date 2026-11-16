@@ -2,9 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
-  ArrowDownRight,
   ArrowRight,
-  ArrowUpRight,
   Banknote,
   CreditCard,
   Clock3,
@@ -20,15 +18,6 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { ChartResponsiveContainer } from "@/components/common/ChartResponsiveContainer";
 import { Link } from "react-router";
 import axios from "../../api/axios.js";
 import { useSessionStore } from "@/auth/sessionStore";
@@ -43,373 +32,27 @@ import type {
   StaleStockProduct,
 } from "../../types/dashboard.types.js";
 
-type SummaryResponse = Record<string, unknown>;
 
-const emptyDashboard: DashboardData = {
-  salesOverview: [],
-  productsSummary: {
-    lowStock: 0,
-    stockOut: 0,
-    totalItems: 0,
-    totalValuation: 0,
-  },
-  topItemsByGross: [],
-  topSoldProductsByCategory: [],
-  profitByCategory: [],
-  salesSummary: {
-    currentNetSales: 0,
-    currentReturn: 0,
-    salesGrowth: 0,
-    returnGrowth: 0,
-  },
-  salesActivity: { transactionCount: 0, averageSale: 0 },
-  paymentBreakdown: [],
-  netProfit: { currentNetProfit: 0, profitGrowth: 0 },
-  invoiceDue: { currentDue: 0, growth: null },
-  expensesSummary: { currentExpenses: 0, expensesGrowth: null },
-  purchasesSummary: { currentPurchases: 0, purchasesGrowth: null },
-  returnSummary: { currentReturns: 0, growth: null },
-  recentSales: [],
-  lowStockProducts: [],
-  staleStockProducts: [],
-  topSellingProducts: [],
-};
+import {
+  csvCell,
+  emptyDashboard,
+  formatDate,
+  formatTime,
+  isDashboardPeriod,
+  normalizeDashboard,
+  periodOptions,
+  staleStockLimits,
+  staleStockThresholds,
+  type DashboardPeriod,
+  type SummaryResponse,
+} from "./dashboardNormalizer.js";
+import {
+  EmptyState,
+  MetricCard,
+  SectionHeading,
+} from "./dashboardPrimitives.js";
+import { SalesOverviewChart } from "./SalesOverviewChart.js";
 
-const periodOptions = [
-  { value: "today", label: "Today", comparison: "vs yesterday" },
-  { value: "yesterday", label: "Yesterday", comparison: "vs previous day" },
-  { value: "7d", label: "Last 7 days", comparison: "vs previous 7 days" },
-  { value: "30d", label: "Last 30 days", comparison: "vs previous 30 days" },
-  { value: "60d", label: "Last 2 months", comparison: "vs previous 2 months" },
-  { value: "90d", label: "Last 3 months", comparison: "vs previous 3 months" },
-  { value: "365d", label: "Last 12 months", comparison: "vs previous 12 months" },
-] as const;
-type DashboardPeriod = (typeof periodOptions)[number]["value"];
-const staleStockThresholds = [30, 60, 90, 180] as const;
-const staleStockLimits = [10, 20, 30, 50, 100] as const;
-
-function isDashboardPeriod(value: string): value is DashboardPeriod {
-  return periodOptions.some((option) => option.value === value);
-}
-
-function readValue(record: SummaryResponse, ...keys: string[]): unknown {
-  for (const key of keys) {
-    if (record[key] !== undefined && record[key] !== null) return record[key];
-  }
-  return undefined;
-}
-
-function readNumber(record: SummaryResponse, ...keys: string[]): number {
-  const value = Number(readValue(record, ...keys));
-  return Number.isFinite(value) ? value : 0;
-}
-
-function readText(record: SummaryResponse, ...keys: string[]): string {
-  const value = readValue(record, ...keys);
-  return typeof value === "string" ? value : "";
-}
-
-function readPaymentStatus(
-  record: SummaryResponse,
-): RecentSale["paymentStatus"] {
-  const status = readText(record, "paymentStatus", "payment_status");
-  return status === "paid" || status === "partial" || status === "unpaid"
-    ? status
-    : "unpaid";
-}
-
-function readRows(value: unknown): SummaryResponse[] {
-  return Array.isArray(value)
-    ? value.filter(
-        (row): row is SummaryResponse =>
-          typeof row === "object" && row !== null,
-      )
-    : [];
-}
-
-function firstRow(record: SummaryResponse, ...keys: string[]): SummaryResponse {
-  return readRows(readValue(record, ...keys))[0] ?? {};
-}
-
-function normalizeDashboard(response: SummaryResponse): DashboardData {
-  const products = firstRow(response, "productsSummary", "products_summary");
-  const sales = firstRow(response, "salesSummary", "sales_summary");
-  const activity = firstRow(response, "salesActivity", "sales_activity");
-  const profit = firstRow(response, "netProfit", "net_profit");
-  const due = firstRow(response, "invoiceDue", "invoice_due");
-  const expenses = firstRow(response, "expensesSummary", "expenses_summary");
-  const purchases = firstRow(response, "purchasesSummary", "purchases_summary");
-  const returns = firstRow(response, "return_summary", "returnSummary");
-
-  const salesOverview: SalesOverview[] = readRows(
-    readValue(response, "salesOverview", "sales_overview"),
-  ).map((row) => ({
-    month: readText(row, "month"),
-    sales: readNumber(row, "sales"),
-    cash: readNumber(row, "cash"),
-  }));
-  const lowStockProducts: LowStockProduct[] = readRows(
-    readValue(response, "lowStockSummary", "low_stock_summary"),
-  ).map((row) => ({
-    id: readNumber(row, "id"),
-    productName: readText(row, "productName", "product_name"),
-    variantOptions: readText(row, "variantOptions", "variant_options") || null,
-    variantName: readText(row, "variantName", "variant_name") || null,
-    sku: readText(row, "sku"),
-    status: readText(row, "status"),
-    quantity: readNumber(row, "quantity"),
-  }));
-  const staleStockProducts: StaleStockProduct[] = readRows(
-    readValue(response, "staleStockSummary", "stale_stock_summary"),
-  ).map((row) => ({
-    id: readNumber(row, "id"),
-    productName: readText(row, "productName", "product_name"),
-    variantOptions: readText(row, "variantOptions", "variant_options") || null,
-    variantName: readText(row, "variantName", "variant_name") || null,
-    sku: readText(row, "sku"),
-    quantity: readNumber(row, "quantity"),
-    lastSoldAt: readText(row, "lastSoldAt", "last_sold_at") || null,
-    daysSinceLastSale:
-      readValue(row, "daysSinceLastSale", "days_since_last_sale") === undefined
-        ? null
-        : readNumber(row, "daysSinceLastSale", "days_since_last_sale"),
-    stockValue: readNumber(row, "stockValue", "stock_value"),
-  }));
-  const recentSales: RecentSale[] = readRows(
-    readValue(response, "recentSalesSummary", "recent_sales_summary"),
-  ).map((row) => ({
-    id: readNumber(row, "id"),
-    invoiceNumber: readText(row, "invoiceNumber", "invoice_number"),
-    createdAt: readText(row, "createdAt", "created_at"),
-    customerName: readText(row, "customerName", "customer_name"),
-    paymentStatus: readPaymentStatus(row),
-    itemCount: readNumber(row, "itemCount", "item_count"),
-    soldPrice: readNumber(row, "soldPrice", "sold_price"),
-  }));
-  const topItemsByGross = readRows(
-    readValue(response, "topItemsByGross", "top_items_by_gross"),
-  ).map((row) => ({
-    productName: readText(row, "productName", "product_name"),
-    variantId: readValue(row, "variantId", "variant_id") === undefined ? undefined : readNumber(row, "variantId", "variant_id"),
-    variantOptions: readText(row, "variantOptions", "variant_options") || null,
-    variantName: readText(row, "variantName", "variant_name") || null,
-    sku: readText(row, "sku") || null,
-    currentGross: readNumber(row, "currentMonthGross", "current_month_gross"),
-    currentQuantity: readNumber(row, "currentMonthQuantity", "current_month_quantity"),
-    trend: readText(row, "trend"),
-  }));
-  const topSoldProductsByCategory = readRows(
-    readValue(
-      response,
-      "top_sold_products_by_category",
-      "topSoldProductsByCategory",
-    ),
-  ).map((row) => ({
-    category: readText(row, "category") || "Uncategorized",
-    soldItems: readNumber(row, "soldItemsByCategory", "sold_items_by_category"),
-  }));
-  const profitByCategory = readRows(
-    readValue(response, "profitByCategory", "profit_by_category"),
-  ).map((row) => ({
-    category: readText(row, "category") || "Uncategorized",
-    profit: readNumber(row, "currentMonthProfit", "current_month_profit"),
-  }));
-  const topSellingProducts = readRows(
-    readValue(response, "topSellingProducts", "top_selling_products"),
-  ).map((row) => ({
-    id: readNumber(row, "id"),
-    productName: readText(row, "productName", "product_name"),
-    variantId: readValue(row, "variantId", "variant_id") === undefined ? undefined : readNumber(row, "variantId", "variant_id"),
-    variantOptions: readText(row, "variantOptions", "variant_options") || null,
-    variantName: readText(row, "variantName", "variant_name") || null,
-    sku: readText(row, "sku") || null,
-    unitsSold: readNumber(row, "topSelling", "top_selling"),
-    soldPrice: readNumber(row, "soldPrice", "sold_price"),
-    grossSales: readNumber(row, "grossSales", "gross_sales"),
-  }));
-  const paymentBreakdown: PaymentBreakdown[] = readRows(
-    readValue(response, "paymentBreakdown", "payment_breakdown"),
-  ).map((row) => ({
-    method: readText(row, "method", "payment_method"),
-    amount: readNumber(row, "amount"),
-    paymentCount: readNumber(row, "paymentCount", "payment_count"),
-  }));
-  const salesActivity: SalesActivity = {
-    transactionCount: readNumber(activity, "transactionCount", "transaction_count"),
-    averageSale: readNumber(activity, "averageSale", "average_sale"),
-  };
-
-  return {
-    salesOverview,
-    productsSummary: {
-      lowStock: readNumber(products, "lowStock", "low_stock"),
-      stockOut: readNumber(products, "stockOut", "stock_out"),
-      totalItems: readNumber(products, "totalItems", "total_items"),
-      totalValuation: readNumber(
-        products,
-        "totalValuation",
-        "total_valuation",
-      ),
-    },
-    topItemsByGross,
-    topSoldProductsByCategory,
-    profitByCategory,
-    salesSummary: {
-      currentNetSales: readNumber(sales, "current_net_sales", "currentNetSales"),
-      currentReturn: readNumber(sales, "current_return", "currentReturn"),
-      salesGrowth: readNumber(sales, "sales_growth", "salesGrowth"),
-      returnGrowth: readNumber(sales, "return_growth", "returnGrowth"),
-    },
-    salesActivity,
-    paymentBreakdown,
-    netProfit: {
-      currentNetProfit: readNumber(profit, "current_net_profit", "currentNetProfit"),
-      profitGrowth: readNumber(profit, "profit_growth", "profitGrowth"),
-    },
-    invoiceDue: {
-      currentDue: readNumber(due, "current_due", "currentDue"),
-      growth: readNullableNumber(due, "invoice_due_growth_pct", "invoiceDueGrowthPct"),
-    },
-    expensesSummary: {
-      currentExpenses: readNumber(expenses, "current_expenses", "currentExpenses"),
-      expensesGrowth: readNullableNumber(expenses, "expenses_growth", "expensesGrowth"),
-    },
-    purchasesSummary: {
-      currentPurchases: readNumber(purchases, "current_purchases", "currentPurchases"),
-      purchasesGrowth: readNullableNumber(purchases, "purchases_growth", "purchasesGrowth"),
-    },
-    returnSummary: {
-      currentReturns: readNumber(returns, "current_returns", "currentReturns"),
-      growth: readNullableNumber(returns, "return_growth_pct", "returnGrowthPct"),
-    },
-    recentSales,
-    lowStockProducts,
-    staleStockProducts,
-    topSellingProducts,
-  };
-}
-
-function readNullableNumber(
-  record: SummaryResponse,
-  ...keys: string[]
-): number | null {
-  const value = readValue(record, ...keys);
-  if (value === undefined) return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "Date unavailable"
-    : new Intl.DateTimeFormat("en-BD", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      }).format(date);
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "Time unavailable"
-    : new Intl.DateTimeFormat("en-BD", {
-        hour: "numeric",
-        minute: "2-digit",
-      }).format(date);
-}
-
-function csvCell(value: string | number): string {
-  const safeValue = String(value).replace(/^[=+\-@]/, "'$&");
-  return `"${safeValue.replace(/"/g, '""')}"`;
-}
-
-function MetricCard({
-  title,
-  amount,
-  growth,
-  comparison,
-  growthIsGood = true,
-  detail,
-  icon: Icon,
-  accent,
-}: {
-  title: string;
-  amount: number;
-  growth?: number | null;
-  comparison: string;
-  growthIsGood?: boolean;
-  detail: string;
-  icon: typeof Wallet;
-  accent: string;
-}) {
-  const growthUp = growth !== null && growth !== undefined && growth >= 0;
-  const growthGood = growthUp === growthIsGood;
-  const GrowthIcon = growthUp ? ArrowUpRight : ArrowDownRight;
-  return (
-    <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <p className="mt-3 truncate text-2xl font-semibold tracking-tight text-foreground">
-            {currency(amount)}
-          </p>
-        </div>
-        <span className={`rounded-xl p-2.5 ${accent}`}>
-          <Icon aria-hidden="true" className="size-5" />
-        </span>
-      </div>
-      <div className="mt-4 flex min-h-5 items-center justify-between gap-2">
-        {growth === null || growth === undefined ? (
-          <span className="text-xs text-muted-foreground">{detail}</span>
-        ) : (
-          <>
-            <span
-              className={`inline-flex items-center gap-1 text-xs font-medium ${
-                growthGood ? "text-success" : "text-destructive"
-              }`}
-            >
-              <GrowthIcon aria-hidden="true" className="size-3.5" />
-              {Math.abs(growth).toLocaleString("en-BD")}% {comparison}
-            </span>
-            <span className="truncate text-xs text-muted-foreground/80">{detail}</span>
-          </>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function SectionHeading({
-  title,
-  description,
-  action,
-}: {
-  title: string;
-  description?: string;
-  action?: ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <div>
-        <h2 className="font-semibold text-foreground">{title}</h2>
-        {description ? (
-          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
-      {action}
-    </div>
-  );
-}
-
-function EmptyState({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex min-h-36 items-center justify-center rounded-xl border border-dashed border-border px-4 text-center text-sm text-muted-foreground">
-      {children}
-    </div>
-  );
-}
 
 export default function DashboardComponent() {
   const [dashboard, setDashboard] = useState(emptyDashboard);
@@ -876,97 +519,13 @@ export default function DashboardComponent() {
         </section>
 
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)]">
-          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
-            <SectionHeading
-              title="Sales overview"
-              description={`${periodLabel} · ${selectedPeriod.comparison}.`}
-            />
-            {loading && !hasData ? (
-              <div className="flex h-[280px] items-center justify-center text-sm text-muted-foreground">
-                <LoaderCircle aria-hidden="true" className="mr-2 size-4 animate-spin" />
-                Loading sales overview…
-              </div>
-            ) : hasData ? (
-              <div className="mt-2 h-[280px] w-full">
-                <ChartResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#059669" stopOpacity={0.2} />
-                        <stop offset="95%" stopColor="#059669" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="cashFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#0ea5e9" stopOpacity={0.16} />
-                        <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid vertical={false} stroke="#eef2f6" />
-                    <XAxis
-                      dataKey="month"
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{ fill: "#64748b", fontSize: 12 }}
-                      dy={8}
-                    />
-                    <YAxis
-                      axisLine={false}
-                      tickLine={false}
-                      width={64}
-                      tick={{ fill: "#94a3b8", fontSize: 11 }}
-                      tickFormatter={(value: number) =>
-                        value >= 1000 ? `${(value / 1000).toFixed(0)}k` : String(value)
-                      }
-                    />
-                    <Tooltip
-                      formatter={(value, name) => [
-                        currency(Number(value) || 0),
-                        name === "cash" ? "Fully paid" : "Sales",
-                      ]}
-                      contentStyle={{
-                        border: "1px solid #e2e8f0",
-                        borderRadius: 12,
-                        boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="sales"
-                      name="Sales"
-                      stroke="#059669"
-                      strokeWidth={2.5}
-                      fill="url(#salesFill)"
-                      activeDot={{ r: 5, strokeWidth: 0 }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="cash"
-                      name="Collected"
-                      stroke="#0ea5e9"
-                      strokeWidth={2}
-                      fill="url(#cashFill)"
-                      activeDot={{ r: 4, strokeWidth: 0 }}
-                    />
-                  </AreaChart>
-                </ChartResponsiveContainer>
-              </div>
-            ) : (
-              <div className="mt-5">
-                <EmptyState>
-                  No sales history for {periodLabel.toLowerCase()} yet.
-                </EmptyState>
-              </div>
-            )}
-            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-2">
-                <span className="size-2 rounded-full bg-success" />
-                Total sales
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <span className="size-2 rounded-full bg-sky-500" />
-                Fully collected
-              </span>
-            </div>
-          </article>
+          <SalesOverviewChart
+            chartData={chartData}
+            loading={loading}
+            hasData={hasData}
+            periodLabel={periodLabel}
+            comparison={selectedPeriod.comparison}
+          />
 
           <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
             <SectionHeading

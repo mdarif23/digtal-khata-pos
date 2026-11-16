@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import "@/i18n/index.js";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +11,8 @@ import {
 } from "@/components/ui/dialog.js";
 import { Button } from "@/components/ui/button.js";
 import { Kbd } from "@/components/common/Kbd.js";
-import { CheckCircle2, Printer, Eye, PlusCircle, Check, Copy, ShieldCheck, Send } from "lucide-react";
+import { CheckCircle2, Printer, Eye, PlusCircle, Check, Copy, Link2, ShieldCheck, Send } from "lucide-react";
+import axios from "../../../../api/axios.js";
 import type { SaleReceiptData } from "../../types/receipt.types.js";
 import { resolveReceiptConfig, usePrintReceipt } from "../../hooks/usePrintReceipt.js";
 import { ReceiptPrintDialog } from "./ReceiptPrintDialog.js";
@@ -31,6 +34,7 @@ export function SaleSuccessDialog({
   onOpenChange,
   onNewSale,
 }: SaleSuccessDialogProps) {
+  const { t } = useTranslation();
   const { printReceipt } = usePrintReceipt();
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -125,22 +129,30 @@ export function SaleSuccessDialog({
 
             <DialogHeader className="space-y-1">
               <DialogTitle className="text-xl font-bold">
-                Sale Completed Successfully!
+                {t("saleSuccess:title", {
+                  defaultValue: "Sale Completed Successfully!",
+                })}
               </DialogTitle>
               <DialogDescription className="text-sm text-muted-foreground">
-                Transaction recorded and inventory updated.
+                {t("saleSuccess:subtitle", {
+                  defaultValue: "Transaction recorded and inventory updated.",
+                })}
               </DialogDescription>
             </DialogHeader>
 
             {/* Invoice & Total Highlight Box */}
             <div className="w-full bg-muted/50 rounded-xl p-4 border space-y-2.5 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Invoice Number:</span>
+                <span className="text-muted-foreground">
+                  {t("saleSuccess:invoiceNumber", { defaultValue: "Invoice Number:" })}
+                </span>
                 <button
                   type="button"
                   onClick={handleCopyInvoice}
                   className="font-mono font-bold flex items-center gap-1.5 hover:text-primary transition-colors cursor-pointer"
-                  title="Click to copy invoice"
+                  title={t("saleSuccess:clickToCopyInvoice", {
+                    defaultValue: "Click to copy invoice",
+                  })}
                 >
                   <span>{receipt.invoiceNumber}</span>
                   {copied ? (
@@ -152,14 +164,18 @@ export function SaleSuccessDialog({
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Final Total:</span>
+                <span className="text-muted-foreground">
+                  {t("saleSuccess:finalTotal", { defaultValue: "Final Total:" })}
+                </span>
                 <span className="font-mono font-bold text-base text-foreground">
                   ৳{receipt.finalTotal.toFixed(2)}
                 </span>
               </div>
 
               <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t">
-                <span>Amount Paid:</span>
+                <span>
+                  {t("saleSuccess:amountPaid", { defaultValue: "Amount Paid:" })}
+                </span>
                 <span className="font-mono font-medium text-foreground">
                   ৳{receipt.paidAmount.toFixed(2)}
                 </span>
@@ -167,7 +183,11 @@ export function SaleSuccessDialog({
 
               {receipt.change > 0 && (
                 <div className="flex items-center justify-between text-xs text-emerald-600 font-medium">
-                  <span>Change Due to Customer:</span>
+                  <span>
+                    {t("saleSuccess:changeDue", {
+                      defaultValue: "Change Due to Customer:",
+                    })}
+                  </span>
                   <span className="font-mono font-bold">
                     ৳{receipt.change.toFixed(2)}
                   </span>
@@ -176,7 +196,11 @@ export function SaleSuccessDialog({
 
               {receipt.dueAmount > 0 && (
                 <div className="flex items-center justify-between text-xs text-red-600 font-semibold">
-                  <span>Outstanding Balance:</span>
+                  <span>
+                    {t("saleSuccess:outstandingBalance", {
+                      defaultValue: "Outstanding Balance:",
+                    })}
+                  </span>
                   <span className="font-mono font-bold">
                     ৳{receipt.dueAmount.toFixed(2)}
                   </span>
@@ -193,7 +217,7 @@ export function SaleSuccessDialog({
                 onClick={handleDirectPrint}
               >
                 <Printer className="size-4" />
-                Print Receipt
+                {t("saleSuccess:printReceipt", { defaultValue: "Print Receipt" })}
                 <Kbd keys={["F7"]} className="opacity-70" />
               </Button>
 
@@ -204,7 +228,7 @@ export function SaleSuccessDialog({
                 onClick={() => setIsPreviewOpen(true)}
               >
                 <Eye className="size-4" />
-                Preview
+                {t("common:preview", { defaultValue: "Preview" })}
               </Button>
 
               {warrantedItems.length > 0 && (
@@ -215,7 +239,9 @@ export function SaleSuccessDialog({
                   onClick={handlePrintWarrantyCertificate}
                 >
                   <ShieldCheck className="size-4" />
-                  Print Warranty Certificate
+                  {t("saleSuccess:printWarrantyCertificate", {
+                    defaultValue: "Print Warranty Certificate",
+                  })}
                 </Button>
               )}
 
@@ -234,7 +260,7 @@ export function SaleSuccessDialog({
               }}
             >
               <PlusCircle className="size-4" />
-              New Sale
+              {t("saleSuccess:newSale", { defaultValue: "New Sale" })}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -255,8 +281,35 @@ export function SaleSuccessDialog({
 // endpoint records the delivery on the comm_messages log and enforces the
 // customer's transactional opt-out server-side.
 function SendReceiptButton({ receipt }: { receipt: SaleReceiptData }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState<CommChannel>("sms");
+  // P3 Phase 4 (N1-10, D12): expiring share link — the plaintext token is
+  // shown/copied once and never recoverable.
+  const [sharingLink, setSharingLink] = useState(false);
+  const [shareLinkUrl, setShareLinkUrl] = useState<string | null>(null);
+  const { hasPermission } = usePermissions();
+  const canShare = hasPermission("sales.view");
+  const createShareLink = async () => {
+    setSharingLink(true);
+    try {
+      const res = await axios.post<{ data: { url: string } }>(
+        `/sales/${receipt.saleId}/receipt-link`,
+        {},
+      );
+      setShareLinkUrl(`${window.location.origin}${res.data.data.url}`);
+    } catch (err) {
+      toast.add({
+        description:
+          err instanceof Error
+            ? err.message
+            : t("saleSuccess:linkFailed", { defaultValue: "Link failed." }),
+        type: "error",
+      });
+    } finally {
+      setSharingLink(false);
+    }
+  };
   const [sending, setSending] = useState(false);
   const [outcome, setOutcome] = useState<SendReceiptOutcome | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -284,11 +337,19 @@ function SendReceiptButton({ receipt }: { receipt: SaleReceiptData }) {
       setOutcome(result);
       if (result.status === "sent") {
         toast.add({
-          description: `Receipt sent to ${phone} via ${channel === "sms" ? "SMS" : "WhatsApp"}.`,
+          description: t("saleSuccess:receiptSentVia", {
+            defaultValue: "Receipt sent to {{phone}} via {{channel}}.",
+            phone,
+            channel: channel === "sms" ? "SMS" : "WhatsApp",
+          }),
         });
       }
     } catch (err) {
-      setSendError(err instanceof Error ? err.message : "Sending failed.");
+      setSendError(
+        err instanceof Error
+          ? err.message
+          : t("saleSuccess:sendingFailed", { defaultValue: "Sending failed." }),
+      );
     } finally {
       setSending(false);
     }
@@ -309,22 +370,76 @@ function SendReceiptButton({ receipt }: { receipt: SaleReceiptData }) {
         }}
       >
         <Send className="size-4" />
-        Send Receipt
+        {t("saleSuccess:sendReceipt", { defaultValue: "Send Receipt" })}
       </Button>
+      {canShare && (
+        <Button
+          type="button"
+          variant="ghost"
+          className="w-full gap-2"
+          disabled={sharingLink}
+          onClick={() => void createShareLink()}
+        >
+          <Link2 className="size-4" />
+          {sharingLink
+            ? t("saleSuccess:creatingLink", { defaultValue: "Creating link…" })
+            : shareLinkUrl
+              ? t("saleSuccess:linkCreated", {
+                  defaultValue: "Link created (copy it below)",
+                })
+              : t("saleSuccess:createShareLink", {
+                  defaultValue: "Create share link",
+                })}
+        </Button>
+      )}
+      {shareLinkUrl && (
+        <div className="rounded-md border bg-muted/40 p-2">
+          <p className="mb-1 break-all font-mono text-xs">{shareLinkUrl}</p>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                void navigator.clipboard.writeText(shareLinkUrl);
+                toast.add({
+                  description: t("saleSuccess:shareLinkCopied", {
+                    defaultValue: "Share link copied.",
+                  }),
+                  type: "success",
+                });
+              }}
+            >
+              {t("common:copy", { defaultValue: "Copy" })}
+            </Button>
+            <a href={shareLinkUrl} target="_blank" rel="noreferrer">
+              <Button type="button" size="sm" variant="outline">
+                {t("common:open", { defaultValue: "Open" })}
+              </Button>
+            </a>
+          </div>
+        </div>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Send e-receipt</DialogTitle>
+            <DialogTitle>
+              {t("saleSuccess:sendEReceipt", { defaultValue: "Send e-receipt" })}
+            </DialogTitle>
             <DialogDescription>
-              Delivers the receipt through the business's configured messaging
-              provider. The customer's transactional opt-out is enforced.
+              {t("saleSuccess:sendEReceiptDescription", {
+                defaultValue:
+                  "Delivers the receipt through the business's configured messaging provider. The customer's transactional opt-out is enforced.",
+              })}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <span className="text-sm font-medium">Channel</span>
+              <span className="text-sm font-medium">
+                {t("saleSuccess:channel", { defaultValue: "Channel" })}
+              </span>
               <div className="flex gap-2">
                 {(["sms", "whatsapp"] as CommChannel[]).map((c) => (
                   <Button
@@ -340,7 +455,9 @@ function SendReceiptButton({ receipt }: { receipt: SaleReceiptData }) {
               </div>
             </div>
             <div className="text-sm">
-              <span className="text-muted-foreground">To: </span>
+              <span className="text-muted-foreground">
+                {t("saleSuccess:toLabel", { defaultValue: "To: " })}
+              </span>
               <span className="font-mono">{phone}</span>
             </div>
 
@@ -355,10 +472,22 @@ function SendReceiptButton({ receipt }: { receipt: SaleReceiptData }) {
                 }`}
               >
                 {outcome.status === "sent"
-                  ? "Sent."
+                  ? t("saleSuccess:outcomeSent", { defaultValue: "Sent." })
                   : outcome.status === "skipped"
-                    ? `Not sent: ${outcome.reason ?? "blocked"}.`
-                    : `Delivery failed${outcome.reason ? `: ${outcome.reason}` : ""}.`}
+                    ? t("saleSuccess:outcomeNotSent", {
+                        defaultValue: "Not sent: {{reason}}.",
+                        reason: outcome.reason ?? t("saleSuccess:blocked", {
+                          defaultValue: "blocked",
+                        }),
+                      })
+                    : outcome.reason
+                      ? t("saleSuccess:outcomeFailedReason", {
+                          defaultValue: "Delivery failed: {{reason}}.",
+                          reason: outcome.reason,
+                        })
+                      : t("saleSuccess:outcomeFailed", {
+                          defaultValue: "Delivery failed.",
+                        })}
               </div>
             )}
             {sendError && (
@@ -374,7 +503,7 @@ function SendReceiptButton({ receipt }: { receipt: SaleReceiptData }) {
               variant="outline"
               onClick={() => setOpen(false)}
             >
-              Close
+              {t("common:close", { defaultValue: "Close" })}
             </Button>
             <Button
               type="button"
@@ -382,12 +511,12 @@ function SendReceiptButton({ receipt }: { receipt: SaleReceiptData }) {
               disabled={sending || outcome?.status === "sent"}
             >
               {sending
-                ? "Sending…"
+                ? t("saleSuccess:sending", { defaultValue: "Sending…" })
                 : outcome?.status === "sent"
-                  ? "Sent"
+                  ? t("saleSuccess:sentLabel", { defaultValue: "Sent" })
                   : outcome?.status === "failed"
-                    ? "Retry"
-                    : "Send"}
+                    ? t("saleSuccess:retry", { defaultValue: "Retry" })
+                    : t("saleSuccess:sendLabel", { defaultValue: "Send" })}
             </Button>
           </DialogFooter>
         </DialogContent>

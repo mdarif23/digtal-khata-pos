@@ -4,7 +4,26 @@ import { buildVariantName } from "@/lib/variantDisplay";
 import { ProductHeader } from "./ProductHeader";
 import api from "../../../../api/axios.js";
 import { useCartStore } from "@/features/pos/stores/useCartStore";
-import useProductStore from "@/features/products/useProductStore";
+import {
+  useProductSelectOptionsQuery,
+  type ProductSelectOptions,
+} from "@/features/products/hooks/useProductOptions.js";
+
+const EMPTY_SELECT_OPTIONS: ProductSelectOptions = {
+  brands: [],
+  categories: [],
+  suppliers: [],
+  units: [],
+};
+import {
+  productKeys,
+  productCatalogActions,
+  readProductsCache,
+  useProductsQuery,
+} from "@/features/products/hooks/useProducts.js";
+import { queryClient } from "@/lib/queryClient.js";
+
+const EMPTY_PRODUCT_LIST: ProductType[] = [];
 import { ProductCard } from "../../../../components/common/ProductCard";
 import { ShowVariants } from "../../../../components/common/ShowVariants";
 import { SerialPickerDialog } from "./SerialPickerDialog";
@@ -14,6 +33,7 @@ import {
 } from "@/features/products/product.schema";
 import { toast } from "@/components/ui/toast";
 import { checkAllowance } from "@/features/pos/offline/allocations.js";
+import { readVariantBatches } from "@/features/pos/offline/catalog.js";
 import {
   Select,
   SelectContent,
@@ -50,7 +70,9 @@ export function ProductList({
   scannerEnabled?: boolean;
 }) {
   const { addToCart } = useCartStore();
-  const { products, productSelectOptions } = useProductStore();
+  const products = useProductsQuery().data ?? EMPTY_PRODUCT_LIST;
+  const productSelectOptions =
+    useProductSelectOptionsQuery().data ?? EMPTY_SELECT_OPTIONS;
   const [searchProducts, setSearchProducts] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [activeSerialProduct, setActiveSerialProduct] =
@@ -93,11 +115,51 @@ export function ProductList({
     async (product: ProductType) => {
       const variant = product.variants[0];
       if (!variant || variant.id === undefined) {
-        addToCart(product);
-        return;
+        return false;
       }
       const unit = await resolveDefaultSaleUnit(variant.id);
+      const baseQuantity = unit?.conversionFactor ?? 1;
+      // P3 Phase 2 (D10): offline batch selling requires cached batch truth —
+      // a batch line without it is blocked (mirrors the serial hard block).
+      // The FEFO-first cached batch attaches automatically; the cashier can
+      // re-pick from the cached list on the cart line.
+      if (!navigator.onLine && product.trackingType === "batch") {
+        const cached = await readVariantBatches(variant.id ?? 0);
+        if (!cached || cached.length === 0) {
+          toast.add({
+            type: "error",
+            description: `${product.name}: no cached batch info offline.`,
+            priority: "high",
+          });
+          return false;
+        }
+        if (
+          !productCatalogActions.tryTakeVariantStock(variant.id, baseQuantity)
+        ) {
+          toast.add({
+            type: "error",
+            description: `${product.name}: not enough stock available.`,
+            priority: "high",
+          });
+          return false;
+        }
+        addToCart(product, unit ?? undefined);
+        const first = cached[0]!;
+        useCartStore
+          .getState()
+          .setLineBatch(variant.id, { id: first.id, batchNumber: first.batchNumber });
+        return true;
+      }
+      if (!productCatalogActions.tryTakeVariantStock(variant.id, baseQuantity)) {
+        toast.add({
+          type: "error",
+          description: `${product.name}: not enough stock available.`,
+          priority: "high",
+        });
+        return false;
+      }
       addToCart(product, unit ?? undefined);
+      return true;
     },
     [addToCart],
   );
@@ -118,10 +180,11 @@ export function ProductList({
 
       // The cart entry is built from the full local catalog row; refresh
       // it when the scanned variant is newer than the loaded catalog.
-      let row = findRow(useProductStore.getState().products);
+      let row = findRow(readProductsCache());
       if (!row) {
-        await useProductStore.getState().getProducts();
-        row = findRow(useProductStore.getState().products);
+        // Scanned variant newer than the loaded catalog — refresh once.
+        await queryClient.invalidateQueries({ queryKey: productKeys.catalog() });
+        row = findRow(readProductsCache());
       }
       if (!row) {
         throw new Error(`${match.productName} is not in the loaded catalog.`);
@@ -165,6 +228,39 @@ export function ProductList({
         return;
       }
 
+      // P3 Phase 2 (D10): offline batch scans need cached batch truth and
+      // auto-attach the FEFO-first cached batch (server re-validates at sync).
+      if (!navigator.onLine && product.trackingType === "batch") {
+        const cached = await readVariantBatches(variant.id ?? 0);
+        if (!cached || cached.length === 0) {
+          setSearchProducts("");
+          throw new Error(
+            `${product.name}: no cached batch info offline.`,
+          );
+        }
+        const batchVariantName = buildVariantName(product.name, variant.options);
+        addToCart(
+          { ...product, name: batchVariantName, variants: [variant] },
+          scannedUnit
+            ? {
+                uomConversionId: scannedUnit.conversionId,
+                unitName: scannedUnit.unitName,
+                unitAbbreviation: scannedUnit.unitAbbreviation,
+                conversionFactor: scannedUnit.conversionFactor,
+                salePrice: scannedUnit.salePrice,
+              }
+            : undefined,
+        );
+        useCartStore
+          .getState()
+          .setLineBatch(variant.id ?? 0, { id: cached[0]!.id, batchNumber: cached[0]!.batchNumber });
+        setSearchProducts("");
+        toast.add({
+          description: `${batchVariantName} ← batch ${cached[0]!.batchNumber} added.`,
+        });
+        return;
+      }
+
       const variantName = buildVariantName(product.name, variant.options);
       // Offline allowance gate (Phase 3): allocated products can only take
       // what THIS terminal was granted; blocked products never sell offline.
@@ -197,10 +293,7 @@ export function ProductList({
   // Local-first identification: loaded catalog matches never hit the
   // network; everything else resolves against the server (alias barcodes,
   // codes newer than the catalog).
-  const lookup = useCallback(
-    createCatalogLookup(() => useProductStore.getState().products),
-    [],
-  );
+  const lookup = useCallback(createCatalogLookup(readProductsCache), []);
 
   // Phase 4 (Feature 10-B): embedded price/weight barcodes — parse first,
   // fall back to normal identification when the shape doesn't match. The
@@ -441,14 +534,26 @@ export function ProductList({
             if (!open) setActiveSerialProduct(null);
           }}
           onConfirm={(serials) => {
-            useCartStore
+            const added = useCartStore
               .getState()
               .addSerialItem(
                 activeSerialProduct.product,
                 activeSerialProduct.variantId,
                 serials,
               );
+            if (!added) {
+              toast.add({
+                type: "error",
+                description: "Not enough stock available for this product.",
+                priority: "high",
+              });
+              return false;
+            }
+            toast.add({
+              description: `${activeSerialProduct.product.name} added to cart.`,
+            });
             setActiveSerialProduct(null);
+            return true;
           }}
         />
       )}

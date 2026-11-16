@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSessionStore } from "@/auth/sessionStore";
 import { refreshSessionContext, refreshLocationContext } from "@/api/axios";
-import { getLocationsApi, type LocationSummary } from "@/features/locations/locations.api";
+
 import { toast } from "@/components/ui/toast";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
 import { Button } from "@/components/ui/button";
@@ -35,13 +36,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { PermissionButton } from "@/components/common/PermissionGuard";
 import {
   createStaffUserApi,
-  getUsersApi,
   resetStaffPasswordApi,
   updateStaffUserApi,
   type Member,
   type MemberRole,
 } from "../users.api";
-import { getRolesApi, type RoleSummary } from "@/features/roles/roles.api";
+import { userKeys, useUsersQuery } from "../hooks/useUsers.js";
+import type { RoleSummary } from "@/features/roles/roles.api";
+import { useRolesListQuery } from "@/features/roles/hooks/useRoles.js";
+import { useLocationsQuery } from "@/features/locations/hooks/useLocations.js";
 
 const STAFF_PASSWORD_MIN = 8;
 
@@ -63,10 +66,15 @@ const EMPTY_FORM: FormState = {
 
 export function UsersPage() {
   const version = useSessionStore((state) => state.version);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [roles, setRoles] = useState<RoleSummary[]>([]);
-  const [locations, setLocations] = useState<LocationSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const usersQuery = useUsersQuery();
+  const members = usersQuery.data ?? [];
+  const rolesQuery = useRolesListQuery();
+  const roles = rolesQuery.data ?? [];
+  const locationsQuery = useLocationsQuery();
+  const locations = locationsQuery.data ?? [];
+  const loading =
+    usersQuery.isPending || rolesQuery.isPending || locationsQuery.isPending;
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -86,30 +94,20 @@ export function UsersPage() {
     state.permissions.includes("*") || state.permissions.includes("users.edit"),
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [memberData, roleData, locationData] = await Promise.all([
-        getUsersApi(),
-        getRolesApi().catch(() => [] as RoleSummary[]),
-        getLocationsApi().catch(() => [] as LocationSummary[]),
-      ]);
-      setMembers(memberData);
-      setRoles(roleData);
-      setLocations(locationData);
-    } catch {
+  // Session-context refreshes (role/permission changes) re-fetch the list,
+  // exactly as the old version-triggered load() did.
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: userKeys.all });
+  }, [version, queryClient]);
+
+  useEffect(() => {
+    if (usersQuery.error) {
       toast.add({
         title: "Unable to load users",
         type: "error",
       });
-    } finally {
-      setLoading(false);
     }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load, version]);
+  }, [usersQuery.error]);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -162,7 +160,9 @@ export function UsersPage() {
         entityName: "user",
         displayName: form.fullName,
       });
-      setMembers((prev) => [...prev, created]);
+      queryClient.setQueryData<Member[]>(userKeys.list(), (prev) =>
+        prev ? [...prev, created] : [created],
+      );
       setCreateOpen(false);
       setForm(EMPTY_FORM);
     } catch {
@@ -190,8 +190,8 @@ export function UsersPage() {
         roleIds: editRoleIds,
         locationIds: editLocationIds,
       });
-      setMembers((prev) =>
-        prev.map((m) => (m.userId === updated.userId ? updated : m)),
+      queryClient.setQueryData<Member[]>(userKeys.list(), (prev) =>
+        prev?.map((m) => (m.userId === updated.userId ? updated : m)),
       );
       toast.add({
         title: `${updated.fullName} updated`,
@@ -212,8 +212,8 @@ export function UsersPage() {
       const updated = await updateStaffUserApi(member.userId, {
         isActive: !member.isActive,
       });
-      setMembers((prev) =>
-        prev.map((m) => (m.userId === updated.userId ? updated : m)),
+      queryClient.setQueryData<Member[]>(userKeys.list(), (prev) =>
+        prev?.map((m) => (m.userId === updated.userId ? updated : m)),
       );
       if (member.userId === updated.userId) {
         void refreshSessionContext();

@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import useProductStore from "../../useProductStore";
+import { productOptionActions } from "../../hooks/useProductOptions.js";
 import {
   Dialog,
   DialogClose,
@@ -22,7 +22,7 @@ import type { UnitOption } from "../../product.types";
 
 export function UnitsDialog({ unit }: { unit?: UnitOption }) {
   const [open, setOpen] = useState(false);
-  const store = useProductStore();
+  const { createUnit, updateUnit } = productOptionActions;
   const form = useForm<UnitSchemaType>({
     resolver: zodResolver(unitSchema),
     defaultValues: {
@@ -50,8 +50,8 @@ export function UnitsDialog({ unit }: { unit?: UnitOption }) {
     await createEntityPromiseToast({
       data,
       apiCall: isEditing
-        ? (payload) => store.updateUnit(unit!.value, payload)
-        : store.createUnit,
+        ? (payload) => updateUnit(unit!.value, payload)
+        : createUnit,
       entityName: "Unit",
       displayName: data.unitName,
     });

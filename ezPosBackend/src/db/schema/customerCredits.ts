@@ -45,6 +45,14 @@ export const customerCredits = pgTable(
       onDelete: "set null",
     }),
     note: text(),
+    /**
+     * P3 Phase 1 (F4, migration 0083): when this GRANT expires. NULL = never
+     * (every pre-existing row). The expiry sweep converts expired-but-
+     * unconsumed grant value into one explicit negative 'expiry' ledger row
+     * per customer, so the balance stays a pure SUM — expiry is an
+     * auditable transaction, not a silent read-side filter.
+     */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -54,10 +62,16 @@ export const customerCredits = pgTable(
       t.businessId,
       t.customerId,
     ),
+    // Expiry-sweep candidate scan (migration 0083).
+    index("customer_credits_expiry_idx").on(
+      t.businessId,
+      t.customerId,
+      t.expiresAt,
+    ),
     check("customer_credits_amount_nonzero", sql`${t.amount} <> 0`),
     check(
       "customer_credits_source_valid",
-      sql`${t.sourceType} in ('refund','sale_payment','manual')`,
+      sql`${t.sourceType} in ('refund','sale_payment','manual','expiry','void_restore')`,
     ),
   ],
 );

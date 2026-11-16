@@ -21,9 +21,11 @@ import { variantOptions } from "../../db/schema/variantOptions.js";
 import { variantValues } from "../../db/schema/variantValues.js";
 import type { saleDataInput } from "../../types/sales-types.js";
 import { salePayments } from "../../db/schema/salePayments.js";
+import { saleCharges } from "../../db/schema/saleCharges.js";
 import {
   BadRequestError,
   ConflictError,
+  ExpiredBatchError,
   ForbiddenError,
   NotFoundError,
 } from "../../utils/handleError.js";
@@ -34,6 +36,7 @@ import {
   postRefundLedgerEntry,
   postSaleLedgerEntry,
 } from "./sales.ledger.js";
+import { commissionEntries } from "../../db/schema/commission.js";
 import {
   type DashboardPeriod,
   getExpensesSummary,
@@ -54,10 +57,11 @@ import {
   getTopItemsByGross,
   getTopSellingProducts,
 } from "./dashboardMatrix.service.js";
-import type { CreateSalePayload } from "./schemas/sales.schema.js";
+import type { CancelSaleRequest, CreateSalePayload } from "./schemas/sales.schema.js";
 import { normalizeSaleItemsToBase } from "./sales.uom.js";
 import type { SaleRefundRequest } from "./schemas/sales.schema.js";
 import { customers } from "../../db/schema/customers.js";
+import { getCustomerOutstandingInTx } from "../customers/customers.service.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
 import { recordOrderEventInTx } from "../commerce/orderTimeline.service.js";
 import { salePaymentIntents } from "../../db/schema/salePaymentIntents.js";
@@ -71,6 +75,7 @@ import {
   consumeStoreCreditInTx,
   grantStoreCreditInTx,
 } from "../../services/storeCredit.js";
+import { customerCredits } from "../../db/schema/customerCredits.js";
 import { promotionUsage } from "../../db/schema/pricing.js";
 import { businessMemberships } from "../../db/schema/businessMemberships.js";
 import { getBomsForVariants } from "../bom/bom.service.js";
@@ -88,6 +93,10 @@ import {
   reverseLoyaltyPointsInTx,
 } from "../../services/loyalty.js";
 import { redeemGiftCardInTx } from "../../services/giftCards.js";
+import { giftCardTransactions } from "../../db/schema/giftCards.js";
+import { journalEntries } from "../../db/schema/journalEntries.js";
+import { reverseEntry } from "../../services/ledger.js";
+import { couponRedemptions, coupons } from "../../db/schema/coupons.js";
 import {
   evaluateCouponInTx,
   recordCouponRedemptionInTx,
@@ -108,12 +117,17 @@ import {
   assertOpenDrawerForCashInTx,
   recordCashRefundInTx,
   recordCashSaleInTx,
+  recordSaleVoidCashOutInTx,
 } from "../cashRegisters/cashRegisters.service.js";
 import {
   consumeApprovalInTx,
   isApprovalRequired,
 } from "../../services/managerApproval.js";
-import { getRequireOpenDrawer } from "../posSettings/posSettings.service.js";
+import {
+  getExpiredBatchPolicy,
+  getRequireOpenDrawer,
+  getStoreCreditExpiryMonths,
+} from "../posSettings/posSettings.service.js";
 import { units } from "../../db/schema/units.js";
 import { alias } from "drizzle-orm/pg-core";
 import { productUnitConversions } from "../../db/schema/productUnitConversions.js";
@@ -239,7 +253,7 @@ export async function getSalesData(
     .leftJoin(customers, eq(sales.customerId, customers.id))
     .where(
       and(
-        inArray(sales.status, ["completed", "refunded"]),
+        inArray(sales.status, ["completed", "refunded", "cancelled"]),
         eq(sales.businessId, businessId),
         // Location scope (L1-2): an empty fragment when unrestricted.
         locationScope,
@@ -367,13 +381,52 @@ export async function consumeStockFifo(
   locationId: number,
   variantId: number,
   quantity: number,
-  opts: { allowShortfall?: boolean } = {},
+  opts: {
+    allowShortfall?: boolean;
+    /** P3 Phase 2 (F.2): explicit manual batch selection (batch-tracked
+     * lines). Takes precedence over FEFO; partial coverage is REJECTED
+     * online (D9 — no silent FEFO top-up) and reported as a shortfall only
+     * for offline-originated sales, whose physically-happened truth flows
+     * through the existing batch_shortfall conflict machinery. */
+    manualBatchId?: number;
+    /** P3 Phase 2 (D7): an approval token for `sale.expired_batch` was
+     * consumed for this sale — manual selection may name an expired batch.
+     * FEFO NEVER auto-selects expired stock under either policy. */
+    allowExpiredBatch?: boolean;
+  } = {},
 ) {
-  // 1. Oldest batches first. .for("update") locks the rows, so two sales
-  //    at the same moment can't take the same stock. FIFO is per-location:
-  //    a sale only consumes batches stocked at its own location.
-  // Explicit columns: keeps FIFO stable regardless of new batch columns
-  // (landed cost) added to the schema.
+  // 1. FEFO — earliest valid expiry first, never-expiring batches last
+  //    (NULLS LAST), FIFO by insertion id as the tiebreak. Expired batches
+  //    are excluded from automatic consumption entirely: an expired batch
+  //    must never be silently sold (D7) under either policy. .for("update")
+  //    locks the rows, so two sales at the same moment can't take the same
+  //    stock. Per-location: a sale only consumes batches stocked at its own
+  //    location. Explicit columns keep ordering stable regardless of new
+  //    batch columns added to the schema.
+  //    Expiry comparisons are DB-side (CURRENT_DATE, session TZ pinned to
+  //    UTC like every report query) — a JS-local-midnight boundary shifts a
+  //    day when serialized and would admit yesterday's expired batches.
+  const manualBatchId = opts.manualBatchId;
+  const notExpired = sql`inventory_batches.expiry_date >= CURRENT_DATE`;
+  const candidateWhere = manualBatchId
+    ? and(
+        eq(inventoryBatches.id, manualBatchId),
+        eq(inventoryBatches.variantId, variantId),
+        eq(inventoryBatches.businessId, businessId),
+        eq(inventoryBatches.locationId, locationId),
+        gt(inventoryBatches.quantityRemaining, 0),
+        // Expired manual selections need the consumed approval (D7).
+        ...(opts.allowExpiredBatch
+          ? []
+          : [or(isNull(inventoryBatches.expiryDate), notExpired)]),
+      )
+    : and(
+        eq(inventoryBatches.variantId, variantId),
+        eq(inventoryBatches.businessId, businessId),
+        eq(inventoryBatches.locationId, locationId),
+        gt(inventoryBatches.quantityRemaining, 0),
+        or(isNull(inventoryBatches.expiryDate), notExpired),
+      );
   const batches = await tx
     .select({
       id: inventoryBatches.id,
@@ -390,16 +443,45 @@ export async function consumeStockFifo(
       expiryDate: inventoryBatches.expiryDate,
     })
     .from(inventoryBatches)
-    .where(
-      and(
-        eq(inventoryBatches.variantId, variantId),
-        eq(inventoryBatches.businessId, businessId),
-        eq(inventoryBatches.locationId, locationId),
-        gt(inventoryBatches.quantityRemaining, 0),
-      ),
+    .where(candidateWhere)
+    .orderBy(
+      manualBatchId
+        ? asc(inventoryBatches.id)
+        : sql`inventory_batches.expiry_date ASC NULLS LAST`,
+      asc(inventoryBatches.id),
     )
-    .orderBy(asc(inventoryBatches.id))
     .for("update");
+
+  // Manual selection misses are precise, client-actionable conflicts: the
+  // batch may be expired (policy), foreign (wrong variant/location/business)
+  // or simply gone. Distinguish expired so offline sync can flag it.
+  if (manualBatchId && batches.length === 0) {
+    const [anyBatch] = await tx
+      .select({
+        id: inventoryBatches.id,
+        batchNumber: inventoryBatches.batchNumber,
+        expiryDate: inventoryBatches.expiryDate,
+        quantityRemaining: inventoryBatches.quantityRemaining,
+      })
+      .from(inventoryBatches)
+      .where(eq(inventoryBatches.id, manualBatchId))
+      .limit(1);
+    if (anyBatch && anyBatch.expiryDate !== null) {
+      // Local-midnight dates on both sides — civil-date comparison.
+      const expiry = new Date(anyBatch.expiryDate);
+      expiry.setHours(0, 0, 0, 0);
+      const missToday = new Date();
+      missToday.setHours(0, 0, 0, 0);
+      if (expiry.getTime() < missToday.getTime()) {
+        throw new ExpiredBatchError(
+          `Expired batch ${anyBatch.batchNumber} cannot be sold${opts.allowExpiredBatch ? "" : " under the current expired-batch policy"}.`,
+        );
+      }
+    }
+    throw new ConflictError(
+      `Batch ${manualBatchId} is not available for variant ${variantId} at this location.`,
+    );
+  }
 
   let remaining = quantity;
   let totalCost = 0;
@@ -435,7 +517,16 @@ export async function consumeStockFifo(
   //    Offline-originated sales are different: the sale PHYSICALLY happened,
   //    so with allowShortfall the batches are consumed as far as possible and
   //    the gap is returned for a sync_conflicts row (never silently lost).
+  //    Manual selection online is REJECTED, never silently topped up from
+  //    other batches (D9) — the message names the batch so the cashier can
+  //    re-pick.
   if (remaining > 0 && !opts.allowShortfall) {
+    if (manualBatchId) {
+      const batchNumber = batches[0]?.batchNumber ?? `#${manualBatchId}`;
+      throw new ConflictError(
+        `Batch ${batchNumber} has ${quantity - remaining} of the ${quantity} unit(s) requested for variant ${variantId}.`,
+      );
+    }
     throw new ConflictError(
       `Insufficient stock for variant ${variantId}: short by ${remaining}`,
     );
@@ -560,8 +651,49 @@ function getPaymentStatus(paid: number, due: number) {
   return "unpaid";
 }
 
+/**
+ * P3 Phase 1 (F2): customer credit-limit gate. Runs inside the sale
+ * transaction with the customer row FOR UPDATE so concurrent due purchases
+ * serialize — two cashiers cannot collectively push a customer past the
+ * limit. The outstanding figure is the due-management recomputation
+ * (final_total − payments − refunds over completed sales), the authoritative
+ * number the business sees on the due screens; the denormalized
+ * sales.due_amount is a dual truth, never the credit authority.
+ * NULL limit = unlimited (pre-existing customers — no behavior change);
+ * limit 0 blocks any due; the check is backend-only (frontend balances are
+ * display context, never trusted).
+ */
+async function assertCustomerCreditWithinLimit(
+  tx: DbTransaction,
+  businessId: number,
+  customerId: number | null,
+  dueAmount: number,
+): Promise<void> {
+  if (customerId === null || dueAmount <= 0) return;
+  const [customer] = await tx
+    .select({ creditLimit: customers.creditLimit, name: customers.name })
+    .from(customers)
+    .where(
+      and(eq(customers.id, customerId), eq(customers.businessId, businessId)),
+    )
+    .for("update");
+  if (!customer) return; // customerValidation already rejected foreign ids
+  if (customer.creditLimit == null) return;
+  const limit = Number(customer.creditLimit);
+  const outstanding = await getCustomerOutstandingInTx(
+    tx,
+    businessId,
+    customerId,
+  );
+  if (outstanding + dueAmount > limit + 0.005) {
+    throw new ConflictError(
+      `Credit limit exceeded for ${customer.name}: limit ৳${limit.toFixed(2)}, already outstanding ৳${outstanding.toFixed(2)}, this sale would add ৳${roundMoney(dueAmount).toFixed(2)}. Collect a due or raise the limit.`,
+    );
+  }
+}
+
 /** Per-line warranty summary embedded in the receipt payload. */
-interface WarrantyReceiptSummary {
+export interface WarrantyReceiptSummary {
   warrantyNumber: string;
   provider: string;
   warrantyType: string;
@@ -691,6 +823,26 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
     return max;
   }, 0);
 
+  // P3 Phase 1 (F1): named sale-level charges ride along for the receipt /
+  // invoice renderers and the CFD paid screen.
+  const chargeRows = await db
+    .select({
+      id: saleCharges.id,
+      label: saleCharges.label,
+      amount: saleCharges.amount,
+    })
+    .from(saleCharges)
+    .where(
+      and(
+        eq(saleCharges.saleId, saleId),
+        eq(saleCharges.businessId, businessId),
+      ),
+    )
+    .orderBy(asc(saleCharges.sortOrder), asc(saleCharges.id));
+  const chargesTotal = roundMoney(
+    chargeRows.reduce((sum, c) => sum + Number(c.amount), 0),
+  );
+
   // Document branding + active templates ride along with every receipt, so
   // the printed output always matches the business's saved customization.
   // Financial values above stay sourced from the immutable sale rows.
@@ -778,6 +930,12 @@ export async function getSaleReceipt(businessId: number, saleId: number) {
     subtotal: Number(sale.subtotal ?? 0),
     discount: Number(sale.discount ?? 0),
     vat: Number(sale.vat ?? 0),
+    charges: chargeRows.map((c) => ({
+      id: c.id,
+      label: c.label,
+      amount: Number(c.amount),
+    })),
+    chargesTotal,
     finalTotal: Number(sale.finalTotal ?? 0),
     dueAmount: Number(sale.dueAmount ?? 0),
     paidAmount: Number(totalPaid),
@@ -947,6 +1105,17 @@ export async function createSale(
   // Phase 5 (Feature 13): salesperson attribution — validated at insert.
   const salespersonUserId = data.salespersonUserId ?? null;
   const couponCode = data.couponCode?.trim() || null;
+  // P3 Phase 1 (F1): named sale-level charges. The server re-derives the
+  // total from the labels/amounts; nothing money-shaped is trusted from the
+  // client beyond the declared charge rows themselves.
+  const chargesInput = (data.charges ?? []).map((c, idx) => ({
+    label: c.label,
+    amount: roundMoney(c.amount),
+    sortOrder: idx,
+  }));
+  const chargesTotal = roundMoney(
+    chargesInput.reduce((sum, c) => sum + c.amount, 0),
+  );
   const idempotencyKey = data.idempotencyKey?.trim() || null;
   // Binds the idempotency key to THIS payload so a replay with different
   // sale data cannot masquerade as a retry (see findSaleByIdempotencyKey).
@@ -1045,6 +1214,89 @@ export async function createSale(
       }
     }
 
+    // P3 Phase 2 (F.2/D7): manual batch selections. Validated against the DB
+    // (variant + business + location ownership — never trusted from the
+    // request) and the expired-batch policy. FEFO never auto-selects expired
+    // stock under either policy; manual selection of an expired batch is
+    // only possible under 'allow_with_approval' with a consumed
+    // sale.expired_batch approval token (approval rows are consumed
+    // in-tx, so a rolled-back sale does not burn it).
+    let expiredBatchApprovedBy: number | null = null;
+    const expiredBatchPolicy = await getExpiredBatchPolicy(businessId);
+    const manualBatchLines = trustedItems.filter((i) => i.batchId != null);
+    let allowExpiredBatch = false;
+    if (manualBatchLines.length > 0) {
+      const unsupported = manualBatchLines.find(
+        (i) =>
+          bomByVariant.has(i.variantId) ||
+          variantMap.get(i.variantId)?.trackingType === "serial",
+      );
+      if (unsupported) {
+        throw new BadRequestError(
+          "Batch selection is not supported for composite or serial-tracked lines.",
+        );
+      }
+      const manualBatchIds = [
+        ...new Set(manualBatchLines.map((i) => i.batchId!)),
+      ];
+      const selectedBatches = await tx
+        .select({
+          id: inventoryBatches.id,
+          variantId: inventoryBatches.variantId,
+          locationId: inventoryBatches.locationId,
+          expiryDate: inventoryBatches.expiryDate,
+          batchNumber: inventoryBatches.batchNumber,
+        })
+        .from(inventoryBatches)
+        .where(
+          and(
+            eq(inventoryBatches.businessId, businessId),
+            inArray(inventoryBatches.id, manualBatchIds),
+          ),
+        )
+        .for("update");
+      for (const line of manualBatchLines) {
+        const batch = selectedBatches.find((b) => b.id === line.batchId);
+        if (
+          !batch ||
+          batch.variantId !== line.variantId ||
+          batch.locationId !== locationId
+        ) {
+          throw new NotFoundError(
+            `Batch ${line.batchId} is not stocked for variant ${line.variantId} at this location.`,
+          );
+        }
+      }
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const expiredSelections = selectedBatches.filter(
+        (b) =>
+          b.expiryDate !== null &&
+          new Date(b.expiryDate).getTime() < today.getTime(),
+      );
+      if (expiredSelections.length > 0) {
+        if (expiredBatchPolicy !== "allow_with_approval") {
+          const names = expiredSelections
+            .map((b) => b.batchNumber)
+            .join(", ");
+          throw new ExpiredBatchError(
+            `Expired batch ${names} cannot be sold under the current expired-batch policy.`,
+          );
+        }
+        if (!data.approvalToken) {
+          throw new ForbiddenError(
+            "A manager approval is required to sell an expired batch.",
+          );
+        }
+        const approval = await consumeApprovalInTx(tx, businessId, {
+          token: data.approvalToken,
+          opType: "sale.expired_batch",
+        });
+        allowExpiredBatch = true;
+        expiredBatchApprovedBy = approval.approverUserId;
+      }
+    }
+
     // 5. Calculate every total from the same trusted items. When any line's
     // product carries tax rules, VAT comes from those rules (server-side,
     // snapshotted per line) and the legacy cart-wide vatPercent is not
@@ -1081,8 +1333,8 @@ export async function createSale(
     );
     const promoInput = toCartPromotionInput(promoEvaluation);
     const totals = usesTaxRules
-      ? getCartTotalsWithTaxRules(trustedItems, discount, taxRulesByVariant, groupInput, promoInput)
-      : getCartTotals(trustedItems, discount, Number(vatPercent ?? 0), groupInput, promoInput);
+      ? getCartTotalsWithTaxRules(trustedItems, discount, taxRulesByVariant, groupInput, promoInput, chargesTotal)
+      : getCartTotals(trustedItems, discount, Number(vatPercent ?? 0), groupInput, promoInput, chargesTotal);
     const lineTaxes = "perLine" in totals ? totals.perLine : null;
     // Self-describing snapshots: promotion names by id for price_adjustments.
     const promoNameById = new Map(
@@ -1203,8 +1455,12 @@ export async function createSale(
       });
     }
     const couponDiscount = couponEvaluation?.discountAmount ?? 0;
+    // Charges are coupon-immune (D1): the coupon reduces the product portion
+    // only; the charge total rides on top unchanged, so quote and checkout
+    // agree bit for bit.
     const finalTotalWithCoupon = roundMoney(
-      Math.max(0, totals.finalTotal - couponDiscount),
+      Math.max(0, roundMoney(totals.finalTotal - chargesTotal) - couponDiscount) +
+        chargesTotal,
     );
 
     // Header discount keeps its conflated meaning (line + manual cart) and
@@ -1228,6 +1484,12 @@ export async function createSale(
     );
 
     const paymentStatus = getPaymentStatus(paidAmount, dueAmount);
+
+    // P3 Phase 1 (F2): credit-limit gate on the due this sale would create.
+    // Runs BEFORE the invoice number is drawn and before any insert, inside
+    // the same transaction (customer row locked → concurrent purchases
+    // serialize on it).
+    await assertCustomerCreditWithinLimit(tx, businessId, customerId, dueAmount);
 
     // 7. Per-business invoice number from the business's own
     // document_sequences counter inside this transaction (rollback-safe).
@@ -1301,6 +1563,20 @@ export async function createSale(
     }
 
     const saleId = newSale.id;
+
+    // P3 Phase 1 (F1): persist the named charges as first-class child rows —
+    // receipt rendering, refund pro-rata context and audit all read them.
+    if (chargesInput.length > 0) {
+      await tx.insert(saleCharges).values(
+        chargesInput.map((c) => ({
+          businessId,
+          saleId,
+          label: c.label,
+          amount: c.amount,
+          sortOrder: c.sortOrder,
+        })),
+      );
+    }
 
     // Phase 6 audit trail: permission-gated price overrides and approved
     // below-minimum lines land in the audit log with the sale (in-tx, so it
@@ -1438,7 +1714,14 @@ export async function createSale(
           locationId,
           item.variantId,
           item.quantity,
-          { ...(options.allowNegativeStock ? { allowShortfall: true } : {}) },
+          {
+            ...(options.allowNegativeStock ? { allowShortfall: true } : {}),
+            // P3 Phase 2 (F.2): manual batch selection takes precedence over
+            // FEFO; validated + policy-gated above. Online partial coverage
+            // is rejected (D9); offline shortfall flows to batch_shortfall.
+            ...(item.batchId != null ? { manualBatchId: item.batchId } : {}),
+            ...(allowExpiredBatch ? { allowExpiredBatch: true } : {}),
+          },
         );
         if ("shortfall" in cost && Number(cost.shortfall) > 0) {
           batchShortfalls.push({
@@ -1837,7 +2120,11 @@ export async function createSale(
         dueAmount: Number(newSale.dueAmount),
         paymentStatus: newSale.paymentStatus,
         itemCount: items.length,
+        ...(chargesInput.length > 0 ? { chargesTotal } : {}),
         ...(belowMinimumApprovedBy !== null ? { belowMinimumApprovedBy } : {}),
+        ...(expiredBatchApprovedBy !== null
+          ? { expiredBatchApprovedBy }
+          : {}),
       },
     });
 
@@ -2162,7 +2449,19 @@ async function applySaleRefund(
   // Store credit settlement: the refund value becomes spendable customer
   // balance, recorded transactionally in the ledger (balances reconcile by
   // construction). Exchanges net out against replacement value upstream.
+  // P3 Phase 1 (F4): refund-granted credit follows the business's expiry
+  // policy — months from the pos_settings policy stamped on the grant row
+  // (NULL policy = never expires, today's behavior).
   if (options.refundMethod === "store_credit") {
+    const expiryMonths = await getStoreCreditExpiryMonths(businessId);
+    const expiresAt =
+      expiryMonths != null
+        ? (() => {
+            const d = new Date();
+            d.setMonth(d.getMonth() + expiryMonths);
+            return d;
+          })()
+        : null;
     await grantStoreCreditInTx(tx, {
       businessId,
       customerId: sale.customerId!,
@@ -2170,6 +2469,7 @@ async function applySaleRefund(
       sourceType: "refund",
       sourceId: refund.id,
       note: `Refund credit (sale #${saleId})`,
+      expiresAt,
     });
   }
 
@@ -2376,24 +2676,79 @@ async function applySaleRefund(
         ),
       );
 
-    const [returnBatch] = await tx
-      .insert(inventoryBatches)
-      .values({
-        businessId,
-        variantId: item.variantId,
-        locationId: stock.locationId,
-        batchNumber: `RETURN-${refund.id}-${item.id}`,
-        purchasePrice: item.costAtSale,
-        quantityReceived: returnedQuantity,
-        quantityRemaining: returnedQuantity,
+    // P3 Phase 2 (F.6): restore the ORIGINAL batches the sale consumed
+    // (sale_item_batch_consumptions provenance; serials carry their own
+    // original batchId) instead of fabricating a RETURN- batch. A partial
+    // return must put stock back where it came from, and Phase 3 void will
+    // replay the same provenance. The RETURN- batch survives ONLY as the
+    // fallback when provenance is incomplete (legacy rows, a batch row that
+    // no longer exists) — the refund never fails on incomplete provenance.
+    //
+    // Across MULTIPLE partial refunds the allocation must respect what
+    // earlier refunds already restored per batch (prior 'return' movements
+    // of this sale), otherwise the largest lot would absorb every refund.
+    const restoredBatches: { batchId: number; quantity: number }[] = [];
+    let fallbackQuantity = 0;
+    let fallbackBatchId: number | null = null;
+    let orphanSerialIds: number[] = [];
+
+    const consumptionRows = await tx
+      .select({
+        batchId: saleItemBatchConsumptions.batchId,
+        quantity: saleItemBatchConsumptions.quantity,
       })
-      .returning({ id: inventoryBatches.id });
-    if (variant.trackingType === "serial" && returnBatch) {
-      // Full-line returns re-point every serial of the line; partial
-      // returns re-point exactly the serials selected above.
+      .from(saleItemBatchConsumptions)
+      .where(eq(saleItemBatchConsumptions.saleItemId, item.id));
+    const thisSaleRefundIds = (
       await tx
-        .update(serialNumbers)
-        .set({ batchId: returnBatch.id })
+        .select({ id: saleRefunds.id })
+        .from(saleRefunds)
+        .where(and(eq(saleRefunds.saleId, saleId), eq(saleRefunds.businessId, businessId)))
+    ).map((r) => r.id);
+    const priorRestored = new Map<number, number>();
+    if (thisSaleRefundIds.length > 0 && consumptionRows.length > 0) {
+      const rows = await tx
+        .select({
+          batchId: inventoryMovements.batchId,
+          qty: sql<string>`COALESCE(SUM(${inventoryMovements.quantity}), 0)`,
+        })
+        .from(inventoryMovements)
+        .where(
+          and(
+            eq(inventoryMovements.businessId, businessId),
+            eq(inventoryMovements.movementType, "return"),
+            eq(inventoryMovements.referenceType, "sale_refund"),
+            inArray(inventoryMovements.referenceId, thisSaleRefundIds),
+            inArray(
+              inventoryMovements.batchId,
+              consumptionRows.map((r) => r.batchId),
+            ),
+          ),
+        )
+        .groupBy(inventoryMovements.batchId);
+      for (const row of rows) {
+        if (row.batchId != null) priorRestored.set(row.batchId, Number(row.qty));
+      }
+    }
+    // Units of each consumed lot still out with the customer.
+    const remainingOut = new Map<number, number>();
+    for (const row of consumptionRows) {
+      const prior = priorRestored.get(row.batchId) ?? 0;
+      remainingOut.set(
+        row.batchId,
+        Math.max(0, roundMoney(Number(row.quantity) - prior)),
+      );
+    }
+
+    if (variant.trackingType === "serial") {
+      // Serial rows keep the batch they were sold from (consumeSerials never
+      // clears batchId) — group the RETURNED serials by it and give each
+      // batch its units back, capped by what is still out per batch (an
+      // already-returned serial of this line must not restore twice). No
+      // RETURN- re-pointing for healthy provenance.
+      const returnedSerials = await tx
+        .select({ id: serialNumbers.id, batchId: serialNumbers.batchId })
+        .from(serialNumbers)
         .where(
           and(
             eq(serialNumbers.saleItemId, item.id),
@@ -2407,21 +2762,133 @@ async function applySaleRefund(
               : undefined,
           ),
         );
+      const perBatch = new Map<number, number>();
+      for (const serial of returnedSerials) {
+        if (serial.batchId == null) {
+          orphanSerialIds.push(serial.id);
+          continue;
+        }
+        perBatch.set(serial.batchId, (perBatch.get(serial.batchId) ?? 0) + 1);
+      }
+      for (const [batchId, rawQty] of perBatch) {
+        const capped = Math.min(
+          rawQty,
+          remainingOut.get(batchId) ?? 0,
+        );
+        if (capped <= 0) continue;
+        await tx
+          .update(inventoryBatches)
+          .set({
+            quantityRemaining: sql`${inventoryBatches.quantityRemaining} + ${capped}`,
+          })
+          .where(
+            and(
+              eq(inventoryBatches.id, batchId),
+              eq(inventoryBatches.businessId, businessId),
+            ),
+          );
+        restoredBatches.push({ batchId, quantity: capped });
+        fallbackQuantity = roundMoney(fallbackQuantity + (rawQty - capped));
+      }
+      fallbackQuantity = roundMoney(fallbackQuantity + orphanSerialIds.length);
+    } else {
+      // Allocate across the lots with the most units still out first
+      // (deterministic, history-aware). Batches that no longer exist fall
+      // back to the RETURN- batch.
+      const orderedRows = [...consumptionRows]
+        .map((r) => ({ ...r, out: remainingOut.get(r.batchId) ?? 0 }))
+        .sort((a, b) => b.out - a.out || a.batchId - b.batchId);
+      let unallocated = returnedQuantity;
+      const allocations: { batchId: number; quantity: number }[] = [];
+      for (const row of orderedRows) {
+        if (unallocated <= 0) break;
+        if (row.out <= 0) continue;
+        const take = Math.min(row.out, unallocated);
+        allocations.push({ batchId: row.batchId, quantity: take });
+        unallocated = roundMoney(unallocated - take);
+      }
+      const existingBatches =
+        allocations.length > 0
+          ? await tx
+              .select({ id: inventoryBatches.id })
+              .from(inventoryBatches)
+              .where(
+                and(
+                  eq(inventoryBatches.businessId, businessId),
+                  inArray(
+                    inventoryBatches.id,
+                    allocations.map((a) => a.batchId),
+                  ),
+                ),
+              )
+              .for("update")
+          : [];
+      for (const alloc of allocations) {
+        const batch = existingBatches.find((b) => b.id === alloc.batchId);
+        if (!batch) {
+          fallbackQuantity = roundMoney(fallbackQuantity + alloc.quantity);
+          continue;
+        }
+        await tx
+          .update(inventoryBatches)
+          .set({
+            quantityRemaining: sql`${inventoryBatches.quantityRemaining} + ${alloc.quantity}`,
+          })
+          .where(
+            and(
+              eq(inventoryBatches.id, alloc.batchId),
+              eq(inventoryBatches.businessId, businessId),
+            ),
+          );
+        restoredBatches.push(alloc);
+      }
+      fallbackQuantity = roundMoney(fallbackQuantity + unallocated);
     }
 
-    await tx.insert(inventoryMovements).values({
-      businessId,
-      variantId: item.variantId,
-      locationId: stock.locationId,
-      batchId: returnBatch?.id ?? null,
-      movementType: "return",
-      // The ACTUAL restocked quantity — a partial return of 2 of 12 must not
-      // log a 12-unit movement (stock math is already exact; this is the
-      // movements ledger that reconciliation and reports read).
-      quantity: returnedQuantity,
-      referenceType: "sale_refund",
-      referenceId: refund.id,
-    });
+    if (fallbackQuantity > 0.0000001) {
+      const [returnBatch] = await tx
+        .insert(inventoryBatches)
+        .values({
+          businessId,
+          variantId: item.variantId,
+          locationId: stock.locationId,
+          batchNumber: `RETURN-${refund.id}-${item.id}`,
+          purchasePrice: item.costAtSale,
+          quantityReceived: fallbackQuantity,
+          quantityRemaining: fallbackQuantity,
+        })
+        .returning({ id: inventoryBatches.id });
+      fallbackBatchId = returnBatch?.id ?? null;
+      if (fallbackBatchId !== null) {
+        restoredBatches.push({ batchId: fallbackBatchId, quantity: fallbackQuantity });
+      }
+      if (variant.trackingType === "serial" && fallbackBatchId !== null) {
+        // Fallback only: orphaned serials (null batchId provenance) re-point
+        // to the RETURN- batch. Healthy serials keep their original batch.
+        if (orphanSerialIds.length > 0) {
+          await tx
+            .update(serialNumbers)
+            .set({ batchId: fallbackBatchId })
+            .where(inArray(serialNumbers.id, orphanSerialIds));
+        }
+      }
+    }
+
+    // Movements ledger: one row per restored batch (reconciliation reads
+    // per-batch quantities; the ACTUAL restored amount — a partial return
+    // of 2 of 12 must not log a 12-unit movement).
+    for (const restored of restoredBatches) {
+      await tx.insert(inventoryMovements).values({
+        businessId,
+        variantId: item.variantId,
+        locationId: stock.locationId,
+        batchId: restored.batchId,
+        movementType: "return",
+        quantity: restored.quantity,
+        referenceType: "sale_refund",
+        referenceId: refund.id,
+      });
+    }
   }
 
   // A refund returns value to the customer: on credit (unpaid/partial) sales
@@ -2872,6 +3339,89 @@ export async function getAvailableSerials(
     )
     .orderBy(asc(serialNumbers.id));
   return rows.map((r) => r.serialNumber);
+}
+
+/**
+ * P3 Phase 2 (F.1): eligible batches for the POS batch picker — the serial
+ * endpoint's access model (requireAnyPermission(["pos.create_sale",
+ * "inventory.view"])) applied to batches. Location-scoped (a batch stocked
+ * at another store is never exposed), FEFO-ordered (expiry ASC NULLS LAST,
+ * id tiebreak), and expiry-aware: expired batches are hidden under the
+ * 'block' policy and returned flagged under 'allow_with_approval' so the
+ * picker can mark them for the approval flow.
+ */
+export async function getAvailableBatches(
+  businessId: number,
+  locationId: number,
+  variantId: number,
+): Promise<
+  {
+    id: number;
+    batchNumber: string;
+    quantityRemaining: number;
+    expiryDate: string | null;
+    expiryStatus: "valid" | "expiring_soon" | "expired" | "no_expiry";
+  }[]
+> {
+  const [policyRow] = await Promise.all([
+    getExpiredBatchPolicy(businessId),
+  ]);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const soon = new Date(today);
+  soon.setDate(soon.getDate() + 30);
+  const rows = await db
+    .select({
+      id: inventoryBatches.id,
+      batchNumber: inventoryBatches.batchNumber,
+      quantityRemaining: inventoryBatches.quantityRemaining,
+      expiryDate: inventoryBatches.expiryDate,
+    })
+    .from(inventoryBatches)
+    .where(
+      and(
+        eq(inventoryBatches.businessId, businessId),
+        eq(inventoryBatches.variantId, variantId),
+        eq(inventoryBatches.locationId, locationId),
+        gt(inventoryBatches.quantityRemaining, 0),
+        // 'block' hides expired batches entirely; 'allow_with_approval'
+        // surfaces them flagged for the approval flow (D7). DB-side
+        // boundary — see consumeStockFifo's timezone note.
+        ...(policyRow === "allow_with_approval"
+          ? []
+          : [
+              or(
+                isNull(inventoryBatches.expiryDate),
+                sql`inventory_batches.expiry_date >= CURRENT_DATE`,
+              ),
+            ]),
+      ),
+    )
+    .orderBy(
+      sql`inventory_batches.expiry_date ASC NULLS LAST`,
+      asc(inventoryBatches.id),
+    );
+  return rows.map((row) => {
+    const expiry =
+      row.expiryDate !== null ? new Date(row.expiryDate) : null;
+    const expiryStatus: "valid" | "expiring_soon" | "expired" | "no_expiry" =
+      expiry === null
+        ? "no_expiry"
+        : expiry.getTime() < today.getTime()
+          ? "expired"
+          : expiry.getTime() <= soon.getTime()
+            ? "expiring_soon"
+            : "valid";
+    return {
+      id: row.id,
+      batchNumber: row.batchNumber,
+      quantityRemaining: Number(row.quantityRemaining),
+      expiryDate: expiry
+        ? expiry.toISOString().slice(0, 10)
+        : null,
+      expiryStatus,
+    };
+  });
 }
 
 export async function updateAvailableSerial(
@@ -3564,6 +4114,8 @@ export interface SaleQuotePayload {
   vatPercent?: number | null | undefined;
   couponCode?: string | null | undefined;
   customerId?: number | null | undefined;
+  /** P3 Phase 1 (F1): sale-level charges priced identically to checkout. */
+  charges?: { label: string; amount: number }[] | null | undefined;
 }
 
 export async function quoteSaleTotals(
@@ -3574,6 +4126,16 @@ export async function quoteSaleTotals(
   if (payload.items.length === 0) {
     throw new BadRequestError("A quote requires at least one item.");
   }
+  // P3 Phase 1 (F1): sale-level charges — normalized exactly like createSale
+  // so the quoted total matches the checkout total bit for bit.
+  const chargesInput = (payload.charges ?? []).map((c, idx) => ({
+    label: c.label,
+    amount: roundMoney(c.amount),
+    sortOrder: idx,
+  }));
+  const chargesTotal = roundMoney(
+    chargesInput.reduce((sum, c) => sum + c.amount, 0),
+  );
   return db.transaction(async (tx) => {
     const variantIds = [...new Set(payload.items.map((i) => i.variantId))];
     const variants = await tx
@@ -3685,8 +4247,8 @@ export async function quoteSaleTotals(
         : {}),
     };
     const totals = usesTaxRules
-      ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant, groupInput, promoInput)
-      : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0), groupInput, promoInput);
+      ? getCartTotalsWithTaxRules(trustedItems, payload.cartDiscount ?? null, taxRulesByVariant, groupInput, promoInput, chargesTotal)
+      : getCartTotals(trustedItems, payload.cartDiscount ?? null, Number(payload.vatPercent ?? 0), groupInput, promoInput, chargesTotal);
 
     // Minimum-price protection (Phase 6): the quote WARNS always (block or
     // approve happens at createSale, permission-gated there).
@@ -3732,6 +4294,8 @@ export async function quoteSaleTotals(
         afterDiscount: totals.afterDiscount,
         vatPercent: "vatPercent" in totals ? totals.vatPercent : 0,
         vat: totals.vat,
+        charges: chargesInput,
+        chargesTotal,
         finalTotal: totals.finalTotal,
         usesTaxRules,
         perLine: "perLine" in totals ? totals.perLine : [],
@@ -3764,6 +4328,8 @@ export async function quoteSaleTotals(
           afterDiscount: totals.afterDiscount,
           vatPercent: "vatPercent" in totals ? totals.vatPercent : 0,
           vat: totals.vat,
+          charges: chargesInput,
+          chargesTotal,
           finalTotal: totals.finalTotal,
           usesTaxRules,
           perLine: "perLine" in totals ? totals.perLine : [],
@@ -3785,7 +4351,14 @@ export async function quoteSaleTotals(
       afterDiscount: totals.afterDiscount,
       vatPercent: "vatPercent" in totals ? totals.vatPercent : 0,
       vat: totals.vat,
-      finalTotal: roundMoney(Math.max(0, totals.finalTotal - couponDiscount)),
+      charges: chargesInput,
+      chargesTotal,
+      // Charges are coupon-immune (D1): the coupon reduces the product
+      // portion only — identical math to createSale.
+      finalTotal: roundMoney(
+        Math.max(0, roundMoney(totals.finalTotal - chargesTotal) - couponDiscount) +
+          chargesTotal,
+      ),
       usesTaxRules,
       perLine,
       ...groupBlock,
@@ -3795,6 +4368,431 @@ export async function quoteSaleTotals(
       ...(coupon === null && couponCode
         ? { couponError: "Coupon is not valid." }
         : {}),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// P3 Phase 3 (E1-003): sale void — atomic, batch-aware full reversal (D11).
+// Only completed sales with ZERO prior refunds may be voided; the reason is
+// mandatory and permanent; the invoice number is never released. Every
+// reversal happens exactly once inside one transaction: original batches
+// (provenance replay), serials, drawer cash-out, loyalty earn/redeem,
+// gift-card + store-credit instrument ledgers (positive void_restore rows —
+// never deletions), commissions (100%), coupon + promotion usage release,
+// warranties, and the finance journal via the tested reverseEntry primitive.
+// Reports already exclude 'cancelled' (verified enumeration in the plan) —
+// only the sales LIST gains cancelled visibility, not the metrics.
+// ---------------------------------------------------------------------------
+export async function cancelSale(
+  businessId: number,
+  saleId: number,
+  locationId: number,
+  actorUserId: number | null,
+  request: CancelSaleRequest,
+  terminalId: number | null = null,
+): Promise<{ saleId: number; invoiceNumber: string; status: string }> {
+  const reason = request.reason.trim();
+  return db.transaction(async (tx) => {
+    // 1. Lock the sale row — simultaneous duplicate voids serialize here and
+    //    the status check makes the loser a conflict, never a double void.
+    const [sale] = await tx
+      .select({
+        id: sales.id,
+        invoiceNumber: sales.invoiceNumber,
+        status: sales.status,
+        locationId: sales.locationId,
+        customerId: sales.customerId,
+        finalTotal: sales.finalTotal,
+        dueAmount: sales.dueAmount,
+        paymentStatus: sales.paymentStatus,
+      })
+      .from(sales)
+      .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
+      .for("update");
+    if (!sale) throw new NotFoundError(`Sale #${saleId} not found`);
+    if (sale.locationId !== locationId) {
+      throw new ForbiddenError("This sale belongs to another location.");
+    }
+    const [priorRefund] = await tx
+      .select({ id: saleRefunds.id })
+      .from(saleRefunds)
+      .where(
+        and(eq(saleRefunds.saleId, saleId), eq(saleRefunds.businessId, businessId)),
+      )
+      .limit(1);
+    if (priorRefund) {
+      throw new ConflictError(
+        "This sale has refunds and can no longer be voided — use returns instead.",
+      );
+    }
+    if (sale.status !== "completed") {
+      throw new ConflictError(
+        `Only completed sales can be voided (this sale is ${sale.status}).`,
+      );
+    }
+    if (await isApprovalRequired(businessId, "sale.cancel")) {
+      if (!request.approvalToken) {
+        throw new ForbiddenError(
+          "A manager approval is required to void a sale.",
+        );
+      }
+      await consumeApprovalInTx(tx, businessId, {
+        token: request.approvalToken,
+        opType: "sale.cancel",
+      });
+    }
+
+    // 2. Inventory restoration from provenance — the SAME machinery refunds
+    //    use (Phase 2). A void has zero prior refunds, so every consumed lot
+    //    is still outstanding and gets restored in full.
+    const items = await tx
+      .select({ id: saleItems.id, variantId: saleItems.variantId, quantity: saleItems.quantity })
+      .from(saleItems)
+      .where(and(eq(saleItems.saleId, saleId), eq(saleItems.businessId, businessId)))
+      .for("update");
+    const variantRestores = new Map<number, number>();
+    const lotRestores: { batchId: number; quantity: number }[] = [];
+    let fallbackQuantity = 0;
+    for (const item of items) {
+      variantRestores.set(
+        item.variantId,
+        (variantRestores.get(item.variantId) ?? 0) + Number(item.quantity),
+      );
+      const consumptionRows = await tx
+        .select({
+          batchId: saleItemBatchConsumptions.batchId,
+          quantity: saleItemBatchConsumptions.quantity,
+        })
+        .from(saleItemBatchConsumptions)
+        .where(eq(saleItemBatchConsumptions.saleItemId, item.id))
+        .orderBy(desc(saleItemBatchConsumptions.quantity));
+      let unallocated = Number(item.quantity);
+      for (const row of consumptionRows) {
+        if (unallocated <= 0) break;
+        const take = Math.min(Number(row.quantity), unallocated);
+        lotRestores.push({ batchId: row.batchId, quantity: take });
+        unallocated = roundMoney(unallocated - take);
+      }
+      fallbackQuantity = roundMoney(fallbackQuantity + unallocated);
+    }
+    const existingBatches =
+      lotRestores.length > 0
+        ? await tx
+            .select({ id: inventoryBatches.id })
+            .from(inventoryBatches)
+            .where(
+              and(
+                eq(inventoryBatches.businessId, businessId),
+                inArray(inventoryBatches.id, lotRestores.map((r) => r.batchId)),
+              ),
+            )
+            .for("update")
+        : [];
+    let fallbackBatchId: number | null = null;
+    if (fallbackQuantity > 0.0000001) {
+      const [voidBatch] = await tx
+        .insert(inventoryBatches)
+        .values({
+          businessId,
+          variantId: items[0]?.variantId ?? 0,
+          locationId,
+          batchNumber: `VOID-${saleId}`,
+          purchasePrice: 0,
+          quantityReceived: fallbackQuantity,
+          quantityRemaining: fallbackQuantity,
+        })
+        .returning({ id: inventoryBatches.id });
+      fallbackBatchId = voidBatch?.id ?? null;
+    }
+    const restoredBatches: { batchId: number; quantity: number }[] = [];
+    for (const lot of lotRestores) {
+      const batch = existingBatches.find((b) => b.id === lot.batchId);
+      if (!batch) {
+        // Missing batch rows land in the VOID batch (movement still truthful).
+        if (fallbackBatchId !== null) {
+          restoredBatches.push({ batchId: fallbackBatchId, quantity: lot.quantity });
+        }
+        continue;
+      }
+      await tx
+        .update(inventoryBatches)
+        .set({
+          quantityRemaining: sql`${inventoryBatches.quantityRemaining} + ${lot.quantity}`,
+        })
+        .where(
+          and(
+            eq(inventoryBatches.id, lot.batchId),
+            eq(inventoryBatches.businessId, businessId),
+          ),
+        );
+      restoredBatches.push(lot);
+    }
+    // Variant-level stock + movements (one row per restored batch).
+    for (const [variantId, qty] of variantRestores) {
+      await tx
+        .update(inventoryStock)
+        .set({ quantity: sql`${inventoryStock.quantity} + ${qty}` })
+        .where(
+          and(
+            eq(inventoryStock.variantId, variantId),
+            eq(inventoryStock.businessId, businessId),
+            eq(inventoryStock.locationId, locationId),
+          ),
+        );
+    }
+    for (const restored of restoredBatches) {
+      await tx.insert(inventoryMovements).values({
+        businessId,
+        variantId:
+          items.find((i) => i.variantId !== undefined)!.variantId,
+        locationId,
+        batchId: restored.batchId,
+        movementType: "return",
+        quantity: restored.quantity,
+        referenceType: "sale_cancel",
+        referenceId: saleId,
+      });
+    }
+
+    // 3. Serials return to in_stock at their sale-time batch.
+    const saleItemIds = items.map((i) => i.id);
+    if (saleItemIds.length > 0) {
+      await tx
+        .update(serialNumbers)
+        .set({ status: "in_stock" })
+        .where(
+          and(
+            eq(serialNumbers.businessId, businessId),
+            inArray(serialNumbers.saleItemId, saleItemIds),
+            eq(serialNumbers.status, "sold"),
+          ),
+        );
+    }
+
+    // 4. Gift-card redemptions on this sale — positive void_restore rows
+    //    (append-only reversal, never deletion).
+    const giftRedemptions = await tx
+      .select({ amount: giftCardTransactions.amount, giftCardId: giftCardTransactions.giftCardId })
+      .from(giftCardTransactions)
+      .where(
+        and(
+          eq(giftCardTransactions.businessId, businessId),
+          eq(giftCardTransactions.sourceType, "redeem"),
+          eq(giftCardTransactions.sourceId, saleId),
+        ),
+      );
+    for (const redemption of giftRedemptions) {
+      await tx.insert(giftCardTransactions).values({
+        businessId,
+        giftCardId: redemption.giftCardId,
+        amount: roundMoney(Math.abs(Number(redemption.amount))),
+        sourceType: "void_restore",
+        sourceId: saleId,
+        actorUserId,
+        note: `Sale ${sale.invoiceNumber} voided — restored`,
+      });
+    }
+
+    // 5. Store-credit spends on this sale — same append-only reversal.
+    const creditSpends = await tx
+      .select({ amount: customerCredits.amount, customerId: customerCredits.customerId })
+      .from(customerCredits)
+      .where(
+        and(
+          eq(customerCredits.businessId, businessId),
+          eq(customerCredits.sourceType, "sale_payment"),
+          eq(customerCredits.sourceId, saleId),
+        ),
+      );
+    for (const spend of creditSpends) {
+      await tx.insert(customerCredits).values({
+        businessId,
+        customerId: spend.customerId,
+        amount: roundMoney(Math.abs(Number(spend.amount))),
+        sourceType: "void_restore",
+        sourceId: saleId,
+        actorUserId,
+        note: `Sale ${sale.invoiceNumber} voided — restored`,
+      });
+    }
+
+    // 6. Loyalty: earned points reversed on the PAID portion (the earn base
+    //    never exceeded it); redeemed points restored in full — exactly once
+    //    because the void itself is once-only.
+    if (sale.customerId !== null) {
+      const paidAmount = roundMoney(
+        Number(sale.finalTotal) - Number(sale.dueAmount),
+      );
+      if (paidAmount > 0) {
+        await reverseLoyaltyPointsInTx(tx, {
+          businessId,
+          customerId: sale.customerId,
+          refundedAmount: paidAmount,
+          sourceId: saleId,
+        });
+      }
+      await restoreRedeemedPointsInTx(tx, {
+        businessId,
+        customerId: sale.customerId,
+        saleId,
+        refundId: saleId,
+        refundTotal: Number(sale.finalTotal),
+        saleFinalTotal: Number(sale.finalTotal),
+      });
+    }
+
+    // 7. Commissions: pending entries reversed at 100% (mirrors the refund
+    //    engine's proportional pattern; approved+paid money stays manual).
+    const pendingCommissions = await tx
+      .select()
+      .from(commissionEntries)
+      .where(
+        and(
+          eq(commissionEntries.businessId, businessId),
+          eq(commissionEntries.saleId, saleId),
+          eq(commissionEntries.status, "pending"),
+          sql`${commissionEntries.refundId} IS NULL`,
+        ),
+      )
+      .for("update");
+    for (const original of pendingCommissions) {
+      await tx.insert(commissionEntries).values({
+        businessId,
+        saleId,
+        salespersonUserId: original.salespersonUserId,
+        ruleId: original.ruleId,
+        ruleNameSnapshot: original.ruleNameSnapshot,
+        calcMethod: original.calcMethod,
+        rate: original.rate,
+        baseAmount: original.baseAmount,
+        amount: -roundMoney(Number(original.amount)),
+        status: "reversed",
+        refundId: saleId,
+        reason: "Sale voided",
+      });
+    }
+
+    // 8. Coupon + promotion usage counters — the voided sale never happened,
+    //    so its usage is released (counter tables, not financial history).
+    //    The coupon's denormalized used_count is decremented alongside the
+    //    redemption-row delete — evaluateCouponInTx limits on usedCount.
+    const voidedRedemptions = await tx
+      .select({ couponId: couponRedemptions.couponId })
+      .from(couponRedemptions)
+      .where(
+        and(
+          eq(couponRedemptions.saleId, saleId),
+          eq(couponRedemptions.businessId, businessId),
+        ),
+      );
+    for (const redemption of voidedRedemptions) {
+      await tx
+        .update(coupons)
+        .set({
+          usedCount: sql`greatest(0, ${coupons.usedCount} - 1)`,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(coupons.id, redemption.couponId), eq(coupons.businessId, businessId)));
+    }
+    await tx.delete(couponRedemptions).where(
+      and(
+        eq(couponRedemptions.saleId, saleId),
+        eq(couponRedemptions.businessId, businessId),
+      ),
+    );
+    await tx.delete(promotionUsage).where(
+      and(eq(promotionUsage.saleId, saleId), eq(promotionUsage.businessId, businessId)),
+    );
+
+    // 9. Drawer: the cash portion leaves the open session (idempotent by the
+    //    reference-unique index; no session = GL-only reversal, honest).
+    const cashPayments = await tx
+      .select({ amount: salePayments.amount })
+      .from(salePayments)
+      .where(
+        and(
+          eq(salePayments.saleId, saleId),
+          eq(salePayments.businessId, businessId),
+          eq(salePayments.paymentMethod, "cash"),
+        ),
+      );
+    const cashTotal = roundMoney(
+      cashPayments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0),
+    );
+    if (cashTotal > 0 && actorUserId !== null) {
+      await recordSaleVoidCashOutInTx(
+        tx,
+        businessId,
+        actorUserId,
+        locationId,
+        cashTotal,
+        saleId,
+        terminalId,
+      );
+    }
+
+    // 10. Warranties of the voided sale end (coverage never existed).
+    await voidWarrantiesForSale(tx, {
+      businessId,
+      saleId,
+      refundId: saleId,
+      reason: `sale_void:${saleId}`,
+    });
+
+    // 11. Mark voided — the invoice number stays reserved forever.
+    await tx
+      .update(sales)
+      .set({
+        status: "cancelled",
+        cancelReason: reason,
+        cancelledByUserId: actorUserId,
+        cancelledAt: new Date(),
+      })
+      .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)));
+
+    // 12. Finance journal: exact mirrored reversal via the tested primitive
+    //     (original marked reversed; duplicates blocked). No silent deletion.
+    const [saleEntry] = await tx
+      .select({ id: journalEntries.id, status: journalEntries.status })
+      .from(journalEntries)
+      .where(
+        and(
+          eq(journalEntries.businessId, businessId),
+          eq(journalEntries.sourceType, "sale"),
+          eq(journalEntries.sourceId, saleId),
+          eq(journalEntries.status, "posted"),
+        ),
+      )
+      .limit(1);
+    if (saleEntry) {
+      await reverseEntry(tx, {
+        businessId,
+        entryId: saleEntry.id,
+        reason: `Sale ${sale.invoiceNumber} voided: ${reason}`,
+        actorUserId,
+      });
+    }
+
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId,
+      action: "sale.void",
+      entityType: "sale",
+      entityId: saleId,
+      metadata: {
+        invoiceNumber: sale.invoiceNumber,
+        reason,
+        finalTotal: Number(sale.finalTotal),
+        itemCount: items.length,
+      },
+    });
+
+    publishRealtime(businessId, locationId, { kind: "stock.changed", locationId });
+    return {
+      saleId,
+      invoiceNumber: sale.invoiceNumber,
+      status: "cancelled",
     };
   });
 }

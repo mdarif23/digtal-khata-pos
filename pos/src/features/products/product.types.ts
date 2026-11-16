@@ -82,67 +82,14 @@ export type StockAdjustmentResult = {
 };
 export type { ProductType };
 
-export interface ProductStoreType {
-  products: ProductType[];
-  productSelectOptions: {
-    brands: BrandOption[];
-    units: UnitOption[];
-    categories: CategoryOption[];
-    suppliers: {
-      value: number;
-      label: string;
-    }[];
-  };
-  productVariantOptions: VariantOptionGroup[];
-  loading: boolean;
-  error: string | null;
-  getProducts: () => void;
-  returnVariantStock: (variantId: number, quantity: number) => void;
-  takeVariantStock: (variantId: number, quantity: number) => void;
-  adjustVariantStock: (
-    variantId: number,
-    data: StockAdjustmentInput,
-  ) => Promise<StockAdjustmentResult>;
-  getProductSelectOptions: () => void;
-  getProductVariantOptions: () => void;
-  createProduct: (data: ProductTypeOutput) => Promise<CreateProductResponse>;
-  updateProduct: (id: number, data: ProductTypeOutput) => Promise<void>;
-  createCategory: (
-    data: AddCategorySchemaType,
-  ) => Promise<CreateEntityResponse>;
-  updateCategory: (
-    id: number,
-    data: AddCategorySchemaType,
-  ) => Promise<CreateEntityResponse>;
-  deleteCategory: (id: number) => Promise<void>;
-  createBrand: (data: BrandSchemaType) => Promise<CreateEntityResponse>;
-  updateBrand: (
-    id: number,
-    data: BrandSchemaType,
-  ) => Promise<CreateEntityResponse>;
-  deleteBrand: (id: number) => Promise<void>;
-  createUnit: (data: UnitSchemaType) => Promise<CreateEntityResponse>;
-  updateUnit: (
-    id: number,
-    data: UnitSchemaType,
-  ) => Promise<CreateEntityResponse>;
-  deleteUnit: (id: number) => Promise<void>;
-  createVariantType: (
-    data: VariantTypeSchemaType,
-  ) => Promise<ApiResponse<VariantTypeData>>;
-  updateVariantType: (
-    id: number,
-    data: VariantTypeSchemaType,
-  ) => Promise<ApiResponse<VariantTypeData>>;
-  deleteVariantType: (id: number) => Promise<void>;
-  createVariantOption: (
-    data: VariantOptionSchemaType,
-  ) => Promise<ApiResponse<VariantOptionData>>;
-  updateVariantOption: (
-    id: number,
-    value: string,
-  ) => Promise<ApiResponse<VariantOptionData>>;
-  deleteVariantOption: (id: number) => Promise<void>;
+export interface ProductSelectOptions {
+  brands: BrandOption[];
+  units: UnitOption[];
+  categories: CategoryOption[];
+  suppliers: {
+    value: number;
+    label: string;
+  }[];
 }
 export interface SelectOptionsProps {
   options: {

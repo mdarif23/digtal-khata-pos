@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
 import { useEffect, useState } from "react";
-import useProductStore from "../../useProductStore";
+import { productOptionActions } from "../../hooks/useProductOptions.js";
 import {
   Dialog,
   DialogClose,
@@ -29,7 +29,7 @@ import type { BrandOption } from "../../product.types";
 
 export function BrandsDialog({ brand }: { brand?: BrandOption }) {
   const [open, setOpen] = useState(false);
-  const store = useProductStore();
+  const { createBrand, updateBrand } = productOptionActions;
   const form = useForm<BrandSchemaType>({
     resolver: zodResolver(brandSchema),
     defaultValues: {
@@ -57,8 +57,8 @@ export function BrandsDialog({ brand }: { brand?: BrandOption }) {
     await createEntityPromiseToast({
       data,
       apiCall: isEditing
-        ? (payload) => store.updateBrand(brand!.value, payload)
-        : store.createBrand,
+        ? (payload) => updateBrand(brand!.value, payload)
+        : createBrand,
       entityName: "Brand",
       displayName: data.brandName,
     });

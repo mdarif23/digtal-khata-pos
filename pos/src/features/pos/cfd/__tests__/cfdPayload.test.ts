@@ -14,6 +14,10 @@ const baseTotals: CartTotalsView = {
   afterDiscount: 1000,
   vatPercent: 0,
   vat: 0,
+  // P3 Phase 1 (F1): no charges in the base fixture — the composition below
+  // asserts grandTotal without them.
+  charges: [],
+  chargesTotal: 0,
   finalTotal: 1000,
 };
 

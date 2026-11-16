@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Layers3, ListChecks, Trash2 } from "lucide-react";
-import useProductStore from "../useProductStore";
+import { productOptionActions, useProductVariantOptionsQuery } from "../hooks/useProductOptions.js";
 import { useEffect, useState } from "react";
 import { VariantTypeDialog } from "../components/variants/VariantTypeDialog";
 import { VariantOptionDialog } from "../components/variants/VariantOptionDialog";
@@ -25,11 +25,8 @@ type DeleteTarget =
     };
 
 export function VariantManager() {
-  const {
-    productVariantOptions,
-    deleteVariantType,
-    deleteVariantOption,
-  } = useProductStore();
+  const { deleteVariantType, deleteVariantOption } = productOptionActions;
+  const productVariantOptions = useProductVariantOptionsQuery().data ?? [];
   const [activeId, setActiveId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 

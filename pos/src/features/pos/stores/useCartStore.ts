@@ -10,7 +10,10 @@ import {
   type SwitchUnitResult,
 } from "../types/cart.types.js";
 import { HoldCartItems } from "@/features/pos/types/cart.types.js";
-import useProductStore from "@/features/products/useProductStore.js";
+import {
+  productCatalogActions,
+  readProductsCache,
+} from "@/features/products/hooks/useProducts.js";
 import { fetchSellUnits } from "../hooks/useSellUnits.js";
 import { useSessionStore } from "@/auth/sessionStore.js";
 
@@ -287,13 +290,24 @@ export const useCartStore = create<CartStore>((set, get) => ({
     set({ cart });
     return { ok: true, convertedQuantity, merged } as const;
   },
-  resetCart: () =>
-    set((state) => ({
+  resetCart: (options) => {
+    if (options?.restoreStock) {
+      for (const item of get().cart) {
+        const variantId = item.variants[0]?.id;
+        const quantity = item.quantity * (item.conversionFactor ?? 1);
+        if (variantId !== undefined && Number.isFinite(quantity) && quantity > 0) {
+          productCatalogActions.returnVariantStock(variantId, quantity);
+        }
+      }
+    }
+
+    set({
       cart: [],
       // A fresh cart is a fresh checkout — never reuse the old sale's key.
       checkoutIdempotencyKey: null,
       belowMinimumReason: "",
-    })),
+    });
+  },
   addHoldItemsToCart: (holdItems) => {
     set(() => {
       return {
@@ -315,18 +329,31 @@ export const useCartStore = create<CartStore>((set, get) => ({
       };
     });
   },
-  addSerialItem: (product, variantId, serials) =>
-    set((state) => {
-      const variant = product.variants.find((v) => v.id === variantId);
-      if (!variant) {
-        return state; // Safety check
-      }
+  addSerialItem: (product, variantId, serials) => {
+    if (variantId === undefined || serials.length === 0) return false;
+    const variant = product.variants.find((v) => v.id === variantId);
+    if (!variant || new Set(serials).size !== serials.length) return false;
 
-      // 3. Check if this specific variant is already in the cart
-      const exists = state.cart.find((item) =>
+    const existing = get().cart.find((item) =>
+      item.variants.some((v) => v.id === variantId),
+    );
+    const previousQuantity =
+      existing?.serialNumbers?.length ?? existing?.quantity ?? 0;
+    const quantityDelta = serials.length - previousQuantity;
+    if (
+      quantityDelta > 0 &&
+      !productCatalogActions.tryTakeVariantStock(variantId, quantityDelta)
+    ) {
+      return false;
+    }
+    if (quantityDelta < 0) {
+      productCatalogActions.returnVariantStock(variantId, -quantityDelta);
+    }
+
+    set((state) => {
+      const exists = state.cart.some((item) =>
         item.variants.some((v) => v.id === variantId),
       );
-
       if (exists) {
         return {
           cart: state.cart.map((item) =>
@@ -334,32 +361,46 @@ export const useCartStore = create<CartStore>((set, get) => ({
               ? {
                   ...item,
                   serialNumbers: serials,
-                  quantity: serials.length, // Quantity always matches serials count
+                  quantity: serials.length,
                 }
               : item,
           ),
         };
       }
 
-      // 4. If it doesn't exist, add it as a new cart line
       return {
         cart: [
           ...state.cart,
           {
             ...product,
-            variants: [variant], // Only keep the selected variant
+            variants: [variant],
             quantity: serials.length,
-            serialNumbers: serials, // Attach serials here
+            serialNumbers: serials,
           },
         ],
       };
-    }),
+    });
+    return true;
+  },
   setLinePriceOverride: (variantId, uomConversionId, override) =>
     set((state) => ({
       cart: state.cart.map((item) =>
         item.variants.some((v) => v.id === variantId) &&
         lineMatchesUnit(item, uomConversionId)
           ? { ...item, priceOverride: override }
+          : item,
+      ),
+    })),
+  /** P3 Phase 2 (F.1): attach / clear a manual batch selection on a line. */
+  setLineBatch: (variantId, batch) =>
+    set((state) => ({
+      cart: state.cart.map((item) =>
+        item.variants.some((v) => v.id === variantId)
+          ? {
+              ...item,
+              batchId: batch?.id ?? null,
+              batchNumber: batch?.batchNumber ?? null,
+            }
           : item,
       ),
     })),
@@ -378,10 +419,13 @@ interface HoldCartStore {
 /** Slim, serializable hold snapshot sent to the server. */
 interface HeldItemPayload {
   variantId: number;
+  /** P3 Phase 2 (F.2): manual batch selection (null = FEFO default). */
+  batchId?: number | null;
   /** Quantity in the SELECTED unit (see enteredQuantity). */
   quantity: number;
   discount?: { type: "percentage" | "fixed"; value: number } | null;
   serialNumbers?: string[];
+  batchNumber?: string | null;
   productName: string;
   /** Packaging-unit selling: null = base unit. */
   uomConversionId?: number | null;
@@ -448,6 +492,7 @@ export const useHoldCartStore = create<HoldCartStore>()((set, get) => ({
         productName: item.name,
         uomConversionId: item.uomConversionId ?? null,
         enteredQuantity: item.enteredQuantity ?? item.quantity,
+        batchId: item.batchId ?? null,
       })),
     };
     try {
@@ -499,9 +544,10 @@ export async function resumeHeldItems(
     productName: string;
     uomConversionId?: number | null;
     enteredQuantity?: number;
+    batchId?: number | null;
   }[],
 ): Promise<{ lines: CartType[]; missing: string[] }> {
-  const products = useProductStore.getState().products;
+  const products = readProductsCache();
   const lines: CartType[] = [];
   const missing: string[] = [];
 
@@ -551,6 +597,7 @@ export async function resumeHeldItems(
         enteredQuantity,
         discount: item.discount ?? null,
         serialNumbers: item.serialNumbers ?? [],
+        batchId: item.batchId ?? null,
         uomConversionId: heldUnit.uomConversionId,
         unitName: heldUnit.unitName,
         unitAbbreviation: heldUnit.unitAbbreviation,
@@ -565,6 +612,7 @@ export async function resumeHeldItems(
         enteredQuantity,
         discount: item.discount ?? null,
         serialNumbers: item.serialNumbers ?? [],
+        batchId: item.batchId ?? null,
         uomConversionId: null,
         unitName: null,
         unitAbbreviation: null,

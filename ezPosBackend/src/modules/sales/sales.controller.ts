@@ -13,6 +13,7 @@ import {
   createSalePayloadSchema,
   saleRefundRequestSchema,
   updateAvailableSerialSchema,
+  cancelSaleRequestSchema,
 } from "./schemas/sales.schema.js";
 import {
   dashboardPeriods,
@@ -232,6 +233,24 @@ export async function getAvailableSerials(req: Request, res: Response) {
   }
 }
 
+/** P3 Phase 2 (F.1): eligible batches for the POS batch picker. */
+export async function getAvailableBatches(req: Request, res: Response) {
+  try {
+    const variantId = Number(req.params.variantId);
+    if (!Number.isInteger(variantId) || variantId <= 0) {
+      return res.status(400).json({ message: "Invalid Variant ID" });
+    }
+    const batches = await salesService.getAvailableBatches(
+      getBusinessId(req),
+      getLocationId(req),
+      variantId,
+    );
+    return res.status(200).json({ success: true, data: batches });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to load available batches.");
+  }
+}
+
 export async function updateAvailableSerial(req: Request, res: Response) {
   try {
     const variantId = Number(req.params.variantId);
@@ -256,5 +275,38 @@ export async function updateAvailableSerial(req: Request, res: Response) {
     return res.status(200).json({ serialNumber });
   } catch (err: unknown) {
     return sendSafeError(res, err, "Unable to update the serial number.");
+  }
+}
+
+/**
+ * P3 Phase 3 (E1-003): void a completed sale — atomic batch-aware reversal.
+ * Permission sales.void is enforced by the route; approval_required
+ * .sale_cancel demands a one-time manager approval token (consumed in-tx).
+ */
+export async function cancelSale(req: Request, res: Response) {
+  try {
+    const saleId = Number(req.params.id);
+    if (!Number.isInteger(saleId) || saleId <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid sale ID." });
+    }
+    const parsed = cancelSaleRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "A reason of at least 3 characters is required to void a sale.",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const result = await salesService.cancelSale(
+      getBusinessId(req),
+      saleId,
+      getLocationId(req),
+      req.user?.id ?? null,
+      parsed.data,
+      getTerminalId(req),
+    );
+    return res.status(200).json({ success: true, data: result });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to void the sale.");
   }
 }

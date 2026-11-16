@@ -37,8 +37,17 @@ export const APPROVAL_TTL_MINUTES = 10;
 export const APPROVAL_OPS = {
   "register.reopen": { permission: "cash_register.manage" },
   "sale.refund": { permission: "sales.return" },
+  "sale.cancel": { permission: "sales.void" },
   "cash_movement": { permission: "cash_movement.create" },
   "pricing.below_minimum": { permission: "pricing.below_minimum_override" },
+  /**
+   * P3 Phase 2 (D7): selling an expired batch under the
+   * 'allow_with_approval' policy. NOT config-gated — the policy column
+   * itself mandates the approval whenever expired stock is selected, so
+   * this op has no approval_required key (isApprovalRequired returns false
+   * for it; createSale consumes the token directly).
+   */
+  "sale.expired_batch": { permission: "inventory.adjust" },
 } as const;
 
 export type ManagerOpType = keyof typeof APPROVAL_OPS;
@@ -313,19 +322,22 @@ export async function consumeApprovalInTx(
   };
 }
 
-/** Op type → pos_settings.approval_required key (reopen is not configurable). */
-const CONFIG_KEY_BY_OP: Record<
-  Exclude<ManagerOpType, "register.reopen">,
-  keyof ApprovalRequiredConfig
+/** Op type → pos_settings.approval_required key. sale.expired_batch is
+ * policy-gated (no config key); register.reopen is not configurable. */
+const CONFIG_KEY_BY_OP: Partial<
+  Record<Exclude<ManagerOpType, "register.reopen">, keyof ApprovalRequiredConfig>
 > = {
   "sale.refund": "sale_refund",
+  "sale.cancel": "sale_cancel",
   "cash_movement": "cash_movement",
   "pricing.below_minimum": "below_minimum_price",
 };
 
 /**
  * Whether the business requires an approval token for this op today.
- * register.reopen is always required; the rest read pos_settings.
+ * register.reopen is always required; the rest read pos_settings. Ops
+ * without a config key (sale.expired_batch — policy-gated) return false
+ * here; their gating happens at the call site.
  */
 export async function isApprovalRequired(
   businessId: number,
@@ -337,6 +349,8 @@ export async function isApprovalRequired(
     .from(posSettings)
     .where(eq(posSettings.businessId, businessId))
     .limit(1);
-  const configKey = CONFIG_KEY_BY_OP[opType as Exclude<ManagerOpType, "register.reopen">];
+  const configKey =
+    CONFIG_KEY_BY_OP[opType as Exclude<ManagerOpType, "register.reopen">];
+  if (!configKey) return false;
   return row?.approvalRequired?.[configKey] === true;
 }

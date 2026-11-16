@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { Printer, RefreshCcw } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -17,13 +18,13 @@ import {
 import {
   convertQuotationApi,
   getQuotationApi,
-  listQuotationsApi,
   transitionQuotationApi,
   type QuotationDetail,
   type QuotationRow,
   type QuotationStatus,
 } from "./quotations.api";
 import { formatCurrency } from "@/features/reports/utils/reportUtils";
+import { quotationKeys, useQuotationsQuery } from "./hooks/useQuotations.js";
 
 function extractError(error: unknown, fallback: string): string {
   if (
@@ -57,32 +58,35 @@ const STATUS_FILTERS: { value: QuotationStatus | "all"; label: string }[] = [
  * pipeline once a quote exists.
  */
 export function QuotationsPage() {
-  const [rows, setRows] = useState<QuotationRow[] | null>(null);
-  const [total, setTotal] = useState(0);
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<QuotationStatus | "all">("all");
   const [search, setSearch] = useState("");
+  const filters = {
+    ...(status !== "all" ? { status } : {}),
+    ...(search.trim() ? { search: search.trim() } : {}),
+  };
+  const quotationsQuery = useQuotationsQuery(filters);
+  // keepPreviousData mirrors the old behavior: rows keep their previous
+  // value while a new filter's fetch is in flight (no skeleton flash).
+  const rows: QuotationRow[] | null = quotationsQuery.data
+    ? quotationsQuery.data.rows
+    : quotationsQuery.isError
+      ? []
+      : null;
+  const total = quotationsQuery.data?.total ?? 0;
   const [detail, setDetail] = useState<QuotationDetail | null>(null);
   const [convertOpen, setConvertOpen] = useState(false);
   const [cashReceived, setCashReceived] = useState("");
   const [acting, setActing] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await listQuotationsApi({
-        ...(status !== "all" ? { status } : {}),
-        ...(search.trim() ? { search: search.trim() } : {}),
-      });
-      setRows(data.rows);
-      setTotal(data.total);
-    } catch (error) {
-      toast.add({ title: extractError(error, "Unable to load quotations."), type: "error" });
-      setRows([]);
-    }
-  }, [status, search]);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (quotationsQuery.error) {
+      toast.add({
+        title: extractError(quotationsQuery.error, "Unable to load quotations."),
+        type: "error",
+      });
+    }
+  }, [quotationsQuery.error]);
 
   async function openDetail(id: number) {
     try {
@@ -98,7 +102,9 @@ export function QuotationsPage() {
       await transitionQuotationApi(id, to);
       toast.add({ title: `Quotation ${to}.`, type: "success" });
       await openDetail(id);
-      void load();
+      void queryClient
+        .invalidateQueries({ queryKey: quotationKeys.all })
+        .catch(() => undefined);
     } catch (error) {
       toast.add({ title: extractError(error, "Unable to update the quotation."), type: "error" });
     } finally {
@@ -128,7 +134,9 @@ export function QuotationsPage() {
       });
       setConvertOpen(false);
       setDetail(null);
-      void load();
+      void queryClient
+        .invalidateQueries({ queryKey: quotationKeys.all })
+        .catch(() => undefined);
     } catch (error) {
       toast.add({ title: extractError(error, "Unable to convert the quotation."), type: "error" });
     } finally {
@@ -191,7 +199,12 @@ export function QuotationsPage() {
             Offers and estimates — convert accepted quotes into sales.
           </p>
         </div>
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void load()}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => void quotationsQuery.refetch()}
+        >
           <RefreshCcw className="size-4" /> Refresh
         </Button>
       </div>

@@ -31,6 +31,19 @@ export class ConflictError extends Error {
     this.name = "ConflictsError";
   }
 }
+
+/**
+ * P3 Phase 2 (D10): an expired batch was selected while the business policy
+ * blocks it (or no approval accompanied it under 'allow_with_approval'). A
+ * ConflictError subclass (still HTTP 409) so offline sync can single it out
+ * for the `expired_batch_selected` sync-conflict reason via instanceof.
+ */
+export class ExpiredBatchError extends ConflictError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExpiredBatchError";
+  }
+}
 //5. for missing or invalid authentication (HTTP 401)
 export class UnauthorizedError extends Error {
   constructor(message: string) {

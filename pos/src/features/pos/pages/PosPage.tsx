@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import "@/i18n/index.js";
+import { LanguageToggle } from "@/i18n/LanguageToggle.js";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { ProductList } from "@/features/pos/components/pos/ProductList.js";
 import { SpeedKeyGrid } from "@/features/pos/speedKeys/SpeedKeyGrid";
 import { CartHeader } from "@/features/pos/components/pos/CartHeader.js";
@@ -22,6 +26,9 @@ import { SalespersonSelect } from "../components/pos/SalespersonSelect";
 import { pushCfdPayloadApi } from "../cfd/cfd.api";
 import { buildCfdCartPayload, buildCfdPaidPayload } from "../cfd/cfdPayload";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
+import { queryClient } from "@/lib/queryClient.js";
+import { customerKeys } from "@/features/customers/hooks/useCustomers.js";
+import { productKeys } from "@/features/products/hooks/useProducts.js";
 import {
   Card,
   CardContent,
@@ -42,10 +49,10 @@ import { requestDrawerOpen } from "@/features/hardware/drawerCommands";
 import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
 import { useRealtimeStore } from "@/features/pos/offline/realtime.js";
 import axios from "../../../api/axios.js";
-import useProductStore from "@/features/products/useProductStore.js";
 import { TerminalBindingDialog } from "@/features/pos/components/pos/TerminalBindingDialog.js";
 
 function Pos() {
+  const { t } = useTranslation();
   const { cart, resetCart } = useCartStore();
   const { setShowCustomerInfo } = useCustomerStore();
   const { createSale } = useSalesStore();
@@ -69,12 +76,12 @@ function Pos() {
   }, []);
   useEffect(() => {
     if (stockRevision > 0 || productRevision > 0) {
-      void useProductStore.getState().getProducts();
+      void queryClient.invalidateQueries({ queryKey: productKeys.catalog() });
     }
   }, [stockRevision, productRevision]);
   useEffect(() => {
     if (customerRevision > 0) {
-      void useCustomerStore.getState().getCustomers();
+      void queryClient.invalidateQueries({ queryKey: customerKeys.all });
     }
   }, [customerRevision]);
   useEffect(() => {
@@ -102,6 +109,8 @@ function Pos() {
       discount: null,
       vatPercent: null,
       couponCode: undefined,
+      // P3 Phase 1 (F1): named sale-level charges (post-VAT additive).
+      charges: [],
     },
   });
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
@@ -125,7 +134,7 @@ function Pos() {
   // coupon), local fallback otherwise. The display must never disagree with
   // what checkout will charge.
   const cartValue = useCartStore((state) => state.cart);
-  const cfdDisplayId = useCfdDisplayId();
+  const cfdDisplayIds = useCfdDisplayIds();
   const totals = useCartTotals(form);
   const cartKey = JSON.stringify(
     cartValue.map((item) => ({
@@ -145,21 +154,24 @@ function Pos() {
     totals.promotions?.total ?? 0,
     totals.coupon?.discountAmount ?? 0,
     totals.vat,
+    totals.chargesTotal ?? 0,
     totals.finalTotal,
   ].join("|");
   useEffect(() => {
-    if (cfdDisplayId === null) return;
+    if (cfdDisplayIds.length === 0) return;
     // The completed sale pushes its own "paid" screen with the receipt's
     // authoritative numbers — suppress the cart-clearing "idle" push while
     // the success dialog is up so the thank-you is never overwritten.
     if (isSuccessDialogOpen) return;
     const timer = setTimeout(() => {
       const payload = buildCfdCartPayload(cartValue, totals);
-      void pushCfdPayloadApi(cfdDisplayId, payload).catch(() => undefined);
+      // P3 Phase 4: fan the payload out to every selected display (one call
+      // carries the list; the backend ownership-checks each target).
+      void pushCfdPayloadApi(payload, cfdDisplayIds).catch(() => undefined);
     }, 250);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- totalsKey stands in for the totals object (identity changes every render)
-  }, [cfdDisplayId, cartKey, cartValue, totalsKey, isSuccessDialogOpen]);
+  }, [cfdDisplayIds, cartKey, cartValue, totalsKey, isSuccessDialogOpen]);
 
   async function onSubmit(data: CartSchemaType) {
     // Claim the checkout key before anything else: every retry of THIS
@@ -181,6 +193,9 @@ function Pos() {
         discount: item.discount ?? null,
         serialNumbers:
           item.trackingType === "serial" ? item.serialNumbers : undefined,
+        // P3 Phase 2 (F.2): manual batch selection (null = FEFO default) —
+        // the server re-validates ownership, availability and expiry policy.
+        batchId: item.trackingType === "batch" ? item.batchId : undefined,
         uomConversionId: item.uomConversionId ?? null,
         priceOverride: item.priceOverride ?? null,
       })),
@@ -193,7 +208,9 @@ function Pos() {
       console.error("Payload validation failed:", result.error.flatten());
       toast.add({
         type: "error",
-        description: "Cart data is invalid. Please refresh and try again.",
+        description: t("pos:cartInvalid", {
+          defaultValue: "Cart data is invalid. Please refresh and try again.",
+        }),
         priority: "high",
       });
       return;
@@ -221,8 +238,10 @@ function Pos() {
       });
       toast.add({
         type: "info",
-        description:
-          "No connection — the sale is recorded offline and will sync automatically (duplicates are impossible).",
+        description: t("pos:offlineRecorded", {
+          defaultValue:
+            "No connection — the sale is recorded offline and will sync automatically (duplicates are impossible).",
+        }),
         priority: "high",
       });
       // Clear checkout inputs and modal
@@ -272,7 +291,9 @@ function Pos() {
               }
               if (!result.opened && result.error) {
                 toast.add({
-                  title: "Drawer did not open",
+                  title: t("pos:drawerDidNotOpen", {
+                    defaultValue: "Drawer did not open",
+                  }),
                   description: result.error,
                   type: "info",
                 });
@@ -291,10 +312,10 @@ function Pos() {
       // Customer display: the authoritative post-payment screen (receipt
       // numbers, not the cart's running estimate). Fire-and-forget — a
       // display problem never touches the completed sale.
-      if (cfdDisplayId !== null && response?.data?.receipt) {
+      if (cfdDisplayIds.length > 0 && response?.data?.receipt) {
         void pushCfdPayloadApi(
-          cfdDisplayId,
           buildCfdPaidPayload(response.data.receipt.items, response.data.receipt),
+          cfdDisplayIds,
         ).catch(() => undefined);
       }
     } catch (error) {
@@ -323,7 +344,11 @@ function Pos() {
               .message
           : null;
       toast.add({
-        title: serverMessage ?? "The sale could not be completed.",
+        title:
+          serverMessage ??
+          t("pos:saleFailed", {
+            defaultValue: "The sale could not be completed.",
+          }),
         type: "error",
       });
     }
@@ -337,6 +362,8 @@ function Pos() {
           <div className="flex flex-wrap items-center justify-end gap-2">
             <NotificationBell revision={notificationRevision} />
             <SyncStatusIndicator />
+            <LanguageToggle />
+            <ThemeToggle />
             <RegisterDialog />
             <SalespersonSelect
               value={salespersonUserId}
@@ -409,18 +436,44 @@ function Pos() {
 export default Pos;
 
 /** Locally-persisted target display for the POS cart push (Phase 3). */
-function useCfdDisplayId(): number | null {
-  const [displayId, setDisplayId] = useState<number | null>(null);
+/** P3 Phase 4 (N1-08): the register may push to SEVERAL authorized displays
+ * (localStorage `ezpos.cfd.pushDisplayIds`, migrated from the single-id key).
+ * Empty list = no display push (the old null behavior). */
+function useCfdDisplayIds(): number[] {
+  const [displayIds, setDisplayIds] = useState<number[]>([]);
   useEffect(() => {
-    const stored = localStorage.getItem("ezpos.cfd.pushDisplayId");
-    setDisplayId(stored ? Number(stored) : null);
+    const read = () => {
+      const multi = localStorage.getItem("ezpos.cfd.pushDisplayIds");
+      if (multi !== null) {
+        try {
+          const parsed: unknown = JSON.parse(multi);
+          setDisplayIds(
+            Array.isArray(parsed)
+              ? parsed.filter(
+                  (id): id is number =>
+                    typeof id === "number" && Number.isInteger(id) && id > 0,
+                )
+              : [],
+            );
+          return;
+        } catch {
+          // fall through to the legacy key
+        }
+      }
+      const legacy = localStorage.getItem("ezpos.cfd.pushDisplayId");
+      setDisplayIds(legacy ? [Number(legacy)] : []);
+    };
+    read();
     const onChange = (event: StorageEvent) => {
-      if (event.key === "ezpos.cfd.pushDisplayId") {
-        setDisplayId(event.newValue ? Number(event.newValue) : null);
+      if (
+        event.key === "ezpos.cfd.pushDisplayIds" ||
+        event.key === "ezpos.cfd.pushDisplayId"
+      ) {
+        read();
       }
     };
     window.addEventListener("storage", onChange);
     return () => window.removeEventListener("storage", onChange);
   }, []);
-  return displayId;
+  return displayIds;
 }

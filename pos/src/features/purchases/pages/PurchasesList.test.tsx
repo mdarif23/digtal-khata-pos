@@ -146,12 +146,20 @@ describe("PurchasesList (server-driven, Phase 6-8)", () => {
 
   it("shows the loading skeleton before data arrives", async () => {
     let resolve!: (value: { data: unknown }) => void;
-    mockedGet.mockImplementation(
-      () =>
-        new Promise((res) => {
-          resolve = res as typeof resolve;
-        }),
-    );
+    mockedGet.mockImplementation((url) => {
+      // Phase 6: the page also loads the option groups — give that GET its
+      // own resolved shape so the deferred below stays dedicated to the
+      // purchase list (the original single-deferred trick orphans the first
+      // caller when a second request arrives).
+      if (String(url).includes("/product/select-options")) {
+        return Promise.resolve({
+          data: { brands: [], categories: [], suppliers: [], units: [] },
+        });
+      }
+      return new Promise((res) => {
+        resolve = res as typeof resolve;
+      });
+    });
     renderList();
     expect(document.querySelector(".animate-pulse")).toBeInTheDocument();
 

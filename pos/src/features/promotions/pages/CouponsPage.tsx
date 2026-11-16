@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Ticket } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
@@ -22,6 +23,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { toast } from "@/components/ui/toast.js";
 import axios from "../../../api/axios.js";
+import { couponKeys, useCouponsQuery } from "../hooks/useCoupons.js";
 
 interface CouponRow {
   id: number;
@@ -45,7 +47,11 @@ interface CouponRow {
  * auto-applied promotions (BOGO, category rules) are a future engine.
  */
 export function CouponsPage() {
-  const [coupons, setCoupons] = useState<CouponRow[] | null>(null);
+  const queryClient = useQueryClient();
+  const couponsQuery = useCouponsQuery();
+  // null = not yet loaded → the skeleton; failures render as an empty list
+  // (the old load() catch) plus the same error toast via the effect below.
+  const coupons = couponsQuery.data ?? null;
   const [code, setCode] = useState("");
   const [type, setType] = useState<"percentage" | "fixed">("percentage");
   const [value, setValue] = useState("");
@@ -56,19 +62,11 @@ export function CouponsPage() {
   const [endsAt, setEndsAt] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await axios.get<{ data: CouponRow[] }>("/coupons");
-      setCoupons(res.data.data);
-    } catch {
-      toast.add({ type: "error", description: "Could not load coupons." });
-      setCoupons([]);
-    }
-  }, []);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (couponsQuery.error) {
+      toast.add({ type: "error", description: "Could not load coupons." });
+    }
+  }, [couponsQuery.error]);
 
   async function create() {
     const parsedValue = Number(value);
@@ -99,7 +97,10 @@ export function CouponsPage() {
       setUsageLimit("");
       setPerCustomerLimit("");
       setEndsAt("");
-      await load();
+      // The old load() never threw after a successful create — keep that.
+      await queryClient
+        .invalidateQueries({ queryKey: couponKeys.all })
+        .catch(() => undefined);
     } catch (err) {
       toast.add({
         type: "error",
@@ -118,7 +119,9 @@ export function CouponsPage() {
       await axios.patch(`/coupons/${coupon.id}`, {
         isActive: !coupon.isActive,
       });
-      await load();
+      await queryClient
+        .invalidateQueries({ queryKey: couponKeys.all })
+        .catch(() => undefined);
     } catch {
       toast.add({ type: "error", description: "Could not update the coupon." });
     } finally {

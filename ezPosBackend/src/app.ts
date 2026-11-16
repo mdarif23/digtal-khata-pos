@@ -69,6 +69,8 @@ import quotationsRouter from "./modules/quotations/quotations.routes.js";
 import commsRouter from "./modules/comms/comms.routes.js";
 import speedKeysRouter from "./modules/speedKeys/speedKeys.routes.js";
 import cfdRouter from "./modules/cfd/cfd.routes.js";
+import receiptShareRouter from "./modules/receiptShare/receiptShare.routes.js";
+import receiptSharePublicRouter from "./modules/receiptShare/receiptSharePublic.routes.js";
 import bomRouter from "./modules/bom/bom.routes.js";
 import commissionRouter from "./modules/commission/commission.routes.js";
 import pricingRouter from "./modules/pricing/pricing.routes.js";
@@ -210,6 +212,10 @@ export function buildApp() {
   app.use("/", commsRouter);
   app.use("/", speedKeysRouter);
   app.use("/", cfdRouter);
+  app.use("/", receiptShareRouter);
+  // P3 Phase 4: the public receipt fetch — the only unauthenticated receipt
+  // surface (hashed token, expiring, revocable, rate-limited).
+  app.use("/", receiptSharePublicRouter);
   app.use("/", bomRouter);
   app.use("/", commissionRouter);
   app.use("/", pricingRouter);

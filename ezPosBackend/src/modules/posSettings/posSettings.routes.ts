@@ -33,6 +33,7 @@ const manage = [
 const approvalRequiredSchema = z
   .object({
     sale_refund: z.boolean().optional(),
+    sale_cancel: z.boolean().optional(),
     cash_movement: z.boolean().optional(),
     below_minimum_price: z.boolean().optional(),
   })
@@ -56,6 +57,19 @@ const patchSchema = z
     requireOpenDrawer: z.boolean().optional(),
     approvalRequired: approvalRequiredSchema.optional(),
     embeddedBarcode: embeddedBarcodeSchema.nullable().optional(),
+    // P3 Phase 1 (F4): months until granted store credit expires; null = no
+    // expiry. Positive whole months only.
+    storeCreditExpiryMonths: z
+      .number()
+      .int()
+      .min(1)
+      .max(240)
+      .nullable()
+      .optional(),
+    // P3 Phase 2 (D7): expired-batch selling policy.
+    expiredBatchPolicy: z.enum(["block", "allow_with_approval"]).optional(),
+    // P3 Phase 2 (F.5): near-expiry notification window in days.
+    expiryWarningDays: z.number().int().min(1).max(365).optional(),
   })
   .refine(
     (v) =>
@@ -63,7 +77,10 @@ const patchSchema = z
       v.allowMultipleDrawerSessions !== undefined ||
       v.requireOpenDrawer !== undefined ||
       v.approvalRequired !== undefined ||
-      v.embeddedBarcode !== undefined,
+      v.embeddedBarcode !== undefined ||
+      v.storeCreditExpiryMonths !== undefined ||
+      v.expiredBatchPolicy !== undefined ||
+      v.expiryWarningDays !== undefined,
     { message: "Nothing to update." },
   );
 

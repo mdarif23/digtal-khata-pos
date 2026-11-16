@@ -6,7 +6,7 @@ import {
 import { AddCategoryDialog } from "../components/categories/AddCategoryDialog";
 import { EntityListLayout } from "@/components/common/EntityListLayout";
 import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
-import useProductStore from "../useProductStore";
+import { productOptionActions, EMPTY_SELECT_OPTIONS, useProductSelectOptionsQuery } from "../hooks/useProductOptions.js";
 
 type CategoryRecord = {
   value: number;
@@ -50,7 +50,8 @@ function buildCategoryTree(categories: CategoryRecord[]): CategoryTreeNode[] {
 }
 
 export function Categories() {
-  const { productSelectOptions, deleteCategory } = useProductStore();
+  const { deleteCategory } = productOptionActions;
+  const productSelectOptions = useProductSelectOptionsQuery().data ?? EMPTY_SELECT_OPTIONS;
   const [searchValue, setSearchValue] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">(
     "all",

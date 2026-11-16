@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { purchaseReturnApi } from "../purchase.api.js";
 import { usePurchasesStore } from "../usePurchaseStore";
-import useProductStore from "@/features/products/useProductStore";
+import { productKeys } from "@/features/products/hooks/useProducts.js";
 import { purchaseDetailKeys } from "./usePurchaseDetail";
 import { landedCostKeys } from "@/features/landed-cost/hooks/useLandedCost";
 import type {
@@ -45,12 +45,11 @@ export function usePurchaseReturn() {
       // Zustand consumers outside this page (documented dependency).
       const { getPurchases, getPurchaseItems, getPurchasesReturnItems } =
         usePurchasesStore.getState();
-      const { getProducts } = useProductStore.getState();
       await Promise.all([
         getPurchases(),
         getPurchaseItems(),
         getPurchasesReturnItems(),
-        getProducts(),
+        queryClient.invalidateQueries({ queryKey: productKeys.catalog() }),
       ]);
     },
   });

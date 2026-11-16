@@ -16,6 +16,21 @@ export const paymentSchema = z.object({
   reference: z.string().trim().optional(),
 });
 
+/**
+ * P3 Phase 1 (F1): named sale-level charges — delivery, service, packing.
+ * Post-VAT additive components of finalTotal (approved decision D1): never
+ * discounted, never taxed, never part of the per-line minimum-price floors.
+ * Stored on sale_charges (not fake sale items) so product profitability is
+ * unaffected by construction.
+ */
+export const saleChargeSchema = z.object({
+  label: z.string().trim().min(1).max(120),
+  amount: z.number().min(0).refine(
+    (v) => Math.round(v * 100) === v * 100,
+    "Charge amounts support up to 2 decimals.",
+  ),
+});
+
 // 1. Define what a single cart item should look like when sent to the DB
 const cartItemPayloadSchema = z
   .object({
@@ -40,6 +55,12 @@ const cartItemPayloadSchema = z
       })
       .nullable(),
     serialNumbers: z.array(z.string().trim().min(1)).optional(),
+    // P3 Phase 2 (F.2): explicit manual batch selection for batch-tracked
+    // lines. The server re-validates ownership (variant + business +
+    // location), availability and the expired-batch policy — the FEFO
+    // default applies when absent. Ignored for serial-tracked and composite
+    // lines.
+    batchId: z.number().int().positive().nullish(),
     // UOM (migration 0062): the selling unit for this line. The server
     // resolves the authoritative factor/price — client values advisory.
     uomConversionId: z.number().int().positive().nullish(),
@@ -105,6 +126,9 @@ export const createSalePayloadSchema = z.object({
   // unattributed; defaults to cashier for reporting fallback).
   salespersonUserId: z.number().int().positive().nullable().optional(),
 
+  // P3 Phase 1 (F1): named sale-level charges (see saleChargeSchema).
+  charges: z.array(saleChargeSchema).max(20).optional(),
+
   // ✅ Add the items array here!
   items: z.array(cartItemPayloadSchema).min(1, "Cart cannot be empty"),
 });
@@ -113,6 +137,18 @@ export const updateAvailableSerialSchema = z.object({
   currentSerial: z.string().trim().min(1).max(100),
   serialNumber: z.string().trim().min(1).max(100),
 });
+
+/**
+ * P3 Phase 3 (E1-003): sale void. Only completed sales with zero prior
+ * refunds may be voided (D11); the reason is mandatory and recorded
+ * permanently on the sale row.
+ */
+export const cancelSaleRequestSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+  /** One-time manager approval token when approval_required.sale_cancel is on. */
+  approvalToken: z.string().max(120).optional(),
+});
+export type CancelSaleRequest = z.infer<typeof cancelSaleRequestSchema>;
 
 export const saleRefundRequestSchema = z.object({
   reason: z.enum([
@@ -177,3 +213,4 @@ export const saleRefundRequestSchema = z.object({
 // 3. Export the TypeScript type for your payload
 export type CreateSalePayload = z.infer<typeof createSalePayloadSchema>;
 export type SaleRefundRequest = z.infer<typeof saleRefundRequestSchema>;
+export type SaleChargeInput = z.infer<typeof saleChargeSchema>;

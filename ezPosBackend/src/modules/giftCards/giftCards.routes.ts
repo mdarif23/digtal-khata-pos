@@ -48,5 +48,15 @@ router.post(
   requirePermission("pos.create_sale"),
   giftCardsController.setGiftCardStatus,
 );
+// P3 Phase 1 (F3): reload an active card with customer money — same stack as
+// paid issuance; the route resolves the caller's location for the drawer
+// attribution when the reload is paid in cash.
+router.post(
+  "/api/gift-cards/:id/reload",
+  ...write,
+  requireLocationAccess(),
+  requirePermission("pos.create_sale"),
+  giftCardsController.reloadGiftCard,
+);
 
 export default router;

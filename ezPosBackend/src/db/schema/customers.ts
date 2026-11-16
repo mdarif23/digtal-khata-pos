@@ -2,6 +2,7 @@ import {
   boolean,
   index,
   integer,
+  numeric,
   pgTable,
   serial,
   text,
@@ -37,6 +38,19 @@ export const customers = pgTable(
      * exactly one cloud row. NULL for cloud-native customers.
      */
     clientUuid: uuid("client_uuid"),
+    /**
+     * P3 Phase 1 (F2, migration 0081): maximum outstanding receivable this
+     * customer may carry. NULL = unlimited (every pre-existing customer —
+     * no behavior change on migrate); 0 = due sales blocked outright;
+     * > 0 caps Σ(final_total − payments − refunds) over completed sales.
+     * One business-wide limit; createSale locks the row FOR UPDATE so
+     * concurrent due purchases serialize.
+     */
+    creditLimit: numeric("credit_limit", {
+      precision: 14,
+      scale: 2,
+      mode: "number",
+    }),
     /**
      * Phase 2C consent: marketing sends REQUIRE this; transactional sends
      * are skipped when transactional_opt_out is set.

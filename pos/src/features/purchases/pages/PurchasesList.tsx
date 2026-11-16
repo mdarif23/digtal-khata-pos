@@ -29,7 +29,7 @@ import {
 import { usePurchaseList } from "../hooks/usePurchaseList";
 import { StatusBadge, type StatusTone } from "@/components/common/StatusBadge";
 import { PurchaseDetailsDrawer } from "../components/details/PurchaseDetailsDrawer";
-import useProductStore from "@/features/products/useProductStore";
+import { useProductSelectOptionsQuery } from "@/features/products/hooks/useProductOptions.js";
 import type { PurchaseListItem } from "../purchase.types";
 
 type PurchaseNoticeState = {
@@ -147,9 +147,8 @@ export const PurchasesList = () => {
     ...(activeTab?.params ?? {}),
   });
 
-  const suppliers = useProductStore(
-    (state) => state.productSelectOptions.suppliers,
-  );
+  const suppliers =
+    useProductSelectOptionsQuery().data?.suppliers ?? [];
 
   const rows = list.data?.data ?? [];
   const counts = list.data?.counts;

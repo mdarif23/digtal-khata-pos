@@ -35,6 +35,15 @@ export async function createFullReturnApi(
   return await axios.post(`/sold_products/refunds_all/${id}`, options);
 }
 
+/** P3 Phase 3 (E1-003): void a completed sale (sales.void; 409 on guards,
+ * 403 when approval_required.sale_cancel demands a token). */
+export const voidSaleApi = async (id: number, reason: string, approvalToken?: string) => {
+  return await axios.post(`/sales/${id}/cancel`, {
+    reason,
+    ...(approvalToken ? { approvalToken } : {}),
+  });
+}
+
 // --- exchanges (Module 5) ---------------------------------------------------
 
 export interface ExchangePayload {

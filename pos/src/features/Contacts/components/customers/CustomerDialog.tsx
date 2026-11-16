@@ -21,9 +21,20 @@ const customerFormSchema = z.object({
   name: z.string().trim().min(1, "Customer name is required."),
   phone: z.string().trim().min(1, "Phone number is required."),
   address: z.string().trim(),
+  // P3 Phase 1 (F2): empty string = unlimited (no limit); a value must be a
+  // non-negative 2-decimal amount.
+  creditLimit: z
+    .string()
+    .trim()
+    .refine(
+      (v) =>
+        v === "" ||
+        (/^\d+(\.\d{1,2})?$/.test(v) && Number(v) >= 0 && Number(v) <= 99999999),
+      "Credit limit must be a non-negative amount (2 decimals) or empty for unlimited.",
+    ),
 });
 
-const initialForm = { name: "", phone: "", address: "" };
+const initialForm = { name: "", phone: "", address: "", creditLimit: "" };
 
 /** Customer snapshot for the edit path (E1-004). */
 export interface EditableCustomer {
@@ -31,6 +42,7 @@ export interface EditableCustomer {
   name: string;
   phone: string;
   address: string;
+  creditLimit?: number | null;
 }
 
 /**
@@ -52,6 +64,8 @@ export function CustomerDialog({
     name: editCustomer?.name ?? "",
     phone: editCustomer?.phone ?? "",
     address: editCustomer?.address ?? "",
+    creditLimit:
+      editCustomer?.creditLimit != null ? String(editCustomer.creditLimit) : "",
   });
   const [formError, setFormError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -68,6 +82,10 @@ export function CustomerDialog({
               name: editCustomer.name,
               phone: editCustomer.phone,
               address: editCustomer.address,
+              creditLimit:
+                editCustomer.creditLimit != null
+                  ? String(editCustomer.creditLimit)
+                  : "",
             }
           : initialForm,
       );
@@ -84,12 +102,26 @@ export function CustomerDialog({
 
     setFormError("");
     setIsSubmitting(true);
+    // P3 Phase 1 (F2): empty limit = unlimited (null); a value is ৳ amount.
+    const creditLimit =
+      result.data.creditLimit === "" ? null : Number(result.data.creditLimit);
     try {
       await createEntityPromiseToast({
-        data: { id: isEdit ? editCustomer.id : 0, ...result.data },
+        data: {
+          id: isEdit ? editCustomer.id : 0,
+          name: result.data.name,
+          phone: result.data.phone,
+          address: result.data.address,
+          creditLimit,
+        },
         apiCall: isEdit
-          ? (payload: { id: number; name: string; phone: string; address: string }) =>
-              updateCustomer(payload.id, payload)
+          ? (payload: {
+              id: number;
+              name: string;
+              phone: string;
+              address: string;
+              creditLimit: number | null;
+            }) => updateCustomer(payload.id, payload)
           : addCustomer,
         entityName: isEdit ? "Customer updated" : "Customer",
         displayName: result.data.name,
@@ -183,6 +215,25 @@ export function CustomerDialog({
                   }))
                 }
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="customer-credit-limit">Credit limit</Label>
+              <Input
+                id="customer-credit-limit"
+                inputMode="decimal"
+                placeholder="Empty = unlimited"
+                value={formData.creditLimit}
+                onChange={(event) =>
+                  setFormData((current) => ({
+                    ...current,
+                    creditLimit: event.target.value,
+                  }))
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Maximum outstanding due this customer may carry. Empty means
+                unlimited; 0 blocks due sales entirely.
+              </p>
             </div>
             {formError ? (
               <p role="alert" className="text-sm text-destructive">

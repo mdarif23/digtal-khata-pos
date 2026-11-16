@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import useProductStore from "../useProductStore.js";
+import { productKeys } from "./useProducts.js";
 import {
   addPackagingUnitApi,
   deactivatePackagingUnitApi,
@@ -46,7 +46,9 @@ function useInvalidateProductUom() {
     void queryClient.invalidateQueries({
       queryKey: ["product", "select-options"],
     });
-    void useProductStore.getState().getProductSelectOptions();
+    void queryClient.invalidateQueries({
+      queryKey: productKeys.selectOptions(),
+    });
   };
 }
 

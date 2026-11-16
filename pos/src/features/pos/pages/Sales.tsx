@@ -22,9 +22,11 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ManagerApprovalDialog } from "@/features/cashRegisters/components/ManagerApprovalDialog";
 import {
   Select,
   SelectContent,
@@ -41,15 +43,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getErrorMessage } from "@/utils/getErrorMessage";
+import { toast } from "@/components/ui/toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSalesStore } from "../stores/useSalesStore.js";
+import { saleKeys, useSalesQuery } from "../hooks/useSales.js";
+import { queryClient } from "@/lib/queryClient.js";
 import type {
   AllSoldProduct,
   SaleRefundRequest,
   SalesStoreType,
 } from "../types/sales.types.js";
 import { SalesDataTable } from "../components/sales/SalesDataTable.js";
-import { getSaleReceiptApi } from "../sales.api.js";
+import { getSaleReceiptApi, voidSaleApi } from "../sales.api.js";
 import type { SaleReceiptData } from "../types/receipt.types.js";
 import { ReceiptPrintDialog } from "../components/receipt/ReceiptPrintDialog.js";
 import { ExchangeDialog } from "../components/pos/ExchangeDialog.js";
@@ -57,150 +62,38 @@ import { PaymentIntentDialog } from "../components/pos/PaymentIntentDialog.js";
 import { LocationRequiredNotice } from "@/components/common/LocationRequiredNotice.js";
 import { SummaryCard } from "@/components/common/SummaryCard";
 
-const DATE_RANGES = ["all", "today", "7-days", "30-days"] as const;
-type DateRange = (typeof DATE_RANGES)[number];
-const REFUND_REASONS = [
-  "customer_request",
-  "wrong_item",
-  "damaged",
-  "quality_issue",
-  "other",
-] as const satisfies readonly SaleRefundRequest["reason"][];
-const REFUND_DISPOSITIONS = [
-  "restock",
-  "inspection",
-  "damaged",
-] as const satisfies readonly SaleRefundRequest["disposition"][];
-
-function isDateRange(value: string | null): value is DateRange {
-  return DATE_RANGES.some((range) => range === value);
-}
-
-function isRefundReason(
-  value: string | null,
-): value is SaleRefundRequest["reason"] {
-  return REFUND_REASONS.some((reason) => reason === value);
-}
-
-function isRefundDisposition(
-  value: string | null,
-): value is SaleRefundRequest["disposition"] {
-  return REFUND_DISPOSITIONS.some(
-    (disposition) => disposition === value,
-  );
-}
-
-const REFUND_REASON_LABELS: Record<SaleRefundRequest["reason"], string> = {
-  customer_request: "Customer changed their mind",
-  wrong_item: "Wrong item",
-  damaged: "Damaged item",
-  quality_issue: "Quality issue",
-  other: "Other",
-};
-
-const REFUND_DISPOSITION_LABELS: Record<
-  SaleRefundRequest["disposition"],
-  string
-> = {
-  restock: "Restock — return to available stock",
-  inspection: "Needs inspection — keep out of available stock",
-  damaged: "Damaged — do not restock",
-};
-
 import { formatCurrency } from "@/lib/format";
+import {
+  DATE_RANGES,
+  formatDate,
+  isDateRange,
+  isRefundDisposition,
+  isRefundFilter,
+  isRefundReason,
+  isInDateRange,
+  REFUND_DISPOSITIONS,
+  REFUND_DISPOSITION_LABELS,
+  REFUND_FILTERS,
+  REFUND_REASONS,
+  REFUND_REASON_LABELS,
+  refundStateOf,
+  remainingOf,
+  summarizeSales,
+  type DateRange,
+  type RefundFilter,
+} from "./salesListUtils.js";
 
-function formatDate(
-  value: string | null,
-  options: Intl.DateTimeFormatOptions,
-) {
-  if (!value) return "Date unavailable";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "Invalid date"
-    : date.toLocaleString(undefined, options);
-}
-
-function summarizeSales(items: SalesStoreType[]): AllSoldProduct[] {
-  const grouped = new Map<number, SalesStoreType[]>();
-  for (const item of items) {
-    const saleItems = grouped.get(item.saleId) ?? [];
-    saleItems.push(item);
-    grouped.set(item.saleId, saleItems);
-  }
-
-  return Array.from(grouped, ([id, saleItems]) => ({
-    id,
-    invoiceNumber: saleItems[0]?.invoiceNumber ?? `#${id}`,
-    items: saleItems,
-    createdAt: saleItems[0]?.createdAt ?? null,
-    totalQuantity: saleItems.reduce(
-      (total, item) => total + Number(item.soldQuantity),
-      0,
-    ),
-    totalAmount:
-      saleItems[0]?.saleTotal == null
-        ? saleItems.reduce((total, item) => total + Number(item.lineTotal), 0)
-        : Number(saleItems[0].saleTotal),
-    paymentStatus: saleItems[0]?.paymentStatus ?? "unpaid",
-    saleStatus: saleItems[0]?.saleStatus ?? "completed",
-    customerName: saleItems[0]?.customerName ?? null,
-  })).sort(
-    (first, second) =>
-      new Date(second.createdAt ?? 0).getTime() -
-      new Date(first.createdAt ?? 0).getTime(),
-  );
-}
-
-function isInDateRange(sale: AllSoldProduct, range: DateRange) {
-  if (range === "all") return true;
-  if (!sale.createdAt) return false;
-  const date = new Date(sale.createdAt);
-  if (Number.isNaN(date.getTime())) return false;
-
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  if (range === "today") return date >= start && date < end;
-
-  const days = range === "7-days" ? 7 : 30;
-  start.setDate(start.getDate() - (days - 1));
-  return date >= start && date <= now;
-}
-
-/** Refund states a sale can be filtered by. The backend flips `saleStatus`
- *  to "refunded" only when EVERY line is fully returned; anything returned
- *  on a completed sale is a partial refund (per-line returnedQuantity). */
-type RefundFilter = "all" | "completed" | "partial" | "refunded";
-
-const REFUND_FILTERS: RefundFilter[] = ["all", "completed", "partial", "refunded"];
-
-function isRefundFilter(value: string | null): value is RefundFilter {
-  return (REFUND_FILTERS as string[]).includes(value as string);
-}
-
-function refundStateOf(sale: AllSoldProduct): Exclude<RefundFilter, "all"> {
-  if (sale.saleStatus === "refunded") return "refunded";
-  const hasReturn = sale.items.some(
-    (item) => Number(item.returnedQuantity) > 0,
-  );
-  return hasReturn ? "partial" : "completed";
-}
-
-/** Units still returnable on a line: sold − already returned. */
-function remainingOf(item: SalesStoreType): number {
-  return Math.max(
-    0,
-    Number(item.soldQuantity) - Number(item.returnedQuantity),
-  );
-}
 
 export function Sales() {
   const { hasPermission } = usePermissions();
-  const sales = useSalesStore((state) => state.sales);
-  const loading = useSalesStore((state) => state.loading);
-  const error = useSalesStore((state) => state.error);
-  const getSales = useSalesStore((state) => state.getSales);
+  const salesQuery = useSalesQuery();
+  const sales = salesQuery.data ?? [];
+  const loading = salesQuery.isPending;
+  const error = salesQuery.error
+    ? salesQuery.error instanceof Error
+      ? salesQuery.error.message
+      : String(salesQuery.error)
+    : null;
   const returnProducts = useSalesStore((state) => state.returnProducts);
   const returnSingleItems = useSalesStore((state) => state.returnSingleItems);
   const [query, setQuery] = useState("");
@@ -235,6 +128,13 @@ export function Sales() {
   const [isFetchingReceipt, setIsFetchingReceipt] = useState(false);
   const [exchangeTarget, setExchangeTarget] = useState<SalesStoreType | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<SalesStoreType | null>(null);
+  // P3 Phase 3 (E1-003): void flow — reason mandatory; approval_required
+  // .sale_cancel surfaces a one-time manager PIN dialog and retries.
+  const [voidTarget, setVoidTarget] = useState<AllSoldProduct | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [voidError, setVoidError] = useState<string | null>(null);
+  const [approvalToken, setApprovalToken] = useState<string | null>(null);
+  const [isApprovalOpen, setIsApprovalOpen] = useState(false);
 
   const handlePrintReceipt = async (saleId: number) => {
     try {
@@ -295,6 +195,43 @@ export function Sales() {
       ),
     );
     setRefundTarget({ type: "sale", sale });
+  };
+
+  /** P3 Phase 3 (E1-003): void the sale — 403 with approval_required
+   * .sale_cancel opens the manager PIN dialog; the minted token retries. */
+  const submitVoid = async () => {
+    if (!voidTarget) return;
+    if (voidReason.trim().length < 3) {
+      setVoidError("Give a reason of at least 3 characters.");
+      return;
+    }
+    setBusySaleId(voidTarget.id);
+    setVoidError(null);
+    try {
+      await voidSaleApi(voidTarget.id, voidReason.trim(), approvalToken ?? undefined);
+      toast.add({
+        title: "Sale voided",
+        description: `${voidTarget.invoiceNumber} reversed — stock, drawer, loyalty and ledger updated.`,
+        type: "success",
+      });
+      setVoidTarget(null);
+      setVoidReason("");
+      setApprovalToken(null);
+      setSelectedSaleId(null);
+      await queryClient
+        .invalidateQueries({ queryKey: saleKeys.list() })
+        .catch(() => undefined);
+    } catch (err: unknown) {
+      const message = getErrorMessage(err);
+      if (/manager approval is required/i.test(message)) {
+        setIsApprovalOpen(true);
+        setVoidError(null);
+      } else {
+        setVoidError(message);
+      }
+    } finally {
+      setBusySaleId(null);
+    }
   };
 
   const openItemRefund = (item: SalesStoreType) => {
@@ -403,7 +340,7 @@ export function Sales() {
         </div>
         <Button
           variant="outline"
-          onClick={() => void getSales()}
+          onClick={() => void salesQuery.refetch()}
           disabled={loading}
         >
           <RefreshCw className={loading ? "animate-spin" : ""} />
@@ -421,7 +358,7 @@ export function Sales() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void getSales()}
+            onClick={() => void salesQuery.refetch()}
             disabled={loading}
           >
             Try again
@@ -689,11 +626,89 @@ export function Sales() {
                   <RotateCcw />
                   Refund entire sale
                 </Button>
+                {hasPermission("sales.void") &&
+                  selectedSale.saleStatus === "completed" && (
+                    <Button
+                      variant="destructive"
+                      disabled={busySaleId !== null}
+                      onClick={() => {
+                        setVoidTarget(selectedSale);
+                        setVoidReason("");
+                        setVoidError(null);
+                        setApprovalToken(null);
+                      }}
+                    >
+                      Void sale
+                    </Button>
+                  )}
               </div>
             </>
           )}
         </DialogContent>
       </Dialog>
+      {/* P3 Phase 3: void reason dialog */}
+      <Dialog
+        open={voidTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && busySaleId === null) {
+            setVoidTarget(null);
+            setVoidError(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Void sale</DialogTitle>
+            <DialogDescription>
+              {voidTarget?.invoiceNumber} — every reversal happens atomically:
+              stock, original batches, serials, drawer cash, loyalty, coupon
+              usage and the finance ledger. The invoice number is never
+              reused. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">Reason (required)</span>
+            <Input
+              value={voidReason}
+              maxLength={500}
+              placeholder="Why is this sale being voided?"
+              onChange={(e) => setVoidReason(e.target.value)}
+            />
+          </label>
+          {voidError && (
+            <p className="text-sm text-destructive">{voidError}</p>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busySaleId !== null}
+              onClick={() => setVoidTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={busySaleId !== null || voidReason.trim().length < 3}
+              onClick={() => void submitVoid()}
+            >
+              {busySaleId !== null ? "Voiding…" : "Void sale"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ManagerApprovalDialog
+        open={isApprovalOpen}
+        onOpenChange={setIsApprovalOpen}
+        opType="sale.cancel"
+        opLabel="Void a sale"
+        reason={voidReason}
+        onApproved={(token) => {
+          setApprovalToken(token);
+          setIsApprovalOpen(false);
+        }}
+      />
       <Dialog
         open={refundTarget !== null}
         onOpenChange={(open) => {

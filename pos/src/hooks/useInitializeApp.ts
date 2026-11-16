@@ -1,11 +1,25 @@
 import { useEffect } from "react";
-import { useCustomerStore } from "../store/useCustomerStore";
-import { useSalesStore } from "../features/pos/stores/useSalesStore";
-import useProductStore from "@/features/products/useProductStore";
+import {
+  saleKeys,
+} from "@/features/pos/hooks/useSales.js";
+import { getSalesApi } from "@/features/pos/sales.api.js";
+import {
+  fetchProductSelectOptions,
+  fetchProductVariantOptions,
+} from "@/features/products/hooks/useProductOptions.js";
 import { usePurchasesStore } from "@/features/purchases/usePurchaseStore";
 import { getActiveBusinessId, getActiveLocationId, getSessionUser } from "@/api/axios";
 import { useHoldCartStore } from "@/features/pos/stores/useCartStore";
 import { useReceiptSettingsStore } from "@/features/pos/stores/useReceiptSettingsStore";
+import { queryClient } from "@/lib/queryClient.js";
+import {
+  customerKeys,
+  fetchCustomersWithOfflineCache,
+} from "@/features/customers/hooks/useCustomers.js";
+import {
+  productKeys,
+  fetchProductsWithOfflineCache,
+} from "@/features/products/hooks/useProducts.js";
 
 const LAST_SESSION_KEY = "ezpos-last-session";
 
@@ -41,22 +55,35 @@ function enforceSessionScope(): void {
 // `enabled` gates the startup data fetches on the session bootstrap: firing
 // them without a restored token produces doomed 401s and redirect cascades.
 export function useInitializeApp(enabled: boolean) {
-  const { getCustomers } = useCustomerStore();
-  const { getSales } = useSalesStore();
   const { getPurchases, getPurchaseItems, getPurchasesReturnItems } =
     usePurchasesStore();
-  const { getProductSelectOptions, getProductVariantOptions, getProducts } =
-    useProductStore();
   useEffect(() => {
     if (!enabled) return;
     enforceSessionScope();
-    getProducts();
-    getSales();
-    getCustomers();
+    // Products + customers + sales lists: TanStack Query warm-starts (same
+    // fetch the old store actions performed, same order position).
+    void queryClient.prefetchQuery({
+      queryKey: productKeys.catalog(),
+      queryFn: fetchProductsWithOfflineCache,
+    });
+    void queryClient.prefetchQuery({
+      queryKey: customerKeys.list(),
+      queryFn: fetchCustomersWithOfflineCache,
+    });
+    void queryClient.prefetchQuery({
+      queryKey: productKeys.selectOptions(),
+      queryFn: fetchProductSelectOptions,
+    });
+    void queryClient.prefetchQuery({
+      queryKey: productKeys.variantOptions(),
+      queryFn: fetchProductVariantOptions,
+    });
+    void queryClient.prefetchQuery({
+      queryKey: saleKeys.list(),
+      queryFn: getSalesApi,
+    });
     getPurchases();
     getPurchaseItems();
     getPurchasesReturnItems();
-    getProductSelectOptions();
-    getProductVariantOptions();
   }, [enabled]);
 }

@@ -74,6 +74,13 @@ export const giftCardTransactions = pgTable(
       .notNull(),
     sourceType: varchar("source_type", { length: 20 }).notNull(),
     sourceId: integer("source_id"),
+    /**
+     * P3 Phase 1 (F3, migration 0082): optional client reference for reload
+     * dedup. Partial unique (business_id, gift_card_id, reference) WHERE NOT
+     * NULL lives in the migration (this drizzle version cannot express the
+     * WHERE predicate — same as the customers client_uuid index).
+     */
+    reference: varchar("reference", { length: 100 }),
     actorUserId: integer("actor_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -87,7 +94,7 @@ export const giftCardTransactions = pgTable(
     check("gift_card_transactions_amount_nonzero", sql`${t.amount} <> 0`),
     check(
       "gift_card_transactions_source_valid",
-      sql`${t.sourceType} in ('issue','redeem')`,
+      sql`${t.sourceType} in ('issue','redeem','reload','void_restore')`,
     ),
   ],
 );

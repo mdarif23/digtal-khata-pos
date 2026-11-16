@@ -23,6 +23,8 @@ export interface CfdPushPayload {
   grandTotal: number;
   paidTotal: number;
   dueTotal: number;
+  /** P3 Phase 1 (F1): named sale-level charges (subset of grandTotal). */
+  chargesTotal?: number;
 }
 
 export async function pairCfdApi(): Promise<{ code: string; expiresAt: string }> {
@@ -44,13 +46,18 @@ export async function revokeDisplayApi(displayId: number): Promise<void> {
 }
 
 export async function pushCfdPayloadApi(
-  displayId: number,
   payload: CfdPushPayload,
+  displayIds: number[],
 ): Promise<{ delivered: boolean }> {
-  const res = await api.post<{ success: boolean; data: { delivered: boolean } }>(
-    "/cfd/push",
-    { displayId, ...payload },
-  );
+  const res = await api.post<{
+    success: boolean;
+    data: { delivered: boolean };
+  }>("/cfd/push", {
+    // P3 Phase 4 (N1-08): fan out — one authenticated call carries the list;
+    // the backend ownership-checks each target.
+    displayIds,
+    ...payload,
+  });
   return res.data.data;
 }
 

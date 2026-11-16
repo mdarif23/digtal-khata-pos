@@ -4,7 +4,7 @@ import { ContactListLayout } from "../components/ContactListLayout";
 import { CustomersTable } from "../components/customers/CustomersTable";
 import { ContactImportExportButtons } from "../components/ContactImportExportButtons";
 import { CustomerDialog } from "../components/customers/CustomerDialog";
-import { useCustomerStore } from "@/store/useCustomerStore";
+import { useCustomersQuery } from "@/features/customers/hooks/useCustomers.js";
 import { getCustomerDueSummaryApi } from "@/api/customer.api";
 import { formatCurrency } from "@/lib/format";
 import type { CustomerDue } from "@/types/customers.types";
@@ -14,10 +14,14 @@ export function CustomersPage() {
   const [dues, setDues] = useState<CustomerDue[]>([]);
   const [dueError, setDueError] = useState("");
   const [loadingDues, setLoadingDues] = useState(true);
-  const customers = useCustomerStore((state) => state.customers);
-  const loading = useCustomerStore((state) => state.loading);
-  const error = useCustomerStore((state) => state.error);
-  const getCustomers = useCustomerStore((state) => state.getCustomers);
+  const customersQuery = useCustomersQuery();
+  const customers = customersQuery.data ?? [];
+  const loading = customersQuery.isPending;
+  const error = customersQuery.error
+    ? customersQuery.error instanceof Error
+      ? customersQuery.error.message
+      : String(customersQuery.error)
+    : null;
 
   const loadDues = useCallback(async () => {
     setLoadingDues(true);
@@ -111,7 +115,7 @@ export function CustomersPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void getCustomers().catch(() => undefined)}
+            onClick={() => void customersQuery.refetch()}
           >
             Try again
           </Button>
