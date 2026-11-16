@@ -193,3 +193,42 @@ export async function removePackageApi(
     `/businesses/${businessId}/orders/${orderId}/packages/${packageId}`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Assignment (Flexible Operating Model Phase 3, migration 0088)
+// ---------------------------------------------------------------------------
+
+export interface AssignableStaffMember {
+  id: number;
+  fullName: string;
+  email: string;
+}
+
+export async function listAssignableStaffApi(): Promise<
+  AssignableStaffMember[]
+> {
+  const businessId = requireBusinessId();
+  const { data } = await api.get<ApiEnvelope<AssignableStaffMember[]>>(
+    `/businesses/${businessId}/orders/assignable-staff`,
+  );
+  return data.data;
+}
+
+export async function assignOrderApi(
+  orderId: number,
+  userId: number,
+): Promise<void> {
+  await postAction(orderId, "assign", { userId });
+}
+
+export async function unassignOrderApi(orderId: number): Promise<void> {
+  const businessId = requireBusinessId();
+  await api.delete(`/businesses/${businessId}/orders/${orderId}/assign`);
+}
+
+export async function deliveryFailedApi(
+  orderId: number,
+  note?: string | undefined,
+): Promise<void> {
+  await postAction(orderId, "delivery-failed", { note: note ?? null });
+}

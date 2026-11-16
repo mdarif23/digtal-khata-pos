@@ -6,6 +6,7 @@ import {
   PackageCheck,
   RefreshCw,
   Truck,
+  UserRound,
   XCircle,
 } from "lucide-react";
 import { useSessionStore } from "@/auth/sessionStore";
@@ -60,6 +61,7 @@ export function OnlineOrdersPage() {
   const [fulfillment, setFulfillment] = useState<FulfillmentState | "">("");
   const [status, setStatus] = useState<OrderStatus | "">("");
   const [locationId, setLocationId] = useState<number | "">("");
+  const [assignee, setAssignee] = useState<"me" | "unassigned" | "">("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
@@ -71,12 +73,13 @@ export function OnlineOrdersPage() {
       ...(fulfillment ? { fulfillmentStatus: fulfillment } : {}),
       ...(status ? { status } : {}),
       ...(locationId ? { locationId } : {}),
+      ...(assignee ? { assignee } : {}),
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
       page,
       pageSize: PAGE_SIZE,
     }),
-    [search, channel, fulfillment, status, locationId, from, to, page],
+    [search, channel, fulfillment, status, locationId, assignee, from, to, page],
   );
 
   const summaryFilters = useMemo(
@@ -103,6 +106,7 @@ export function OnlineOrdersPage() {
     setFulfillment("");
     setStatus("");
     setLocationId("");
+    setAssignee("");
     setFrom("");
     setTo("");
     setPage(1);
@@ -144,12 +148,22 @@ export function OnlineOrdersPage() {
           value={String(summary?.unpaidCount ?? "—")}
           description={
             summary
-              ? `${summary.cancelled} cancelled · ${summary.returnRequests} returns · unpaid above`
+              ? `${summary.cancelled} cancelled · ${summary.returnRequests} returns · ${summary.unassignedCount} unassigned · unpaid above`
               : undefined
           }
           icon={<XCircle className="size-4 text-muted-foreground" />}
         />
       </div>
+
+      {/* Work-queue nudge: open orders nobody owns yet */}
+      {summary && summary.unassignedCount > 0 ? (
+        <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-4 py-2.5 text-sm text-warning">
+          <UserRound className="h-4 w-4" />
+          {summary.unassignedCount} open{" "}
+          {summary.unassignedCount === 1 ? "order has" : "orders have"} no
+          assignee — assign them so nothing stalls silently.
+        </div>
+      ) : null}
 
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
@@ -243,6 +257,24 @@ export function OnlineOrdersPage() {
                 {loc.name}
               </option>
             ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="oo-assignee">
+            Assignee
+          </label>
+          <select
+            id="oo-assignee"
+            value={assignee}
+            onChange={(e) => {
+              setAssignee(e.target.value as "me" | "unassigned" | "");
+              setPage(1);
+            }}
+            className="rounded-md border border-input bg-card px-2 py-1.5 text-sm"
+          >
+            <option value="">Everyone</option>
+            <option value="me">Assigned to me</option>
+            <option value="unassigned">Unassigned</option>
           </select>
         </div>
         <div className="flex flex-col gap-1">

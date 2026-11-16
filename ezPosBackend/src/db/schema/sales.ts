@@ -109,6 +109,20 @@ export const sales = pgTable(
       onDelete: "set null",
     }),
     /**
+     * Online order ownership (Flexible Operating Model, migration 0088): the
+     * employee currently responsible for fulfilling this order (NULL =
+     * unassigned). Operational owner only — commission attribution stays in
+     * salesperson_*. History lives in sale_order_events, so reassignment
+     * never rewrites the past.
+     */
+    assignedToUserId: integer("assigned_to_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    assignedAt: timestamp("assigned_at", { withTimezone: true }),
+    assignedByUserId: integer("assigned_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    /**
      * Customer group AT SALE TIME (pricing, migration 0063) for group
      * profitability reporting. Snapshot — deliberately NO foreign key:
      * deleting a group must never rewrite historical sales.

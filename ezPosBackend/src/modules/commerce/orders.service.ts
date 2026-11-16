@@ -34,6 +34,8 @@ import {
 } from "../../utils/documentSequence.js";
 import { salePayments } from "../../db/schema/salePayments.js";
 import { saleRefunds } from "../../db/schema/saleRefunds.js";
+import { businessMemberships } from "../../db/schema/businessMemberships.js";
+import { users } from "../../db/schema/users.js";
 import {
   confirmReservationsForSaleInTx,
   createReservationsInTx,
@@ -724,6 +726,9 @@ export interface UnifiedOrderRow {
   locationName: string | null;
   createdAt: Date | null;
   itemsCount: number;
+  /** Current fulfillment owner (migration 0088); null = unassigned. */
+  assignedToUserId: number | null;
+  assignedToName: string | null;
 }
 
 export interface UnifiedOrderFilters {
@@ -732,6 +737,8 @@ export interface UnifiedOrderFilters {
   fulfillmentStatus?: string | undefined;
   search?: string | undefined;
   locationId?: number | undefined;
+  /** Assignment filter: a user id, "unassigned", or undefined = everyone. */
+  assignee?: number | "unassigned" | undefined;
   /** ISO dates (YYYY-MM-DD), inclusive. */
   from?: string | undefined;
   to?: string | undefined;
@@ -782,6 +789,11 @@ export async function listUnifiedOrders(
   if (filters.locationId) {
     conditions.push(eq(sales.locationId, filters.locationId));
   }
+  if (filters.assignee === "unassigned") {
+    conditions.push(sql`${sales.assignedToUserId} IS NULL`);
+  } else if (typeof filters.assignee === "number") {
+    conditions.push(eq(sales.assignedToUserId, filters.assignee));
+  }
   if (filters.from) {
     conditions.push(gte(sales.saleDate, new Date(`${filters.from}T00:00:00`)));
   }
@@ -812,10 +824,13 @@ export async function listUnifiedOrders(
       locationName: locations.name,
       createdAt: sales.createdAt,
       itemsCount: sql<number>`(select coalesce(sum(${saleItems.quantity}), 0)::int from ${saleItems} where ${saleItems.saleId} = ${sales.id})`,
+      assignedToUserId: sales.assignedToUserId,
+      assignedToName: users.fullName,
     })
     .from(sales)
     .leftJoin(customers, eq(customers.id, sales.customerId))
     .leftJoin(locations, eq(locations.id, sales.locationId))
+    .leftJoin(users, eq(users.id, sales.assignedToUserId))
     .where(and(...conditions))
     .orderBy(desc(sales.id))
     .limit(pageSize)
@@ -854,6 +869,10 @@ export interface OrderDetail {
   customerPhone: string | null;
   customerEmail: string | null;
   locationName: string | null;
+  /** Current fulfillment owner (migration 0088); null = unassigned. */
+  assignedToUserId: number | null;
+  assignedToName: string | null;
+  assignedAt: Date | null;
   /** Order-time shipping snapshot (falls back to the customer in the UI). */
   shippingName: string | null;
   shippingPhone: string | null;
@@ -900,6 +919,9 @@ export async function getOrderDetail(
       customerPhone: customers.phone,
       customerEmail: customers.email,
       locationName: locations.name,
+      assignedToUserId: sales.assignedToUserId,
+      assignedToName: users.fullName,
+      assignedAt: sales.assignedAt,
       shippingName: sales.shippingName,
       shippingPhone: sales.shippingPhone,
       shippingAddress: sales.shippingAddress,
@@ -911,6 +933,7 @@ export async function getOrderDetail(
     .from(sales)
     .leftJoin(customers, eq(customers.id, sales.customerId))
     .leftJoin(locations, eq(locations.id, sales.locationId))
+    .leftJoin(users, eq(users.id, sales.assignedToUserId))
     .where(and(eq(sales.id, orderId), eq(sales.businessId, businessId)));
   if (!order) throw new NotFoundError("Order not found.");
 
@@ -1211,11 +1234,16 @@ export interface OrdersSummary {
   netSales: number;
   /** Completed orders still carrying a due (COD uncollected / partial). */
   unpaidCount: number;
+  /** Open orders (completed, not delivered/returned) with no assignee. */
+  unassignedCount: number;
 }
 
 export async function getOrdersSummary(
   businessId: number,
-  filters: Omit<UnifiedOrderFilters, "status" | "fulfillmentStatus" | "search" | "page" | "pageSize"> = {},
+  filters: Omit<
+    UnifiedOrderFilters,
+    "status" | "fulfillmentStatus" | "search" | "page" | "pageSize" | "assignee"
+  > = {},
 ): Promise<OrdersSummary> {
   const conditions = [
     eq(sales.businessId, businessId),
@@ -1241,6 +1269,11 @@ export async function getOrdersSummary(
       completed: sql<number>`count(*) filter (where ${sales.status} = 'completed')::int`,
       grossSales: sql<number>`coalesce(sum(${sales.finalTotal}) filter (where ${sales.status} = 'completed'), 0)::float8`,
       unpaidCount: sql<number>`count(*) filter (where ${sales.status} = 'completed' and ${sales.paymentStatus} <> 'paid')::int`,
+      unassignedCount: sql<number>`count(*) filter (
+        where ${sales.status} = 'completed'
+          and ${sales.assignedToUserId} IS NULL
+          and ${sales.fulfillmentStatus} NOT IN ('delivered', 'returned', 'partially_returned')
+      )::int`,
     })
     .from(sales)
     .where(and(...conditions));
@@ -1278,5 +1311,130 @@ export async function getOrdersSummary(
     refundedTotal: Math.round(refundedTotal * 100) / 100,
     netSales: Math.round((grossSales - refundedTotal) * 100) / 100,
     unpaidCount: orderStats?.unpaidCount ?? 0,
+    unassignedCount: orderStats?.unassignedCount ?? 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Order assignment (Flexible Operating Model Phase 3, migration 0088)
+// ---------------------------------------------------------------------------
+
+/**
+ * Active members of the business who can own a fulfillment task. Gated by
+ * orders.assign at the route — this exists so the assignee picker does not
+ * require users.view (a picker needs names, not the staff admin).
+ */
+export async function listAssignableStaff(
+  businessId: number,
+): Promise<{ id: number; fullName: string; email: string }[]> {
+  return db
+    .select({
+      id: users.id,
+      fullName: users.fullName,
+      email: users.email,
+    })
+    .from(businessMemberships)
+    .innerJoin(users, eq(users.id, businessMemberships.userId))
+    .where(
+      and(
+        eq(businessMemberships.businessId, businessId),
+        eq(businessMemberships.status, "active"),
+      ),
+    )
+    .orderBy(asc(users.fullName));
+}
+
+/**
+ * Assigns (or reassigns/unassigns) an online order to an employee. The
+ * assignee must be an ACTIVE member of the same business — the client-supplied
+ * user id is never trusted beyond that. The previous assignee is preserved in
+ * the append-only timeline event, so reassignment keeps its full history.
+ * Cancellation of a user's account sets the column NULL via ON DELETE SET
+ * NULL (unassigned, never orphaned).
+ */
+export async function assignOnlineOrder(
+  businessId: number,
+  orderId: number,
+  assigneeUserId: number | null,
+  actorUserId: number | null,
+): Promise<{ id: number; assignedToUserId: number | null }> {
+  return db.transaction(async (tx) => {
+    const [sale] = await tx
+      .select({
+        id: sales.id,
+        status: sales.status,
+        channel: sales.channel,
+        fulfillmentStatus: sales.fulfillmentStatus,
+        assignedToUserId: sales.assignedToUserId,
+      })
+      .from(sales)
+      .where(and(eq(sales.id, orderId), eq(sales.businessId, businessId)))
+      .for("update");
+    if (!sale) {
+      throw new NotFoundError("Order not found.");
+    }
+    // Assignment is an online-operations concept — counter sales have their
+    // cashier attribution and LAN replays their own flow.
+    if (sale.channel === "pos" || sale.channel === "offline") {
+      throw new ConflictError(
+        "Only online-channel orders can be assigned to employees.",
+      );
+    }
+    if (sale.status === "cancelled" || sale.status === "refunded") {
+      throw new ConflictError(
+        "Cancelled and refunded orders cannot be assigned.",
+      );
+    }
+
+    if (assigneeUserId !== null) {
+      const [assignee] = await tx
+        .select({ id: users.id })
+        .from(businessMemberships)
+        .innerJoin(users, eq(users.id, businessMemberships.userId))
+        .where(
+          and(
+            eq(businessMemberships.businessId, businessId),
+            eq(businessMemberships.userId, assigneeUserId),
+            eq(businessMemberships.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!assignee) {
+        throw new BadRequestError(
+          "The assignee must be an active member of this business.",
+        );
+      }
+    }
+
+    const now = new Date();
+    await tx
+      .update(sales)
+      .set({
+        assignedToUserId: assigneeUserId,
+        assignedAt: assigneeUserId !== null ? now : null,
+        assignedByUserId: assigneeUserId !== null ? actorUserId : null,
+      })
+      .where(eq(sales.id, orderId));
+
+    await recordOrderEventInTx(tx, {
+      businessId,
+      saleId: orderId,
+      eventType:
+        assigneeUserId === null
+          ? "unassigned"
+          : sale.assignedToUserId === null
+            ? "assigned"
+            : "reassigned",
+      previousStatus: sale.fulfillmentStatus,
+      newStatus: sale.fulfillmentStatus,
+      actorUserId,
+      metadata: {
+        assigneeUserId,
+        previousAssigneeUserId: sale.assignedToUserId,
+      },
+    });
+
+    publishRealtime(businessId, null, { kind: "order.updated", saleId: orderId });
+    return { id: orderId, assignedToUserId: assigneeUserId };
+  });
 }

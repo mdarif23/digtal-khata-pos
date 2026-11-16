@@ -19,6 +19,7 @@ import {
   type FulfillmentActor,
 } from "./orders.service.js";
 import { recordOrderEventInTx } from "./orderTimeline.service.js";
+import { publishRealtime } from "../realtime/realtime.service.js";
 
 /**
  * Order fulfillment (module two §6.3–6.7): processing, packaging, ready to
@@ -679,4 +680,74 @@ export async function getStockForVariants(
       ),
     );
   return new Map(rows.map((r) => [r.variantId, r.quantity ?? 0]));
+}
+
+// ---------------------------------------------------------------------------
+// Failed delivery (Flexible Operating Model Phase 3)
+// ---------------------------------------------------------------------------
+
+const deliveryFailedSchemaNote = "delivery_failed";
+
+/**
+ * Marks the active shipment FAILED (a courier returned the parcel / delivery
+ * attempt failed). Fulfillment status deliberately stays `shipped`: money and
+ * stock are untouched — redelivery is `PATCH /shipment` (new courier or
+ * tracking) followed by the normal `deliver`. The shipment row keeps the
+ * `failed` status until it is re-shipped or delivered, and the full history
+ * lives in sale_order_events.
+ */
+export async function markOrderDeliveryFailed(
+  businessId: number,
+  orderId: number,
+  actorUserId: number | null,
+  note: string | null,
+): Promise<{ id: number; status: string }> {
+  return db.transaction(async (tx) => {
+    // Same guard family as updateOrderShipment: a real, business-owned,
+    // non-POS sale in an editable state — delivered orders cannot fail
+    // retroactively (use returns instead).
+    const sale = await getEditableSaleInTx(tx, businessId, orderId);
+    if (sale.fulfillmentStatus === "delivered") {
+      throw new ConflictError(
+        "A delivered order cannot be marked as failed delivery — process a return instead.",
+      );
+    }
+    const [shipment] = await tx
+      .select({ id: saleShipments.id, status: saleShipments.status })
+      .from(saleShipments)
+      .where(
+        and(
+          eq(saleShipments.saleId, orderId),
+          eq(saleShipments.businessId, businessId),
+        ),
+      )
+      .limit(1);
+    if (!shipment) {
+      throw new NotFoundError(
+        "No shipment recorded for this order — record the shipment first.",
+      );
+    }
+    if (shipment.status === "delivered") {
+      throw new ConflictError("This shipment is already delivered.");
+    }
+
+    await tx
+      .update(saleShipments)
+      .set({ status: "failed", updatedAt: new Date() })
+      .where(eq(saleShipments.id, shipment.id));
+
+    await recordOrderEventInTx(tx, {
+      businessId,
+      saleId: orderId,
+      eventType: deliveryFailedSchemaNote,
+      previousStatus: sale.fulfillmentStatus,
+      newStatus: sale.fulfillmentStatus,
+      actorUserId,
+      note,
+      metadata: { shipmentStatus: "failed" },
+    });
+
+    publishRealtime(businessId, null, { kind: "order.updated", saleId: orderId });
+    return { id: shipment.id, status: "failed" };
+  });
 }
