@@ -6,20 +6,24 @@ import {
 } from "@tanstack/react-query";
 import {
   addPackageApi,
+  assignOrderApi,
   cancelOrderApi,
   confirmOrderApi,
   deliverOrderApi,
+  deliveryFailedApi,
   getOrderApi,
   getOrderFulfillmentApi,
   getOrderTimelineApi,
   getOrdersSummaryApi,
   getPackagingDefaultsApi,
+  listAssignableStaffApi,
   listOrdersApi,
   markOrderPaidApi,
   readyToShipApi,
   removePackageApi,
   shipOrderApi,
   startProcessingApi,
+  unassignOrderApi,
   updatePackageApi,
   updateShipmentApi,
 } from "../api/onlineOrders.api";
@@ -204,5 +208,36 @@ export function useRemovePackage() {
   return useOrderMutation(
     ({ orderId, packageId }: { orderId: number; packageId: number }) =>
       removePackageApi(orderId, packageId),
+  );
+}
+
+// Assignment (Flexible Operating Model Phase 3, migration 0088)
+
+export function useAssignableStaff(enabled: boolean) {
+  return useQuery({
+    queryKey: [...onlineOrderKeys.all, "assignable-staff"] as const,
+    queryFn: listAssignableStaffApi,
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useAssignOrder() {
+  return useOrderMutation(
+    ({ orderId, userId }: { orderId: number; userId: number }) =>
+      assignOrderApi(orderId, userId),
+  );
+}
+
+export function useUnassignOrder() {
+  return useOrderMutation(({ orderId }: { orderId: number }) =>
+    unassignOrderApi(orderId),
+  );
+}
+
+export function useDeliveryFailed() {
+  return useOrderMutation(
+    ({ orderId, note }: { orderId: number; note?: string | undefined }) =>
+      deliveryFailedApi(orderId, note),
   );
 }

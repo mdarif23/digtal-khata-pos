@@ -58,6 +58,7 @@ export function OnlineOrdersTable({
     "Total",
     "Payment",
     "Fulfillment",
+    "Assignee",
     "Location",
   ];
 
@@ -133,6 +134,11 @@ export function OnlineOrdersTable({
                 </TableCell>
                 <TableCell>
                   <OrderStatusBadge status={order.fulfillmentStatus} />
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {order.assignedToName ?? (
+                    <span className="italic text-warning">Unassigned</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {order.locationName ?? "—"}

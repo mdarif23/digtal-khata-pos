@@ -615,6 +615,13 @@
       "when": 1794500037000,
       "tag": "0087_receipt_share_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1794849307774,
+      "tag": "0088_online_order_assignment",
+      "breakpoints": true
     }
   ]
 }

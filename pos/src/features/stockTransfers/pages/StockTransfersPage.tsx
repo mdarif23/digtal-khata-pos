@@ -43,6 +43,8 @@ import {
   type TransferStatus,
   type VariantOption,
 } from "../stockTransfers.api";
+import { usePlanUpgradeError } from "@/hooks/usePlanUpgrade";
+import { PlanUpgradeCard } from "@/components/common/PlanUpgradeCard";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
 import { BarcodeScannerInput } from "@/features/barcodes/scanning/BarcodeScannerInput";
@@ -79,6 +81,10 @@ export function StockTransfersPage() {
   const locations = useSessionStore((state) => state.locations);
   const [transfers, setTransfers] = useState<TransferListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
+  // Transfers are plan-gated (multiLocation): a 403 FEATURE_NOT_IN_PLAN gets
+  // the shared upgrade card instead of a silent toast.
+  const planGate = usePlanUpgradeError(loadError);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [fromLocationId, setFromLocationId] = useState<string>("");
@@ -107,7 +113,9 @@ export function StockTransfersPage() {
     try {
       const data = await getTransfersApi();
       setTransfers(data);
-    } catch {
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(error);
       toast.add({ title: "Unable to load transfers", type: "error" });
     } finally {
       setLoading(false);
@@ -358,6 +366,14 @@ export function StockTransfersPage() {
       </div>
 
       <div className="rounded-lg border bg-background">
+        {planGate ? (
+          <div className="p-4">
+            <PlanUpgradeCard
+              gate={planGate}
+              featureLabel="Stock transfers"
+            />
+          </div>
+        ) : (
         <Table>
           <TableHeader>
             <TableRow>
@@ -416,6 +432,7 @@ export function StockTransfersPage() {
             )}
           </TableBody>
         </Table>
+        )}
       </div>
 
       {/* Create dialog */}

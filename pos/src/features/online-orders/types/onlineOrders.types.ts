@@ -59,6 +59,9 @@ export interface OnlineOrderRow {
   locationName: string | null;
   createdAt: string | null;
   itemsCount: number;
+  /** Current fulfillment owner (null = unassigned). */
+  assignedToUserId: number | null;
+  assignedToName: string | null;
 }
 
 export interface OnlineOrdersFilters {
@@ -67,6 +70,8 @@ export interface OnlineOrdersFilters {
   fulfillmentStatus?: FulfillmentState | undefined;
   search?: string | undefined;
   locationId?: number | undefined;
+  /** Assignment filter: "me" resolves server-side to the signed-in user. */
+  assignee?: "me" | "unassigned" | number | undefined;
   from?: string | undefined;
   to?: string | undefined;
   page?: number | undefined;
@@ -96,6 +101,8 @@ export interface OrdersSummary {
   refundedTotal: number;
   netSales: number;
   unpaidCount: number;
+  /** Open (completed, not delivered/returned) orders with no assignee. */
+  unassignedCount: number;
 }
 
 export interface OrderDetailItem {
@@ -130,6 +137,10 @@ export interface OrderDetail {
   customerPhone: string | null;
   customerEmail: string | null;
   locationName: string | null;
+  /** Current fulfillment owner (null = unassigned). */
+  assignedToUserId: number | null;
+  assignedToName: string | null;
+  assignedAt: string | null;
   shippingName: string | null;
   shippingPhone: string | null;
   shippingAddress: string | null;

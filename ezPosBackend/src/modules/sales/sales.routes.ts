@@ -6,9 +6,15 @@ import {
   requireBusinessContext,
   requireFullAccess,
 } from "../../middleware/business.js";
-import { requireLocationAccess } from "../../middleware/location.js";
+import {
+  requireLocationAccess,
+  requireOptionalLocation,
+} from "../../middleware/location.js";
 import { requireTerminalContext } from "../../middleware/terminalContext.js";
 import { requireAnyPermission, requirePermission } from "../../middleware/permissions.js";
+import { requireSurfaceModes } from "../../middleware/storefront.js";
+
+const PHYSICAL_SURFACE_MODES = ["physical_only", "omnichannel"] as const;
 
 const router = express.Router();
 // Location-aware: the X-Location-Id header (or the business default) is
@@ -21,6 +27,14 @@ const read = [
 // Writes additionally resolve the optional X-Terminal-Id header (terminal
 // attribution + revocation enforcement; strict mode via pos_settings).
 const write = [...read, requireTerminalContext(), requireFullAccess] as const;
+// The dashboard is meaningful without any physical counter (online-only
+// businesses): location resolves when one exists, stays absent otherwise,
+// and the service already treats the location scope as optional.
+const dashboardRead = [
+  requireAuth,
+  requireBusinessContext(),
+  requireOptionalLocation(),
+] as const;
 
 router.get(
   "/api/sold_products",
@@ -28,9 +42,21 @@ router.get(
   requirePermission("sales.view"),
   salesController.getSalesData,
 );
+// Counter checkout belongs to the physical surface: blocked (403
+// SURFACE_NOT_ACTIVE) for online-only businesses even via direct API calls.
+// Refund/exchange/list routes below stay mode-neutral — online refunds flow
+// through the same endpoints.
 router.post(
   "/api/sales",
-  ...write,
+  requireAuth,
+  requireBusinessContext(),
+  requireSurfaceModes(
+    [...PHYSICAL_SURFACE_MODES],
+    "Counter sales are not active for an online-only business. Switch the operating model in Settings → Business Operations.",
+  ),
+  requireLocationAccess(),
+  requireTerminalContext(),
+  requireFullAccess,
   requirePermission("pos.create_sale"),
   salesController.createSale,
 );
@@ -71,7 +97,7 @@ router.post(
 );
 router.get(
   "/api/dashboard_summary",
-  ...read,
+  ...dashboardRead,
   requirePermission("dashboard.view"),
   salesController.getDashboardSummary,
 );

@@ -1,17 +1,13 @@
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { AxiosResponse } from "axios";
+import {
+  extractEntitlementError,
+  type EntitlementErrorInfo,
+} from "@/hooks/usePlanUpgrade";
 
-/**
- * Entitlement payload from a 403 FEATURE_NOT_IN_PLAN response: the backend
- * names the plans that include the gated feature so the UI can point the
- * user at the right upgrade instead of a generic error.
- */
-export interface EntitlementErrorInfo {
-  code: string;
-  message: string;
-  upgradePlans: string[];
-}
+/** Shared plan-gate payload — defined once in hooks/usePlanUpgrade. */
+export type { EntitlementErrorInfo };
 
 interface UseReportDataResult<T> {
   data: T | null;
@@ -20,33 +16,6 @@ interface UseReportDataResult<T> {
   /** Set when the failure was a 403 FEATURE_NOT_IN_PLAN gate, not a glitch. */
   entitlementError: EntitlementErrorInfo | null;
   refetch: () => void;
-}
-
-function extractEntitlementError(err: unknown): EntitlementErrorInfo | null {
-  if (
-    typeof err === "object" &&
-    err !== null &&
-    "response" in err &&
-    typeof (err as { response?: { status?: number } }).response?.status ===
-      "number" &&
-    (err as { response: { status: number } }).response.status === 403
-  ) {
-    const body = (
-      err as {
-        response: { data?: { code?: string; message?: string; upgradePlans?: string[] } };
-      }
-    ).response.data;
-    if (body?.code === "FEATURE_NOT_IN_PLAN") {
-      return {
-        code: body.code,
-        message:
-          body.message ??
-          "This feature is not part of your current plan. Upgrade to unlock it.",
-        upgradePlans: Array.isArray(body.upgradePlans) ? body.upgradePlans : [],
-      };
-    }
-  }
-  return null;
 }
 
 export function useReportData<T>(

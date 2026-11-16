@@ -22,6 +22,8 @@ import ReportsHub from "@/features/reports/pages/ReportsHub";
 import ForbiddenPage from "@/pages/ForbiddenPage";
 import { RouteErrorBoundary } from "@/components/common/RouteErrorBoundary";
 import { RequirePermission } from "@/components/common/PermissionGuard";
+import { RequireMode } from "@/components/common/ModeGuard";
+import { BusinessOperationsPage } from "@/features/business-operations/pages/BusinessOperationsPage";
 import { UsersPage } from "@/features/users/pages/UsersPage";
 import { LocationsPage } from "@/features/locations/pages/LocationsPage";
 import { StockTransfersPage } from "@/features/stockTransfers/pages/StockTransfersPage";
@@ -100,6 +102,10 @@ const REPORTS_PERMISSIONS = [
 const FINANCE_OVERVIEW_PERMISSIONS = ["finance.overview.view", "finance.profit.view"];
 const FINANCE_OWNER_PERMISSIONS = ["finance.investment.view", "finance.withdrawal.view"];
 
+// Operating-model surfaces — must mirror navigation.ts `modes` entries.
+const PHYSICAL_MODES = ["physical_only", "omnichannel"] as const;
+const ONLINE_MODES = ["online_only", "omnichannel"] as const;
+
 // All application routes. Mounted inside a single pathless wrapper route
 // whose errorElement catches navigation errors and component crashes
 // (P1-1: a render error used to unmount the whole tree, POS included).
@@ -126,7 +132,9 @@ const routes = [
     path: "/",
     element: (
       <RequirePermission permission="pos.view">
-        <Pos />
+        <RequireMode modes={[...PHYSICAL_MODES]}>
+          <Pos />
+        </RequireMode>
       </RequirePermission>
     ),
   },
@@ -227,7 +235,9 @@ const routes = [
         path: "/online-orders",
         element: (
           <RequirePermission permission="orders.view">
-            <OnlineOrdersPage />
+            <RequireMode modes={[...ONLINE_MODES]}>
+              <OnlineOrdersPage />
+            </RequireMode>
           </RequirePermission>
         ),
       },
@@ -235,7 +245,9 @@ const routes = [
         path: "/online-orders/:orderId",
         element: (
           <RequirePermission permission="orders.view">
-            <OnlineOrderDetailsPage />
+            <RequireMode modes={[...ONLINE_MODES]}>
+              <OnlineOrderDetailsPage />
+            </RequireMode>
           </RequirePermission>
         ),
       },
@@ -645,7 +657,17 @@ const routes = [
         path: "/register",
         element: (
           <RequirePermission permission="cash_register.view">
-            <RegisterPage />
+            <RequireMode modes={[...PHYSICAL_MODES]}>
+              <RegisterPage />
+            </RequireMode>
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/settings/business-operations",
+        element: (
+          <RequirePermission permission="settings.view">
+            <BusinessOperationsPage />
           </RequirePermission>
         ),
       },
@@ -659,7 +681,9 @@ const routes = [
               "cash_drawer.open_without_sale",
             ]}
           >
-            <HardwareSettingsPage />
+            <RequireMode modes={[...PHYSICAL_MODES]}>
+              <HardwareSettingsPage />
+            </RequireMode>
           </RequirePermission>
         ),
       },

@@ -19,6 +19,7 @@ function loginAs(permissions: string[]) {
   useSessionStore.getState().setSession({
     user: { id: 1, fullName: "Cashier", email: "cashier@example.test" },
     businessId: 1,
+    businessMode: null,
     roleSlug: "cashier",
     roleName: "Cashier",
     roles: [],

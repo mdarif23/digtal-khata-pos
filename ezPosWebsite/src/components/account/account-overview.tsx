@@ -133,12 +133,20 @@ export function AccountOverview() {
             Subscription and usage at a glance.
           </p>
         </div>
-        <Link
-          href="/account/subscription"
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
-        >
-          Manage subscription
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href="/account/business-operations"
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:border-slate-400"
+          >
+            Business Operations
+          </Link>
+          <Link
+            href="/account/subscription"
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
+          >
+            Manage subscription
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-6 sm:grid-cols-2">

@@ -17,6 +17,8 @@ const row: OnlineOrderRow = {
   locationName: "Main Store",
   createdAt: "2026-11-04T10:00:00.000Z",
   itemsCount: 3,
+  assignedToUserId: null,
+  assignedToName: null,
 };
 
 describe("OnlineOrdersTable", () => {

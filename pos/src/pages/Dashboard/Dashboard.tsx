@@ -21,7 +21,13 @@ import {
 import { Link } from "react-router";
 import axios from "../../api/axios.js";
 import { useSessionStore } from "@/auth/sessionStore";
+import { usePermissions } from "@/hooks/usePermissions";
 import { formatCurrency as currency } from "@/lib/format";
+import {
+  reportsApi,
+  type ChannelPerformanceRow,
+} from "../../features/reports/api/reports.api.js";
+import type { ReportFilters } from "../../features/reports/types/report.types.js";
 import type {
   DashboardData,
   LowStockProduct,
@@ -67,6 +73,15 @@ export default function DashboardComponent() {
   const [locationId, setLocationId] = useState<number | undefined>(undefined);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const requestId = useRef(0);
+  const { hasPermission } = usePermissions();
+
+  // Consolidated owner view (Flexible Operating Model Phase 5): revenue by
+  // sales channel — in-store POS next to WooCommerce/storefront — reusing the
+  // existing channel-performance report (no new calculation).
+  const canViewChannelMix = hasPermission("reports.financial.view");
+  const [channelMix, setChannelMix] = useState<ChannelPerformanceRow[] | null>(
+    null,
+  );
   const selectedPeriod =
     periodOptions.find((option) => option.value === range) ?? periodOptions[0];
   const periodLabel = selectedPeriod.label;
@@ -128,6 +143,34 @@ export default function DashboardComponent() {
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, [loadDashboard]);
+
+  // Channel mix follows the same period when the report API supports it
+  // (today/yesterday/7d/30d); longer dashboard windows fall back to the
+  // report default (this month). Failures stay silent — this card is an
+  // addition, never a blocker for the dashboard itself.
+  useEffect(() => {
+    if (!canViewChannelMix) {
+      setChannelMix(null);
+      return;
+    }
+    const sharedPeriods: DashboardPeriod[] = [
+      "today",
+      "yesterday",
+      "7d",
+      "30d",
+    ];
+    const filters: Partial<ReportFilters> = sharedPeriods.includes(range)
+      ? { period: range as ReportFilters["period"] }
+      : {};
+    void (async () => {
+      try {
+        const { data } = await reportsApi.getChannelPerformance(filters);
+        setChannelMix(data.data);
+      } catch {
+        setChannelMix(null);
+      }
+    })();
+  }, [canViewChannelMix, range, locationId]);
 
   const chartData = useMemo(() => dashboard.salesOverview, [dashboard.salesOverview]);
   const hasData = dashboard.salesOverview.length > 0;
@@ -475,6 +518,72 @@ export default function DashboardComponent() {
             )}
           </article>
         </section>
+
+        {/* Consolidated owner view: revenue by sales channel (POS alongside
+            online channels) — reuses the channel-performance report. */}
+        {canViewChannelMix && channelMix && channelMix.length > 0 ? (
+          <article className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs sm:p-6">
+            <SectionHeading
+              title="Channel mix"
+              description={`Revenue by sales channel · ${periodLabel.toLowerCase()}.`}
+              action={
+                <Link
+                  to="/reports?tab=analytics-channels"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  Full report
+                  <ArrowRight aria-hidden="true" className="size-3.5" />
+                </Link>
+              }
+            />
+            <ul className="mt-5 space-y-4">
+              {channelMix.map((channel) => {
+                const totalRevenue = channelMix.reduce(
+                  (sum, row) => sum + row.revenue,
+                  0,
+                );
+                const share =
+                  totalRevenue > 0 ? (channel.revenue / totalRevenue) * 100 : 0;
+                const label =
+                  channel.channel === "pos"
+                    ? "In-store (POS)"
+                    : channel.channel === "woocommerce"
+                      ? "WooCommerce"
+                      : channel.channel === "offline"
+                        ? "Offline (LAN)"
+                        : "Storefront";
+                return (
+                  <li key={channel.channel}>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium text-foreground">
+                        {label}
+                        <span className="ml-2 text-xs font-normal text-muted-foreground/80">
+                          {channel.orders.toLocaleString("en-BD")} orders
+                        </span>
+                      </span>
+                      <span className="text-sm font-semibold text-foreground">
+                        {currency(channel.revenue)}
+                      </span>
+                    </div>
+                    <div
+                      role="progressbar"
+                      aria-label={`${label} revenue share`}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(share)}
+                      className="mt-2 h-2 overflow-hidden rounded-full bg-muted"
+                    >
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${share}%` }}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </article>
+        ) : null}
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl border border-border bg-card p-5 shadow-xs">

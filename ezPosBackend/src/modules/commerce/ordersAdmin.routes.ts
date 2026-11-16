@@ -29,6 +29,14 @@ router.get(
   requirePermission("orders.view"),
   ordersAdminController.getOrderSummary,
 );
+// Assignee picker — registered BEFORE /orders/:orderId as well. Deliberately
+// NOT users.view-gated: the picker needs names, orders.assign is the authority.
+router.get(
+  "/api/businesses/:businessId/orders/assignable-staff",
+  ...read,
+  requirePermission("orders.assign"),
+  ordersAdminController.getAssignableStaff,
+);
 router.get(
   "/api/businesses/:businessId/orders/:orderId",
   ...read,
@@ -102,5 +110,29 @@ router.patch(
   ordersAdminController.patchShipment,
 );
 router.post(`${orderId}/deliver`, ...write, requirePermission("orders.deliver"), ordersAdminController.deliver);
+
+// Assignment (Flexible Operating Model Phase 3, migration 0088): the
+// assignee must be an active member; every change writes a timeline event.
+router.post(
+  `${orderId}/assign`,
+  ...write,
+  requirePermission("orders.assign"),
+  ordersAdminController.assignOrder,
+);
+router.delete(
+  `${orderId}/assign`,
+  ...write,
+  requirePermission("orders.assign"),
+  ordersAdminController.unassignOrder,
+);
+
+// Failed delivery: shipment -> failed (money/stock untouched); redelivery is
+// PATCH /shipment + deliver, or a return.
+router.post(
+  `${orderId}/delivery-failed`,
+  ...write,
+  requirePermission("orders.manage_shipping"),
+  ordersAdminController.deliveryFailed,
+);
 
 export default router;

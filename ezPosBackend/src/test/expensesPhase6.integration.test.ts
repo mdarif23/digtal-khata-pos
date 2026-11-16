@@ -399,7 +399,10 @@ describe("expenses phase 6 integration", { skip: !runIntegration }, () => {
       accountant,
       "POST",
       "/api/expense_budgets",
-      { category_id: null, location_id: null, month: thisMonth(), amount: 500 },
+      // Amount must stay above the worst-case generated total (300 base +
+      // 75 × up to 3 weekly periods landing in the same month = 525), or the
+      // overBudget=false assertion below flips on mid-month runs (day ≥ 15).
+      { category_id: null, location_id: null, month: thisMonth(), amount: 600 },
       locationA,
     );
     assert.equal(created.status, 201);
@@ -457,7 +460,7 @@ describe("expenses phase 6 integration", { skip: !runIntegration }, () => {
       (d) => d.slice(0, 7) === today().slice(0, 7),
     ).length;
     const overall = rows.find((r) => r.categoryId === null);
-    assert.equal(Number(overall?.amount), 500);
+    assert.equal(Number(overall?.amount), 600);
     assert.equal(Number(overall?.actualAmount), 300 + 75 * inMonthWeekly);
     assert.equal(overall?.overBudget, false);
     const catBudget = rows.find(

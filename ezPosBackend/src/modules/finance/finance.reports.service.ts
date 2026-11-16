@@ -635,6 +635,20 @@ export async function getReconciliation(businessId: number) {
     WHERE r.business_id = ${businessId} AND per.status IN ('approved', 'partial', 'paid')
   `).then((r) => r.rows as { total: number }[]);
 
+  // Revenue: posted 4010 vs operational Σ(final_total − vat − delivery_fee)
+  // over completed sales (all channels). Online orders post to the GL from
+  // the Flexible Operating Model Phase 4 cutover onward (E3: forward-only,
+  // no historical backfill) — a variance here quantifies the pre-cutover
+  // online margin that never reached the ledger.
+  const [revenue] = await db
+    .select({
+      total: sql<string>`coalesce(sum(${sales.finalTotal} - ${sales.vat} - ${sales.deliveryFee}), 0)`,
+    })
+    .from(sales)
+    .where(
+      and(eq(sales.businessId, businessId), eq(sales.status, "completed")),
+    );
+
   const checks: ReconciliationCheck[] = [
     {
       key: "inventory",
@@ -659,6 +673,12 @@ export async function getReconciliation(businessId: number) {
       glAccount: "2030",
       glBalance: poishaToMoneyString(-poisha(byCode.get("2030")?.balance)),
       operational: Number(salaryPayable?.total ?? 0).toFixed(2),
+    },
+    {
+      key: "revenue",
+      glAccount: "4010",
+      glBalance: poishaToMoneyString(-poisha(byCode.get("4010")?.balance)),
+      operational: Number(revenue?.total ?? 0).toFixed(2),
     },
   ].map((check) => {
     const variance =

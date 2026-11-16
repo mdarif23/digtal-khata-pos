@@ -20,16 +20,16 @@ export interface PlanFeatures {
   multiLocation?: boolean | undefined;
   /** Profit, tax reconciliation, and location-comparison reports. */
   advancedReports?: boolean | undefined;
-  /** Data export endpoints (reserved; no gate wired yet). */
+  /** Data export endpoints (enforced on the exports router — Flexible
+   *  Operating Model E6; every seeded plan carries it). */
   exports?: boolean | undefined;
-  /** Purchase management module (reserved; no gate wired yet). */
+  /** Purchase management module (reserved; no gate wired yet — needs a
+   *  product decision on which purchase capabilities it should gate). */
   purchaseManagement?: boolean | undefined;
   /** Storefront API keys for custom websites (Phase 9.2). */
   storefrontApi?: boolean | undefined;
   /** WooCommerce store connections (Phase 9.3). */
   woocommerceIntegration?: boolean | undefined;
-  /** More than one connected store of any platform. */
-  multipleOnlineStores?: boolean | undefined;
   /** Outbound webhook endpoints (Phase 9.4). */
   advancedWebhooks?: boolean | undefined;
   /** Hosted storefront builder sites (website platform stage 1). */

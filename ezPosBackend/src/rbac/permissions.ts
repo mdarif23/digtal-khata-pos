@@ -193,6 +193,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
 
   // Online Orders (order management & fulfillment)
   { key: "orders.view", module: "orders", description: "View online orders, their details and timelines" },
+  { key: "orders.assign", module: "orders", description: "Assign online orders to employees and reassign them" },
   { key: "orders.confirm", module: "orders", description: "Confirm or reject incoming online orders" },
   { key: "orders.process", module: "orders", description: "Start processing and progress order fulfillment" },
   { key: "orders.pack", module: "orders", description: "Record and edit order packages" },
@@ -323,6 +324,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     "storefront.view",
     "storefront.manage",
     "orders.view",
+    "orders.assign",
     "orders.confirm",
     "orders.process",
     "orders.pack",

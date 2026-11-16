@@ -1,14 +1,17 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import {
+  changeBusinessModeForMembership,
   createBusinessForUser,
   deleteBusinessForMembership,
   getBusinessForMembership,
+  getBusinessOperationsSummary,
   removeBusinessLogoForMembership,
   setBusinessLogoForMembership,
   updateBusinessForMembership,
 } from "./businesses.service.js";
 import {
+  changeBusinessModeSchema,
   createBusinessSchema,
   updateBusinessSchema,
 } from "./businesses.validation.js";
@@ -117,6 +120,59 @@ export async function updateBusiness(req: Request, res: Response) {
     return res.status(200).json({ success: true, business: detail });
   } catch (err) {
     return sendSafeError(res, err, "Unable to update the business right now.");
+  }
+}
+
+export async function changeBusinessMode(req: Request, res: Response) {
+  try {
+    if (!req.user || !req.membership) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
+    }
+    const parsed = changeBusinessModeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: parsed.error.issues[0]?.message ?? "Invalid business mode.",
+      });
+    }
+    const detail = await changeBusinessModeForMembership(
+      req.user.id,
+      req.membership.businessId,
+      parsed.data.mode,
+    );
+    return res.status(200).json({
+      success: true,
+      message: "Business mode updated.",
+      business: detail,
+    });
+  } catch (err) {
+    return sendSafeError(
+      res,
+      err,
+      "Unable to change the business mode right now.",
+    );
+  }
+}
+
+export async function getBusinessOperations(req: Request, res: Response) {
+  try {
+    if (!req.user || !req.membership) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
+    }
+    const operations = await getBusinessOperationsSummary(
+      req.membership.businessId,
+    );
+    return res.status(200).json({ success: true, operations });
+  } catch (err) {
+    return sendSafeError(
+      res,
+      err,
+      "Unable to load the business operations right now.",
+    );
   }
 }
 

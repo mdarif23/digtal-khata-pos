@@ -10,6 +10,7 @@ import {
 import { requireLocationAccess, getLocationId } from "../../middleware/location.js";
 import { requireTerminalContext, getTerminalId } from "../../middleware/terminalContext.js";
 import { requirePermission } from "../../middleware/permissions.js";
+import { requireSurfaceModes } from "../../middleware/storefront.js";
 import { bridgePollRateLimit } from "../../middleware/rateLimit.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import {
@@ -28,9 +29,16 @@ import {
  */
 const router = express.Router();
 
+// Offline terminals sync counter sales: physical surface only.
+const surface = requireSurfaceModes(
+  ["physical_only", "omnichannel"],
+  "Offline terminals are not active for an online-only business. Switch the operating model in Settings → Business Operations.",
+);
+
 const read = [
   requireAuth,
   requireBusinessContext(),
+  surface,
   requireLocationAccess(),
   requireTerminalContext(),
 ] as const;

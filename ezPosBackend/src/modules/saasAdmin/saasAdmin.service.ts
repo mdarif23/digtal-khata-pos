@@ -277,6 +277,10 @@ export interface AdminBusinessSummary {
   name: string;
   slug: string;
   status: string;
+  /** Operating model (physical_only | online_only | omnichannel). */
+  mode: string;
+  /** Free-form trade label (Retail shop, …) set during onboarding. */
+  businessType: string | null;
   ownerName: string | null;
   ownerEmail: string | null;
   createdAt: Date | null;
@@ -296,6 +300,8 @@ export async function listBusinesses(
       name: businesses.name,
       slug: businesses.slug,
       status: businesses.status,
+      mode: businesses.mode,
+      businessType: businesses.businessType,
       createdAt: businesses.createdAt,
       ownerName: users.fullName,
       ownerEmail: users.email,

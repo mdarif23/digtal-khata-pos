@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, PackageOpen, Truck } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  PackageOpen,
+  Truck,
+  UserRound,
+} from "lucide-react";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,15 +39,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { usePermissions } from "@/hooks/usePermissions";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import {
+  useAssignOrder,
+  useAssignableStaff,
   useCancelOrder,
   useConfirmOrder,
   useDeliverOrder,
+  useDeliveryFailed,
   useMarkOrderPaid,
   useOnlineOrder,
   useOrderFulfillment,
   useOrderTimeline,
   useReadyToShip,
   useStartProcessing,
+  useUnassignOrder,
 } from "../hooks/useOnlineOrders";
 import { OrderStateBadge, OrderStatusBadge } from "../components/OrderStatusBadge";
 import { OrderTimeline } from "../components/OrderTimeline";
@@ -77,11 +87,18 @@ export function OnlineOrderDetailsPage() {
   const readyToShip = useReadyToShip();
   const deliverOrder = useDeliverOrder();
   const markPaid = useMarkOrderPaid();
+  const assignOrder = useAssignOrder();
+  const unassignOrder = useUnassignOrder();
+  const deliveryFailed = useDeliveryFailed();
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [codOpen, setCodOpen] = useState(false);
   const [codMethod, setCodMethod] = useState<(typeof COD_METHODS)[number]>("cash");
+  const [pickedAssignee, setPickedAssignee] = useState<string>("");
+
+  const canAssign = hasPermission("orders.assign");
+  const staffQuery = useAssignableStaff(canAssign);
 
   const order = orderQuery.data;
   const snapshot = fulfillmentQuery.data;
@@ -283,12 +300,96 @@ export function OnlineOrderDetailsPage() {
               Collect COD on delivery
             </Button>
           ) : null}
+          {isCompleted &&
+          fulfillment === "shipped" &&
+          hasPermission("orders.manage_shipping") ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={deliveryFailed.isPending}
+              onClick={() =>
+                void onAction("Delivery marked failed", () =>
+                  deliveryFailed.mutateAsync({ orderId }),
+                )
+              }
+            >
+              <AlertTriangle aria-hidden="true" className="size-4" />
+              Mark delivery failed
+            </Button>
+          ) : null}
         </div>
       ) : (
         <div className="rounded-lg border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
           This order is cancelled.
         </div>
       )}
+
+      {/* Assignment (Flexible Operating Model Phase 3) — who owns this order's
+       * fulfillment. Visible to everyone; controls require orders.assign. */}
+      {isCompleted && !isCancelled ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
+          <UserRound aria-hidden="true" className="size-4 text-muted-foreground" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              {order.assignedToName ?? "Unassigned"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {order.assignedToName
+                ? `Owner of this fulfillment task${order.assignedAt ? ` since ${formatDateTime(order.assignedAt)}` : ""}`
+                : "Assign someone so this order has a clear owner."}
+            </p>
+          </div>
+          {canAssign ? (
+            <div className="ml-auto flex items-center gap-2">
+              <Select
+                value={pickedAssignee}
+                onValueChange={(value) => setPickedAssignee(value ?? "")}
+              >
+                <SelectTrigger className="h-9 w-52">
+                  <SelectValue placeholder="Change assignee…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(staffQuery.data ?? []).map((member) => (
+                    <SelectItem key={member.id} value={String(member.id)}>
+                      {member.fullName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                size="sm"
+                disabled={!pickedAssignee || assignOrder.isPending}
+                onClick={() => {
+                  const userId = Number(pickedAssignee);
+                  if (!userId) return;
+                  void onAction("Order assigned", async () => {
+                    await assignOrder.mutateAsync({ orderId, userId });
+                    setPickedAssignee("");
+                  });
+                }}
+              >
+                Assign
+              </Button>
+              {order.assignedToUserId ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={unassignOrder.isPending}
+                  onClick={() =>
+                    void onAction("Order unassigned", () =>
+                      unassignOrder.mutateAsync({ orderId }),
+                    )
+                  }
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="grid gap-5 lg:grid-cols-3">
         {/* Left column: overview, customer, items */}
@@ -308,6 +409,10 @@ export function OnlineOrderDetailsPage() {
               />
               <DetailRow label="Order date" value={formatDateTime(order.createdAt)} />
               <DetailRow label="Location" value={order.locationName ?? "—"} />
+              <DetailRow
+                label="Assignee"
+                value={order.assignedToName ?? <span className="italic text-muted-foreground">Unassigned</span>}
+              />
               <DetailRow
                 label="Subtotal"
                 value={<span className="tabular-nums">{formatCurrency(order.subtotal)}</span>}

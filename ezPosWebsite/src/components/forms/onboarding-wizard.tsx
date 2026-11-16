@@ -9,8 +9,10 @@ import { TextField } from "@/components/forms/text-field";
 import { useAuth } from "@/components/providers/auth-provider";
 import {
   createLocation,
+  fetchBusiness,
   fetchSubscription,
   updateBusiness,
+  type BusinessMode,
 } from "@/lib/api/account";
 
 const POS_URL = process.env.NEXT_PUBLIC_POS_URL ?? "http://localhost:5173";
@@ -106,7 +108,9 @@ function OnboardingContent() {
   const [country, setCountry] = useState("Bangladesh");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
-  // Step 2 — location
+  // Operating model of this business (adapts the location step's copy).
+  const [mode, setMode] = useState<BusinessMode>("physical_only");
+  // Step 2 — location (the stock source for whichever channels are active)
   const [locationName, setLocationName] = useState("Main Store");
   const [locationAddress, setLocationAddress] = useState("");
   // Step 3 — preferences
@@ -132,6 +136,25 @@ function OnboardingContent() {
       setName(membership.businessName);
     }
   }, [membership, name]);
+
+  // Load the business's operating model so the location step speaks the
+  // right language (a counter for physical modes, a stock source for
+  // online-only).
+  useEffect(() => {
+    if (!businessId) return;
+    void (async () => {
+      const result = await fetchBusiness(businessId);
+      if (result.ok && result.data?.business.mode) {
+        const loadedMode = result.data.business.mode;
+        setMode(loadedMode);
+        if (loadedMode === "online_only" && locationName === "Main Store") {
+          setLocationName("Online Store");
+        }
+      }
+    })();
+    // Run once per business; locationName is read for the untouched default.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessId]);
 
   useEffect(() => {
     if (step !== 3 || !businessId) return;
@@ -324,15 +347,16 @@ function OnboardingContent() {
       {step === 1 ? (
         <div className="mt-6 space-y-5">
           <p className="text-sm text-slate-600">
-            Where does the counter live? Stock and registers are tracked per
-            location.
+            {mode === "online_only"
+              ? "Where do you store your stock? Inventory lives at a location — for an online-only business this is your warehouse or stock room, not a customer-facing shop."
+              : "Where does the counter live? Stock and registers are tracked per location."}
           </p>
           <TextField
             id="onboarding-location"
             label="Location name"
             value={locationName}
             onChange={(event) => setLocationName(event.target.value)}
-            placeholder="Main Store"
+            placeholder={mode === "online_only" ? "Online Store" : "Main Store"}
           />
           <TextField
             id="onboarding-location-address"

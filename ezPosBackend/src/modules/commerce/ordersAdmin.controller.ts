@@ -1,10 +1,12 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import {
+  assignOnlineOrder,
   cancelOnlineOrder,
   confirmOnlineOrder,
   getOrderDetail,
   getOrdersSummary,
+  listAssignableStaff,
   listUnifiedOrders,
   markOnlineOrderPaid,
   updateFulfillmentStatus,
@@ -15,6 +17,7 @@ import {
   deliverOrder,
   getOrderFulfillment,
   getOrderPackagingDefaults,
+  markOrderDeliveryFailed,
   markOrderReadyToShip,
   shipOrder,
   startOrderProcessing,
@@ -31,6 +34,11 @@ const listSchema = z.object({
   fulfillmentStatus: z.string().optional(),
   search: z.string().optional(),
   locationId: z.coerce.number().int().positive().optional(),
+  // Assignment filter: "me" resolves to the caller server-side — the client
+  // never picks an arbitrary user id for scoping.
+  assignee: z
+    .union([z.literal("me"), z.literal("unassigned"), z.coerce.number().int().positive()])
+    .optional(),
   from: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "from must be YYYY-MM-DD")
@@ -49,6 +57,7 @@ const summarySchema = listSchema.omit({
   search: true,
   page: true,
   pageSize: true,
+  assignee: true,
 });
 
 export async function getOrderSummary(req: Request, res: Response) {
@@ -76,9 +85,16 @@ export async function getOrders(req: Request, res: Response) {
       .json({ success: false, message: "Invalid order filters." });
   }
   try {
+    // "me" never travels as a client-chosen id — resolve the caller here.
+    const { assignee, ...rest } = parsed.data;
+    const assigneeFilter =
+      assignee === "me" ? (req.user?.id as number) : assignee;
     res.status(200).json({
       success: true,
-      ...((await listUnifiedOrders(getBusinessId(req), parsed.data)) as object),
+      ...((await listUnifiedOrders(getBusinessId(req), {
+        ...rest,
+        assignee: assigneeFilter,
+      })) as object),
     });
   } catch (err) {
     sendSafeError(res, err, "Unable to load orders right now.");
@@ -535,5 +551,117 @@ export async function deliver(req: Request, res: Response) {
     });
   } catch (err) {
     sendSafeError(res, err, "Unable to record the delivery right now.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Assignment (Flexible Operating Model Phase 3, migration 0088)
+// ---------------------------------------------------------------------------
+
+const assignSchema = z.object({
+  userId: z.coerce.number().int().positive(),
+});
+
+/** POST /:orderId/assign — body { userId }. Reassignment = assign again. */
+export async function assignOrder(req: Request, res: Response) {
+  const orderId = parseOrderId(req);
+  if (orderId === null) {
+    return res
+      .status(400)
+      .json({ success: false, message: "A valid order ID is required." });
+  }
+  const parsed = assignSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ success: false, message: "A valid assignee user ID is required." });
+  }
+  try {
+    await assignOnlineOrder(
+      getBusinessId(req),
+      orderId,
+      parsed.data.userId,
+      req.user?.id ?? null,
+    );
+    res.status(200).json({
+      success: true,
+      message: "Order assigned.",
+    });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to assign the order right now.");
+  }
+}
+
+/** DELETE /:orderId/assign — clears the assignment (history kept). */
+export async function unassignOrder(req: Request, res: Response) {
+  const orderId = parseOrderId(req);
+  if (orderId === null) {
+    return res
+      .status(400)
+      .json({ success: false, message: "A valid order ID is required." });
+  }
+  try {
+    await assignOnlineOrder(getBusinessId(req), orderId, null, req.user?.id ?? null);
+    res.status(200).json({
+      success: true,
+      message: "Order unassigned.",
+    });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to unassign the order right now.");
+  }
+}
+
+/**
+ * GET /orders/assignable-staff — active members for the assignee picker.
+ * Deliberately NOT behind users.view: the picker needs names, not the staff
+ * admin; orders.assign is the authority here.
+ */
+export async function getAssignableStaff(req: Request, res: Response) {
+  try {
+    res.status(200).json({
+      success: true,
+      data: await listAssignableStaff(getBusinessId(req)),
+    });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to load the team right now.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Failed delivery (Flexible Operating Model Phase 3)
+// ---------------------------------------------------------------------------
+
+const deliveryFailedSchema = z.object({
+  note: z.string().max(500).optional(),
+});
+
+/** POST /:orderId/delivery-failed — marks the active shipment failed. */
+export async function deliveryFailed(req: Request, res: Response) {
+  const orderId = parseOrderId(req);
+  if (orderId === null) {
+    return res
+      .status(400)
+      .json({ success: false, message: "A valid order ID is required." });
+  }
+  const parsed = deliveryFailedSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid delivery-failure details." });
+  }
+  try {
+    await markOrderDeliveryFailed(
+      getBusinessId(req),
+      orderId,
+      req.user?.id ?? null,
+      parsed.data.note ?? null,
+    );
+    res.status(200).json({
+      success: true,
+      message:
+        "Delivery marked failed. Update the shipment and record the delivery again (or process a return).",
+    });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to mark the delivery failed right now.");
   }
 }
