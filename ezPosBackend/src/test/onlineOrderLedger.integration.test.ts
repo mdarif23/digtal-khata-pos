@@ -163,7 +163,11 @@ describe("online order GL posting (Phase 4)", { skip: !runIntegration }, () => {
       idempotencyKey: `gl-cod-${Date.now()}`,
       paymentMethod: "cod",
     });
-    await confirmOnlineOrder(owner.businessId, order.saleId);
+    // COD confirm: payment ≠ fulfillment — the sale stays unpaid with the
+    // full total on 1040 receivable.
+    await confirmOnlineOrder(owner.businessId, order.saleId, {
+      paymentMode: "cod",
+    });
 
     const lines = await entryLines("sale", order.saleId);
     const revenue = lines.find((l) => l.code === "4010");
@@ -196,7 +200,9 @@ describe("online order GL posting (Phase 4)", { skip: !runIntegration }, () => {
       idempotencyKey: `gl-cod2-${Date.now()}`,
       paymentMethod: "cod",
     });
-    await confirmOnlineOrder(owner.businessId, order.saleId);
+    await confirmOnlineOrder(owner.businessId, order.saleId, {
+      paymentMode: "cod",
+    });
     // Ship first (delivery requires a recorded shipment flow-wise).
     await pg!.query(
       `INSERT INTO sale_shipments (business_id, sale_id, courier_name, tracking_number, status)

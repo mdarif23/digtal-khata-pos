@@ -78,6 +78,13 @@ describe("online order assignment (Phase 3)", { skip: !runIntegration }, () => {
        VALUES ($1, $2, $3, $4, 0)`,
       [businessId, variant.rows[0]!.id, location.id, qty],
     );
+    // Online confirm consumes BATCHES (FEFO/FIFO) — without a batch the
+    // confirm is short even when the stock row has quantity.
+    await pg!.query(
+      `INSERT INTO inventory_batches (business_id, variant_id, location_id, batch_number, purchase_price, quantity_received, quantity_remaining)
+       VALUES ($1, $2, $3, $4, 40, $5, $5)`,
+      [businessId, variant.rows[0]!.id, location.id, `A-${Date.now()}-${(counter += 1)}`, qty],
+    );
     return variant.rows[0]!.id as number;
   }
 
@@ -396,7 +403,9 @@ describe("online order assignment (Phase 3)", { skip: !runIntegration }, () => {
     const order = await createOnlineOrder(
       orderInput(owner.businessId, variantId, "f"),
     );
-    await confirmOnlineOrder(owner.businessId, order.saleId);
+    await confirmOnlineOrder(owner.businessId, order.saleId, {
+      paymentMode: "cod",
+    });
 
     // No shipment yet → 404.
     const earlyFail = await fetch(
