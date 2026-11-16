@@ -8,6 +8,7 @@ import {
 import { requireLocationAccess } from "../../middleware/location.js";
 import { requireTerminalContext } from "../../middleware/terminalContext.js";
 import { requirePermission } from "../../middleware/permissions.js";
+import { requireSurfaceModes } from "../../middleware/storefront.js";
 
 /**
  * Shared held sales (Module 1): held carts live on the server per
@@ -15,11 +16,17 @@ import { requirePermission } from "../../middleware/permissions.js";
  */
 const router = express.Router();
 
+// Held carts are a counter concept: physical surface only.
+const surface = requireSurfaceModes(
+  ["physical_only", "omnichannel"],
+  "Held carts are not active for an online-only business. Switch the operating model in Settings → Business Operations.",
+);
 // Location-aware: holds are scoped to the X-Location-Id (validated against
 // membership + assignment), matching the sales routes.
 const read = [
   requireAuth,
   requireBusinessContext(),
+  surface,
   requireLocationAccess(),
 ] as const;
 // Writes resolve the optional X-Terminal-Id header (revoked terminals must

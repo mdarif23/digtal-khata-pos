@@ -244,3 +244,42 @@ export function requireBusinessModePortal(
     })();
   };
 }
+
+/**
+ * Generic surface gate for the authenticated business chain (runs after
+ * requireBusinessContext/requireBusinessAccess): blocks routes belonging to
+ * a surface the business has not activated in its operating model — e.g.
+ * counter sales for an online-only business. The DB is re-read per request,
+ * so a mode switch takes effect immediately. Message varies by direction.
+ */
+export function requireSurfaceModes(
+  modes: ("physical_only" | "online_only" | "omnichannel")[],
+  message?: string,
+) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    void (async () => {
+      try {
+        const [business] = await db
+          .select({ mode: businesses.mode })
+          .from(businesses)
+          .where(eq(businesses.id, getBusinessId(req)));
+        if (business && modes.includes(business.mode)) {
+          next();
+          return;
+        }
+        res.status(403).json({
+          success: false,
+          code: "SURFACE_NOT_ACTIVE",
+          message:
+            message ??
+            "This feature is not active for the current operating model. Switch it in Settings → Business Operations.",
+        });
+      } catch (err) {
+        console.error("Business surface check failed:", err);
+        res
+          .status(500)
+          .json({ success: false, message: "Unable to verify the business mode." });
+      }
+    })();
+  };
+}

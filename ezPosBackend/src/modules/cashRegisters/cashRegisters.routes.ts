@@ -8,13 +8,21 @@ import {
 import { requireLocationAccess } from "../../middleware/location.js";
 import { requireTerminalContext } from "../../middleware/terminalContext.js";
 import { requirePermission } from "../../middleware/permissions.js";
+import { requireSurfaceModes } from "../../middleware/storefront.js";
 
 const router = express.Router();
+// Registers/drawers are a physical-surface concept: blocked (403
+// SURFACE_NOT_ACTIVE) for online-only businesses even via direct API calls.
+const surface = requireSurfaceModes(
+  ["physical_only", "omnichannel"],
+  "Cash registers are not active for an online-only business. Switch the operating model in Settings → Business Operations.",
+);
 // Register operations are location-scoped: the X-Location-Id header (or the
 // business default) is validated against membership + assignment.
 const locationRead = [
   requireAuth,
   requireBusinessContext(),
+  surface,
   requireLocationAccess(),
 ] as const;
 // Writes resolve the optional X-Terminal-Id header — opening a session from

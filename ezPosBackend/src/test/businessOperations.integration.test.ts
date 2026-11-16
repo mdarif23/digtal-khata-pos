@@ -51,7 +51,7 @@ describe("business operating model (Phase 1)", { skip: !runIntegration }, () => 
 
   after(async () => {
     if (server) {
-      await new Promise((resolve) => server!.close(() => resolve()));
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
     }
     await pg?.end();
   });
@@ -152,9 +152,80 @@ describe("business operating model (Phase 1)", { skip: !runIntegration }, () => 
       };
     };
     assert.equal(body.operations.mode, "online_only");
-    assert.equal(body.operations.counts.activeLocations, 0);
-    assert.equal(body.operations.readiness.stockSourceReady, false);
+    // Online-capable signup provisions the single stock source (warehouse)
+    // immediately — inventory/orders/purchases work with no physical store.
+    assert.equal(body.operations.counts.activeLocations, 1);
+    assert.equal(body.operations.readiness.stockSourceReady, true);
     assert.equal(body.operations.readiness.registerReady, false);
+  });
+
+  it("provisions the stock source as a warehouse for online-only and a store for omnichannel", async () => {
+    const token = await registerOwner();
+    const onlineId = await createBusiness(token, "Provision Online Co", "online_only");
+    const omniId = await createBusiness(token, "Provision Omni Co", "omnichannel");
+
+    const list = await fetch(`${baseUrl}/api/locations`, {
+      headers: { Authorization: `Bearer ${token}`, "X-Business-Id": String(onlineId) },
+    });
+    assert.equal(list.status, 200);
+    const listBody = (await list.json()) as {
+      data: { name: string; locationType: string; isDefault: boolean }[];
+    };
+    const onlineLocation = listBody.data.find((l) => l.isDefault);
+    assert.ok(onlineLocation, "online-only business must have a default stock source");
+    assert.equal(onlineLocation.name, "Online Store");
+    assert.equal(onlineLocation.locationType, "warehouse");
+
+    const omniList = await fetch(`${baseUrl}/api/locations`, {
+      headers: { Authorization: `Bearer ${token}`, "X-Business-Id": String(omniId) },
+    });
+    const omniBody = (await omniList.json()) as {
+      data: { name: string; locationType: string; isDefault: boolean }[];
+    };
+    const omniLocation = omniBody.data.find((l) => l.isDefault);
+    assert.ok(omniLocation, "omnichannel business must have a default location");
+    assert.equal(omniLocation.name, "Online Store");
+    assert.equal(omniLocation.locationType, "store");
+  });
+
+  it("keeps the dashboard usable for a business with zero locations", async () => {
+    const token = await registerOwner();
+    const businessId = await createBusiness(token, "Zero Location Co");
+
+    const res = await fetch(`${baseUrl}/api/dashboard_summary?period=today`, {
+      headers: { Authorization: `Bearer ${token}`, "X-Business-Id": String(businessId) },
+    });
+    // Previously a 400 ("no locations yet") — the dashboard is meaningful
+    // without any physical counter.
+    assert.equal(res.status, 200);
+  });
+
+  it("blocks counter-sale surfaces for an online-only business even via direct API calls", async () => {
+    const token = await registerOwner();
+    const businessId = await createBusiness(token, "Surface Gate Co", "online_only");
+
+    // POS checkout: 403 SURFACE_NOT_ACTIVE before any validation of the cart.
+    const sale = await fetch(`${baseUrl}/api/sales`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "X-Business-Id": String(businessId),
+      },
+      body: JSON.stringify({ items: [] }),
+    });
+    assert.equal(sale.status, 403);
+    const saleBody = (await sale.json()) as { code?: string };
+    assert.equal(saleBody.code, "SURFACE_NOT_ACTIVE");
+
+    // Registers: same gate.
+    const registers = await fetch(`${baseUrl}/api/registers`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Business-Id": String(businessId),
+      },
+    });
+    assert.equal(registers.status, 403);
   });
 
   it("switches modes via PATCH /mode and auto-provisions a stock location for online-capable modes", async () => {

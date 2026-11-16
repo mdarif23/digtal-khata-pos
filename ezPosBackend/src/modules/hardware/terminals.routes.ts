@@ -10,14 +10,22 @@ import {
   requireAnyPermission,
   requirePermission,
 } from "../../middleware/permissions.js";
+import { requireSurfaceModes } from "../../middleware/storefront.js";
 import { drawerCommandRateLimit } from "../../middleware/rateLimit.js";
 
 const router = express.Router();
+
+// POS terminals pair with cash drawers: physical surface only.
+const surface = requireSurfaceModes(
+  ["physical_only", "omnichannel"],
+  "POS terminals are not active for an online-only business. Switch the operating model in Settings → Business Operations.",
+);
 
 // Terminal administration is location-scoped like register management.
 const locationRead = [
   requireAuth,
   requireBusinessContext(),
+  surface,
   requireLocationAccess(),
 ] as const;
 const manage = [

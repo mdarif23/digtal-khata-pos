@@ -166,6 +166,154 @@ export function requireLocationAccess() {
 }
 
 /**
+ * Optional variant of resolveRequestLocation: identical validation whenever
+ * a location CAN be resolved (header present, or a usable default exists),
+ * but returns null instead of throwing when the business has no locations
+ * at all and sent no header. Used by surfaces that stay meaningful without
+ * any physical counter (e.g. the owner dashboard, and any future module
+ * that must work for a bare online-only business). An explicit bad header
+ * is still a 400/403 — never silently ignored.
+ */
+export async function resolveOptionalRequestLocation(
+  req: Request,
+): Promise<RequestLocation | null> {
+  const membership = req.membership;
+  if (!membership || !req.user) {
+    throw new Error(
+      "resolveOptionalRequestLocation() used without requireBusinessContext — programming error",
+    );
+  }
+  const businessId = membership.businessId;
+  const callerIsOwner = membership.permissions.includes(WILDCARD_PERMISSION);
+
+  const rawHeader = req.headers[LOCATION_HEADER];
+  const raw = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+  const headerValue =
+    typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
+
+  // Header present: full validation — exactly the required path's rules.
+  if (headerValue !== null) {
+    const requestedId = Number(headerValue);
+    if (!Number.isInteger(requestedId) || requestedId! <= 0) {
+      throw new BadRequestError("A valid location ID is required.");
+    }
+    const [location] = await db
+      .select({
+        id: locations.id,
+        name: locations.name,
+        isDefault: locations.isDefault,
+        status: locations.status,
+      })
+      .from(locations)
+      .where(
+        and(eq(locations.id, requestedId), eq(locations.businessId, businessId)),
+      );
+    // Not-found vs. foreign location are indistinguishable on purpose.
+    if (!location) {
+      throw new BadRequestError("Location not found.");
+    }
+    if (location.status !== "active") {
+      throw new BadRequestError(
+        "This location is deactivated and cannot be used.",
+      );
+    }
+    if (!callerIsOwner) {
+      const [assignment] = await db
+        .select({ id: userLocationAssignments.id })
+        .from(userLocationAssignments)
+        .where(
+          and(
+            eq(userLocationAssignments.userId, req.user.id),
+            eq(userLocationAssignments.businessId, businessId),
+            eq(userLocationAssignments.locationId, location.id),
+          ),
+        );
+      if (!assignment) {
+        throw new ForbiddenError(
+          "You do not have access to this location.",
+        );
+      }
+    }
+    return {
+      locationId: location.id,
+      name: location.name,
+      isDefault: location.isDefault,
+    };
+  }
+
+  // Header absent: fall back to the business's default location — or null
+  // when the business has none (this is the only difference from the
+  // required variant).
+  const [defaultLocation] = await db
+    .select({
+      id: locations.id,
+      name: locations.name,
+      isDefault: locations.isDefault,
+      status: locations.status,
+    })
+    .from(locations)
+    .where(
+      and(
+        eq(locations.businessId, businessId),
+        eq(locations.isDefault, true),
+      ),
+    );
+  if (!defaultLocation) {
+    return null;
+  }
+  if (defaultLocation.status !== "active") {
+    throw new BadRequestError(
+      "The default location is deactivated. Activate it or choose another location.",
+    );
+  }
+  if (!callerIsOwner) {
+    const [assignment] = await db
+      .select({ id: userLocationAssignments.id })
+      .from(userLocationAssignments)
+      .where(
+        and(
+          eq(userLocationAssignments.userId, req.user.id),
+          eq(userLocationAssignments.businessId, businessId),
+          eq(userLocationAssignments.locationId, defaultLocation.id),
+        ),
+      );
+    if (!assignment) {
+      throw new ForbiddenError(
+        "You are not assigned to any location. Ask your manager to assign you.",
+      );
+    }
+  }
+  return {
+    locationId: defaultLocation.id,
+    name: defaultLocation.name,
+    isDefault: defaultLocation.isDefault,
+  };
+}
+
+/**
+ * Optional location middleware: attaches req.location when one resolves,
+ * continues with req.location unset when the business has no locations.
+ */
+export function requireOptionalLocation() {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const resolved = await resolveOptionalRequestLocation(req);
+    if (resolved) {
+      req.location = resolved;
+    }
+    next();
+  };
+}
+
+/**
+ * Location id when the route ran requireOptionalLocation()/requireLocationAccess();
+ * null when no location could be resolved. Safe to call on optional routes —
+ * unlike getLocationId() it never throws.
+ */
+export function getOptionalLocationId(req: Request): number | null {
+  return req.location?.locationId ?? null;
+}
+
+/**
  * Server-verified location id for controllers/services on routes that ran
  * requireLocationAccess(). Throws (→ generic 500) if the middleware was
  * skipped — a programming error, never a client error.

@@ -9,6 +9,7 @@ import {
 import { requireLocationAccess } from "../../middleware/location.js";
 import { getTerminalId } from "../../middleware/terminalContext.js";
 import { callerHasPermission, requirePermission } from "../../middleware/permissions.js";
+import { requireSurfaceModes } from "../../middleware/storefront.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { BadRequestError } from "../../utils/handleError.js";
 import {
@@ -18,6 +19,12 @@ import {
 } from "./speedKeys.service.js";
 
 const router = express.Router();
+
+// Speed keys are a register concept: physical surface only.
+const surface = requireSurfaceModes(
+  ["physical_only", "omnichannel"],
+  "Speed keys are not active for an online-only business. Switch the operating model in Settings → Business Operations.",
+);
 
 const tileSchema = z.object({
   variantId: z.number().int().positive(),
@@ -36,6 +43,7 @@ const putSchema = z.object({
 const read = [
   requireAuth,
   requireBusinessContext(),
+  surface,
   requireLocationAccess(),
 ] as const;
 

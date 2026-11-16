@@ -231,6 +231,21 @@ export async function createBusinessForUser(
       .insert(units)
       .values({ businessId: business.id, name: "Piece", abbreviation: "pc" });
 
+    // Online-capable signup: provision the single stock source immediately,
+    // so inventory, purchases and online orders work with NO physical store.
+    // The location is a fulfillment source (a warehouse for online-only
+    // businesses), not a retail storefront. Idempotent by construction — the
+    // same guarantee is applied by changeBusinessMode when the mode flips
+    // later, and never duplicates when locations already exist.
+    if (input.mode === "online_only" || input.mode === "omnichannel") {
+      await tx.insert(locations).values({
+        businessId: business.id,
+        name: "Online Store",
+        isDefault: true,
+        locationType: input.mode === "online_only" ? "warehouse" : "store",
+      });
+    }
+
     await tx.insert(businessMemberships).values({
       userId,
       businessId: business.id,
@@ -749,6 +764,8 @@ async function changeBusinessMode(
         businessId,
         name: "Online Store",
         isDefault: true,
+        // Online-only: a fulfillment source, not a retail storefront.
+        locationType: mode === "online_only" ? "warehouse" : "store",
       });
     }
   }
