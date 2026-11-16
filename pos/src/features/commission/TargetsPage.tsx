@@ -26,7 +26,7 @@ function extractError(error: unknown, fallback: string): string {
 }
 
 interface UserOption {
-  id: number;
+  userId: number;
   fullName: string;
   isActive: boolean;
 }
@@ -113,9 +113,9 @@ export function TargetsPage() {
               value={form.userId}
               onChange={(e) => setForm({ ...form, userId: e.target.value })}
             >
-              <option value="">Pick a user</option>
+              <option key="pick-user" value="">Pick a user</option>
               {users.map((user) => (
-                <option key={user.id} value={user.id}>
+                <option key={user.userId} value={user.userId}>
                   {user.fullName}
                 </option>
               ))}

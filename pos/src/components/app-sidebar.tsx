@@ -20,9 +20,16 @@ import {
   ChevronRight,
   ChevronsUpDown,
   ChevronUp,
+  CreditCard,
+  ExternalLink,
   LayoutDashboard,
+  LockKeyhole,
   LogOut,
+  MapPin,
+  Moon,
+  RefreshCw,
   Settings,
+  Sun,
   User,
   Zap,
 } from "lucide-react";
@@ -35,13 +42,25 @@ import { Link, useLocation } from "react-router";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Avatar, AvatarBadge, AvatarFallback } from "./ui/avatar";
 import { getSessionUser, logout } from "@/api/axios";
 import { usePermissions } from "@/hooks/usePermissions";
 import { LocationSwitcher } from "./common/LocationSwitcher";
+import { useTheme } from "@/components/theme-provider";
+import { useSessionStore } from "@/auth/sessionStore";
+import { useTranslation } from "react-i18next";
+import { setAppLanguage } from "@/i18n/language";
+import { useCrossTabLanguage } from "@/i18n/LanguageToggle";
+import { useCurrentBusinessSubscription } from "@/features/subscriptions/hooks/useSubscription";
+import { formatDate } from "@/lib/format";
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -50,6 +69,13 @@ function initialsOf(name: string): string {
     .slice(0, 2)
     .map((part) => part[0]!.toUpperCase())
     .join("");
+}
+
+function subscriptionStatusLabel(status: string): string {
+  if (status === "trialing") return "Trial";
+  return status
+    .replaceAll("_", " ")
+    .replace(/^\w/, (firstLetter) => firstLetter.toUpperCase());
 }
 
 /**
@@ -70,7 +96,20 @@ export function AppSidebar() {
   const location = useLocation();
   const user = getSessionUser();
   const displayName = user?.fullName?.trim() || user?.email || "Signed in";
-  const { hasPermission, hasAnyPermission } = usePermissions();
+  const roleName = user?.roleName ?? user?.roleSlug ?? "Staff";
+  const { hasPermission, hasAnyPermission, roleSlug } = usePermissions();
+  const { theme, setTheme } = useTheme();
+  const activeLocationName = useSessionStore(
+    (state) => state.activeLocationName,
+  );
+  const { i18n } = useTranslation();
+  const language = i18n.language === "bn" ? "bn" : "en";
+  const canViewBusinessPlan = roleSlug === "owner" || hasPermission("*");
+  const subscriptionQuery =
+    useCurrentBusinessSubscription(canViewBusinessPlan);
+  useCrossTabLanguage();
+  const websiteUrl =
+    import.meta.env.VITE_WEBSITE_URL || "http://localhost:3001";
 
   // Hide nav entries the active role set cannot open. Backend permissions
   // remain the real gate — this only shapes the interface.
@@ -232,6 +271,125 @@ export function AppSidebar() {
                 <ChevronsUpDown className="ml-auto" />
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="start">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>{displayName}</DropdownMenuLabel>
+                  <div className="px-2 pb-2 text-xs text-muted-foreground">
+                    <div>{roleName}</div>
+                    <div className="mt-1 flex items-center gap-1">
+                      <MapPin className="size-3.5" />
+                      <span>{activeLocationName ?? "No active location"}</span>
+                    </div>
+                  </div>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                {canViewBusinessPlan && (
+                  <>
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Business plan</DropdownMenuLabel>
+                      {subscriptionQuery.isPending ? (
+                        <div className="px-2 pb-2 text-xs text-muted-foreground">
+                          Loading subscription…
+                        </div>
+                      ) : subscriptionQuery.isError ? (
+                        <div className="space-y-1 px-2 pb-2 text-xs text-destructive">
+                          <p role="alert">Could not load subscription details.</p>
+                          <DropdownMenuItem
+                            onClick={() => void subscriptionQuery.refetch()}
+                          >
+                            <RefreshCw className="size-3" />
+                            Retry
+                          </DropdownMenuItem>
+                        </div>
+                      ) : subscriptionQuery.data ? (
+                        <div className="px-2 pb-2 text-xs">
+                          <div className="font-medium">
+                            {subscriptionQuery.data.planName}
+                            <span className="ml-1.5 font-normal capitalize text-muted-foreground">
+                              {" · "}
+                              {subscriptionStatusLabel(
+                                subscriptionQuery.data.status,
+                              )}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-muted-foreground">
+                            {subscriptionQuery.data.cancelAtPeriodEnd
+                              ? "Ends"
+                              : subscriptionQuery.data.status === "trialing"
+                                ? "Trial ends"
+                                : subscriptionQuery.data.status === "active"
+                                  ? "Renews"
+                                  : "Period ends"}{" "}
+                            {formatDate(subscriptionQuery.data.currentPeriodEnd)}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="px-2 pb-2 text-xs text-muted-foreground">
+                          No subscription found.
+                        </div>
+                      )}
+                      <DropdownMenuItem
+                        render={
+                          <a
+                            href={`${websiteUrl}/account/subscription`}
+                            target="_blank"
+                            rel="noreferrer"
+                          />
+                        }
+                      >
+                        <CreditCard />
+                        Manage subscription
+                        <ExternalLink className="ml-auto size-3.5 text-muted-foreground" />
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Appearance</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    aria-label="Appearance"
+                    value={theme}
+                    onValueChange={(value) => {
+                      if (value === "light" || value === "dark") {
+                        setTheme(value);
+                      }
+                    }}
+                  >
+                    <DropdownMenuRadioItem value="light">
+                      <Sun />
+                      Light
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="dark">
+                      <Moon />
+                      Dark
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Language</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    aria-label="Language"
+                    value={language}
+                    onValueChange={(value) => {
+                      if (value === "en" || value === "bn") {
+                        void setAppLanguage(value);
+                      }
+                    }}
+                  >
+                    <DropdownMenuRadioItem value="en">
+                      English
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="bn">
+                      বাংলা
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => void logout()}>
+                  <LockKeyhole />
+                  Lock / Switch user
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => void logout()}>
                   <LogOut />
                   Sign out

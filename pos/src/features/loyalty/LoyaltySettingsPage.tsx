@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Combobox,
+  ComboboxChip,
+  ComboboxChips,
+  ComboboxChipsInput,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxValue,
+  useComboboxAnchor,
+} from "@/components/ui/combobox";
+import { useProductsQuery } from "@/features/products/hooks/useProducts.js";
 import {
   createTierApi,
   deleteTierApi,
@@ -42,34 +55,84 @@ function extractError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+const DEFAULT_LOYALTY_PROGRAM: LoyaltyProgram = {
+  earnRate: 0.01,
+  redeemValue: 1,
+  isActive: false,
+  expiryMode: "none",
+  expiryDays: null,
+  minRedemptionPoints: 0,
+  maxRedemptionPointsPerSale: null,
+};
+
+interface ProductOption {
+  id: number;
+  label: string;
+  sku: string | null;
+  searchText: string;
+}
+
 /**
  * Loyalty engine settings (Phase 2A): program (rates, expiry, redemption
  * caps), earning rules (minimum spend, exclusions, multiplier, bonus,
  * campaign window) and spend-derived tiers with earn multipliers.
  */
 export function LoyaltySettingsPage() {
+  const productsQuery = useProductsQuery();
   const [program, setProgram] = useState<LoyaltyProgram | null>(null);
   const [rule, setRule] = useState<EarnRule | null>(null);
   const [tiers, setTiers] = useState<LoyaltyTier[] | null>(null);
+  const [programConfigured, setProgramConfigured] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [savingProgram, setSavingProgram] = useState(false);
   const [savingRule, setSavingRule] = useState(false);
   const [newTier, setNewTier] = useState({ name: "", minSpend: "500", earnMultiplier: "1", rank: "10" });
+  const productPickerAnchor = useComboboxAnchor();
+  const productOptions = useMemo(
+    () =>
+      (productsQuery.data ?? []).map((product) => {
+        const skus = product.variants
+          .map((variant) => variant.sku)
+          .filter(Boolean);
+        return {
+          id: product.id,
+          label: product.name,
+          sku: skus.length > 1 ? `${skus[0]} +${skus.length - 1} more` : (skus[0] ?? null),
+          searchText: [product.name, ...skus].join(" "),
+        };
+      }),
+    [productsQuery.data],
+  );
+  const selectedProductOptions = useMemo(() => {
+    const optionsById = new Map(productOptions.map((option) => [option.id, option]));
+    return (rule?.excludedProductIds ?? []).map(
+      (id) =>
+        optionsById.get(id) ?? {
+          id,
+          label: `Unavailable product (${id})`,
+          searchText: "",
+        },
+    );
+  }, [productOptions, rule?.excludedProductIds]);
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       const [p, r, t] = await Promise.all([
         getLoyaltyProgramApi(),
         getEarnRuleApi(),
         getTiersApi(),
       ]);
-      setProgram(p);
+      setProgramConfigured(p !== null);
+      setProgram(p ?? { ...DEFAULT_LOYALTY_PROGRAM });
       setRule(r);
       setTiers(t);
     } catch (error) {
-      toast.add({ title: extractError(error, "Unable to load loyalty settings."), type: "error" });
-      setProgram(null);
-      setRule(null);
-      setTiers([]);
+      setLoadError(extractError(error, "Unable to load loyalty settings."));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -83,6 +146,7 @@ export function LoyaltySettingsPage() {
     try {
       const saved = await putLoyaltyProgramApi(program);
       setProgram(saved);
+      setProgramConfigured(true);
       toast.add({ title: "Loyalty program saved.", type: "success" });
     } catch (error) {
       toast.add({ title: extractError(error, "Unable to save the program."), type: "error" });
@@ -149,12 +213,28 @@ export function LoyaltySettingsPage() {
     }
   }
 
-  if (program === null || rule === null || tiers === null) {
+  if (loading) {
     return (
       <div className="grid gap-3 p-4 lg:p-6">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-48 w-full" />
         <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+
+  if (loadError || program === null || rule === null || tiers === null) {
+    return (
+      <div className="grid gap-3 p-4 lg:p-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Loyalty program</h1>
+        <p role="alert" className="text-sm text-destructive">
+          {loadError ?? "Loyalty settings could not be loaded."}
+        </p>
+        <div>
+          <Button size="sm" variant="outline" onClick={() => void load()}>
+            Retry
+          </Button>
+        </div>
       </div>
     );
   }
@@ -167,6 +247,12 @@ export function LoyaltySettingsPage() {
           Points earn and redemption policy for this business.
         </p>
       </div>
+      {!programConfigured && (
+        <p className="rounded-md border p-3 text-sm text-muted-foreground">
+          This business has not set up a loyalty program yet. Configure the
+          settings below and save the program to create it. It starts inactive.
+        </p>
+      )}
 
       {/* Program */}
       <section className="grid gap-3 rounded-md border p-4">
@@ -287,7 +373,7 @@ export function LoyaltySettingsPage() {
         <p className="text-xs text-muted-foreground">
           points = eligible spend × earn rate × rule multiplier × tier multiplier + bonus
         </p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div className="grid gap-1.5">
             <Label htmlFor="rule-min">Minimum spend (৳)</Label>
             <Input
@@ -321,22 +407,93 @@ export function LoyaltySettingsPage() {
               onChange={(e) => setRule({ ...rule, bonusPoints: Number(e.target.value) || 0 })}
             />
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="rule-excl">Excluded product IDs (comma-separated)</Label>
-            <Input
-              id="rule-excl"
-              placeholder="e.g. 12, 34"
-              value={rule.excludedProductIds.join(", ")}
-              onChange={(e) =>
+          <div className="grid gap-1.5 sm:col-span-2 lg:col-span-3">
+            <Label htmlFor="rule-excluded-products">
+              Products that don’t earn points
+            </Label>
+            <Combobox
+              multiple
+              autoHighlight
+              disabled={savingRule || productsQuery.isPending || productsQuery.isError}
+              items={productOptions}
+              value={selectedProductOptions}
+              onValueChange={(selected: ProductOption[]) =>
                 setRule({
                   ...rule,
-                  excludedProductIds: e.target.value
-                    .split(",")
-                    .map((v) => Number(v.trim()))
-                    .filter((v) => Number.isInteger(v) && v > 0),
+                  excludedProductIds: selected.map((product) => product.id),
                 })
               }
-            />
+              itemToStringValue={(product) => product.searchText}
+            >
+              <ComboboxChips
+                ref={productPickerAnchor}
+                className="w-full bg-background"
+              >
+                <ComboboxValue>
+                  {(values: ProductOption[]) => (
+                    <>
+                      {values.map((product) => (
+                        <ComboboxChip key={product.id}>
+                          {product.label}
+                        </ComboboxChip>
+                      ))}
+                      <ComboboxChipsInput
+                        id="rule-excluded-products"
+                        aria-label="Products that don’t earn points"
+                        placeholder={
+                          values.length > 0
+                            ? "Add another product..."
+                            : "Search products by name or SKU..."
+                        }
+                      />
+                    </>
+                  )}
+                </ComboboxValue>
+              </ComboboxChips>
+              <ComboboxContent anchor={productPickerAnchor}>
+                <ComboboxEmpty>No matching products found.</ComboboxEmpty>
+                <ComboboxList>
+                  {(product) => (
+                    <ComboboxItem
+                      key={product.id}
+                      value={product}
+                      disabled={
+                        rule.excludedProductIds.length >= 500 &&
+                        !rule.excludedProductIds.includes(product.id)
+                      }
+                      className="flex-col items-start gap-0"
+                    >
+                      <span>{product.label}</span>
+                      {product.sku && (
+                        <span className="text-xs text-muted-foreground">
+                          SKU: {product.sku}
+                        </span>
+                      )}
+                    </ComboboxItem>
+                  )}
+                </ComboboxList>
+              </ComboboxContent>
+            </Combobox>
+            {productsQuery.error ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <p role="alert" className="text-xs text-destructive">
+                  Could not load products. Existing exclusions are preserved.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void productsQuery.refetch()}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Search by product name or SKU. Selected products won’t earn
+                loyalty points. {rule.excludedProductIds.length} of 500 selected.
+              </p>
+            )}
           </div>
         </div>
         <div>

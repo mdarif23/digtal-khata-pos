@@ -5,11 +5,14 @@ import { queryClient } from "./lib/queryClient.js";
 import "./i18n/index.js";
 import  "./index.css";
 import App from "./App.js";
+import { ThemeProvider } from "./components/theme-provider.js";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <App />
+        <ThemeProvider>
+          <App />
+        </ThemeProvider>
       </QueryClientProvider>
   </StrictMode>
 );

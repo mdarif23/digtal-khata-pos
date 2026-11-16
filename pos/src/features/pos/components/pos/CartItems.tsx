@@ -726,6 +726,19 @@ function CartItemRow({ item }: { item: CartItem }) {
                     batch: item.batchNumber ?? "FEFO",
                   })}
                 </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("pos:removeItem", { defaultValue: "Remove item" })}
+                  onClick={() => {
+                    returnVariantStock(variantId, quantity * conversionFactor);
+                    removeCartItem(variantId, lineUnit);
+                  }}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 />
+                </Button>
               </div>
             </>
           ) : isSerial ? (
@@ -1117,16 +1130,18 @@ function PriceOverrideDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="sm" className="h-7 w-fit px-2 text-xs">
-          {current
-            ? t("pos:priceSet", {
-                defaultValue: "Price set ৳{{price}}",
-                price: current.unitPrice.toFixed(2),
-              })
-            : t("pos:overridePrice", { defaultValue: "Override price" })}
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <Button type="button" variant="outline" size="sm" className="h-7 w-fit px-2 text-xs">
+            {current
+              ? t("pos:priceSet", {
+                  defaultValue: "Price set ৳{{price}}",
+                  price: current.unitPrice.toFixed(2),
+                })
+              : t("pos:overridePrice", { defaultValue: "Override price" })}
+          </Button>
+        }
+      />
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>

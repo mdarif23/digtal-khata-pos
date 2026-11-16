@@ -1231,7 +1231,7 @@ export async function getHourlySalesReport(businessId: number, params: DateRange
         AND s.business_id = ${businessId}${locationFilter("s", locationId)}
         AND s.created_at >= ${start}::timestamp
         AND s.created_at <= ${end}::timestamp
-      GROUP BY EXTRACT(HOUR FROM s.created_at AT TIME ZONE ${tz})
+      GROUP BY 1
     ),
     hourly_items AS (
       SELECT
@@ -1243,7 +1243,7 @@ export async function getHourlySalesReport(businessId: number, params: DateRange
         AND s.business_id = ${businessId}${locationFilter("s", locationId)}
         AND s.created_at >= ${start}::timestamp
         AND s.created_at <= ${end}::timestamp
-      GROUP BY EXTRACT(HOUR FROM s.created_at AT TIME ZONE ${tz})
+      GROUP BY 1
     )
     SELECT
       h.hour_num AS "hourNum",
@@ -1345,7 +1345,7 @@ export async function getTaxReconciliationReport(businessId: number, params: Dat
         AND business_id = ${businessId}${locationFilter("sales", locationId)}
         AND created_at >= ${start}::timestamp
         AND created_at <= ${end}::timestamp
-      GROUP BY DATE(created_at AT TIME ZONE ${tz})
+      GROUP BY 1
     ),
     daily_purchases AS (
       SELECT
@@ -1356,7 +1356,7 @@ export async function getTaxReconciliationReport(businessId: number, params: Dat
       WHERE business_id = ${businessId}${locationFilter("purchases", locationId)}
       AND created_at >= ${start}::timestamp
         AND created_at <= ${end}::timestamp
-      GROUP BY DATE(created_at AT TIME ZONE ${tz})
+      GROUP BY 1
     )
     SELECT 
       COALESCE(s.tx_date, p.tx_date) AS "reportDate",

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import "@/i18n/index.js";
 import { LanguageToggle } from "@/i18n/LanguageToggle.js";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { ProductList } from "@/features/pos/components/pos/ProductList.js";
 import { SpeedKeyGrid } from "@/features/pos/speedKeys/SpeedKeyGrid";
 import { CartHeader } from "@/features/pos/components/pos/CartHeader.js";
@@ -362,6 +363,7 @@ function Pos() {
             <NotificationBell revision={notificationRevision} />
             <SyncStatusIndicator />
             <LanguageToggle />
+            <ThemeToggle />
             <RegisterDialog />
             <SalespersonSelect
               value={salespersonUserId}

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18next from "i18next";
 
@@ -34,9 +34,11 @@ describe("LanguageToggle", () => {
 
   it("follows language changes made in another tab (storage event)", async () => {
     render(<LanguageToggle />);
-    window.dispatchEvent(
-      new StorageEvent("storage", { key: LANG_STORAGE_KEY, newValue: "bn" }),
-    );
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: LANG_STORAGE_KEY, newValue: "bn" }),
+      );
+    });
     await waitFor(() => expect(i18next.language).toBe("bn"));
     expect(screen.getByRole("button", { name: "বাংলা" })).toHaveAttribute("aria-pressed", "true");
   });
