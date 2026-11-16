@@ -81,6 +81,10 @@ export interface AdminBusiness {
   name: string;
   slug: string;
   status: string;
+  /** Operating model (physical_only | online_only | omnichannel). */
+  mode: string;
+  /** Free-form trade label set during onboarding. */
+  businessType: string | null;
   ownerName: string | null;
   ownerEmail: string | null;
   createdAt: string | null;
@@ -343,7 +347,6 @@ export const PLAN_FEATURE_FLAGS: { key: string; label: string }[] = [
   { key: "storefrontApi", label: "Storefront API keys" },
   { key: "woocommerceIntegration", label: "WooCommerce integration" },
   { key: "customStorefront", label: "Custom storefront" },
-  { key: "multipleOnlineStores", label: "Multiple online stores" },
   { key: "advancedWebhooks", label: "Advanced webhooks" },
   { key: "hostedStorefront", label: "Hosted storefront" },
   { key: "storefrontCustomDomains", label: "Storefront custom domains" },

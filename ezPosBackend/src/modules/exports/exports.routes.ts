@@ -12,6 +12,7 @@ import {
 } from "../../middleware/location.js";
 import { requirePermission } from "../../middleware/permissions.js";
 import { callerHasPermission } from "../../middleware/permissions.js";
+import { requireFeature } from "../../middleware/entitlements.js";
 import { recordAudit } from "../../services/audit.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import {
@@ -27,7 +28,15 @@ import {
 
 const router = express.Router();
 
-const read = [requireAuth, requireBusinessContext()] as const;
+// CSV exports are a plan entitlement (the `exports` flag — enforced from the
+// Flexible Operating Model work; every seeded plan carries it, so only plans
+// that deliberately omit the flag are gated). Permission checks below stay
+// per-entity.
+const read = [
+  requireAuth,
+  requireBusinessContext(),
+  requireFeature("exports"),
+] as const;
 
 function sendCsv(res: Response, file: { filename: string; contentType: string; body: string }) {
   res

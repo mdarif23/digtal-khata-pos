@@ -383,6 +383,12 @@ export async function updateStorefront(
     update.storePickupEnabled = patch.storePickupEnabled;
   }
   if (patch.analyticsEnabled !== undefined) {
+    if (patch.analyticsEnabled) {
+      // Storefront analytics are a plan capability — enabling the beacon is
+      // gated like every other entitlement (Flexible Operating Model E6).
+      const entitlements = await getEntitlements(businessId);
+      assertFeature(entitlements, "storefrontAnalytics");
+    }
     update.analyticsEnabled = patch.analyticsEnabled;
   }
   if (patch.searchIndexingEnabled !== undefined) {

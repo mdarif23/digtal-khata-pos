@@ -149,6 +149,39 @@ describe("phase1 data import/export", { skip: !runIntegration }, () => {
       email: `ie-owner-${stamp}@example.test`,
     };
 
+    // Dedicated plan with the `exports` entitlement — the export router
+    // enforces the plan flag (Flexible Operating Model E6), and this suite
+    // must not depend on how the shared free-trial plan row was seeded.
+    {
+      const client = (await import("pg")).default;
+      const pg = new client.Client({ connectionString: process.env.DATABASE_URL });
+      await pg.connect();
+      const plan = await pg.query(
+        `INSERT INTO subscription_plans (name, slug, interval, price, currency, limits, features, is_active)
+         VALUES ($1, $2, 'monthly', 500, 'BDT', $3::jsonb, $4::jsonb, true) RETURNING id`,
+        [
+          `IE plan ${stamp}`,
+          `ie-plan-${stamp}`,
+          JSON.stringify({ maxUsers: 5, maxLocations: 3, maxProducts: 1000 }),
+          JSON.stringify({
+            multiLocation: true,
+            advancedReports: true,
+            storefrontApi: true,
+            woocommerceIntegration: true,
+            advancedWebhooks: true,
+            exports: true,
+          }),
+        ],
+      );
+      await pg.query(
+        `UPDATE subscriptions SET plan_id = $1, status = 'active',
+           current_period_start = now(), current_period_end = now() + interval '30 days'
+         WHERE business_id = $2`,
+        [plan.rows[0]!.id, owner.businessId],
+      );
+      await pg.end();
+    }
+
     const locRes = await api(owner, "POST", "/api/locations", { name: `IE Main ${stamp}` });
     assert.equal(locRes.status, 201);
   });

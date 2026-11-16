@@ -119,6 +119,7 @@ export function AdminBusinesses() {
               <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-5 py-2 font-medium">Business</th>
                 <th className="px-5 py-2 font-medium">Owner</th>
+                <th className="px-5 py-2 font-medium">Mode</th>
                 <th className="px-5 py-2 font-medium">Plan</th>
                 <th className="px-5 py-2 font-medium">Users / Locations</th>
                 <th className="px-5 py-2 font-medium">Status</th>
@@ -137,6 +138,18 @@ export function AdminBusinesses() {
                     <span className="block text-xs text-slate-400">
                       {business.ownerEmail}
                     </span>
+                  </td>
+                  <td className="px-5 py-3 text-slate-600">
+                    {business.mode === "physical_only"
+                      ? "Physical only"
+                      : business.mode === "online_only"
+                        ? "Online only"
+                        : "Physical + online"}
+                    {business.businessType ? (
+                      <span className="block text-xs text-slate-400">
+                        {business.businessType}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-5 py-3 text-slate-600">
                     {business.planName ?? "—"}

@@ -22,7 +22,6 @@ const planFeaturesSchema = z
     storefrontApi: z.boolean().optional(),
     woocommerceIntegration: z.boolean().optional(),
     customStorefront: z.boolean().optional(),
-    multipleOnlineStores: z.boolean().optional(),
     advancedWebhooks: z.boolean().optional(),
     hostedStorefront: z.boolean().optional(),
     storefrontCustomDomains: z.boolean().optional(),
