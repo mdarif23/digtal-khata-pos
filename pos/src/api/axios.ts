@@ -456,6 +456,10 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// WP-002: throttle for the SURFACE_NOT_ACTIVE session refresh (one per 15s
+// at most) — see the response interceptor below.
+let lastSurfaceRefreshAt = 0;
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -475,6 +479,21 @@ api.interceptors.response.use(
       redirectToSignIn(
         `401_retry_${String(original.url ?? "?")}_token=${accessToken !== null}_biz=${activeBusinessId !== null}`,
       );
+    }
+    // WP-002: the operating model can flip while a POS tab sits open (the
+    // owner switched it from the website). The next mode-gated call 403s
+    // with SURFACE_NOT_ACTIVE — refresh the session snapshot (throttled, at
+    // most once per 15s) so the sidebar/route guards converge without a
+    // manual reload. The 403 itself still rejects to the caller.
+    if (
+      error.response?.status === 403 &&
+      error.response?.data?.code === "SURFACE_NOT_ACTIVE"
+    ) {
+      const now = Date.now();
+      if (now - lastSurfaceRefreshAt > 15_000) {
+        lastSurfaceRefreshAt = now;
+        void refreshSessionContext().catch(() => undefined);
+      }
     }
     return Promise.reject(error);
   },

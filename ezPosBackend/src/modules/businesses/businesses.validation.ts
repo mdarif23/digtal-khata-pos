@@ -81,11 +81,9 @@ export const updateBusinessSchema = z.object({
   tagline: optionalTextField(
     z.string().max(160, "Tagline is too long"),
   ),
-  mode: z
-    .enum(["physical_only", "online_only", "omnichannel"], {
-      message: "Invalid business mode.",
-    })
-    .optional(),
+  // WB-13: the operating model has a dedicated, transactional switch route
+  // (PATCH /mode) — the profile PUT no longer accepts a parallel write path
+  // that bypasses the provisioning guard.
 });
 
 export type UpdateBusinessInput = z.infer<typeof updateBusinessSchema>;

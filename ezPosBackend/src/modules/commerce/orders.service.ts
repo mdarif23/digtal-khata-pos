@@ -626,6 +626,26 @@ export async function confirmOnlineOrderInTx(
     // Physical quantity drop replaces the hold.
     await confirmReservationsForSaleInTx(tx, businessId, saleId);
 
+    // WB-01: derive the payment mode from the sale's payment rows when the
+    // caller doesn't state it. A COD order has NO captured payments at
+    // confirm time — money has not moved — so it must stay unpaid with the
+    // full total as due (the delivery collection settles it later). callers
+    // that skip this (portal confirm, Woo webhook) used to mark COD orders
+    // paid, leaving an uncollectable 1040 receivable and a 409 at delivery.
+    let paymentMode = options.paymentMode;
+    if (paymentMode === undefined) {
+      const [captured] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(salePayments)
+        .where(
+          and(
+            eq(salePayments.saleId, saleId),
+            eq(salePayments.businessId, businessId),
+          ),
+        );
+      paymentMode = Number(captured?.count ?? 0) > 0 ? "prepaid" : "cod";
+    }
+
     await tx
       .update(sales)
       .set({
@@ -633,8 +653,10 @@ export async function confirmOnlineOrderInTx(
         // Prepaid: the gateway verify (or ledger row) already covers the
         // total. COD: money has NOT moved — the sale stays unpaid until the
         // collection is recorded (payment ≠ fulfillment, always).
-        ...(options.paymentMode === "cod"
-          ? { paymentStatus: "unpaid" as const }
+        ...(paymentMode === "cod"
+          ? // dueAmount already carries the full total from order creation
+            // (any prepaid capture adjusts it via mark-paid).
+            { paymentStatus: "unpaid" as const }
           : { paymentStatus: "paid" as const, dueAmount: 0 }),
         // Business checks passed and stock is consumed — the order is
         // CONFIRMED. Staff explicitly start processing (module two §6.3).

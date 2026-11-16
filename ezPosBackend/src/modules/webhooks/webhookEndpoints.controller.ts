@@ -49,7 +49,7 @@ export async function createWebhookEndpoint(req: Request, res: Response) {
   try {
     const businessId = getBusinessId(req);
     const entitlements = await getEntitlements(businessId);
-    assertFeature(entitlements, "advancedWebhooks");
+    await assertFeature(entitlements, "advancedWebhooks");
     assertWithinWebhookLimit(entitlements, await countWebhookEndpoints(businessId));
     const created = await createEndpoint(
       businessId,

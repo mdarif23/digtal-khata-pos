@@ -68,12 +68,24 @@ router.put(
 // Session routes are user-scoped (no X-Location-Id requirement): the
 // service enforces that only the session owner (or the owner account)
 // operates a session. Reads require the register-view authority.
+// WB-03: session WRITES are physical-surface operations (cash movements,
+// reopen) — a business that switched to online_only must not run new cash
+// through a drawer (and a fresh online_only business can never open one,
+// since the open routes are gated). Reads and close/reconcile stay
+// mode-neutral so a pre-existing open session can always be wound down.
 const sessionRead = [
   requireAuth,
   requireBusinessContext(),
   requirePermission("cash_register.view"),
 ] as const;
-const sessionWrite = [...sessionRead, requireFullAccess] as const;
+const sessionWrite = [
+  ...sessionRead,
+  requireSurfaceModes(
+    ["physical_only", "omnichannel"],
+    "Cash registers are not active for an online-only business. Switch the operating model in Settings → Business Operations.",
+  ),
+  requireFullAccess,
+] as const;
 
 router.get("/api/sessions/current", ...sessionRead, cashRegistersController.getCurrentSessionHandler);
 // Register summaries feed the reports hub — financial report scope.

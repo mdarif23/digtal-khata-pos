@@ -279,7 +279,7 @@ describe("receiptShare integration", { skip: !runIntegration }, () => {
       `INSERT INTO receipt_share_tokens (business_id, sale_id, token_hash, expires_at)
        VALUES ($1, $2, $3, now() + interval '1 hour')`,
       [foreignBusiness[0]!.id, saleId, "f".repeat(64)],
-    ).catch((err: { code?: string }) => err);
+    ).catch((err: { code?: string }) => err) as { code?: string };
     assert.equal(fk.code, "23503", "composite FK rejects the foreign link");
   });
 

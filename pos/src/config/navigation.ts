@@ -43,14 +43,6 @@ export interface NavSubItem {
   modes?: BusinessMode[];
 }
 
-export interface NavSubItem {
-  title: string;
-  url: string;
-  permission?: string;
-  anyPermission?: string[];
-  modes?: BusinessMode[];
-}
-
 /**
  * One entry: either a direct link (url + icon, no items) or an expandable
  * group (items). All fields optional so the literal array stays assignable;

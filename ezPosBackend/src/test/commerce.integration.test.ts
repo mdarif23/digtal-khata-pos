@@ -356,8 +356,10 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
     const admin = await createOwnerCtx(baseUrl, "Mode Admin");
 
     // online_only without any location → "Online Store" auto-created.
-    const put = await fetch(`${baseUrl}/api/businesses/${owner.businessId}`, {
-      method: "PUT",
+    // WB-13: the mode switch lives on the dedicated PATCH /mode route — the
+    // profile PUT no longer carries a parallel mode write path.
+    const put = await fetch(`${baseUrl}/api/businesses/${owner.businessId}/mode`, {
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${owner.token}`,
@@ -383,8 +385,8 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
 
     // Downgrade blocked while an integration is connected.
     await seedIntegration(owner.businessId, null);
-    const blocked = await fetch(`${baseUrl}/api/businesses/${owner.businessId}`, {
-      method: "PUT",
+    const blocked = await fetch(`${baseUrl}/api/businesses/${owner.businessId}/mode`, {
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${owner.token}`,

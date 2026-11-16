@@ -7,6 +7,7 @@ import {
 } from "../../middleware/business.js";
 import { requireLocationAccess } from "../../middleware/location.js";
 import { requirePermission } from "../../middleware/permissions.js";
+import { requireSurfaceModes } from "../../middleware/storefront.js";
 
 const router = express.Router();
 
@@ -15,6 +16,17 @@ const write = [
   ...read,
   requireLocationAccess(),
   requireFullAccess,
+] as const;
+// WB-04: conversion creates a counter (pos-channel) sale through the sale
+// engine — the POST /api/sales surface gate is not on this path, so gate the
+// route itself. Refunds/exchanges stay deliberately mode-neutral; this is
+// new-sale creation.
+const convert = [
+  ...write,
+  requireSurfaceModes(
+    ["physical_only", "omnichannel"],
+    "Converting a quotation creates a counter sale, which is not active for an online-only business. Switch the operating model in Settings → Business Operations.",
+  ),
 ] as const;
 
 router.get(
@@ -47,10 +59,11 @@ router.post(
   requirePermission("quotations.create"),
   controller.postTransition,
 );
-// Conversion creates a sale — the dedicated convert permission.
+// Conversion creates a sale — the dedicated convert permission (and the
+// counter-sale surface gate, WB-04).
 router.post(
   "/api/quotations/:quotationId/convert",
-  ...write,
+  ...convert,
   requirePermission("quotations.convert"),
   controller.postConvert,
 );

@@ -43,7 +43,7 @@ export async function createKey(req: Request, res: Response) {
   try {
     const businessId = getBusinessId(req);
     const entitlements = await getEntitlements(businessId);
-    assertFeature(entitlements, "storefrontApi");
+    await assertFeature(entitlements, "storefrontApi");
     const publishableKey = generatePublishableKey();
     const secretKey = generateSecretKey();
 

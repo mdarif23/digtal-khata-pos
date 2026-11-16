@@ -261,14 +261,14 @@ export async function createStorefront(
   input: CreateStorefrontInput,
 ): Promise<typeof storefronts.$inferSelect> {
   const entitlements = await getEntitlements(businessId);
-  assertFeature(entitlements, "hostedStorefront");
+  await assertFeature(entitlements, "hostedStorefront");
 
   const theme = getTheme(input.themeId);
   if (!theme) {
     throw new BadRequestError("Unknown template. Pick one from the gallery.");
   }
   if (theme.premium) {
-    assertFeature(entitlements, "premiumThemes");
+    await assertFeature(entitlements, "premiumThemes");
   }
 
   const subdomain = await pickSubdomain(businessId, input.subdomain);
@@ -357,7 +357,7 @@ export async function updateStorefront(
     const entitlements = await getEntitlements(businessId);
     const theme = getTheme(patch.themeId);
     if (!theme) throw new BadRequestError("Unknown template.");
-    if (theme.premium) assertFeature(entitlements, "premiumThemes");
+    if (theme.premium) await assertFeature(entitlements, "premiumThemes");
     update.themeId = theme.id;
   }
 
@@ -387,7 +387,7 @@ export async function updateStorefront(
       // Storefront analytics are a plan capability — enabling the beacon is
       // gated like every other entitlement (Flexible Operating Model E6).
       const entitlements = await getEntitlements(businessId);
-      assertFeature(entitlements, "storefrontAnalytics");
+      await assertFeature(entitlements, "storefrontAnalytics");
     }
     update.analyticsEnabled = patch.analyticsEnabled;
   }

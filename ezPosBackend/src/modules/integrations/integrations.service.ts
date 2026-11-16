@@ -106,7 +106,7 @@ export async function connectWoocommerceStore(
 ): Promise<ConnectResult> {
   // Plan entitlements: WooCommerce integration + connected-store limit.
   const entitlements = await getEntitlements(businessId);
-  assertFeature(entitlements, "woocommerceIntegration");
+  await assertFeature(entitlements, "woocommerceIntegration");
   assertWithinStoreLimit(entitlements, await countConnectedStores(businessId));
 
   // SSRF guard: the store URL drives authenticated server-side requests, so

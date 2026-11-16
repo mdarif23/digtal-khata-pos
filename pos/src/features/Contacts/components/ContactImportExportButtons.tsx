@@ -121,6 +121,27 @@ export function ContactImportExportButtons(props: { entity: "customers" | "suppl
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
+      // WP-008: the exports router is plan-gated (FEATURE_NOT_IN_PLAN) and
+      // the blob wrapper hides the JSON body from extractError — read the
+      // Blob so the upgrade reason reaches the user.
+      const blob = (error as { response?: { data?: unknown } }).response?.data;
+      if (blob instanceof Blob) {
+        try {
+          const parsed = JSON.parse(await blob.text()) as {
+            message?: string;
+            upgradePlans?: { name: string }[];
+          };
+          const plans = parsed.upgradePlans?.map((p) => p.name).join(", ");
+          toast.add({
+            title: parsed.message ?? "Unable to export.",
+            description: plans ? `Available on: ${plans}` : undefined,
+            type: "error",
+          });
+          return;
+        } catch {
+          // Not JSON — fall through to the generic message.
+        }
+      }
       toast.add({ title: extractError(error, "Unable to export."), type: "error" });
     }
   }

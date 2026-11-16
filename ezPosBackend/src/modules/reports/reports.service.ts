@@ -59,6 +59,13 @@ async function getDateBounds(businessId: number, params: DateRangeQuery) {
   } else if (period === "30d") {
     startDate = shiftDay(today, -29);
     endDate = today;
+  } else if (period === "60d" || period === "90d" || period === "365d") {
+    // WP-006: dashboard-shared windows — the channel-mix card labels these
+    // "last 2/3/12 months", so the report must honor the same window
+    // instead of silently falling back to this_month.
+    const days = period === "60d" ? 59 : period === "90d" ? 89 : 364;
+    startDate = shiftDay(today, -days);
+    endDate = today;
   } else if (period === "last_month") {
     const lastMonthToday = shiftDay(today, -Number(today.slice(8, 10)));
     const [firstDayLastMonth] = monthBoundsLocal(lastMonthToday);

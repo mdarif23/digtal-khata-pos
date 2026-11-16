@@ -62,6 +62,9 @@ interface OfflineState {
 
 let backoffMs = 5_000;
 let backoffTimer: ReturnType<typeof setTimeout> | null = null;
+// WP-015: startWatchers is reachable from every loadSession (bootstrap,
+// 401 recovery, permission refresh) — one loop per page load, ever.
+let watchersStarted = false;
 
 function isNetworkError(err: unknown): boolean {
   return (
@@ -269,7 +272,14 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
     // re-queues them as pending AFTER the cashier has had the chance to
     // adjust (e.g. re-pricing) — the payload is replayed as-is with the
     // SAME idempotency key, so nothing can duplicate.
-    const entries = (await listOutbox()).filter((e) => e.status === "failed");
+    // WP-014: mode-blocked entries (the business switched to a model whose
+    // surface gate 403s this op) are skipped — they can never succeed in
+    // this mode; re-queueing them loops forever.
+    const entries = (await listOutbox()).filter(
+      (e) =>
+        e.status === "failed" &&
+        !e.lastError?.includes("not active for the current operating model"),
+    );
     for (const entry of entries) {
       entry.status = "pending";
       entry.lastError = "Manually re-queued after review.";
@@ -280,6 +290,11 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
   },
 
   startWatchers: () => {
+    // WP-015: single-instance guard — every call added fresh listeners and
+    // another backoff timer chain (stacked per mode switch / permission
+    // change, since loadSession re-runs this). One loop per page load.
+    if (watchersStarted) return;
+    watchersStarted = true;
     // Reconnect + periodic retry with backoff. The engine never overlaps.
     const refreshGrants = async () => {
       // Phase 3: keep this terminal's offline allowances fresh WHILE online

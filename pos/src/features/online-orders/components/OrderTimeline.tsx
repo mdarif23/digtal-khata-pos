@@ -16,6 +16,10 @@ const EVENT_LABELS: Record<string, string> = {
   cancelled: "Order cancelled",
   partially_returned: "Partially returned",
   returned: "Returned",
+  assigned: "Order assigned",
+  reassigned: "Order reassigned",
+  unassigned: "Assignment removed",
+  delivery_failed: "Delivery failed",
 };
 
 function actorName(event: OrderTimelineEvent): string {

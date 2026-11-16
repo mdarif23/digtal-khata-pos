@@ -43,7 +43,11 @@ import {
   type TransferStatus,
   type VariantOption,
 } from "../stockTransfers.api";
-import { usePlanUpgradeError } from "@/hooks/usePlanUpgrade";
+import {
+  extractEntitlementError,
+  usePlanUpgradeError,
+  type EntitlementErrorInfo,
+} from "@/hooks/usePlanUpgrade";
 import { PlanUpgradeCard } from "@/components/common/PlanUpgradeCard";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
 import { useBarcodeScanner } from "@/features/barcodes/scanning/useBarcodeScanner";
@@ -83,8 +87,14 @@ export function StockTransfersPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
   // Transfers are plan-gated (multiLocation): a 403 FEATURE_NOT_IN_PLAN gets
-  // the shared upgrade card instead of a silent toast.
+  // the shared upgrade card instead of a silent toast. WP-005: the gate also
+  // fires from mutation errors — the list route is never gated, so a plan
+  // without multiLocation only 403s on create/ship/receive.
   const planGate = usePlanUpgradeError(loadError);
+  const [mutationGate, setMutationGate] = useState<EntitlementErrorInfo | null>(
+    null,
+  );
+  const gate = planGate ?? mutationGate;
 
   const [createOpen, setCreateOpen] = useState(false);
   const [fromLocationId, setFromLocationId] = useState<string>("");
@@ -255,6 +265,12 @@ export function StockTransfersPage() {
       setCreateOpen(false);
       void load();
     } catch (error) {
+      const gate = extractEntitlementError(error);
+      if (gate) {
+        setMutationGate(gate);
+        setCreateOpen(false);
+        return;
+      }
       setFormError(extractError(error, "Unable to create the transfer."));
     } finally {
       setSaving(false);
@@ -290,6 +306,13 @@ export function StockTransfersPage() {
       setDetail(updated);
       void load();
     } catch (error) {
+      // WP-005: a plan-gated mutation renders the upgrade card instead of a
+      // toast the user cannot act on.
+      const gate = extractEntitlementError(error);
+      if (gate) {
+        setMutationGate(gate);
+        return;
+      }
       toast.add({ title: extractError(error, "Action failed."), type: "error" });
     } finally {
       setActing(false);
@@ -366,10 +389,10 @@ export function StockTransfersPage() {
       </div>
 
       <div className="rounded-lg border bg-background">
-        {planGate ? (
+        {gate ? (
           <div className="p-4">
             <PlanUpgradeCard
-              gate={planGate}
+              gate={gate}
               featureLabel="Stock transfers"
             />
           </div>

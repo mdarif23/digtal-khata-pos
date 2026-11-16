@@ -92,7 +92,7 @@ export async function addCustomDomain(
   rawDomain: string,
 ): Promise<typeof storefrontDomains.$inferSelect> {
   const entitlements = await getEntitlements(businessId);
-  assertFeature(entitlements, "storefrontCustomDomains");
+  await assertFeature(entitlements, "storefrontCustomDomains");
   await requireStorefront(businessId, storefrontId);
 
   const domain = normalizeDomain(rawDomain);

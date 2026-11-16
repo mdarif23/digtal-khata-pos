@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router";
 import { CheckCircle2, CircleDashed, ExternalLink, Store } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -245,36 +246,44 @@ export function BusinessOperationsPage() {
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 text-sm">
           <span className="text-muted-foreground">Related setup:</span>
-          <a
-            href="/locations"
+          <Link
+            to="/locations"
             className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
           >
             Locations
-          </a>
-          <a
-            href="/register"
-            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
-          >
-            Registers
-          </a>
-          <a
-            href={`${WEBSITE_URL}/account/integrations`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
-          >
-            Channels & integrations
-            <ExternalLink className="size-3.5 text-muted-foreground" />
-          </a>
-          <a
-            href={`${WEBSITE_URL}/account/online-store`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
-          >
-            Hosted storefront
-            <ExternalLink className="size-3.5 text-muted-foreground" />
-          </a>
+          </Link>
+          {/* WP-016: mode-appropriate quick links — after switching to
+              online-only the register route is mode-blocked and would 403. */}
+          {effectiveMode !== "online_only" ? (
+            <Link
+              to="/register"
+              className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+            >
+              Registers
+            </Link>
+          ) : null}
+          {effectiveMode !== "physical_only" ? (
+            <a
+              href={`${WEBSITE_URL}/account/integrations`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+            >
+              Channels & integrations
+              <ExternalLink className="size-3.5 text-muted-foreground" />
+            </a>
+          ) : null}
+          {effectiveMode !== "physical_only" ? (
+            <a
+              href={`${WEBSITE_URL}/account/online-store`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+            >
+              Hosted storefront
+              <ExternalLink className="size-3.5 text-muted-foreground" />
+            </a>
+          ) : null}
         </CardContent>
       </Card>
     </PageContainer>
