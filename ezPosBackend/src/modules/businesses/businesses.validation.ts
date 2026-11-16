@@ -15,6 +15,10 @@ function optionalTextField(
   }, inner.optional());
 }
 
+const businessModeField = z.enum(["physical_only", "online_only", "omnichannel"], {
+  message: "Invalid business mode.",
+});
+
 export const createBusinessSchema = z.object({
   name: z
     .string()
@@ -28,9 +32,18 @@ export const createBusinessSchema = z.object({
   address: optionalTextField(z.string().max(500, "Address is too long")),
   businessType: optionalTextField(z.string().max(50, "Business type is too long")),
   country: optionalTextField(z.string().max(50, "Country is too long")),
+  // Operating model chosen at signup — never permanent, the owner can
+  // switch it later from Settings → Business Operations.
+  mode: businessModeField.optional(),
 });
 
 export type CreateBusinessInput = z.infer<typeof createBusinessSchema>;
+
+export const changeBusinessModeSchema = z.object({
+  mode: businessModeField,
+});
+
+export type ChangeBusinessModeInput = z.infer<typeof changeBusinessModeSchema>;
 
 export const updateBusinessSchema = z.object({
   name: z.string().trim().min(2).max(100).optional(),

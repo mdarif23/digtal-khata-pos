@@ -109,6 +109,64 @@ export async function updateBusiness(
   });
 }
 
+export type BusinessMode = "physical_only" | "online_only" | "omnichannel";
+
+/**
+ * Operating-model switch via the dedicated PATCH /mode endpoint. Works even
+ * while the subscription is read-only (the backend deliberately omits
+ * requireFullAccess there) — the mode is configuration, not data.
+ */
+export async function updateBusinessMode(
+  businessId: number,
+  mode: BusinessMode,
+): Promise<ApiResult<BusinessDetailPayload>> {
+  return request<BusinessDetailPayload>(
+    `/api/businesses/${businessId}/mode`,
+    {
+      method: "PATCH",
+      businessId,
+      body: JSON.stringify({ mode }),
+    },
+  );
+}
+
+export interface BusinessOperationsSnapshot {
+  mode: BusinessMode;
+  subscription: {
+    status: string;
+    accessMode: "full" | "read_only";
+    trial: boolean;
+  };
+  counts: {
+    activeLocations: number;
+    activeRegisters: number;
+    connectedChannels: number;
+    hostedStorefronts: number;
+    activeStaff: number;
+    products: number;
+  };
+  readiness: {
+    stockSourceReady: boolean;
+    registerReady: boolean;
+    onlineChannelConnected: boolean;
+    hostedStorefrontCreated: boolean;
+    catalogReady: boolean;
+  };
+}
+
+export interface BusinessOperationsPayload {
+  operations: BusinessOperationsSnapshot;
+}
+
+export async function fetchBusinessOperations(
+  businessId: number,
+): Promise<ApiResult<BusinessOperationsPayload>> {
+  return request<BusinessOperationsPayload>(
+    `/api/businesses/${businessId}/operations`,
+    { method: "GET", businessId },
+  );
+}
+
 export async function createLocation(
   businessId: number,
   input: { name: string; address?: string },

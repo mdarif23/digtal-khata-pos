@@ -16,6 +16,9 @@ export interface SessionLocation {
   status: string;
 }
 
+/** Operating model of the active business (mirrors the backend enum). */
+export type BusinessMode = "physical_only" | "online_only" | "omnichannel";
+
 export interface SessionState {
   user: {
     id?: number | undefined;
@@ -23,6 +26,8 @@ export interface SessionState {
     email?: string | undefined;
   } | null;
   businessId: number | null;
+  /** Operating model of the active business; null until /auth/me resolves. */
+  businessMode: BusinessMode | null;
   roleSlug: string | null;
   roleName: string | null;
   roles: SessionRole[];
@@ -57,6 +62,7 @@ interface SessionStore extends SessionState {
 export const useSessionStore = create<SessionStore>((set) => ({
   user: null,
   businessId: null,
+  businessMode: null,
   roleSlug: null,
   roleName: null,
   roles: [],
@@ -78,6 +84,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
     set(() => ({
       user: null,
       businessId: null,
+      businessMode: null,
       roleSlug: null,
       roleName: null,
       roles: [],
@@ -88,6 +95,20 @@ export const useSessionStore = create<SessionStore>((set) => ({
       version: Date.now(),
     })),
 }));
+
+/**
+ * Mode gate for navigation entries and route guards. A null businessMode
+ * (session not resolved yet, or an older backend payload without `mode`)
+ * lets everything through — the backend remains the real gate.
+ */
+export function businessModeMatches(
+  businessMode: BusinessMode | null,
+  modes: BusinessMode[] | undefined,
+): boolean {
+  if (!modes || modes.length === 0) return true;
+  if (!businessMode) return true;
+  return modes.includes(businessMode);
+}
 
 export function hasPermission(permission: string): boolean {
   const { permissions } = useSessionStore.getState();

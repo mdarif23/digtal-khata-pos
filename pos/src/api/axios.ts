@@ -1,5 +1,9 @@
 import axios from "axios";
-import { useSessionStore, type SessionLocation } from "../auth/sessionStore";
+import {
+  useSessionStore,
+  type BusinessMode,
+  type SessionLocation,
+} from "../auth/sessionStore";
 import {
   bindTerminalScope,
   currentTerminalId,
@@ -76,6 +80,7 @@ function saveOfflineSessionSnapshot(): void {
         savedAt: new Date().toISOString(),
         user: store.user,
         businessId: store.businessId,
+        businessMode: store.businessMode,
         locations: store.locations,
         activeLocationId: store.activeLocationId,
         permissions: store.permissions,
@@ -97,6 +102,7 @@ function tryRestoreOfflineSession(): boolean {
       savedAt: string;
       user: SessionUser & { id?: number };
       businessId: number | null;
+      businessMode?: BusinessMode | null;
       locations: SessionLocation[];
       activeLocationId: number | null;
       permissions: string[];
@@ -117,6 +123,7 @@ function tryRestoreOfflineSession(): boolean {
     useSessionStore.getState().setSession({
       user: snapshot.user,
       businessId: snapshot.businessId,
+      businessMode: snapshot.businessMode ?? null,
       roleSlug: snapshot.roleSlug,
       roleName: snapshot.roleName,
       roles: [],
@@ -271,6 +278,7 @@ async function loadSession(): Promise<void> {
       user?: { id?: number; fullName?: string; email?: string };
       businesses?: {
         businessId: number;
+        mode?: BusinessMode;
         roleSlug?: string;
         roleName?: string;
         roles?: { id: number; name: string; slug: string }[];
@@ -295,6 +303,7 @@ async function loadSession(): Promise<void> {
         email: me.data.user?.email,
       },
       businessId: first?.businessId ?? null,
+      businessMode: first?.mode ?? null,
       roleSlug: first?.roleSlug ?? null,
       roleName: first?.roleName ?? null,
       roles: first?.roles ?? [],

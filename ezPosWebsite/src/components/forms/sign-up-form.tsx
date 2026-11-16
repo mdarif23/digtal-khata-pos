@@ -11,10 +11,32 @@ import { signUpSchema, type SignUpValues } from "@/lib/validations/auth";
 import { signIn, signUp } from "@/lib/api/auth";
 import { useAuth } from "@/components/providers/auth-provider";
 
+const OPERATING_MODES = [
+  {
+    value: "physical_only",
+    label: "Physical shop",
+    hint: "Counter sales at a store.",
+  },
+  {
+    value: "online_only",
+    label: "Online only",
+    hint: "Sell through WooCommerce or a storefront.",
+  },
+  {
+    value: "omnichannel",
+    label: "Both",
+    hint: "Physical + online side by side.",
+  },
+] as const;
+
+type OperatingMode = (typeof OPERATING_MODES)[number]["value"];
+
 export function SignUpForm() {
   const router = useRouter();
   const { onSignedIn } = useAuth();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [operatingMode, setOperatingMode] =
+    useState<OperatingMode>("physical_only");
   const {
     register,
     handleSubmit,
@@ -58,10 +80,13 @@ export function SignUpForm() {
           return;
         }
         await onSignedIn();
-        // Carry the intended business name into the dashboard's setup form.
-        router.push(
-          `/dashboard?create=${encodeURIComponent(values.businessName)}`,
-        );
+        // Carry the intended business name and operating model into the
+        // dashboard's setup form.
+        const query = new URLSearchParams({
+          create: values.businessName,
+          mode: operatingMode,
+        });
+        router.push(`/dashboard?${query.toString()}`);
       })}
       className="space-y-5"
     >
@@ -130,6 +155,37 @@ export function SignUpForm() {
           {...register("confirmPassword")}
         />
       </div>
+
+      <fieldset>
+        <legend className="text-sm font-medium text-slate-700">
+          How will you sell?
+        </legend>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          {OPERATING_MODES.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => setOperatingMode(option.value)}
+              className={
+                operatingMode === option.value
+                  ? "rounded-xl border-2 border-indigo-600 bg-indigo-50 p-3 text-left"
+                  : "rounded-xl border border-slate-300 p-3 text-left hover:border-slate-400"
+              }
+            >
+              <span className="block text-sm font-medium text-slate-900">
+                {option.label}
+              </span>
+              <span className="mt-0.5 block text-xs text-slate-500">
+                {option.hint}
+              </span>
+            </button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-xs text-slate-500">
+          Just a starting point — you can switch anytime in Settings →
+          Business Operations without losing any data.
+        </p>
+      </fieldset>
 
       <p className="text-xs leading-5 text-slate-500">
         The business name is saved for your workspace — you will set it up as

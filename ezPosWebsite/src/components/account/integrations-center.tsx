@@ -19,7 +19,11 @@ import {
   type StorefrontKey,
   type SyncLog,
 } from "@/lib/api/integrations";
-import { fetchBusiness, updateBusiness } from "@/lib/api/account";
+import {
+  fetchBusiness,
+  updateBusinessMode,
+  type BusinessMode,
+} from "@/lib/api/account";
 
 const statusStyle: Record<string, string> = {
   connected: "font-medium text-green-700",
@@ -183,12 +187,12 @@ export function IntegrationsCenter() {
               onClick={() => {
                 setModeBusy(true);
                 void (async () => {
-                  const result = await updateBusiness(businessId!, {
-                    mode: option.value as
-                      | "physical_only"
-                      | "online_only"
-                      | "omnichannel",
-                  });
+                  // Dedicated PATCH /mode endpoint — the operating model is
+                  // configuration, so this works even in read-only mode.
+                  const result = await updateBusinessMode(
+                    businessId!,
+                    option.value as BusinessMode,
+                  );
                   setModeBusy(false);
                   setMessage({ text: result.message, ok: result.ok });
                   if (result.ok) setMode(option.value);

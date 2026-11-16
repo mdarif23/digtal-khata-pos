@@ -1,8 +1,11 @@
-import { and, eq, inArray , sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { businesses } from "../../db/schema/businesses.js";
 import { integrations } from "../../db/schema/integrations.js";
 import { locations } from "../../db/schema/locations.js";
+import { products } from "../../db/schema/products.js";
+import { registers } from "../../db/schema/registers.js";
+import { storefronts } from "../../db/schema/storefronts.js";
 import { businessMemberships } from "../../db/schema/businessMemberships.js";
 import { roles } from "../../db/schema/roles.js";
 import { units } from "../../db/schema/units.js";
@@ -194,6 +197,9 @@ export async function createBusinessForUser(
         phone: input.phone ?? null,
         email: input.email ?? null,
         address: input.address ?? null,
+        // Operating model from signup (optional; DB default is physical_only).
+        // Configuration, not a permanent classification — switchable later.
+        ...(input.mode !== undefined ? { mode: input.mode } : {}),
         // Server-derived: the creator, not any client-supplied user ID.
         createdByUserId: userId,
       })
@@ -376,6 +382,156 @@ export async function updateBusinessForMembership(
   }
 
   return getBusinessForMembership(userId, businessId);
+}
+
+/**
+ * Operating-model switch through the dedicated PATCH /mode route. Membership
+ * is re-verified in-service (the route also enforces settings.edit), and the
+ * route deliberately omits requireFullAccess: switching the operating
+ * configuration is configuration, not data, so a read-only (expired-trial)
+ * tenant may still flip modes even though every other write stays blocked.
+ */
+export async function changeBusinessModeForMembership(
+  userId: number,
+  businessId: number,
+  mode: BusinessDetail["mode"],
+): Promise<BusinessDetail> {
+  await getBusinessForMembership(userId, businessId);
+  await changeBusinessMode(businessId, mode);
+  return getBusinessForMembership(userId, businessId);
+}
+
+export interface BusinessOperationsSummary {
+  mode: BusinessDetail["mode"];
+  subscription: {
+    status: string;
+    accessMode: string;
+    trial: boolean;
+  };
+  counts: {
+    activeLocations: number;
+    activeRegisters: number;
+    connectedChannels: number;
+    hostedStorefronts: number;
+    activeStaff: number;
+    products: number;
+  };
+  readiness: {
+    /** An active location exists — the stock source for every channel. */
+    stockSourceReady: boolean;
+    /** A register exists for counter sales (physical modes). */
+    registerReady: boolean;
+    /** A WooCommerce/custom-storefront integration is connected. */
+    onlineChannelConnected: boolean;
+    /** A hosted storefront has been created. */
+    hostedStorefrontCreated: boolean;
+    /** At least one product exists in the catalog. */
+    catalogReady: boolean;
+  };
+}
+
+/**
+ * Configuration snapshot for Settings → Business Operations: the current
+ * operating model plus what is actually set up, so the UI can guide the
+ * owner through activating a channel (e.g. "enable physical operations")
+ * without creating duplicate anything. Read-only — no side effects.
+ */
+export async function getBusinessOperationsSummary(
+  businessId: number,
+): Promise<BusinessOperationsSummary> {
+  const [business] = await db
+    .select({ mode: businesses.mode })
+    .from(businesses)
+    .where(eq(businesses.id, businessId));
+  if (!business) {
+    throw new NotFoundError("Business not found.");
+  }
+
+  const [
+    subscriptionRow,
+    locationCount,
+    registerCount,
+    integrationCount,
+    storefrontCount,
+    staffCount,
+    productCount,
+  ] = await Promise.all([
+    db
+      .select({
+        status: subscriptions.status,
+        currentPeriodEnd: subscriptions.currentPeriodEnd,
+      })
+      .from(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.businessId, businessId),
+          inArray(subscriptions.status, [...OPEN_SUBSCRIPTION_STATUSES]),
+        ),
+      ),
+    db
+      .select({ value: count() })
+      .from(locations)
+      .where(and(eq(locations.businessId, businessId), eq(locations.status, "active"))),
+    db
+      .select({ value: count() })
+      .from(registers)
+      .where(and(eq(registers.businessId, businessId), eq(registers.status, "active"))),
+    db
+      .select({ value: count() })
+      .from(integrations)
+      .where(
+        and(
+          eq(integrations.businessId, businessId),
+          sql`${integrations.status} <> 'disconnected'`,
+        ),
+      ),
+    db
+      .select({ value: count() })
+      .from(storefronts)
+      .where(
+        and(eq(storefronts.businessId, businessId), isNull(storefronts.archivedAt)),
+      ),
+    db
+      .select({ value: count() })
+      .from(businessMemberships)
+      .where(
+        and(
+          eq(businessMemberships.businessId, businessId),
+          eq(businessMemberships.status, "active"),
+        ),
+      ),
+    db
+      .select({ value: count() })
+      .from(products)
+      .where(eq(products.businessId, businessId)),
+  ]);
+
+  const subscription = computeSubscriptionState(subscriptionRow[0] ?? null);
+  const counts = {
+    activeLocations: Number(locationCount[0]?.value ?? 0),
+    activeRegisters: Number(registerCount[0]?.value ?? 0),
+    connectedChannels: Number(integrationCount[0]?.value ?? 0),
+    hostedStorefronts: Number(storefrontCount[0]?.value ?? 0),
+    activeStaff: Number(staffCount[0]?.value ?? 0),
+    products: Number(productCount[0]?.value ?? 0),
+  };
+
+  return {
+    mode: business.mode,
+    subscription: {
+      status: subscription.status,
+      accessMode: subscription.accessMode,
+      trial: subscription.trial,
+    },
+    counts,
+    readiness: {
+      stockSourceReady: counts.activeLocations > 0,
+      registerReady: counts.activeRegisters > 0,
+      onlineChannelConnected: counts.connectedChannels > 0,
+      hostedStorefrontCreated: counts.hostedStorefronts > 0,
+      catalogReady: counts.products > 0,
+    },
+  };
 }
 
 const LOGO_MAX_BYTES = 300 * 1024; // 300 KB decoded — plenty for a receipt logo.

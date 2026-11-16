@@ -55,7 +55,11 @@ import { getSessionUser, logout } from "@/api/axios";
 import { usePermissions } from "@/hooks/usePermissions";
 import { LocationSwitcher } from "./common/LocationSwitcher";
 import { useTheme } from "@/components/theme-provider";
-import { useSessionStore } from "@/auth/sessionStore";
+import {
+  businessModeMatches,
+  useSessionStore,
+  type BusinessMode,
+} from "@/auth/sessionStore";
 import { useTranslation } from "react-i18next";
 import { setAppLanguage } from "@/i18n/language";
 import { useCrossTabLanguage } from "@/i18n/LanguageToggle";
@@ -102,6 +106,7 @@ export function AppSidebar() {
   const activeLocationName = useSessionStore(
     (state) => state.activeLocationName,
   );
+  const businessMode = useSessionStore((state) => state.businessMode);
   const { i18n } = useTranslation();
   const language = i18n.language === "bn" ? "bn" : "en";
   const canViewBusinessPlan = roleSlug === "owner" || hasPermission("*");
@@ -111,13 +116,18 @@ export function AppSidebar() {
   const websiteUrl =
     import.meta.env.VITE_WEBSITE_URL || "http://localhost:3001";
 
-  // Hide nav entries the active role set cannot open. Backend permissions
-  // remain the real gate — this only shapes the interface.
+  // Hide nav entries the active role set cannot open, and entries scoped to
+  // an operating mode this business has not activated (e.g. no POS register
+  // chrome for an online-only business). Backend permissions and mode
+  // validation remain the real gates — this only shapes the interface.
+  const matchesMode = (modes: BusinessMode[] | undefined): boolean =>
+    businessModeMatches(businessMode, modes);
   const visibleNavigation = navigation.filter((item) => {
     if (item.permission && !hasPermission(item.permission)) return false;
     if (item.anyPermission && !hasAnyPermission(item.anyPermission)) {
       return false;
     }
+    if (!matchesMode(item.modes)) return false;
     if (item.items) {
       const visibleItems = item.items.filter((subItem) => {
         if (
@@ -134,6 +144,7 @@ export function AppSidebar() {
         ) {
           return false;
         }
+        if (!matchesMode(subItem.modes)) return false;
         return true;
       });
       return visibleItems.length > 0;
@@ -166,6 +177,9 @@ export function AppSidebar() {
             if (!item) return null;
             const Icon = item.icon;
             if (!item.items) {
+              // Leaf entries always carry a url + icon in the config; the
+              // optional types just reflect the shared shape with groups.
+              if (!item.url || !Icon) return null;
               return (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
@@ -183,6 +197,7 @@ export function AppSidebar() {
             const hasActiveChild = item.items.some(
               (subItem) => isNavActive(subItem.url, location.pathname, location.search),
             );
+            if (!Icon) return null;
 
             return (
               <Collapsible
@@ -231,6 +246,7 @@ export function AppSidebar() {
                           ) {
                             return false;
                           }
+                          if (!matchesMode(subItem.modes)) return false;
                           return true;
                         })
                         .map((subItem) => (

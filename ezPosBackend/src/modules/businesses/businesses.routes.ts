@@ -33,15 +33,45 @@ router.get(
   businessesController.getBusiness,
 );
 
-// PUT /api/businesses/:businessId   (auth + membership + full access)
+// PUT /api/businesses/:businessId   (auth + membership + full access +
+// settings.edit) — business profile and operating-model changes are settings
+// decisions, not something every member may make (security fix: this route
+// previously required membership only).
 // State-changing: blocked with 403 TRIAL_EXPIRED / SUBSCRIPTION_REQUIRED in
-// read-only mode.
+// read-only mode. For mode switches available in read-only mode use the
+// dedicated PATCH /mode route below.
 router.put(
   "/api/businesses/:businessId",
   requireAuth,
   requireBusinessAccess(),
   requireFullAccess,
+  requirePermission("settings.edit"),
   businessesController.updateBusiness,
+);
+
+// PATCH /api/businesses/:businessId/mode   (auth + membership + settings.edit)
+// Operating-model switch (physical_only | online_only | omnichannel).
+// Deliberately reachable WITHOUT requireFullAccess: the mode is
+// configuration, not data, so a read-only (expired-trial) tenant may still
+// switch it while every other write stays blocked.
+// Body: { mode }. 200 -> { success, business }
+router.patch(
+  "/api/businesses/:businessId/mode",
+  requireAuth,
+  requireBusinessAccess(),
+  requirePermission("settings.edit"),
+  businessesController.changeBusinessMode,
+);
+
+// GET /api/businesses/:businessId/operations   (auth + membership; read-only OK)
+// Settings → Business Operations snapshot: current mode, per-channel setup
+// counts and readiness flags. Read-only by design — no side effects.
+// 200 -> { success, operations: { mode, subscription, counts, readiness } }
+router.get(
+  "/api/businesses/:businessId/operations",
+  requireAuth,
+  requireBusinessAccess(),
+  businessesController.getBusinessOperations,
 );
 
 // PUT /api/businesses/:businessId/logo   (auth + membership + full access +

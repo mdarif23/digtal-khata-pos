@@ -115,6 +115,8 @@ export interface BusinessContextSummary {
   businessId: number;
   businessName: string;
   businessSlug: string;
+  /** Operating model (physical_only | online_only | omnichannel). */
+  mode: "physical_only" | "online_only" | "omnichannel";
   roleSlug: string;
   roleName: string;
   /** All roles the user holds in this business. */
@@ -541,6 +543,7 @@ export async function getCurrentUserContext(
       businessId: businesses.id,
       businessName: businesses.name,
       businessSlug: businesses.slug,
+      mode: businesses.mode,
       roleId: businessMemberships.roleId,
       roleSlug: roles.slug,
       roleName: roles.name,

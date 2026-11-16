@@ -11,8 +11,15 @@ import { TextField } from "@/components/forms/text-field";
 import { useAuth } from "@/components/providers/auth-provider";
 import { createBusiness } from "@/lib/api/auth";
 import { deleteBusiness, resendVerificationEmail } from "@/lib/api/account";
+import type { BusinessMode } from "@/lib/api/account";
 
 const POS_URL = process.env.NEXT_PUBLIC_POS_URL ?? "http://localhost:5173";
+
+const OPERATING_MODES: { value: BusinessMode; label: string }[] = [
+  { value: "physical_only", label: "Physical shop" },
+  { value: "online_only", label: "Online only" },
+  { value: "omnichannel", label: "Physical + online" },
+];
 
 function subscriptionLabel(status: string, trial: boolean): string {
   if (trial && status === "trialing") return "Free trial — full access";
@@ -31,6 +38,12 @@ function DashboardContent() {
   const [businessName, setBusinessName] = useState(
     () => searchParams.get("create") ?? "",
   );
+  const [businessMode, setBusinessMode] = useState<BusinessMode>(() => {
+    const mode = searchParams.get("mode");
+    return mode === "online_only" || mode === "omnichannel" || mode === "physical_only"
+      ? mode
+      : "physical_only";
+  });
   const [creating, setCreating] = useState(false);
   const [createMessage, setCreateMessage] = useState<string | null>(null);
   const [createError, setCreateError] = useState(false);
@@ -68,7 +81,10 @@ function DashboardContent() {
     }
     setCreating(true);
     setCreateMessage(null);
-    const result = await createBusiness({ name: businessName.trim() });
+    const result = await createBusiness({
+      name: businessName.trim(),
+      mode: businessMode,
+    });
     setCreating(false);
     if (result.ok && result.businessId) {
       // Straight into the setup wizard — steps are skippable.
@@ -165,6 +181,10 @@ function DashboardContent() {
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
                           {business.roleName} ·{" "}
+                          {OPERATING_MODES.find(
+                            (option) => option.value === business.mode,
+                          )?.label ?? "Physical shop"}{" "}
+                          ·{" "}
                           {subscriptionLabel(
                             business.subscription.status,
                             business.subscription.trial,
@@ -282,6 +302,31 @@ function DashboardContent() {
                 value={businessName}
                 onChange={(event) => setBusinessName(event.target.value)}
               />
+              <fieldset>
+                <legend className="text-sm font-medium text-slate-700">
+                  How will you sell?
+                </legend>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {OPERATING_MODES.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setBusinessMode(option.value)}
+                      className={
+                        businessMode === option.value
+                          ? "rounded-lg border-2 border-indigo-600 bg-indigo-50 px-2 py-1.5 text-xs font-medium text-indigo-900"
+                          : "rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-600 hover:border-slate-400"
+                      }
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  A starting point — switch anytime in Settings → Business
+                  Operations.
+                </p>
+              </fieldset>
               <Button
                 className="w-full"
                 onClick={onCreate}

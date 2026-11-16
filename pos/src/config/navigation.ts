@@ -16,18 +16,61 @@ import {
   TrendingUp,
   Users,
   Wallet,
+  type LucideIcon,
 } from "lucide-react";
+import type { BusinessMode } from "@/auth/sessionStore";
 
 /**
  * Sidebar/route configuration. `permission` (string) or `anyPermission`
  * (string[]) gate visibility client-side; the backend independently enforces
  * the same permission keys on every API call.
  *
+ * `modes` (BusinessMode[]) additionally scopes an entry to the active
+ * business's operating model — physical-only surfaces stay hidden for
+ * online-only businesses and vice versa. A null/unknown business mode
+ * (session not resolved, older payload) shows everything; the backend
+ * remains the real gate.
+ *
  * Visibility always mirrors the route guard in AppRoutes.tsx — an entry the
  * current role cannot open (403) must never be shown, and a reachable page
  * must never be hidden from the sidebar.
  */
-export const navigation = [
+export interface NavSubItem {
+  title: string;
+  url: string;
+  permission?: string;
+  anyPermission?: string[];
+  modes?: BusinessMode[];
+}
+
+export interface NavSubItem {
+  title: string;
+  url: string;
+  permission?: string;
+  anyPermission?: string[];
+  modes?: BusinessMode[];
+}
+
+/**
+ * One entry: either a direct link (url + icon, no items) or an expandable
+ * group (items). All fields optional so the literal array stays assignable;
+ * the sidebar narrows on `items` presence. `modes` scopes an entry to
+ * operating models (undefined = visible in every mode).
+ */
+export interface NavItem {
+  title: string;
+  url?: string;
+  icon?: LucideIcon;
+  permission?: string;
+  anyPermission?: string[];
+  modes?: BusinessMode[];
+  items?: NavSubItem[];
+}
+
+const PHYSICAL_MODES: BusinessMode[] = ["physical_only", "omnichannel"];
+const ONLINE_MODES: BusinessMode[] = ["online_only", "omnichannel"];
+
+export const navigation: NavItem[] = [
   {
     title: "Dashboard",
     url: "/dashboard",
@@ -39,6 +82,7 @@ export const navigation = [
     url: "/",
     icon: Store,
     permission: "pos.view",
+    modes: PHYSICAL_MODES,
   },
   {
     title: "Sales",
@@ -51,6 +95,7 @@ export const navigation = [
     url: "/register",
     icon: Calculator,
     permission: "cash_register.view",
+    modes: PHYSICAL_MODES,
   },
   {
     title: "Quotations",
@@ -63,6 +108,7 @@ export const navigation = [
     url: "/online-orders",
     icon: PackageCheck,
     permission: "orders.view",
+    modes: ONLINE_MODES,
   },
   {
     title: "Due Management",
@@ -112,14 +158,14 @@ export const navigation = [
           "warranty.reports.view",
         ],
       },
-      { title: "Shift Close (Z-Report)", url: "/reports?tab=register-close", permission: "reports.sales.view" },
+      { title: "Shift Close (Z-Report)", url: "/reports?tab=register-close", permission: "reports.sales.view", modes: PHYSICAL_MODES },
       { title: "Sales Summary", url: "/reports?tab=sales-summary", permission: "reports.sales.view" },
       { title: "Hourly & Peak Hours", url: "/reports?tab=sales-hourly", permission: "reports.sales.view" },
       { title: "Sales by Invoice", url: "/reports?tab=sales-invoices", permission: "reports.sales.view" },
       { title: "Product Sales", url: "/reports?tab=sales-products", permission: "reports.sales.view" },
       { title: "Payment Breakdown", url: "/reports?tab=sales-payments", permission: "reports.sales.view" },
       { title: "Gross Profit & Margins", url: "/reports?tab=profit", permission: "reports.profit.view" },
-      { title: "Online Store Profitability", url: "/reports?tab=online-profitability", permission: "reports.online_profitability.view" },
+      { title: "Online Store Profitability", url: "/reports?tab=online-profitability", permission: "reports.online_profitability.view", modes: ONLINE_MODES },
       { title: "Customer Receivables", url: "/reports?tab=receivables", permission: "reports.financial.view" },
       { title: "Channel Performance", url: "/reports?tab=analytics-channels", permission: "reports.financial.view" },
       { title: "Customer Lifetime Value", url: "/reports?tab=analytics-clv", permission: "reports.financial.view" },
@@ -198,7 +244,7 @@ export const navigation = [
     anyPermission: ["promotions.view", "pos.view"],
     items: [
       { title: "Coupons", url: "/coupons", permission: "promotions.view" },
-      { title: "Gift Cards", url: "/gift-cards", permission: "pos.view" },
+      { title: "Gift Cards", url: "/gift-cards", permission: "pos.view", modes: PHYSICAL_MODES },
     ],
   },
   {
@@ -259,6 +305,7 @@ export const navigation = [
       "audit.view",
     ],
     items: [
+      { title: "Business Operations", url: "/settings/business-operations", permission: "settings.view" },
       { title: "Locations", url: "/locations", permission: "locations.view" },
       { title: "Tax Rates", url: "/tax-rates", permission: "taxes.view" },
       { title: "Loyalty Program", url: "/loyalty-settings", permission: "loyalty.manage" },
@@ -272,6 +319,7 @@ export const navigation = [
           "cash_drawer.open",
           "cash_drawer.open_without_sale",
         ],
+        modes: PHYSICAL_MODES,
       },
       { title: "Audit Log", url: "/audit-logs", permission: "audit.view" },
     ],

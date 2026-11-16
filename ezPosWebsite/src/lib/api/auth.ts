@@ -26,6 +26,8 @@ export interface BusinessMembership {
   businessId: number;
   businessName: string;
   businessSlug: string;
+  /** Operating model (physical_only | online_only | omnichannel). */
+  mode: "physical_only" | "online_only" | "omnichannel";
   roleSlug: string;
   roleName: string;
   subscription: {
@@ -198,6 +200,8 @@ export async function fetchMe(): Promise<MeResponse | null> {
 export async function createBusiness(input: {
   name: string;
   phone?: string;
+  /** Operating model chosen at signup — never permanent, switchable later. */
+  mode?: "physical_only" | "online_only" | "omnichannel";
 }): Promise<{ ok: boolean; status: number; message: string; businessId?: number }> {
   const { status, body } = await request<{
     success?: boolean;
