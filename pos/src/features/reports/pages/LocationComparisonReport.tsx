@@ -6,7 +6,7 @@ import {
 } from "../api/reports.api";
 import type { ReportFilters } from "../types/report.types";
 import { ReportDateFilter } from "../components/ReportDateFilter";
-import { PlanUpgradeCard } from "../components/PlanUpgradeCard";
+import { PlanUpgradeCard } from "@/components/common/PlanUpgradeCard";
 import type { EntitlementErrorInfo } from "../hooks/useReportData";
 
 /** Extracts the 403 FEATURE_NOT_IN_PLAN payload so the page can show the

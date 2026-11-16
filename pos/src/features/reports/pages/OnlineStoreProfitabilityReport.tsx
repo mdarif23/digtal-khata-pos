@@ -12,7 +12,7 @@ import {
 import { ReportHeader } from "../components/ReportHeader";
 import { ReportDateFilter } from "../components/ReportDateFilter";
 import { ReportMetricCard } from "../components/ReportMetricCard";
-import { PlanUpgradeCard } from "../components/PlanUpgradeCard";
+import { PlanUpgradeCard } from "@/components/common/PlanUpgradeCard";
 import { ReportTable } from "../components/ReportTable";
 import type { ReportColumn } from "../components/ReportTable";
 import {

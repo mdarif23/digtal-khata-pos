@@ -12,7 +12,7 @@ import { ReportHeader } from "../components/ReportHeader";
 import { ReportDateFilter } from "../components/ReportDateFilter";
 import { ReportMetricCard } from "../components/ReportMetricCard";
 import { ReportTable, type ReportColumn } from "../components/ReportTable";
-import { PlanUpgradeCard } from "../components/PlanUpgradeCard";
+import { PlanUpgradeCard } from "@/components/common/PlanUpgradeCard";
 
 export function TaxReconciliationReport() {
   const [filters, setFilters] = useState<ReportFilters>({
