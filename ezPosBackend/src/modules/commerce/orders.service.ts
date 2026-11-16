@@ -34,6 +34,7 @@ import {
 } from "../../utils/documentSequence.js";
 import { salePayments } from "../../db/schema/salePayments.js";
 import { saleRefunds } from "../../db/schema/saleRefunds.js";
+import { postSaleLedgerEntry } from "../sales/sales.ledger.js";
 import { businessMemberships } from "../../db/schema/businessMemberships.js";
 import { users } from "../../db/schema/users.js";
 import {
@@ -640,6 +641,38 @@ export async function confirmOnlineOrderInTx(
         fulfillmentStatus: "confirmed",
       })
       .where(eq(sales.id, saleId));
+
+    // GL posting (Phase 4): online orders now land in the SAME double-entry
+    // ledger as POS sales — revenue/VAT/delivery income/COGS at confirm.
+    // Money side: recorded payment rows (prepaid captures) debit cash NET of
+    // their gateway fee (fee → 5080); the COD residual debits 1040
+    // receivable, which the later collection entry settles. Idempotent per
+    // sale via the ledger gateway; a no-op before Finance activation.
+    const salePaymentRows = await tx
+      .select({
+        method: salePayments.paymentMethod,
+        amount: salePayments.amount,
+        gatewayFee: salePayments.gatewayFee,
+      })
+      .from(salePayments)
+      .where(
+        and(
+          eq(salePayments.saleId, saleId),
+          eq(salePayments.businessId, businessId),
+        ),
+      );
+    await postSaleLedgerEntry(tx, {
+      saleId,
+      businessId,
+      locationId,
+      payments: salePaymentRows.map((payment) => ({
+        method: payment.method,
+        amount: Number(payment.amount),
+        gatewayFee:
+          payment.gatewayFee == null ? null : Number(payment.gatewayFee),
+      })),
+      actorUserId: null,
+    });
 
     await recordOrderEventInTx(tx, {
       businessId,

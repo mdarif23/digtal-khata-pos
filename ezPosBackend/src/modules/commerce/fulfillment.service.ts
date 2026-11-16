@@ -19,6 +19,7 @@ import {
   type FulfillmentActor,
 } from "./orders.service.js";
 import { recordOrderEventInTx } from "./orderTimeline.service.js";
+import { postDueCollectionLedgerEntry } from "../sales/sales.ledger.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
 
 /**
@@ -58,6 +59,7 @@ async function getEditableSaleInTx(
       paymentStatus: sales.paymentStatus,
       dueAmount: sales.dueAmount,
       customerId: sales.customerId,
+      locationId: sales.locationId,
     })
     .from(sales)
     .where(and(eq(sales.id, orderId), eq(sales.businessId, businessId)))
@@ -536,16 +538,19 @@ export async function deliverOrder(
       if (gatewayFee < 0) {
         throw new BadRequestError("Gateway fee cannot be negative.");
       }
-      await tx.insert(salePayments).values({
-        businessId,
-        saleId: orderId,
-        customerId: sale.customerId ?? null,
-        amount,
-        paymentMethod: method,
-        reference: options.codReference ?? null,
-        gatewayFee,
-        notes: "COD collection on delivery",
-      });
+      const paymentRows = await tx
+        .insert(salePayments)
+        .values({
+          businessId,
+          saleId: orderId,
+          customerId: sale.customerId ?? null,
+          amount,
+          paymentMethod: method,
+          reference: options.codReference ?? null,
+          gatewayFee,
+          notes: "COD collection on delivery",
+        })
+        .returning({ id: salePayments.id });
       const remaining = Math.max(0, roundMoney(due - amount));
       await tx
         .update(sales)
@@ -554,6 +559,18 @@ export async function deliverOrder(
           dueAmount: remaining,
         })
         .where(eq(sales.id, orderId));
+      // GL collection entry (Phase 4): the confirm posting put the COD
+      // residual on 1040 — this settles it (cash NET of the gateway fee,
+      // fee → 5080). Idempotent per payment row; no-op pre-activation.
+      await postDueCollectionLedgerEntry(tx, {
+        businessId,
+        paymentId: paymentRows[0]!.id,
+        amount,
+        method,
+        gatewayFee,
+        locationId: sale.locationId ?? null,
+        actorUserId: actorUserId ?? null,
+      });
       await recordOrderEventInTx(tx, {
         businessId,
         saleId: orderId,

@@ -33,6 +33,13 @@ const CASH_LIKE_METHODS = new Set(["cash", "bangla_qr", "card", "sslcommerz"]);
 export interface SaleLedgerPayment {
   method: string;
   amount: number;
+  /**
+   * Processor/gateway fee captured on this payment (Flexible Operating Model
+   * Phase 4). The GL books cash NET of the fee and sends the fee to 5080
+   * "Bank & Gateway Fees"; the customer's payment still counts at gross for
+   * the residual (payments + due = final_total) identity.
+   */
+  gatewayFee?: number | null | undefined;
 }
 
 /**
@@ -82,11 +89,18 @@ export async function postSaleLedgerEntry(
     const amount = roundMoney(Number(payment.amount ?? 0));
     if (amount <= 0) continue;
     paidPoisha += Math.round(amount * 100);
+    // Cash lands NET of the processor fee; the fee itself is an expense
+    // (5080) so debits still total the gross amount.
+    const gatewayFee = Math.min(
+      roundMoney(Number(payment.gatewayFee ?? 0)),
+      amount,
+    );
+    const netAmount = roundMoney(amount - gatewayFee);
     const instrumentAccount = INSTRUMENT_ACCOUNT_BY_METHOD[payment.method];
     if (instrumentAccount) {
       lines.push({
         accountCode: instrumentAccount,
-        debit: amount,
+        debit: netAmount,
         locationId: params.locationId,
         description: `${payment.method.replace("_", " ")} redeemed`,
       });
@@ -98,7 +112,7 @@ export async function postSaleLedgerEntry(
       );
       lines.push({
         accountId: account.id,
-        debit: amount,
+        debit: netAmount,
         locationId: params.locationId,
         description: `Sale payment (${payment.method})`,
       });
@@ -122,6 +136,14 @@ export async function postSaleLedgerEntry(
       throw new Error(
         `Ledger hook: unmapped sale payment method "${payment.method}"`,
       );
+    }
+    if (gatewayFee > 0) {
+      lines.push({
+        accountCode: "5080",
+        debit: gatewayFee,
+        locationId: params.locationId,
+        description: "Payment gateway fee",
+      });
     }
   }
 
@@ -362,6 +384,8 @@ export async function postDueCollectionLedgerEntry(
     paymentId: number;
     amount: number;
     method: string;
+    /** Processor fee on this collection — cash NET, fee to 5080 (Phase 4). */
+    gatewayFee?: number | null | undefined;
     locationId: number | null;
     actorUserId: number | null;
   },
@@ -369,6 +393,11 @@ export async function postDueCollectionLedgerEntry(
   if (!(await isLedgerActivatedInTx(tx, params.businessId))) return;
 
   const amount = roundMoney(params.amount);
+  const gatewayFee = Math.min(
+    roundMoney(Number(params.gatewayFee ?? 0)),
+    amount,
+  );
+  const netAmount = roundMoney(amount - gatewayFee);
   const isCashLike = CASH_LIKE_METHODS.has(params.method);
   let accountId: number | null = null;
   if (isCashLike) {
@@ -391,7 +420,7 @@ export async function postDueCollectionLedgerEntry(
   if (accountId) {
     lines.push({
       accountId,
-      debit: amount,
+      debit: netAmount,
       locationId: params.locationId,
       description: `Due collection (${params.method})`,
     });
@@ -404,9 +433,17 @@ export async function postDueCollectionLedgerEntry(
     }
     lines.push({
       accountCode: instrumentAccount,
-      debit: amount,
+      debit: netAmount,
       locationId: params.locationId,
       description: `Due collection (${params.method})`,
+    });
+  }
+  if (gatewayFee > 0) {
+    lines.push({
+      accountCode: "5080",
+      debit: gatewayFee,
+      locationId: params.locationId,
+      description: "Payment gateway fee",
     });
   }
   lines.push({

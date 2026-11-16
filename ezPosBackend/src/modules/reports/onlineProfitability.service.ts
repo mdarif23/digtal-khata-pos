@@ -20,7 +20,8 @@ import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
  *                      − gateway fees (sale_payments.gateway_fee)
  *                      − marketplace commission (sales.marketplace_commission)
  *
- * Population: sales with channel <> 'pos'. Pending and cancelled orders are
+ * Population: online channels only (woocommerce + custom_storefront — LAN
+ * 'offline' replays are NOT online sales). Pending and cancelled orders are
  * NEVER counted as sales; shipping income stays separate from product
  * sales; VAT (collected tax) is excluded from revenue. Per-order cost
  * components are pre-aggregated with LATERAL joins (never multiplied across
@@ -120,7 +121,7 @@ function round2(value: number): number {
 
 /** WHERE fragment scoping the online sales population (parameter-bound). */
 function populationSql(businessId: number, filters: ProfitabilityFilters): SQL {
-  const parts = [sql`s.business_id = ${businessId}`, sql`s.channel <> 'pos'`];
+  const parts = [sql`s.business_id = ${businessId}`, sql`s.channel NOT IN ('pos', 'offline')`];
   if (filters.from) parts.push(sql`s.purchase_date >= ${`${filters.from}T00:00:00`}::timestamptz`);
   if (filters.to) parts.push(sql`s.purchase_date <= ${`${filters.to}T23:59:59.999`}::timestamptz`);
   if (filters.locationId) parts.push(sql`s.location_id = ${filters.locationId}`);
@@ -164,7 +165,7 @@ export async function getProfitabilitySummary(
         and exists (
           select 1 from sales s2
           where s2.id = r.sale_id and s2.business_id = ${businessId}
-            and s2.channel <> 'pos'
+            and s2.channel NOT IN ('pos', 'offline')
         )
         ${filters.from ? sql`and r.created_at >= ${`${filters.from}T00:00:00`}::timestamptz` : sql``}
         ${filters.to ? sql`and r.created_at <= ${`${filters.to}T23:59:59.999`}::timestamptz` : sql``}
@@ -181,7 +182,7 @@ export async function getProfitabilitySummary(
         and exists (
           select 1 from sales s2
           where s2.id = r.sale_id and s2.business_id = ${businessId}
-            and s2.channel <> 'pos'
+            and s2.channel NOT IN ('pos', 'offline')
         )
         ${filters.from ? sql`and r.created_at >= ${`${filters.from}T00:00:00`}::timestamptz` : sql``}
         ${filters.to ? sql`and r.created_at <= ${`${filters.to}T23:59:59.999`}::timestamptz` : sql``}
@@ -289,7 +290,7 @@ export async function getProfitabilityTrends(
         and exists (
           select 1 from sales s2
           where s2.id = r.sale_id and s2.business_id = ${businessId}
-            and s2.channel <> 'pos'
+            and s2.channel NOT IN ('pos', 'offline')
         )
         ${filters.from ? sql`and r.created_at >= ${`${filters.from}T00:00:00`}::timestamptz` : sql``}
         ${filters.to ? sql`and r.created_at <= ${`${filters.to}T23:59:59.999`}::timestamptz` : sql``}
@@ -378,7 +379,7 @@ export async function getProfitabilityProducts(
       join sale_items si on si.id = ri.sale_item_id
       where r.business_id = ${businessId}
         and s.business_id = ${businessId}
-        and s.channel <> 'pos'
+        and s.channel NOT IN ('pos', 'offline')
         ${filters.from ? sql`and r.created_at >= ${`${filters.from}T00:00:00`}::timestamptz` : sql``}
         ${filters.to ? sql`and r.created_at <= ${`${filters.to}T23:59:59.999`}::timestamptz` : sql``}
       group by si.variant_id
@@ -396,7 +397,7 @@ export async function getProfitabilityProducts(
       where r.business_id = ${businessId}
         and r.status = 'restock'
         and s.business_id = ${businessId}
-        and s.channel <> 'pos'
+        and s.channel NOT IN ('pos', 'offline')
         ${filters.from ? sql`and r.created_at >= ${`${filters.from}T00:00:00`}::timestamptz` : sql``}
         ${filters.to ? sql`and r.created_at <= ${`${filters.to}T23:59:59.999`}::timestamptz` : sql``}
       group by si.variant_id
@@ -494,7 +495,7 @@ export async function getProfitabilityChannels(
       join sales s2 on s2.id = r.sale_id
       where r.business_id = ${businessId}
         and s2.business_id = ${businessId}
-        and s2.channel <> 'pos'
+        and s2.channel NOT IN ('pos', 'offline')
         ${filters.from ? sql`and r.created_at >= ${`${filters.from}T00:00:00`}::timestamptz` : sql``}
         ${filters.to ? sql`and r.created_at <= ${`${filters.to}T23:59:59.999`}::timestamptz` : sql``}
       group by 1
