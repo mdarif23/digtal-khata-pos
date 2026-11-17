@@ -157,7 +157,7 @@ export default function DashboardComponent() {
       setChannelMix(null);
       return;
     }
-    const requestId = ++channelMixRequestId;
+    const requestId = ++channelMixRequestId.current;
     const filters: Partial<ReportFilters> = {
       period: range as ReportFilters["period"],
       ...(locationId !== null ? { locationId } : {}),
@@ -166,10 +166,10 @@ export default function DashboardComponent() {
       try {
         const { data } = await reportsApi.getChannelPerformance(filters);
         // Out-of-order guard: only the newest request renders.
-        if (requestId !== channelMixRequestId) return;
+        if (requestId !== channelMixRequestId.current) return;
         setChannelMix(data.data);
       } catch {
-        if (requestId === channelMixRequestId) setChannelMix(null);
+        if (requestId === channelMixRequestId.current) setChannelMix(null);
       }
     })();
   }, [canViewChannelMix, range, locationId]);
