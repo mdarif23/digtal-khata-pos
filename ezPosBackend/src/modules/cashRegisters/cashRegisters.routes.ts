@@ -68,17 +68,17 @@ router.put(
 // Session routes are user-scoped (no X-Location-Id requirement): the
 // service enforces that only the session owner (or the owner account)
 // operates a session. Reads require the register-view authority.
-// WB-03: session WRITES are physical-surface operations (cash movements,
-// reopen) — a business that switched to online_only must not run new cash
-// through a drawer (and a fresh online_only business can never open one,
-// since the open routes are gated). Reads and close/reconcile stay
-// mode-neutral so a pre-existing open session can always be wound down.
+// WB-03 (scoped per C3-006): only cash-movement/reopen/confirm-drop are
+// physical-surface operations — CLOSE and RECONCILE stay mode-neutral so a
+// pre-existing open session can always be wound down after a switch to
+// online_only (gating close would strand the drawer forever).
 const sessionRead = [
   requireAuth,
   requireBusinessContext(),
   requirePermission("cash_register.view"),
 ] as const;
-const sessionWrite = [
+const sessionWrite = [...sessionRead, requireFullAccess] as const;
+const sessionPhysicalWrite = [
   ...sessionRead,
   requireSurfaceModes(
     ["physical_only", "omnichannel"],
@@ -99,7 +99,9 @@ router.get(
 router.get("/api/sessions/:sessionId", ...sessionRead, cashRegistersController.getSessionHandler);
 router.post(
   "/api/sessions/:sessionId/cash-movement",
-  ...sessionWrite,
+  // C3-006: physical-surface operation — gated; close/reconcile below stay
+  // mode-neutral so a pre-existing open session can be wound down.
+  ...sessionPhysicalWrite,
   requirePermission("cash_movement.create"),
   cashRegistersController.postCashMovement,
 );
@@ -117,13 +119,15 @@ router.post(
 );
 router.post(
   "/api/sessions/:sessionId/reopen",
-  ...sessionWrite,
+  // Reopen starts a new physical-shift window — gated like cash-movement.
+  ...sessionPhysicalWrite,
   requirePermission("cash_register.close"),
   cashRegistersController.postReopen,
 );
 router.post(
   "/api/sessions/:sessionId/transactions/:transactionId/confirm-drop",
-  ...sessionWrite,
+  // Confirms a drawer→safe drop — physical cash handling, gated.
+  ...sessionPhysicalWrite,
   requirePermission("cash_register.manage"),
   cashRegistersController.postConfirmDrop,
 );

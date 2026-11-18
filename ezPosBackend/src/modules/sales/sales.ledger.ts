@@ -28,7 +28,16 @@ const INSTRUMENT_ACCOUNT_BY_METHOD: Record<string, string> = {
   loyalty_points: "2060",
 };
 
-const CASH_LIKE_METHODS = new Set(["cash", "bangla_qr", "card", "sslcommerz"]);
+// 'woocommerce' = captures ingested from Woo order webhooks
+// (confirmWooPaidOrder) — money already taken in Woo, lands in the bank
+// account like the other online methods (migration 0090 allows the method).
+const CASH_LIKE_METHODS = new Set([
+  "cash",
+  "bangla_qr",
+  "card",
+  "sslcommerz",
+  "woocommerce",
+]);
 
 export interface SaleLedgerPayment {
   method: string;

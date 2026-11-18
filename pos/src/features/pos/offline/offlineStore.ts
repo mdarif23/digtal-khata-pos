@@ -210,6 +210,7 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
           if (conflictId !== undefined) entry.conflictId = conflictId;
           entry.attempts += 1;
           entry.lastError = null;
+          entry.errorCode = undefined;
           await putOutboxEntry(entry);
           await appendSyncLog({
             at: new Date().toISOString(),
@@ -239,6 +240,16 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
           // stock conflict, offline-eligible validation) — a real conflict,
           // never retried. Requires manual review by the cashier/manager.
           entry.status = "failed";
+          // A3-001: persist the machine code (retryFailed skips entries the
+          // SURFACE_NOT_ACTIVE gate rejected — matching the English message
+          // breaks as soon as a gate uses a custom wording).
+          const errorCode = (
+            err as { response?: { data?: { code?: string } } }
+          )?.response?.data?.code;
+          entry.errorCode =
+            typeof errorCode === "string" && errorCode.length > 0
+              ? errorCode
+              : undefined;
           entry.lastError =
             (err as { response?: { data?: { message?: string } } })?.response?.data
               ?.message ?? "The sale was rejected by the server.";
@@ -272,13 +283,13 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
     // re-queues them as pending AFTER the cashier has had the chance to
     // adjust (e.g. re-pricing) — the payload is replayed as-is with the
     // SAME idempotency key, so nothing can duplicate.
-    // WP-014: mode-blocked entries (the business switched to a model whose
-    // surface gate 403s this op) are skipped — they can never succeed in
-    // this mode; re-queueing them loops forever.
+    // WP-014 (refined per A3-001): mode-blocked entries (the business
+    // switched to a model whose surface gate 403s this op) are skipped —
+    // they can never succeed in this mode; re-queueing them loops forever.
+    // Matched on the SURFACE_NOT_ACTIVE code, not the message substring
+    // (gates use custom wordings per surface).
     const entries = (await listOutbox()).filter(
-      (e) =>
-        e.status === "failed" &&
-        !e.lastError?.includes("not active for the current operating model"),
+      (e) => e.status === "failed" && e.errorCode !== "SURFACE_NOT_ACTIVE",
     );
     for (const entry of entries) {
       entry.status = "pending";

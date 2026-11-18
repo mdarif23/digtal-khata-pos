@@ -1016,7 +1016,7 @@ describe("storefront platform integration", { skip: !runIntegration }, () => {
   it("internal shopper surface: visibility-scoped catalog, COD checkout with server-side delivery fee, stock consumption, tracking", async () => {
     const owner = await createOwnerCtx("SFP Shopper Co");
     // Online-capable mode is required for storefront orders.
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, { mode: "omnichannel" });
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, { mode: "omnichannel" });
     await setBusinessPlan(owner.businessId, {
       features: { hostedStorefront: true, storefrontCustomDomains: true },
     });
@@ -1277,7 +1277,7 @@ describe("storefront platform integration", { skip: !runIntegration }, () => {
   });
   it("online payments + shoppers: gateway session, verify-once core, IPN routing, shopper accounts", async () => {
     const owner = await createOwnerCtx("SFP Pay Co");
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, { mode: "omnichannel" });
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, { mode: "omnichannel" });
     await setBusinessPlan(owner.businessId, {
       features: { hostedStorefront: true, storefrontCustomDomains: true },
     });
@@ -1474,7 +1474,7 @@ describe("storefront platform integration", { skip: !runIntegration }, () => {
   });
   it("stage 6 hardening: analytics scoping, admin suspend/reactivate with audit, cross-tenant walls", async () => {
     const owner = await createOwnerCtx("SFP Analytics Co");
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, { mode: "omnichannel" });
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, { mode: "omnichannel" });
     await setBusinessPlan(owner.businessId, {
       features: { hostedStorefront: true, storefrontAnalytics: true },
     });

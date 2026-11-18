@@ -192,7 +192,7 @@ describe("integration entitlements", { skip: !runIntegration }, () => {
 
   it("blocks store connection without the woocommerceIntegration feature", async () => {
     const owner = await createOwnerCtx("Ent No Feature Co");
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, {
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, {
       mode: "omnichannel",
     });
     await setBusinessPlan(owner.businessId, {
@@ -233,7 +233,7 @@ describe("integration entitlements", { skip: !runIntegration }, () => {
 
   it("enforces maxConnectedStores", async () => {
     const owner = await createOwnerCtx("Ent Store Limit Co");
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, {
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, {
       mode: "omnichannel",
     });
     await setBusinessPlan(owner.businessId, {
@@ -291,7 +291,7 @@ describe("integration entitlements", { skip: !runIntegration }, () => {
 
   it("gates API key creation on storefrontApi and webhook endpoints on advancedWebhooks + limits", async () => {
     const owner = await createOwnerCtx("Ent Key Gate Co");
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, {
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, {
       mode: "omnichannel",
     });
 
@@ -340,7 +340,7 @@ describe("integration entitlements", { skip: !runIntegration }, () => {
 
   it("pauses outbound sync when the entitlement expires (data stays reachable)", async () => {
     const owner = await createOwnerCtx("Ent Expiry Co");
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, {
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, {
       mode: "omnichannel",
     });
     await setBusinessPlan(owner.businessId, {

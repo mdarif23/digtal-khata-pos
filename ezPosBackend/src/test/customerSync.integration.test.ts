@@ -161,7 +161,7 @@ describe("customer sync integration", { skip: !runIntegration }, () => {
     unitId = unit.json.data.value;
 
     // Omnichannel mode + a connected WooCommerce mock store (both tests).
-    const setMode = await api("PUT", `/api/businesses/${businessId}`, {
+    const setMode = await api("PATCH", `/api/businesses/${businessId}/mode`, {
       mode: "omnichannel",
     });
     assert.ok([200, 204].includes(setMode.status), "mode set to omnichannel");

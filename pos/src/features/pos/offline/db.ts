@@ -160,6 +160,9 @@ export interface OutboxEntry {
   syncedAt: string | null;
   attempts: number;
   lastError: string | null;
+  /** WP-014/A3-001: backend rejection code (e.g. SURFACE_NOT_ACTIVE) —
+   * matched by retryFailed without depending on the message wording. */
+  errorCode?: string;
   /** Cashier-facing summary for the sync history dialog. */
   summary: { total: number; itemCount: number; customerName: string | null };
   /** Phase 3: op kind (default 'sale'). */

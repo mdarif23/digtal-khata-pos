@@ -142,7 +142,7 @@ describe("phase 9 security & load", { skip: !runIntegration }, () => {
   }
 
   async function setMode(ctx: Ctx, mode: string): Promise<void> {
-    await api(ctx, "PUT", `/api/businesses/${ctx.businessId}`, { mode });
+    await api(ctx, "PATCH", `/api/businesses/${ctx.businessId}/mode`, { mode });
   }
 
   async function seedVariant(

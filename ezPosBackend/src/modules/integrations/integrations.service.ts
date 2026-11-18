@@ -13,6 +13,7 @@ import { integrations } from "../../db/schema/integrations.js";
 import { inventoryStock } from "../../db/schema/inventoryStock.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { sales } from "../../db/schema/sales.js";
+import { salePayments } from "../../db/schema/salePayments.js";
 import { products } from "../../db/schema/products.js";
 import { customers } from "../../db/schema/customers.js";
 import { locations } from "../../db/schema/locations.js";
@@ -25,9 +26,10 @@ import {
 } from "./adapters/woocommerce/woocommerce.client.js";
 import {
   cancelOnlineOrder,
-  confirmOnlineOrder,
+  confirmOnlineOrderInTx,
   createOnlineOrder,
 } from "../commerce/orders.service.js";
+import { roundMoney } from "../../utils/roundMoney.js";
 import { NotFoundError, ConflictError } from "../../utils/handleError.js";
 import {
   assertFeature,
@@ -863,6 +865,65 @@ async function pushSingleProduct(
 // WooCommerce webhook ingestion (order.created/updated)
 // ---------------------------------------------------------------------------
 
+/**
+ * WB-01 follow-through: Woo `processing`/`completed` mean the money was
+ * ALREADY taken in Woo. Record that capture as a first-class salePayments
+ * row, then confirm PREPAID. Confirming with no payment row (the pre-WB-01
+ * behavior) marked COD orders paid → uncollectable 1040; plain confirming
+ * (letting confirmOnlineOrderInTx derive) flips a PAID-in-Woo order to
+ * COD/unpaid. The capture row IS the semantic difference between the two.
+ */
+async function confirmWooPaidOrder(
+  businessId: number,
+  saleId: number,
+  reference: string,
+): Promise<{ saleId: number; duplicated?: boolean }> {
+  return db.transaction(async (tx) => {
+    const [sale] = await tx
+      .select({
+        status: sales.status,
+        finalTotal: sales.finalTotal,
+        customerId: sales.customerId,
+      })
+      .from(sales)
+      .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
+      .for("update");
+    if (!sale) throw new Error("Order not found.");
+    if (sale.status !== "pending") {
+      return { saleId, duplicated: sale.status === "completed" };
+    }
+    const total = roundMoney(Number(sale.finalTotal ?? 0));
+    // Idempotent against any other capture (retry storms, storefront prepay):
+    // only the unpaid shortfall becomes a Woo capture row.
+    const [captured] = await tx
+      .select({ sum: sql<string>`coalesce(sum(${salePayments.amount}), 0)` })
+      .from(salePayments)
+      .where(
+        and(
+          eq(salePayments.saleId, saleId),
+          eq(salePayments.businessId, businessId),
+        ),
+      );
+    const shortfall = roundMoney(total - Number(captured?.sum ?? 0));
+    if (shortfall > 0) {
+      await tx.insert(salePayments).values({
+        businessId,
+        saleId,
+        customerId: sale.customerId ?? null,
+        amount: shortfall,
+        paymentMethod: "woocommerce",
+        reference,
+        gatewayFee: 0,
+        notes: `Captured in WooCommerce before sync (webhook reference ${reference})`,
+      });
+    }
+    await confirmOnlineOrderInTx(tx, businessId, saleId, {
+      paymentMode: "prepaid",
+    });
+    return { saleId };
+  });
+}
+
 export async function processOrderWebhookByToken(
   token: string,
   rawBody: string,
@@ -1056,10 +1117,11 @@ async function processWcOrder(
         message: `Order ${order.id} (${wcStatus}) created.`,
       });
 
-      // 'processing'/'completed' mean paid → confirm immediately (stock is
-      // consumed). COD orders stay pending until marked paid in the portal.
+      // 'processing'/'completed' mean paid → record the Woo capture and
+      // confirm prepaid (see confirmWooPaidOrder). COD orders stay pending
+      // until marked paid in the portal.
       if (wcStatus === "processing" || wcStatus === "completed") {
-        await confirmOnlineOrder(businessId, created.saleId);
+        await confirmWooPaidOrder(businessId, created.saleId, String(order.id));
         return { action: "confirmed", saleId: created.saleId };
       }
       return { action: "created", saleId: created.saleId };
@@ -1091,7 +1153,7 @@ async function processWcOrder(
       return { action: "cancelled", saleId };
     }
     if (wcStatus === "processing" || wcStatus === "completed") {
-      await confirmOnlineOrder(businessId, saleId);
+      await confirmWooPaidOrder(businessId, saleId, String(order.id));
       await db
         .update(integrationOrderMappings)
         .set({

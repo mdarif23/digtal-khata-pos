@@ -7,6 +7,12 @@ import { products } from "../../db/schema/products.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { customers } from "../../db/schema/customers.js";
 import { sales } from "../../db/schema/sales.js";
+import { businessMemberships } from "../../db/schema/businessMemberships.js";
+import { roles } from "../../db/schema/roles.js";
+import { userRoles } from "../../db/schema/userRoles.js";
+import { rolePermissions } from "../../db/schema/rolePermissions.js";
+import { permissions } from "../../db/schema/permissions.js";
+import { WILDCARD_PERMISSION } from "../../rbac/permissions.js";
 import {
   registerSessions,
   registerTransactions,
@@ -348,6 +354,47 @@ async function lineEligibility(
   );
 }
 
+/**
+ * A3-006: effective permission set for a syncing user, derived the same way
+ * requireBusinessContext does (owner → wildcard; otherwise the union of the
+ * membership role and every user_roles assignment). Read fresh per op batch
+ * so revocations apply at sync time.
+ */
+async function loadEffectivePermissions(
+  businessId: number,
+  userId: number,
+): Promise<Set<string>> {
+  const [membership] = await db
+    .select({ roleId: businessMemberships.roleId, roleSlug: roles.slug })
+    .from(businessMemberships)
+    .innerJoin(roles, eq(roles.id, businessMemberships.roleId))
+    .where(
+      and(
+        eq(businessMemberships.userId, userId),
+        eq(businessMemberships.businessId, businessId),
+        eq(businessMemberships.status, "active"),
+      ),
+    );
+  if (!membership) return new Set();
+  if (membership.roleSlug === "owner") {
+    return new Set([WILDCARD_PERMISSION]);
+  }
+  const assignments = await db
+    .select({ roleId: userRoles.roleId })
+    .from(userRoles)
+    .where(and(eq(userRoles.userId, userId), eq(userRoles.businessId, businessId)));
+  const roleIds = [
+    ...new Set(assignments.map((a) => a.roleId).concat(membership.roleId)),
+  ];
+  if (roleIds.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ key: permissions.key })
+    .from(rolePermissions)
+    .innerJoin(permissions, eq(permissions.id, rolePermissions.permissionId))
+    .where(inArray(rolePermissions.roleId, roleIds));
+  return new Set(rows.map((row) => row.key));
+}
+
 async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
   const payload = op.payload as { sale?: CreateSalePayload };
   // Back-compat: outboxes recorded before the browser client adopted the
@@ -359,6 +406,34 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
     throw new BadRequestError(`Invalid sale payload: ${JSON.stringify(parsed.error.flatten())}`);
   }
   const sale = parsed.data;
+
+  // A3-006: the online path 403s discounts/price overrides from callers
+  // without pos.apply_discount / pricing.price_override — replay must not
+  // become a bypass. Permissions are re-read at sync time (role changes
+  // take effect immediately, same as requireBusinessContext).
+  const hasDiscount =
+    (sale.discount?.value ?? 0) > 0 ||
+    sale.items.some((item) => (item.discount?.value ?? 0) > 0);
+  const hasOverride = sale.items.some((item) => item.priceOverride != null);
+  if (hasDiscount || hasOverride) {
+    const granted = await loadEffectivePermissions(ctx.businessId, ctx.userId);
+    const holds = (key: string) =>
+      granted.has(WILDCARD_PERMISSION) || granted.has(key);
+    if (hasDiscount && !holds("pos.apply_discount")) {
+      return {
+        opId: op.opId,
+        status: "failed",
+        error: "You do not have permission to apply discounts.",
+      };
+    }
+    if (hasOverride && !holds("pricing.price_override")) {
+      return {
+        opId: op.opId,
+        status: "failed",
+        error: "You do not have permission to override prices.",
+      };
+    }
+  }
 
   const eligibility = await lineEligibility(
     ctx.businessId,
