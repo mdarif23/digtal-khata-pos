@@ -25,6 +25,7 @@ import {
 } from "./cashRegisters.service.js";
 import { z } from "zod";
 import { dateRangeSchema } from "../reports/reports.validation.js";
+import { getDateBounds } from "../reports/reports.service.js";
 
 function actor(req: Request): {
   userId: number;
@@ -432,10 +433,14 @@ export async function getRegisterSessionReportHandler(
         errors: parsed.error.flatten(),
       });
     }
+    // I3-2: honor the shared period vocabulary (60d/90d/365d etc.) via the
+    // same business-timezone bounds every other report uses — the handler
+    // used to silently collapse any period-only query to TODAY.
+    const bounds = await getDateBounds(getBusinessId(req), parsed.data);
     const data = await getRegisterSessionReport(
       getBusinessId(req),
-      parsed.data.startDate ?? new Date().toISOString().slice(0, 10),
-      parsed.data.endDate ?? new Date().toISOString().slice(0, 10),
+      bounds.startDateOnly,
+      bounds.endDateOnly,
     );
     return res.status(200).json({ success: true, data });
   } catch (err: unknown) {

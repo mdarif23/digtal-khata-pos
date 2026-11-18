@@ -6,6 +6,7 @@ import {
   requireBusinessAccess,
   requireFullAccess,
 } from "../../middleware/business.js";
+import { requirePermission } from "../../middleware/permissions.js";
 import {
   authenticateStorefrontKey,
   requireBusinessMode,
@@ -78,10 +79,14 @@ router.get(
 );
 
 // Portal key management.
+// K3-002: minting `ezpos_sk_` secret keys (one-time secret, orders:write)
+// was reachable by ANY active member — storefront.manage is the authority
+// (catalog keys exist for it).
 const portal = [
   requireAuth,
   requireBusinessAccess(),
   requireFullAccess,
+  requirePermission("storefront.manage"),
 ] as const;
 router.post(
   "/api/businesses/:businessId/storefront/keys",

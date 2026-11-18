@@ -65,6 +65,7 @@ import { getCustomerOutstandingInTx } from "../customers/customers.service.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
 import { recordOrderEventInTx } from "../commerce/orderTimeline.service.js";
 import { salePaymentIntents } from "../../db/schema/salePaymentIntents.js";
+import { receiptShareTokens } from "../../db/schema/receiptShare.js";
 import { resolveIntentProvider } from "../../services/payments/saleProviders.js";
 import {
   foldVariantOptionRows,
@@ -2382,17 +2383,25 @@ async function applySaleRefund(
     // remaining-quantity guard apply. Serial lines stay effectively whole —
     // the partial-serial selection below demands exactly one serial per
     // returned unit.
-    if (!Number.isFinite(requested) || requested <= 0) {
+    if (!Number.isFinite(requested) || requested < 0) {
       throw new BadRequestError(
         `Invalid return quantity for sale item ${item.id}.`,
       );
     }
+    // E3-010: 0 = explicitly SKIP this line — the FE's partial multi-line
+    // selection sends one atomic refunds_all request with a quantity for
+    // EVERY refundable line (chosen qty, or 0 to leave it). Absent entries
+    // still default to the full remaining.
+    if (requested === 0) continue;
     if (requested > remaining + 1e-9) {
       throw new ConflictError(
         `Cannot return ${requested} of sale item ${item.id}; only ${Math.max(remaining, 0)} unit(s) remain returnable.`,
       );
     }
     requestedByItem.set(item.id, requested);
+  }
+  if (requestedByItem.size === 0) {
+    throw new BadRequestError("Select at least one line to return.");
   }
 
   // Effective money is pro-rated by the returned share of each line, so a
@@ -4452,7 +4461,10 @@ export async function cancelSale(
       .where(and(eq(saleItems.saleId, saleId), eq(saleItems.businessId, businessId)))
       .for("update");
     const variantRestores = new Map<number, number>();
-    const lotRestores: { batchId: number; quantity: number }[] = [];
+    // D3-002: track the owning variant per restored lot — the movement rows
+    // used to stamp every restore with the FIRST sale item's variantId,
+    // pairing batchIds with variants that never belonged together.
+    const lotRestores: { batchId: number; quantity: number; variantId: number }[] = [];
     let fallbackQuantity = 0;
     for (const item of items) {
       variantRestores.set(
@@ -4471,7 +4483,7 @@ export async function cancelSale(
       for (const row of consumptionRows) {
         if (unallocated <= 0) break;
         const take = Math.min(Number(row.quantity), unallocated);
-        lotRestores.push({ batchId: row.batchId, quantity: take });
+        lotRestores.push({ batchId: row.batchId, quantity: take, variantId: item.variantId });
         unallocated = roundMoney(unallocated - take);
       }
       fallbackQuantity = roundMoney(fallbackQuantity + unallocated);
@@ -4505,13 +4517,17 @@ export async function cancelSale(
         .returning({ id: inventoryBatches.id });
       fallbackBatchId = voidBatch?.id ?? null;
     }
-    const restoredBatches: { batchId: number; quantity: number }[] = [];
+    const restoredBatches: { batchId: number; quantity: number; variantId: number }[] = [];
     for (const lot of lotRestores) {
       const batch = existingBatches.find((b) => b.id === lot.batchId);
       if (!batch) {
         // Missing batch rows land in the VOID batch (movement still truthful).
         if (fallbackBatchId !== null) {
-          restoredBatches.push({ batchId: fallbackBatchId, quantity: lot.quantity });
+          restoredBatches.push({
+            batchId: fallbackBatchId,
+            quantity: lot.quantity,
+            variantId: lot.variantId,
+          });
         }
         continue;
       }
@@ -4544,8 +4560,7 @@ export async function cancelSale(
     for (const restored of restoredBatches) {
       await tx.insert(inventoryMovements).values({
         businessId,
-        variantId:
-          items.find((i) => i.variantId !== undefined)!.variantId,
+        variantId: restored.variantId,
         locationId,
         batchId: restored.batchId,
         movementType: "return",
@@ -4829,6 +4844,21 @@ export async function cancelSale(
         });
       }
     }
+
+    // 12c. Q3-001: receipt-share links die with the sale — a live public
+    // token would otherwise keep serving the cancelled invoice's receipt
+    // (totals, customer name/phone/address) until its TTL expired. The
+    // public fetch also refuses non-completed sales (defense in depth).
+    await tx
+      .update(receiptShareTokens)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(receiptShareTokens.businessId, businessId),
+          eq(receiptShareTokens.saleId, saleId),
+          isNull(receiptShareTokens.revokedAt),
+        ),
+      );
 
     await recordAuditInTx(tx, {
       businessId,

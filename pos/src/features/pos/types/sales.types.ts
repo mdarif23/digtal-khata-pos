@@ -47,6 +47,9 @@ export interface SaleRefundRequest {
    *  without a serial selection, so the UI keeps those lines whole. */
   quantities?: { saleItemId: number; quantity: number }[];
   refundMethod?: "cash" | "store_credit" | "original_payment";
+  /** E3-009: manager approval token (sale.refund policy) — minted by the
+   *  approval dialog after the first 403, same flow as void. */
+  approvalToken?: string;
 }
 export type CreateSaleResponse = {
   success: boolean;

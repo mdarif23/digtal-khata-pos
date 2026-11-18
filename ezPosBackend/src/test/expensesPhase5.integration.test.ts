@@ -273,6 +273,9 @@ describe("expenses phase 5 integration", { skip: !runIntegration }, () => {
         amount: 999,
         category_id: null,
         payment_method: "Cash",
+        // F3-002: voiding requires an UNPAID expense (settled ones must
+        // reverse their payments first).
+        record_as: "unpaid",
       },
       locationA,
     );

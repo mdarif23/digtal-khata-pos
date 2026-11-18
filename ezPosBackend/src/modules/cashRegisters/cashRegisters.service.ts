@@ -7,6 +7,7 @@ import {
   isApprovalRequired,
 } from "../../services/managerApproval.js";
 import { db } from "../../db/schema/index.js";
+import { businesses } from "../../db/schema/businesses.js";
 import { registerSessions } from "../../db/schema/registers.js";
 import { registerTransactions } from "../../db/schema/registers.js";
 import { registers } from "../../db/schema/registers.js";
@@ -1528,6 +1529,17 @@ async function findOpenSessionForAttribution(
   locationId: number,
   terminalId: number | null = null,
 ): Promise<{ id: number } | null> {
+  // F3-003: registers are a physical-surface feature — an online_only
+  // business keeps no drawers. Every drawer auto-attribution (due
+  // collections, gift-card issue/reload cash-in, expense settlements,
+  // supplier payments) funnels through here, so this single no-op freezes
+  // ALL of them instead of a stale pre-existing session quietly absorbing
+  // new cash rows. The GL entry still records the money.
+  const [business] = await tx
+    .select({ mode: businesses.mode })
+    .from(businesses)
+    .where(eq(businesses.id, businessId));
+  if (business?.mode === "online_only") return null;
   if (terminalId !== null) {
     const [terminalSession] = await tx
       .select({
@@ -1745,4 +1757,45 @@ export async function getRegisterSessionReport(
   );
 
   return { rows: reportRows, totals };
+}
+
+/**
+ * D3-003: cash SUPPLIER payments move the drawer like expenses do. The
+ * paying user's OPEN session at the payment's location is attributed
+ * (best-effort: no open drawer → GL-only, no movement — same documented
+ * trade-off as the void cash-out). Non-cash methods never touch a drawer.
+ */
+export async function recordPurchasePaymentCashOutInTx(
+  tx: Tx,
+  params: {
+    businessId: number;
+    userId: number;
+    amount: number;
+    paymentId: number;
+    purchaseId: number;
+    locationId: number | null;
+    method: string;
+  },
+): Promise<void> {
+  if (params.method !== "cash" || params.amount <= 0) return;
+  if (params.locationId == null) return;
+  // Same attribution rules (and F3-003 online_only no-op) as every other
+  // drawer auto-attribution.
+  const session = await findOpenSessionForAttribution(
+    tx,
+    params.businessId,
+    params.userId,
+    params.locationId,
+  );
+  if (!session) return;
+  await tx.insert(registerTransactions).values({
+    businessId: params.businessId,
+    sessionId: session.id,
+    userId: params.userId,
+    type: "cash_out",
+    amount: roundMoney(params.amount),
+    referenceType: "purchase_payment",
+    referenceId: params.paymentId,
+    note: `Supplier payment (purchase #${params.purchaseId})`,
+  });
 }

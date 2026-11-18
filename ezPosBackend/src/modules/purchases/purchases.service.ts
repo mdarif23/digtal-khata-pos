@@ -75,6 +75,7 @@ import {
   incrementStockForReceive,
   recordStockMovement,
 } from "../inventory/index.js";
+import { recordPurchasePaymentCashOutInTx } from "../cashRegisters/cashRegisters.service.js";
 import {
   formatPurchaseOrderNumber,
   nextDocumentNumber,
@@ -1059,6 +1060,20 @@ export async function createReceivePurchase(
         locationId,
         actorUserId: actorUserId ?? null,
       });
+      // D3-003: a cash payment at receive moves the paying user's drawer —
+      // the GL credited cash but the drawer ledger never saw it, so the
+      // expected balance and Z-report overstated cash vs 1020.
+      if (actorUserId != null) {
+        await recordPurchasePaymentCashOutInTx(tx, {
+          businessId,
+          userId: actorUserId,
+          amount: newPaymentAmount,
+          paymentId: purchasePaymentId,
+          purchaseId,
+          locationId,
+          method: paymentMethod,
+        });
+      }
     }
 
     // =========================================================

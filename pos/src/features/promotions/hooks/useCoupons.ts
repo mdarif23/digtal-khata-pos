@@ -1,4 +1,5 @@
 import axios from "../../../api/axios.js";
+import { getActiveBusinessId } from "../../../api/axios.js";
 import { useQuery } from "@tanstack/react-query";
 
 /**
@@ -9,7 +10,10 @@ import { useQuery } from "@tanstack/react-query";
  */
 export const couponKeys = {
   all: ["coupons"] as const,
-  list: () => ["coupons", "list"] as const,
+  // R3-001: per-business data is keyed by the active business (same
+  // convention as roleKeys/userKeys) so a future in-app switcher can't
+  // serve one business's coupons to another.
+  list: () => ["coupons", getActiveBusinessId(), "list"] as const,
 };
 
 export interface CouponRow {

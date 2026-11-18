@@ -53,9 +53,12 @@ import { TerminalBindingDialog } from "@/features/pos/components/pos/TerminalBin
 
 function Pos() {
   const { t } = useTranslation();
-  const { cart, resetCart } = useCartStore();
-  const { setShowCustomerInfo } = useCustomerStore();
-  const { createSale } = useSalesStore();
+  // P3-002: selectors — the whole POS page must not subscribe to every
+  // cart mutation (actions are stable references in zustand).
+  const cart = useCartStore((s) => s.cart);
+  const resetCart = useCartStore((s) => s.resetCart);
+  const setShowCustomerInfo = useCustomerStore((s) => s.setShowCustomerInfo);
+  const createSale = useSalesStore((s) => s.createSale);
   const [lastReceipt, setLastReceipt] = useState<SaleReceiptData | null>(null);
   const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false);
 

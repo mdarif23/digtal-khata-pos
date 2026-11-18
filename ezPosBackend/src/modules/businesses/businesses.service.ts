@@ -22,6 +22,7 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { computeSubscriptionState, type SubscriptionState } from "../../utils/subscription.js";
+import { recordAuditInTx } from "../../services/audit.js";
 import { createRoleWithPermissionsInTx, ensureDefaultRolesInTx } from "../roles/roles.service.js";
 import { recordEvent } from "../subscriptions/subscription.service.js";
 import { DEFAULT_ROLE_PERMISSIONS } from "../../rbac/permissions.js";
@@ -412,7 +413,7 @@ export async function changeBusinessModeForMembership(
   mode: BusinessDetail["mode"],
 ): Promise<BusinessDetail> {
   await getBusinessForMembership(userId, businessId);
-  await changeBusinessMode(businessId, mode);
+  await changeBusinessMode(businessId, mode, userId);
   return getBusinessForMembership(userId, businessId);
 }
 
@@ -728,6 +729,7 @@ export async function deleteBusinessForMembership(
 async function changeBusinessMode(
   businessId: number,
   mode: "physical_only" | "online_only" | "omnichannel",
+  actorUserId: number | null,
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const [current] = await tx
@@ -796,5 +798,17 @@ async function changeBusinessMode(
         });
       }
     }
+
+    // K3-003: the mode gates every surface in the product (sales,
+    // registers, offline, storefronts) and is deliberately reachable
+    // WITHOUT requireFullAccess — it must leave an audit trail.
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId,
+      action: "business.mode_changed",
+      entityType: "business",
+      entityId: businessId,
+      metadata: { from: current.mode, to: mode },
+    });
   });
 }

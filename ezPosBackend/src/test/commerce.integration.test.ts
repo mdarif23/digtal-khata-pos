@@ -315,9 +315,10 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
     assert.equal(order.status, "pending");
   });
 
-  it("the sweep expires stale reservations and cancels pending orders", async () => {
+  it("the sweep expires stale reservations — cancels abandoned prepaid, keeps COD for staff (C3-002)", async () => {
     const owner = await createOwnerCtx(baseUrl, "Commerce Expiry Co");
-    const variantId = await seedVariant(owner.businessId, 5);
+    // batch-tracked: confirm consumes FIFO from batches.
+    const variantId = await seedVariant(owner.businessId, 10, "batch");
     const order = await createOnlineOrder({
       businessId: owner.businessId,
       channel: "custom_storefront",
@@ -339,14 +340,60 @@ describe("commerce core integration", { skip: !runIntegration }, () => {
 
     const stock = await stockRow(owner.businessId, variantId);
     assert.equal(stock.reserved_quantity, 0);
-    const sale = await pg!.query("SELECT status FROM sales WHERE id = $1", [
+    // C3-002: a COD order (no gateway intent) survives the TTL — its hold
+    // is released and the order is flagged for staff, never silently
+    // cancelled 30 minutes after a real checkout.
+    const codSale = await pg!.query("SELECT status FROM sales WHERE id = $1", [
       order.saleId,
     ]);
-    assert.equal(sale.rows[0]!.status, "cancelled");
+    assert.equal(codSale.rows[0]!.status, "pending");
+    const events = await pg!.query(
+      "SELECT event_type FROM sale_order_events WHERE sale_id = $1 ORDER BY id DESC LIMIT 1",
+      [order.saleId],
+    );
+    assert.equal(events.rows[0]!.event_type, "reservation_expired");
+    // The hold is gone — confirming later consumes whatever stock remains.
+    await confirmOnlineOrder(owner.businessId, order.saleId);
+    const confirmed = await pg!.query("SELECT status FROM sales WHERE id = $1", [
+      order.saleId,
+    ]);
+    assert.equal(confirmed.rows[0]!.status, "completed");
+
+    // An ABANDONED PREPAID checkout (gateway intent, never verified) still
+    // auto-cancels — the customer walked away from the gateway.
+    const prepaid = await createOnlineOrder({
+      businessId: owner.businessId,
+      channel: "custom_storefront",
+      integrationId: null,
+      externalOrderId: "EXT-EXP-2",
+      locationId: null,
+      customer: { name: "Buyer" },
+      lines: [{ variantId, quantity: 1 }],
+      idempotencyKey: `exp2-${Date.now()}`,
+    });
+    // The intent row marks this as an abandoned PREPAID checkout (the
+    // gateway step was started and never verified). Inserted directly —
+    // createSalePaymentIntent demands a live provider config the fixture
+    // business has no reason to have.
+    await pg!.query(
+      `INSERT INTO sale_payment_intents (business_id, sale_id, provider, method, amount, idempotency_key, status)
+       VALUES ($1, $2, 'sslcommerz', 'card', 10, $3, 'pending')`,
+      [owner.businessId, prepaid.saleId, `exp2-intent-${Date.now()}`],
+    );
+    await pg!.query(
+      "UPDATE inventory_reservations SET expires_at = now() - interval '1 minute' WHERE sale_id = $1",
+      [prepaid.saleId],
+    );
+    await runCommerceSweeps();
+    const prepaidSale = await pg!.query(
+      "SELECT status FROM sales WHERE id = $1",
+      [prepaid.saleId],
+    );
+    assert.equal(prepaidSale.rows[0]!.status, "cancelled");
 
     // Confirming an expired (cancelled) order fails loudly.
     await assert.rejects(
-      () => confirmOnlineOrder(owner.businessId, order.saleId),
+      () => confirmOnlineOrder(owner.businessId, prepaid.saleId),
       /cannot be confirmed/i,
     );
   });

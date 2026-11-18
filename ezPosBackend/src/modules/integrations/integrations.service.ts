@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, asc, eq, isNotNull, lte, sql, or } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { integrationCredentials } from "../../db/schema/integrationSync.js";
@@ -951,7 +951,9 @@ export function verifyWebhookSignature(
     .digest("base64");
   const a = Buffer.from(expected);
   const b = Buffer.from(signature);
-  return a.length === b.length && a.equals(b);
+  // O3-003: timing-safe compare (Buffer.equals short-circuits — the comms
+  // verifier already models the correct timingSafeEqual pattern).
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 interface WcOrderPayload {

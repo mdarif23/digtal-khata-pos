@@ -87,6 +87,9 @@ export function ReceiptSharePage() {
         title="Shared receipt"
         className="mx-auto block h-[80vh] w-full max-w-md border bg-white shadow-sm"
         srcDoc={html}
+        // P3-003: backend-derived HTML on an unauthenticated page must not
+        // inherit the app origin (same hardening as ReceiptPrintDialog).
+        sandbox="allow-same-origin"
       />
     </div>
   );

@@ -5,14 +5,19 @@ import {
   requireBusinessAccess,
   requireFullAccess,
 } from "../../middleware/business.js";
+import { requirePermission } from "../../middleware/permissions.js";
 
 const router = express.Router();
 
-// Portal webhook management — owner workflows, full access.
+// K3-002: webhook endpoints are an exfiltration channel (the business's
+// order data POSTed to an arbitrary URL) and a server-side-fetch vector —
+// "owner workflows, full access" alone let ANY active member create,
+// delete, or fire test deliveries. settings.edit is the authority now.
 const portal = [
   requireAuth,
   requireBusinessAccess(),
   requireFullAccess,
+  requirePermission("settings.edit"),
 ] as const;
 
 router.post(
@@ -32,8 +37,12 @@ router.delete(
 );
 router.get(
   "/api/businesses/:businessId/webhooks/:endpointId/deliveries",
+  // L3-002: the deliveries (order-event payloads) were readable even in
+  // read-only mode — full portal access required like every sibling.
   requireAuth,
   requireBusinessAccess(),
+  requireFullAccess,
+  requirePermission("settings.edit"),
   webhooksController.getWebhookDeliveries,
 );
 router.post(

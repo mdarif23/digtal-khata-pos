@@ -135,6 +135,9 @@ export function Sales() {
   const [voidError, setVoidError] = useState<string | null>(null);
   const [approvalToken, setApprovalToken] = useState<string | null>(null);
   const [isApprovalOpen, setIsApprovalOpen] = useState(false);
+  // E3-009: refund approvals mint a sale.refund token (the void dialog
+  // mints sale.cancel — separate op types, separate dialog instance).
+  const [isRefundApprovalOpen, setIsRefundApprovalOpen] = useState(false);
 
   const handlePrintReceipt = async (saleId: number) => {
     try {
@@ -279,6 +282,8 @@ export function Sales() {
         disposition,
         ...(refundNotes.trim() ? { notes: refundNotes.trim() } : {}),
         refundMethod,
+        // E3-009: consumed by the sale.refund approval policy on retry.
+        ...(approvalToken ? { approvalToken } : {}),
       };
       if (isWholeSaleReturn) {
         // Nothing customized — one legacy whole-line request (the backend
@@ -297,33 +302,56 @@ export function Sales() {
             setSelectedSaleId(null);
           }
         }
+      } else if (refundTarget.type === "sale") {
+        // E3-010: ONE atomic request — refunds_all accepts a quantity for
+        // every refundable line (0 = leave the line). The old loop fired
+        // one request per line: a failure mid-way left lines 1..k-1
+        // refunded with no rollback and a half-restocked sale.
+        await returnProducts(refundTarget.sale.id, {
+          ...options,
+          quantities: targetLines.map((item) => {
+            const picked = chosen.find(
+              (c) => c.item.saleItemsId === item.saleItemsId,
+            );
+            if (!picked || picked.quantity <= 0) {
+              return { saleItemId: item.saleItemsId, quantity: 0 };
+            }
+            // Serial lines are effectively whole — partial serial returns
+            // need a serial selection the sales list doesn't provide.
+            return {
+              saleItemId: item.saleItemsId,
+              quantity:
+                item.trackingType === "serial"
+                  ? remainingOf(item)
+                  : picked.quantity,
+            };
+          }),
+        });
+        setSelectedSaleId((current) =>
+          current === refundTarget.sale.id ? null : current,
+        );
       } else {
-        // Partial return: the backend's whole-sale endpoint defaults every
-        // line to its full remainder, so per-line selections go through the
-        // single-item endpoint, one request per returned line.
-        for (const { item, quantity } of chosen) {
-          if (item.trackingType === "serial") {
-            // Full remainder only — partial serial returns need a serial
-            // selection the sales list doesn't provide.
-            await returnSingleItems(item, options);
-          } else {
-            await returnSingleItems(item, {
-              ...options,
-              quantities: [
-                { saleItemId: item.saleItemsId, quantity },
-              ],
-            });
-          }
-        }
-        if (refundTarget.type === "sale") {
-          setSelectedSaleId((current) =>
-            current === refundTarget.sale.id ? null : current,
-          );
-        }
+        // Single-line partial — one request is already atomic.
+        await returnSingleItems(refundTarget.item, {
+          ...options,
+          quantities: [
+            { saleItemId: refundTarget.item.saleItemsId, quantity: chosen[0]!.quantity },
+          ],
+        });
       }
       setRefundTarget(null);
+      setApprovalToken(null);
     } catch (refundError) {
-      setActionError(getErrorMessage(refundError));
+      const message = getErrorMessage(refundError);
+      // E3-009: mirror the void flow — a manager-approval 403 opens the
+      // approval dialog instead of dying as a toast; resubmission carries
+      // the token inside `options`.
+      if (/manager approval is required/i.test(message)) {
+        setIsRefundApprovalOpen(true);
+        setActionError(null);
+      } else {
+        setActionError(message);
+      }
     } finally {
       setBusySaleId(null);
     }
@@ -707,6 +735,20 @@ export function Sales() {
         onApproved={(token) => {
           setApprovalToken(token);
           setIsApprovalOpen(false);
+        }}
+      />
+      {/* E3-009: refunds are approval-gated too — without this the 403
+          surfaced as an unactionable toast and the manager could never
+          authorize the return. */}
+      <ManagerApprovalDialog
+        open={isRefundApprovalOpen}
+        onOpenChange={setIsRefundApprovalOpen}
+        opType="sale.refund"
+        opLabel="Refund a sale"
+        reason={refundReason ?? undefined}
+        onApproved={(token) => {
+          setApprovalToken(token);
+          setIsRefundApprovalOpen(false);
         }}
       />
       <Dialog

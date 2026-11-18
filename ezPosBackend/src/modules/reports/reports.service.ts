@@ -13,7 +13,7 @@ import type { DateRangeQuery } from "./reports.validation.js";
  * `${start}::timestamp` comparisons below pin the exact same instants the
  * Finance ledger (which posts entry_date in business-local time) uses.
  */
-async function getDateBounds(businessId: number, params: DateRangeQuery) {
+export async function getDateBounds(businessId: number, params: DateRangeQuery) {
   const tz = await getBusinessTimezone(db, businessId);
   const period = params.period || "this_month";
   const today = businessLocalDate(new Date(), tz);

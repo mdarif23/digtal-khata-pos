@@ -15,6 +15,7 @@ import {
   executeContactImport,
   generateContactTemplate,
   getContactSessionDetail,
+  getContactSessionEntity,
   listContactImportHistory,
   type ContactEntity,
 } from "./contactImport.service.js";
@@ -108,6 +109,14 @@ router.get(
       if (!Number.isInteger(sessionId) || sessionId <= 0) {
         throw new BadRequestError("Invalid session ID.");
       }
+      // K3-004: the session detail exposes imported contact names/PII —
+      // the entity (and its view permission) lives only on the session row.
+      const perms = readPerms(await getContactSessionEntity(getBusinessId(req), sessionId));
+      if (!callerHasPermission(req, perms.view)) {
+        return res
+          .status(403)
+          .json({ success: false, message: `Missing ${perms.view}.` });
+      }
       const data = await getContactSessionDetail(getBusinessId(req), sessionId);
       return res.status(200).json({ success: true, data });
     } catch (err: unknown) {
@@ -125,6 +134,13 @@ router.get(
       const sessionId = Number(req.params.sessionId);
       if (!Number.isInteger(sessionId) || sessionId <= 0) {
         throw new BadRequestError("Invalid session ID.");
+      }
+      // K3-004: error text can embed phone/email — same view gate as the detail.
+      const perms = readPerms(await getContactSessionEntity(getBusinessId(req), sessionId));
+      if (!callerHasPermission(req, perms.view)) {
+        return res
+          .status(403)
+          .json({ success: false, message: `Missing ${perms.view}.` });
       }
       const report = await buildContactErrorReport(getBusinessId(req), sessionId);
       return res
@@ -155,6 +171,15 @@ router.post(
       if (!Number.isInteger(sessionId) || sessionId <= 0) {
         throw new BadRequestError("Invalid session ID.");
       }
+      // K3-004: execution writes customers/suppliers in bulk — the session's
+      // entity decides which edit permission applies (upload IS gated;
+      // execute was not).
+      const perms = readPerms(await getContactSessionEntity(getBusinessId(req), sessionId));
+      if (!callerHasPermission(req, perms.edit)) {
+        return res
+          .status(403)
+          .json({ success: false, message: `Missing ${perms.edit}.` });
+      }
       const businessId = getBusinessId(req);
       const userId = req.user!.id;
       // Fire-and-forget: failures land on the session row (status failed /
@@ -179,6 +204,13 @@ router.post(
       const sessionId = Number(req.params.sessionId);
       if (!Number.isInteger(sessionId) || sessionId <= 0) {
         throw new BadRequestError("Invalid session ID.");
+      }
+      // K3-004: same edit gate as execute.
+      const perms = readPerms(await getContactSessionEntity(getBusinessId(req), sessionId));
+      if (!callerHasPermission(req, perms.edit)) {
+        return res
+          .status(403)
+          .json({ success: false, message: `Missing ${perms.edit}.` });
       }
       const businessId = getBusinessId(req);
       const userId = req.user!.id;

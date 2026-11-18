@@ -24,7 +24,7 @@ export function HeldItemsDialog({
   open: boolean;
   handleOpenChange: (open: boolean) => void;
 }) {
-  const { addHoldItemsToCart } = useCartStore();
+  const addHoldItemsToCart = useCartStore((s) => s.addHoldItemsToCart);
   const { holdCartItems, removeHoldCart, clearHoldCarts, refreshHolds } =
     useHoldCartStore();
 

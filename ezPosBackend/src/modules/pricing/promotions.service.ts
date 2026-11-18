@@ -332,26 +332,41 @@ export async function updatePromotion(
       (payload.promoKind as string | undefined) ??
       (existing.promoKind as string | undefined) ??
       "discount",
+    // H3-2: these seven fields must use the `!== undefined` merge (like
+    // categoryId/startsAt above) — the `??` chain treated an explicit null
+    // (the FE edit dialog sends null/[] for cleared fields) as "not
+    // provided" and resurrected the old value, so switching promoKind away
+    // from bogo kept the stale rule and flash windows could never be
+    // cleared.
     rule:
-      (payload.rule as Record<string, unknown> | null | undefined) ??
-      (existing.rule as Record<string, unknown> | null | undefined) ??
-      null,
+      payload.rule !== undefined
+        ? (payload.rule as Record<string, unknown> | null)
+        : ((existing.rule as Record<string, unknown> | null | undefined) ??
+          null),
     daysOfWeek:
-      (payload.daysOfWeek as number[] | null | undefined) ??
-      (existing.daysOfWeek as number[] | null | undefined) ??
-      null,
+      payload.daysOfWeek !== undefined
+        ? (payload.daysOfWeek as number[] | null)
+        : ((existing.daysOfWeek as number[] | null | undefined) ?? null),
     startTime:
-      (payload.startTime as string | null | undefined) ?? existing.startTime ?? null,
+      payload.startTime !== undefined
+        ? (payload.startTime as string | null)
+        : (existing.startTime ?? null),
     endTime:
-      (payload.endTime as string | null | undefined) ?? existing.endTime ?? null,
+      payload.endTime !== undefined
+        ? (payload.endTime as string | null)
+        : (existing.endTime ?? null),
     locationId:
-      (payload.locationId as number | null | undefined) ?? existing.locationId ?? null,
+      payload.locationId !== undefined
+        ? (payload.locationId as number | null)
+        : (existing.locationId ?? null),
     usageLimit:
-      (payload.usageLimit as number | null | undefined) ?? existing.usageLimit ?? null,
+      payload.usageLimit !== undefined
+        ? (payload.usageLimit as number | null)
+        : (existing.usageLimit ?? null),
     perCustomerLimit:
-      (payload.perCustomerLimit as number | null | undefined) ??
-      existing.perCustomerLimit ??
-      null,
+      payload.perCustomerLimit !== undefined
+        ? (payload.perCustomerLimit as number | null)
+        : (existing.perCustomerLimit ?? null),
     priority: (payload.priority as number | undefined) ?? existing.priority ?? 0,
     isActive: (payload.isActive as boolean | undefined) ?? existing.isActive,
   };

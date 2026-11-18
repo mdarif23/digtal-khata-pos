@@ -687,7 +687,13 @@ async function executeGroupCreate(input: {
     }
 
     const opening = row.openingStock ?? 0;
-    if (opening > 0 && product.trackingType !== "none") {
+    // B3-007: ALL tracked kinds need real stock records — 'none' included.
+    // The old import skipped 'none' entirely ("audit rule"), but the whole
+    // consumption machinery is batch-based: a 'none' variant with no batch
+    // had nothing for consumeStockFifo to take, so every imported
+    // non-tracked product with opening stock was born UNSELLABLE (the
+    // manual stock-adjustment path already writes batches for 'none').
+    if (opening > 0) {
       const batchNumber =
         row.batchNumber?.slice(0, 100) ?? `AUTO-${variant!.id}-${Date.now()}`;
       const [openingBatch] = await tx
@@ -730,6 +736,13 @@ async function executeGroupCreate(input: {
         referenceId: createdProduct!.id,
       });
       for (const serial of row.serialNumbers) {
+        if (product.trackingType !== "serial") {
+          // Serial numbers on a non-serial row are a template misuse —
+          // never silently create serial rows for untracked stock.
+          throw new BadRequestError(
+            `Serial numbers provided for a non-serial-tracked product: ${row.serialNumbers.length} serial(s) on "${row.productName}".`,
+          );
+        }
         await tx.insert(serialNumbers).values({
           businessId,
           variantId: variant!.id,
@@ -742,8 +755,6 @@ async function executeGroupCreate(input: {
           locationId,
         });
       }
-    } else if (opening > 0 && product.trackingType === "none") {
-      // Non-tracked products keep no stock records (audit rule) — nothing to do.
     }
 
     if (row.imageUrl) {
@@ -911,19 +922,19 @@ async function executeGroupUpdate(input: {
           .where(and(eq(locationsTable.businessId, businessId), sql`${locationsTable.isDefault} = true`))
           .limit(1))[0]?.id ?? 0,
       );
-      if (product.trackingType !== "none") {
-        await tx.insert(inventoryBatches).values({
-          businessId,
-          variantId: match.variantId,
-          locationId,
-          purchaseItemId: null,
-          batchNumber: row.batchNumber?.slice(0, 100) ?? `AUTO-${match.variantId}-${Date.now()}`,
-          purchasePrice: row.purchasePrice ?? 0,
-          quantityReceived: opening,
-          quantityRemaining: opening,
-          expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
-        });
-      }
+      // B3-007: 'none'-tracked variants need a batch too — consumeStockFifo
+      // is batch-based and the variant was otherwise born unsellable.
+      await tx.insert(inventoryBatches).values({
+        businessId,
+        variantId: match.variantId,
+        locationId,
+        purchaseItemId: null,
+        batchNumber: row.batchNumber?.slice(0, 100) ?? `AUTO-${match.variantId}-${Date.now()}`,
+        purchasePrice: row.purchasePrice ?? 0,
+        quantityReceived: opening,
+        quantityRemaining: opening,
+        expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
+      });
       await tx
         .insert(inventoryStock)
         .values({ businessId, variantId: match.variantId, locationId, quantity: opening })

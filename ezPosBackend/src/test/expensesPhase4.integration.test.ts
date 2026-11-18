@@ -424,6 +424,9 @@ describe("expenses phase 4 integration", { skip: !runIntegration }, () => {
         amount: 10,
         category_id: null,
         payment_method: "Cash",
+        // F3-002: only UNPAID expenses can be voided (settled ones must
+        // reverse their payments first) — the fixture records it unpaid.
+        record_as: "unpaid",
       },
       locationA,
     );

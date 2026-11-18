@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt, lte, sql } from "drizzle-orm";
 import { db } from "../db/schema/index.js";
 import {
   commMessages,
@@ -160,10 +160,17 @@ async function deliverViaGenericHttp(
   let payload: string | undefined;
   if (method === "POST" || method === "PUT") {
     const bodyTemplate = String(config.body ?? "");
+    // O3-005: substitutions are JSON-encoded, not quote-escaped — a
+    // customer name with a newline/backslash used to rewrite the gateway
+    // payload (field injection into loosely-parsed gateways). JSON.stringify
+    // of the STRING value yields an exact, safely-quoted literal; the
+    // wrapping quotes are trimmed so `{{body}}` composes inside templates.
+    const jsonValue = (value: string) =>
+      JSON.stringify(value).slice(1, -1);
     payload = bodyTemplate
       ? bodyTemplate
-          .replace(/\{\{recipient\}\}/g, recipient)
-          .replace(/\{\{body\}\}/g, body.replace(/"/g, '\\"'))
+          .replace(/\{\{recipient\}\}/g, jsonValue(recipient))
+          .replace(/\{\{body\}\}/g, jsonValue(body))
       : JSON.stringify({ recipient, body });
   }
   const res = await fetch(url, {
@@ -593,10 +600,27 @@ export async function queueAndSend(input: SendInput): Promise<SendOutcome> {
 
   try {
     const provider = await defaultProviderFor(input.businessId, input.channel);
-    const providerKey = provider?.providerKey ?? "console";
+    const providerKey = provider?.providerKey ?? null;
     const config = provider?.config ?? null;
+    // N3-001: "no usable provider" is a FAILED delivery, not a fake
+    // "sent" — but an EXPLICITLY configured console provider (dev /
+    // observability) is a legitimate delivery and stays "sent".
+    if (providerKey === null) {
+      await db
+        .update(commMessages)
+        .set({
+          status: "failed",
+          providerKey: "none",
+          error:
+            "No delivery provider is configured for this channel — the message was not sent.",
+        })
+        .where(eq(commMessages.id, row.id));
+      return { status: "failed", reason: "no_provider_configured", messageId: row.id };
+    }
     let result: DeliveryResult;
-    if (providerKey === "whatsapp_cloud" && config) {
+    if (providerKey === "console") {
+      result = await deliverViaConsole(input.recipient, body, input.channel);
+    } else if (providerKey === "whatsapp_cloud" && config) {
       result = await deliverViaWhatsappCloud(config, input.recipient, body);
     } else if (providerKey === "generic_http" && config) {
       result = await deliverViaGenericHttp(config, input.recipient, body);
@@ -608,7 +632,17 @@ export async function queueAndSend(input: SendInput): Promise<SendOutcome> {
         body,
       );
     } else {
-      result = await deliverViaConsole(input.recipient, body, input.channel);
+      // A provider row exists but is unusable (no config / channel
+      // mismatch) — failed, never a silent console fallback.
+      await db
+        .update(commMessages)
+        .set({
+          status: "failed",
+          providerKey,
+          error: `Provider "${providerKey}" has no usable configuration for this channel.`,
+        })
+        .where(eq(commMessages.id, row.id));
+      return { status: "failed", reason: "provider_not_configured", messageId: row.id };
     }
     await db
       .update(commMessages)
@@ -631,6 +665,100 @@ export async function queueAndSend(input: SendInput): Promise<SendOutcome> {
       .where(eq(commMessages.id, row.id));
     return { status: "failed", reason: "delivery_failed", messageId: row.id };
   }
+}
+
+/**
+ * N3-001: failed deliveries used to be dead permanently (retryCount was
+ * incremented but nothing ever consumed it). One provider-failure retry
+ * window: rows that failed with a REAL provider (never the console
+ * fallback, which cannot succeed on retry) older than 5 minutes, capped
+ * per sweep, ordered oldest-first.
+ */
+const COMMS_RETRY_MAX_ATTEMPTS = 5;
+const COMMS_RETRY_MIN_AGE_MS = 5 * 60_000;
+const COMMS_RETRY_BATCH = 100;
+
+export async function runCommsRetrySweep(): Promise<{
+  retried: number;
+  sent: number;
+  stillFailed: number;
+}> {
+  const rows = await db
+    .select()
+    .from(commMessages)
+    .where(
+      and(
+        eq(commMessages.status, "failed"),
+        lt(commMessages.retryCount, COMMS_RETRY_MAX_ATTEMPTS),
+        // Retry only rows that failed with a REAL provider — rows stamped
+        // 'none' (nothing configured) or 'console' (dev delivery) can never
+        // succeed on retry.
+        sql`(${commMessages.providerKey} IS NOT NULL AND ${commMessages.providerKey} NOT IN ('none', 'console'))`,
+        lte(
+          commMessages.createdAt,
+          new Date(Date.now() - COMMS_RETRY_MIN_AGE_MS),
+        ),
+      ),
+    )
+    .orderBy(asc(commMessages.id))
+    .limit(COMMS_RETRY_BATCH);
+  let sent = 0;
+  let stillFailed = 0;
+  for (const row of rows) {
+    if (row.status !== "failed") continue;
+    // Re-deliver exactly what failed: the stored body is already rendered,
+    // consent was checked at queue time, and the idempotency of the outcome
+    // is the provider's message id.
+    try {
+      const provider = await defaultProviderFor(row.businessId, row.channel);
+      const providerKey = provider?.providerKey ?? null;
+      const config = provider?.config ?? null;
+      let result: DeliveryResult;
+      if (providerKey === "whatsapp_cloud" && config) {
+        result = await deliverViaWhatsappCloud(config, row.recipient, row.body);
+      } else if (providerKey === "generic_http" && config) {
+        result = await deliverViaGenericHttp(config, row.recipient, row.body);
+      } else if (providerKey === "resend" && row.channel === "email" && config) {
+        result = await deliverViaResend(config, row.recipient, row.body, row.body);
+      } else {
+        // Provider vanished/misconfigured since the failure — stays failed.
+        await db
+          .update(commMessages)
+          .set({
+            error:
+              providerKey === null
+                ? "No delivery provider is configured for this channel — the message was not sent."
+                : `Provider "${providerKey}" has no usable configuration for this channel.`,
+            retryCount: sql`${commMessages.retryCount} + 1`,
+          })
+          .where(eq(commMessages.id, row.id));
+        stillFailed += 1;
+        continue;
+      }
+      await db
+        .update(commMessages)
+        .set({
+          status: "sent",
+          providerKey,
+          providerMessageId: result.providerMessageId,
+          sentAt: new Date(),
+          error: null,
+        })
+        .where(eq(commMessages.id, row.id));
+      sent += 1;
+    } catch (err) {
+      await db
+        .update(commMessages)
+        .set({
+          status: "failed",
+          error: err instanceof Error ? err.message.slice(0, 500) : "Delivery failed.",
+          retryCount: sql`${commMessages.retryCount} + 1`,
+        })
+        .where(eq(commMessages.id, row.id));
+      stillFailed += 1;
+    }
+  }
+  return { retried: rows.length, sent, stillFailed };
 }
 
 /** Manual send (comms.manage): receipts, reminders, custom notifications. */

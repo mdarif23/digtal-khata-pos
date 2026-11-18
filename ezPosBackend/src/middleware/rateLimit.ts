@@ -144,3 +144,16 @@ export const commsSendRateLimit = rateLimit({
       : ipKeyGenerator(req.ip ?? "anonymous"),
   message: jsonMessage("Too many messages sent — try again in a few minutes."),
 });
+
+/**
+ * Generic unauthenticated webhook ingress (O3-004): keyed by IP — providers
+ * deliver from a handful of hosts, so this only stops floods.
+ */
+export const ipRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(req.ip ?? "anonymous"),
+  message: jsonMessage("Too many requests — try again later."),
+});

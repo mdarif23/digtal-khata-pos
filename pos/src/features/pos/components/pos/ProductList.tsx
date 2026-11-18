@@ -69,7 +69,9 @@ export function ProductList({
 }: {
   scannerEnabled?: boolean;
 }) {
-  const { addToCart } = useCartStore();
+  // P3-002: selector subscription — the whole-grid form re-renders on
+  // every cart keystroke otherwise.
+  const addToCart = useCartStore((s) => s.addToCart);
   const products = useProductsQuery().data ?? EMPTY_PRODUCT_LIST;
   const productSelectOptions =
     useProductSelectOptionsQuery().data ?? EMPTY_SELECT_OPTIONS;
@@ -83,6 +85,13 @@ export function ProductList({
 
     return products.filter(
       (product) => {
+        // B3-008: the POS catalog sells only ACTIVE products — the list
+        // endpoint serves every status (the Products page needs them), so
+        // draft/inactive rows used to appear here and sell. Legacy rows
+        // with no status stay sellable.
+        if (product.status === "draft" || product.status === "inactive") {
+          return false;
+        }
         const matchesQuery =
           !query ||
           product.name.toLowerCase().includes(query) ||

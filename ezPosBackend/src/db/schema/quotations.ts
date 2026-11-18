@@ -31,6 +31,10 @@ export const quotationStatusEnum = pgEnum("quotation_status", [
   "accepted",
   "rejected",
   "expired",
+  // E3-004 (migration 0092): in-flight conversion claim — the quote is
+  // claimed BEFORE the sale engine runs, so two concurrent converts can
+  // never both create a real sale.
+  "converting",
   "converted",
   "cancelled",
 ]);
@@ -86,6 +90,14 @@ export const quotations = pgTable(
     validUntil: date("valid_until"),
     convertedSaleId: integer("converted_sale_id"),
     convertedAt: timestamp("converted_at", { withTimezone: true }),
+    /**
+     * E3-004 (migration 0092): when the claim was taken ('converting').
+     * Fresh claim + no sale id = conversion in flight (concurrent converts
+     * get a clean 409); stale claim = crashed attempt, reclaimable.
+     */
+    convertedClaimedAt: timestamp("converted_claimed_at", {
+      withTimezone: true,
+    }),
     createdBy: integer("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),

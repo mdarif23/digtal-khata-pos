@@ -16,7 +16,7 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { roundMoney } from "../../utils/roundMoney.js";
-import { recordDueCollectionInTx } from "../cashRegisters/cashRegisters.service.js";
+import { recordDueCollectionInTx, recordPurchasePaymentCashOutInTx } from "../cashRegisters/cashRegisters.service.js";
 import { postDueCollectionLedgerEntry } from "../sales/sales.ledger.js";
 import { postPurchasePaymentLedgerEntry } from "../purchases/purchases.ledger.js";
 import {
@@ -677,6 +677,8 @@ export async function recordSupplierPayment(
         supplierId: purchases.supplierId,
         totalAmount: purchases.totalAmount,
         paidAmount: purchases.paidAmount,
+        // D3-003: the payment's drawer-attribution target.
+        locationId: purchases.locationId,
         purchaseOrderNumber: purchases.purchaseOrderNumber,
       })
       .from(purchases)
@@ -770,6 +772,20 @@ export async function recordSupplierPayment(
         locationId: null,
         actorUserId,
       });
+      // D3-003: cash moves the paying user's open drawer at the purchase's
+      // location (best-effort — no open session → GL-only, same trade-off
+      // as the void cash-out).
+      if (actorUserId != null) {
+        await recordPurchasePaymentCashOutInTx(tx, {
+          businessId,
+          userId: actorUserId,
+          amount: roundMoney(amount),
+          paymentId: inserted.id,
+          purchaseId,
+          locationId: purchase.locationId ?? null,
+          method,
+        });
+      }
     }
 
     return {

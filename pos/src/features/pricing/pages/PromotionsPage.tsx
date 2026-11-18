@@ -33,6 +33,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/components/ui/toast";
 import axios from "@/api/axios";
 import { extractApiError } from "../components/RuleDialog";
+import { useProductsQuery } from "@/features/products/hooks/useProducts";
 import {
   useCreatePromotion,
   useDeletePromotion,
@@ -48,6 +49,8 @@ import type { Promotion } from "../pricing.types";
  */
 export function PromotionsPage() {
   const { hasPermission } = usePermissions();
+  // H3-1: the buy_x_get_y pickers need the product catalog.
+  const products = useProductsQuery().data ?? [];
   const canManage = hasPermission("promotions.manage");
   const promotionsQuery = usePromotions();
   const createPromotion = useCreatePromotion();
@@ -75,6 +78,10 @@ export function PromotionsPage() {
   >("discount");
   const [ruleBuyQty, setRuleBuyQty] = useState("1");
   const [ruleGetQty, setRuleGetQty] = useState("1");
+  // H3-1: buy_x_get_y needs concrete buy/get targets — the kind used to be
+  // offered with NO rule inputs, so the engine silently skipped it forever.
+  const [ruleBuyProductId, setRuleBuyProductId] = useState("");
+  const [ruleGetProductId, setRuleGetProductId] = useState("");
   const [ruleComboSize, setRuleComboSize] = useState("2");
   const [ruleDiscountPercent, setRuleDiscountPercent] = useState("20");
   const [ruleTierMinQty, setRuleTierMinQty] = useState("3");
@@ -128,6 +135,8 @@ export function PromotionsPage() {
     const rule = (promo.rule ?? {}) as Record<string, unknown>;
     setRuleBuyQty(String(rule.buyQty ?? 1));
     setRuleGetQty(String(rule.getQty ?? 1));
+    setRuleBuyProductId(rule.buyProductId != null ? String(rule.buyProductId) : "");
+    setRuleGetProductId(rule.getProductId != null ? String(rule.getProductId) : "");
     setRuleComboSize(String(rule.comboSize ?? 2));
     setRuleDiscountPercent(String(rule.discountPercent ?? 20));
     const tier = Array.isArray(rule.tiers)
@@ -184,6 +193,20 @@ export function PromotionsPage() {
       });
       return;
     }
+    // H3-1: an incomplete buy_x_get_y rule would be saved and then silently
+    // skipped by the engine forever — refuse at the door.
+    if (
+      promoKind === "buy_x_get_y" &&
+      (ruleBuyProductId === "" || ruleGetProductId === "")
+    ) {
+      toast.add({
+        type: "error",
+        description:
+          "Buy X get Y needs both a buy product and a free product.",
+        priority: "high",
+      });
+      return;
+    }
     const scopeIdNum = scopeId === "" ? null : Number(scopeId);
     if (scope !== "whole" && (scopeIdNum == null || !Number.isInteger(scopeIdNum) || scopeIdNum <= 0)) {
       toast.add({ type: "error", description: "Pick a valid scope target.", priority: "high" });
@@ -207,7 +230,18 @@ export function PromotionsPage() {
       rule:
         promoKind === "bogo"
           ? { buyQty: Number(ruleBuyQty) || 1, getQty: Number(ruleGetQty) || 1 }
-          : promoKind === "mix_match"
+          : promoKind === "buy_x_get_y"
+            ? {
+                buyQty: Number(ruleBuyQty) || 1,
+                getQty: Number(ruleGetQty) || 1,
+                ...(ruleBuyProductId !== ""
+                  ? { buyProductId: Number(ruleBuyProductId) }
+                  : {}),
+                ...(ruleGetProductId !== ""
+                  ? { getProductId: Number(ruleGetProductId) }
+                  : {}),
+              }
+            : promoKind === "mix_match"
             ? {
                 comboSize: Number(ruleComboSize) || 2,
                 discountPercent: Number(ruleDiscountPercent) || 0,
@@ -518,6 +552,56 @@ export function PromotionsPage() {
                 <div className="grid gap-1">
                   <span className="text-xs text-muted-foreground">Get free (qty)</span>
                   <Input type="number" min={1} value={ruleGetQty} onChange={(e) => setRuleGetQty(e.target.value)} />
+                </div>
+              </div>
+            ) : null}
+            {promoKind === "buy_x_get_y" ? (
+              <div className="grid gap-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">
+                      Buy X — product
+                    </span>
+                    <select
+                      className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                      value={ruleBuyProductId}
+                      onChange={(e) => setRuleBuyProductId(e.target.value)}
+                    >
+                      <option value="">Select product…</option>
+                      {products.map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">
+                      Get Y free — product
+                    </span>
+                    <select
+                      className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                      value={ruleGetProductId}
+                      onChange={(e) => setRuleGetProductId(e.target.value)}
+                    >
+                      <option value="">Select product…</option>
+                      {products.map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">Buy (qty)</span>
+                    <Input type="number" min={1} value={ruleBuyQty} onChange={(e) => setRuleBuyQty(e.target.value)} />
+                  </div>
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">Get free (qty)</span>
+                    <Input type="number" min={1} value={ruleGetQty} onChange={(e) => setRuleGetQty(e.target.value)} />
+                  </div>
                 </div>
               </div>
             ) : null}

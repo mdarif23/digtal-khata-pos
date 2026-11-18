@@ -581,7 +581,7 @@ function CartItemRow({ item }: { item: CartItem }) {
   const addCustomCartQuantity = useCartStore((s) => s.addCustomCartQuantity);
   const switchLineUnit = useCartStore((s) => s.switchLineUnit);
   const addDiscount = useCartStore((s) => s.addDiscount);
-  const { addSerialItem } = useCartStore();
+  const addSerialItem = useCartStore((s) => s.addSerialItem);
   const catalogProducts = useProductsQuery().data ?? [];
 
   const variant = item.variants[0];
@@ -623,7 +623,7 @@ function CartItemRow({ item }: { item: CartItem }) {
   const isBatchLine = item.trackingType === "batch";
   const [isSerialOpen, setIsSerialOpen] = useState(false);
   const [isBatchOpen, setIsBatchOpen] = useState(false);
-  const { setLineBatch } = useCartStore();
+  const setLineBatch = useCartStore((s) => s.setLineBatch);
   const showStockError = () =>
     toast.add({
       type: "error",

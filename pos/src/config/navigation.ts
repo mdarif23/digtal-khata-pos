@@ -252,7 +252,8 @@ export const navigation: NavItem[] = [
       "loans.view",
     ],
     items: [
-      { title: "Financial Overview", url: "/finance", permission: "finance.overview.view" },
+      // P3-005: mirror the route guard — /finance accepts overview OR profit view.
+      { title: "Financial Overview", url: "/finance", anyPermission: ["finance.overview.view", "finance.profit.view"] },
       { title: "Growth Analytics", url: "/finance/growth", permission: "finance.profit.view" },
       { title: "Cash Flow", url: "/finance/cash-flow", permission: "finance.overview.view" },
       { title: "Balance Sheet & Net Worth", url: "/finance/balance-sheet", permission: "finance.overview.view" },
@@ -286,6 +287,7 @@ export const navigation: NavItem[] = [
     title: "Settings",
     icon: Settings2,
     anyPermission: [
+      "settings.view",
       "locations.view",
       "taxes.view",
       "loyalty.manage",

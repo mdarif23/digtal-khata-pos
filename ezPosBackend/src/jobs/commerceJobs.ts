@@ -3,13 +3,21 @@ import { db } from "../db/schema/index.js";
 import { inventoryReservations } from "../db/schema/inventoryReservations.js";
 import { inventoryStock } from "../db/schema/inventoryStock.js";
 import { sales } from "../db/schema/sales.js";
+import { salePaymentIntents } from "../db/schema/salePaymentIntents.js";
+import { recordOrderEventInTx } from "../modules/commerce/orderTimeline.service.js";
+import { publishRealtime } from "../modules/realtime/realtime.service.js";
 
 /**
  * Commerce sweeps (Phase 9.1): expire stale online-order reservations.
  *
  * An expired reservation releases its stock hold and cancels the still-
- * pending sale. Lock ordering matches confirmOnlineOrder (sale row first,
- * then reservations) so the two paths cannot deadlock.
+ * pending sale — but ONLY abandoned PREPAID checkouts (a gateway intent
+ * exists and was never verified): the customer walked away. A COD order
+ * awaiting staff confirmation must never silently vanish on the 30-minute
+ * reservation TTL (C3-002) — its hold is released and the order is flagged
+ * on the timeline instead; confirming it later simply re-consumes whatever
+ * stock is available. Lock ordering matches confirmOnlineOrder (sale row
+ * first, then reservations) so the two paths cannot deadlock.
  */
 export async function sweepExpiredReservations(
   now: Date = new Date(),
@@ -38,15 +46,37 @@ export async function sweepExpiredReservations(
         // only if it is still pending — a confirmed/paid sale owns its
         // reservation as 'confirmed', which this sweep never selects.
         const [sale] = await tx
-          .select({ id: sales.id, status: sales.status })
+          .select({ id: sales.id, status: sales.status, businessId: sales.businessId })
           .from(sales)
           .where(eq(sales.id, reservation.saleId))
           .for("update");
         if (sale && sale.status === "pending") {
-          await tx
-            .update(sales)
-            .set({ status: "cancelled" })
-            .where(eq(sales.id, sale.id));
+          // C3-002: COD orders carry no gateway intent — the money comes at
+          // delivery, staff confirm on their own clock.
+          const [intent] = await tx
+            .select({ id: salePaymentIntents.id })
+            .from(salePaymentIntents)
+            .where(eq(salePaymentIntents.saleId, sale.id))
+            .limit(1);
+          if (intent) {
+            await tx
+              .update(sales)
+              .set({ status: "cancelled" })
+              .where(eq(sales.id, sale.id));
+          } else {
+            await recordOrderEventInTx(tx, {
+              businessId: sale.businessId,
+              saleId: sale.id,
+              eventType: "reservation_expired",
+              actorType: "system",
+              note:
+                "Stock hold expired after 30 minutes — the order stays open for staff review.",
+            });
+            publishRealtime(sale.businessId, null, {
+              kind: "order.updated",
+              saleId: sale.id,
+            });
+          }
         }
       }
       await tx

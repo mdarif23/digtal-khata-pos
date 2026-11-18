@@ -7,12 +7,16 @@ import {
   requireBusinessContext,
 } from "../../middleware/business.js";
 import { requirePermission } from "../../middleware/permissions.js";
-import { commsSendRateLimit } from "../../middleware/rateLimit.js";
+import {
+  commsSendRateLimit,
+  ipRateLimit,
+} from "../../middleware/rateLimit.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { BadRequestError } from "../../utils/handleError.js";
 import {
   applyDeliveryWebhook,
   ensureWebhookSecret,
+  getCommSettings,
   getCommSettingsWithDefaults,
   listMessages,
   listProviders,
@@ -249,18 +253,29 @@ router.post("/api/comms/webhook-secret", ...manage, async (req: Request, res: Re
 // the global express.json verify hook (see app.ts) before parsing.
 router.post(
   "/api/comms/webhook/:businessId",
+  // O3-004: unauthenticated + writes-then-verifies used to make this a
+  // public DB-write amplifier — read-only secret lookup now, uniform 401
+  // for never-configured business ids, and an IP limiter.
+  ipRateLimit,
   async (req: Request, res: Response) => {
     try {
       const businessId = Number(req.params.businessId);
       if (!Number.isInteger(businessId) || businessId <= 0) {
-        throw new BadRequestError("Invalid business ID.");
+        // Uniform 401 — never reveal whether the business id exists.
+        return res
+          .status(401)
+          .json({ success: false, message: "Invalid webhook signature." });
       }
       const rawBody =
         (req as Request & { __rawBody?: string }).__rawBody ??
         (typeof req.body === "string" ? req.body : JSON.stringify(req.body ?? {}));
-      const secretRow = await ensureWebhookSecret(businessId);
+      // O3-004: SELECT only — the old ensureWebhookSecret upsert created a
+      // settings row for ANY never-configured business id before auth.
+      const settings = await getCommSettings(businessId);
+      const secretRow = settings?.webhookSecret ?? null;
       const signature = req.headers["x-ezpos-signature"];
       if (
+        secretRow === null ||
         !verifyWebhookSignature(
           secretRow,
           rawBody,
