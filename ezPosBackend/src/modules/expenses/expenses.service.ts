@@ -617,6 +617,30 @@ export async function updateExpense(
             .filter((line) => line.description === "Initial settlement")
             .reduce((sum, line) => sum + Number(line.credit), 0),
         );
+        // F2-001: the repost needs the ORIGINAL initial payment's
+        // method/session so the cash credit line is reproduced — passing
+        // null skipped the cash leg and the entry went out unbalanced,
+        // rolling the whole edit back. The creation-time payment row is
+        // the first expense_payments row (settlements post later).
+        const initialPaymentInfo =
+          initialPaid > 0.005
+            ? (
+                await tx
+                  .select({
+                    method: expensePayments.paymentMethod,
+                    registerSessionId: expensePayments.registerSessionId,
+                  })
+                  .from(expensePayments)
+                  .where(
+                    and(
+                      eq(expensePayments.expenseId, id),
+                      eq(expensePayments.businessId, businessId),
+                    ),
+                  )
+                  .orderBy(asc(expensePayments.id))
+                  .limit(1)
+              )[0]
+            : undefined;
         await reverseExpenseLedgerEntry(tx, {
           businessId,
           expenseId: id,
@@ -633,7 +657,12 @@ export async function updateExpense(
             locationId: existing.locationId,
             title: data.title,
           },
-          initialPayment: null,
+          initialPayment: initialPaymentInfo
+            ? {
+                method: initialPaymentInfo.method,
+                registerSessionId: initialPaymentInfo.registerSessionId,
+              }
+            : null,
           actorUserId: updatedBy,
         });
       }

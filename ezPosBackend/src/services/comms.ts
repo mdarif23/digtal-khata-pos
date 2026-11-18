@@ -510,6 +510,12 @@ async function consentAndCapCheck(
   businessId: number,
   input: SendInput,
 ): Promise<string | null> {
+  // O3-002: consent is recorded on the CUSTOMER. A marketing send with no
+  // customerId has no consent basis to check — the pre-fix behavior checked
+  // nothing and pushed unbounded unsolicited marketing. Fail closed.
+  if (input.messageClass === "marketing" && !input.customerId) {
+    return "marketing_consent_unverifiable";
+  }
   if (input.customerId) {
     const [customer] = await db
       .select({

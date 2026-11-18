@@ -43,6 +43,7 @@ import {
   releaseReservationsForSaleInTx,
 } from "./reservations.service.js";
 import { recordOrderEventInTx } from "./orderTimeline.service.js";
+import { getBomsForVariants } from "../bom/bom.service.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
 import { pushFulfillmentToWoocommerce } from "../integrations/integrations.service.js";
 
@@ -447,17 +448,56 @@ export async function createOnlineOrder(
     }
 
     // Hold the stock. Insufficient online availability aborts everything.
-    await createReservationsInTx(tx, {
-      businessId: input.businessId,
-      locationId,
-      integrationId: input.integrationId,
-      saleId: sale.id,
-      lines: input.lines,
-      idempotencyKey: input.idempotencyKey,
-      expiresAt: new Date(
-        Date.now() + DEFAULT_RESERVATION_MINUTES * 60 * 1000,
-      ),
-    });
+    // C3-001: composite (BOM) parents are assemble-on-sale — the PARENT is
+    // not stocked, so reserving it 500s ("No stock record for variant X")
+    // and confirming consumed the wrong rows. Components hold no
+    // reservation either (component expansion is fractional via waste%
+    // while reservations are integer) — availability is enforced at
+    // confirm time, mirroring the POS assemble-on-sale contract.
+    const bomByVariant = await getBomsForVariants(
+      input.businessId,
+      [...new Set(input.lines.map((line) => line.variantId))],
+    );
+    if (bomByVariant.size > 0) {
+      const componentIds = [
+        ...new Set(
+          [...bomByVariant.values()].flatMap((components) =>
+            components.map((component) => component.componentVariantId),
+          ),
+        ),
+      ];
+      const serialComponents = await tx
+        .select({ id: productVariants.id })
+        .from(productVariants)
+        .innerJoin(products, eq(products.id, productVariants.productId))
+        .where(
+          and(
+            inArray(productVariants.id, componentIds),
+            eq(products.trackingType, "serial"),
+          ),
+        );
+      if (serialComponents.length > 0) {
+        throw new BadRequestError(
+          "Serial-tracked composite products are not supported.",
+        );
+      }
+    }
+    const reservableLines = input.lines.filter(
+      (line) => !bomByVariant.has(line.variantId),
+    );
+    if (reservableLines.length > 0) {
+      await createReservationsInTx(tx, {
+        businessId: input.businessId,
+        locationId,
+        integrationId: input.integrationId,
+        saleId: sale.id,
+        lines: reservableLines,
+        idempotencyKey: input.idempotencyKey,
+        expiresAt: new Date(
+          Date.now() + DEFAULT_RESERVATION_MINUTES * 60 * 1000,
+        ),
+      });
+    }
 
     // Order timeline: reception from the channel (module two §7).
     await recordOrderEventInTx(tx, {
@@ -572,7 +612,93 @@ export async function confirmOnlineOrderInTx(
     const locationId = sale.locationId;
     if (!locationId) throw new Error("Order has no fulfillment location.");
 
+    // C3-001: composite (BOM) parents are assemble-on-sale — confirm must
+    // consume their COMPONENTS exactly like the POS engine does, never the
+    // unstocked parent.
+    const bomByVariant = await getBomsForVariants(
+      businessId,
+      items.map((item) => item.variantId),
+    );
+
     for (const item of items) {
+      if (bomByVariant.has(item.variantId)) {
+        // Assemble-on-sale: consume each component FIFO (waste-inclusive),
+        // move the components ("bom_sale" — refunds restock via the
+        // persisted consumptions), stamp the line cost from the component
+        // total, and leave the unstocked parent alone. Insufficient
+        // component stock fails the whole confirm (the order stays pending
+        // for staff action instead of silently going negative).
+        const components = bomByVariant.get(item.variantId)!;
+        let componentTotalCost = 0;
+        const consumedAll: {
+          batchId: number;
+          quantity: number;
+          unitCost: number;
+        }[] = [];
+        for (const component of components) {
+          const required = roundMoney(
+            item.quantity *
+              component.quantity *
+              (1 + component.wastePercent / 100),
+          );
+          const [stock] = await tx
+            .select({ quantity: inventoryStock.quantity })
+            .from(inventoryStock)
+            .where(
+              and(
+                eq(inventoryStock.businessId, businessId),
+                eq(inventoryStock.variantId, component.componentVariantId),
+                eq(inventoryStock.locationId, locationId),
+              ),
+            )
+            .for("update");
+          if (Number(stock?.quantity ?? 0) < required) {
+            throw new Error(
+              `Insufficient stock for component ${component.componentName}: need ${required}, have ${Number(stock?.quantity ?? 0)}.`,
+            );
+          }
+          const componentCost = await consumeStockFifo(
+            tx,
+            businessId,
+            locationId,
+            component.componentVariantId,
+            required,
+          );
+          componentTotalCost += componentCost.totalCost;
+          consumedAll.push(
+            ...(componentCost.consumed ?? []).map((c) => ({
+              batchId: c.batchId,
+              quantity: c.quantity,
+              unitCost: c.unitCost,
+            })),
+          );
+          await tx.insert(inventoryMovements).values({
+            businessId,
+            variantId: component.componentVariantId,
+            locationId,
+            movementType: "sale",
+            quantity: -required,
+            referenceType: "bom_sale",
+            referenceId: saleId,
+          });
+        }
+        await tx
+          .update(saleItems)
+          .set({ costAtSale: roundMoney(componentTotalCost / item.quantity) })
+          .where(eq(saleItems.id, item.id));
+        if (consumedAll.length) {
+          await insertSaleItemConsumptions(
+            tx,
+            businessId,
+            saleId,
+            item.id,
+            item.variantId,
+            consumedAll,
+          );
+        }
+        continue;
+      }
+
       // Same FIFO batch consumption the POS uses (locks the batches).
       const cost = await consumeStockFifo(
         tx,
@@ -714,11 +840,19 @@ export async function confirmOnlineOrderInTx(
       currency: "BDT" as const,
       duplicated: false,
     };
-    await emitWebhookEventInTx(tx, businessId, "order.paid", {
-      orderId: result.saleId,
-      invoiceNumber: result.invoiceNumber,
-      total: result.total,
-    });
+    // O3-001: order.paid must mean money has actually moved. A COD confirm
+    // has NO captured payment yet — emit it there and every ERP/accounting
+    // automation would book an unpaid order as paid (the exact lie WB-01
+    // removed internally). COD orders emit order.paid when their collection
+    // lands (markOnlineOrderPaid → confirm prepaid, deliverOrder COD
+    // collection below).
+    if (paymentMode === "prepaid") {
+      await emitWebhookEventInTx(tx, businessId, "order.paid", {
+        orderId: result.saleId,
+        invoiceNumber: result.invoiceNumber,
+        total: result.total,
+      });
+    }
     return result;
   }
 }

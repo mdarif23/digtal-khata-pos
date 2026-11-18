@@ -7,6 +7,7 @@ import {
   requireBusinessContext,
 } from "../../middleware/business.js";
 import { requirePermission } from "../../middleware/permissions.js";
+import { commsSendRateLimit } from "../../middleware/rateLimit.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { BadRequestError } from "../../utils/handleError.js";
 import {
@@ -167,50 +168,70 @@ router.get("/api/comms/messages", ...manage, async (req: Request, res: Response)
 });
 
 // ---- manual send ----
-const sendSchema = z.object({
-  channel: channelSchema,
-  customerId: z.number().int().positive().nullable().optional(),
-  recipient: z.string().trim().min(3).max(255),
-  templateKey: templateKeySchema,
-  messageClass: z.enum(["transactional", "marketing"]),
-  entityType: z.string().max(40).nullable().optional(),
-  entityId: z.number().int().positive().nullable().optional(),
-  variables: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
-  reason: z.string().trim().max(300).optional(),
-});
-
-router.post("/api/comms/send", ...manage, async (req: Request, res: Response) => {
-  try {
-    const parsed = sendSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid send request.",
-        errors: parsed.error.flatten(),
+const sendSchema = z
+  .object({
+    channel: channelSchema,
+    customerId: z.number().int().positive().nullable().optional(),
+    recipient: z.string().trim().min(3).max(255),
+    templateKey: templateKeySchema,
+    messageClass: z.enum(["transactional", "marketing"]),
+    entityType: z.string().max(40).nullable().optional(),
+    entityId: z.number().int().positive().nullable().optional(),
+    variables: z
+      .record(z.string(), z.union([z.string(), z.number()]))
+      .optional(),
+    reason: z.string().trim().max(300).optional(),
+  })
+  // O3-002: consent lives on the customer — marketing without one has no
+  // consent basis and is rejected at the door (the service fail-closes too).
+  .superRefine((data, ctx) => {
+    if (data.messageClass === "marketing" && !data.customerId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["customerId"],
+        message:
+          "Marketing messages require a customer (consent is recorded per customer).",
       });
     }
-    const input: SendInput & { reason?: string } = {
-      businessId: getBusinessId(req),
-      channel: parsed.data.channel,
-      customerId: parsed.data.customerId ?? null,
-      recipient: parsed.data.recipient,
-      templateKey: parsed.data.templateKey,
-      messageClass: parsed.data.messageClass,
-      entityType: parsed.data.entityType ?? null,
-      entityId: parsed.data.entityId ?? null,
-      variables: parsed.data.variables ?? {},
-      ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
-    };
-    const outcome = await sendManualMessage(
-      getBusinessId(req),
-      req.user!.id,
-      input,
-    );
-    return res.status(200).json({ success: true, data: outcome });
-  } catch (err: unknown) {
-    return sendSafeError(res, err, "Unable to send the message.");
-  }
-});
+  });
+
+router.post(
+  "/api/comms/send",
+  ...manage,
+  commsSendRateLimit,
+  async (req: Request, res: Response) => {
+    try {
+      const parsed = sendSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid send request.",
+          errors: parsed.error.flatten(),
+        });
+      }
+      const input: SendInput & { reason?: string } = {
+        businessId: getBusinessId(req),
+        channel: parsed.data.channel,
+        customerId: parsed.data.customerId ?? null,
+        recipient: parsed.data.recipient,
+        templateKey: parsed.data.templateKey,
+        messageClass: parsed.data.messageClass,
+        entityType: parsed.data.entityType ?? null,
+        entityId: parsed.data.entityId ?? null,
+        variables: parsed.data.variables ?? {},
+        ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
+      };
+      const outcome = await sendManualMessage(
+        getBusinessId(req),
+        req.user!.id,
+        input,
+      );
+      return res.status(200).json({ success: true, data: outcome });
+    } catch (err: unknown) {
+      return sendSafeError(res, err, "Unable to send the message.");
+    }
+  },
+);
 
 // Webhook signing secret — shown to managers so they can configure the
 // provider's outbound webhook. Regenerating invalidates the old one.

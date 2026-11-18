@@ -421,6 +421,7 @@ export async function verifySalePaymentIntent(
         dueAmount: sales.dueAmount,
         paymentStatus: sales.paymentStatus,
         finalTotal: sales.finalTotal,
+        status: sales.status,
       })
       .from(sales)
       .where(
@@ -431,6 +432,36 @@ export async function verifySalePaymentIntent(
       )
       .for("update");
     if (!sale) throw new NotFoundError("Sale not found.");
+    // E3-003: a voided sale must never capture. The void flow cancels
+    // pending intents, but a verify racing the void holds this intent's
+    // row first — fail it HERE instead of landing money on a cancelled
+    // invoice that no refund can ever return (refunds require completed).
+    if (sale.status === "cancelled") {
+      await tx
+        .update(salePaymentIntents)
+        .set({
+          status: "failed",
+          lastError: "The sale was voided before the payment was captured.",
+          updatedAt: new Date(),
+        })
+        .where(eq(salePaymentIntents.id, locked.id));
+      await recordAuditInTx(tx, {
+        businessId: locked.businessId,
+        actorUserId: null,
+        action: "sale.payment.capture_refused",
+        entityType: "sale_payment_intent",
+        entityId: locked.id,
+        metadata: { saleId: locked.saleId, reason: "sale_cancelled" },
+      });
+      return {
+        verified: false,
+        alreadyCaptured: false,
+        intentId: locked.id,
+        saleId: locked.saleId,
+        reason:
+          "The sale was voided — this payment can no longer be captured.",
+      } satisfies VerifyOutcome;
+    }
 
     const newDue = roundMoney(
       Math.max(0, Number(sale.dueAmount) - Number(locked.amount)),

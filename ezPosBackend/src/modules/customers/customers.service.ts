@@ -31,16 +31,21 @@ export async function createCustomer(
   return customer;
 }
 
-/** E1-004: customer contact details were permanently uncorrectable. */
+/** E1-004: customer contact details were permanently uncorrectable.
+ * E3-001/E3-007: undefined means "field not provided" → the column is
+ * PRESERVED (drizzle skips undefined keys); null means an explicit clear.
+ * The old mapping turned omitted email/address/creditLimit into null and
+ * every Contacts-page edit silently wiped the customer's credit limit and
+ * online-order email/address. */
 export async function updateCustomer(
   businessId: number,
   customerId: number,
   data: {
     name: string;
     phone: string;
-    email: string | null;
-    address: string | null;
-    creditLimit: number | null;
+    email?: string | null | undefined;
+    address?: string | null | undefined;
+    creditLimit?: number | null | undefined;
   },
   actorUserId: number | null,
 ) {
@@ -93,13 +98,20 @@ export async function getCustomerOutstandingInTx(
   // table-qualified text — interpolating drizzle columns (${sales.id}) here
   // renders as the UNQUALIFIED "id", which inside the subquery binds to
   // sale_payments.id / sale_refunds.id and silently corrupts the sum.
+  // F2-003: each sale's component is clamped at 0 — a fully-refunded PAID
+  // sale contributes payments − refunds = 0 to truth, but the naive sum
+  // subtracted BOTH the payment and the refund from final_total
+  // (100 − 100 − 100 = −100), driving the outstanding negative and letting
+  // the credit-limit guard hand out unlimited extra credit after one
+  // refunded paid sale.
   const [row] = await tx
     .select({
-      outstanding: sql<number>`COALESCE(SUM(
+      outstanding: sql<number>`COALESCE(SUM(GREATEST(
         sales.final_total
         - COALESCE((SELECT SUM(sp.amount) FROM sale_payments sp WHERE sp.sale_id = sales.id AND sp.business_id = sales.business_id), 0)
-        - COALESCE((SELECT SUM(sr.refund_total) FROM sale_refunds sr WHERE sr.sale_id = sales.id AND sr.business_id = sales.business_id), 0)
-      ), 0)`.as("outstanding"),
+        - COALESCE((SELECT SUM(sr.refund_total) FROM sale_refunds sr WHERE sr.sale_id = sales.id AND sr.business_id = sales.business_id), 0),
+        0
+      )), 0)`.as("outstanding"),
     })
     .from(sales)
     .where(

@@ -4751,6 +4751,25 @@ export async function cancelSale(
       })
       .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)));
 
+    // 11b. E3-005: pending payment intents die with the sale — a gateway
+    // verify racing the void is refused by saleIntents (E3-003), and any
+    // intent still pending is cancelled here so it can never capture on a
+    // cancelled invoice.
+    await tx
+      .update(salePaymentIntents)
+      .set({
+        status: "cancelled",
+        lastError: `Sale voided: ${reason}`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(salePaymentIntents.saleId, saleId),
+          eq(salePaymentIntents.businessId, businessId),
+          eq(salePaymentIntents.status, "pending"),
+        ),
+      );
+
     // 12. Finance journal: exact mirrored reversal via the tested primitive
     //     (original marked reversed; duplicates blocked). No silent deletion.
     const [saleEntry] = await tx
@@ -4772,6 +4791,43 @@ export async function cancelSale(
         reason: `Sale ${sale.invoiceNumber} voided: ${reason}`,
         actorUserId,
       });
+    }
+
+    // 12b. F2-002: due collections posted AFTER the sale (due-management
+    // receipts / intent captures) are their own journal entries keyed on
+    // the payment row — the sale-entry reversal does not touch them. Void
+    // must reverse each one or GL cash stays overstated and 1040 goes
+    // negative for an invoice that no longer exists.
+    const salePaymentRows = await tx
+      .select({ id: salePayments.id })
+      .from(salePayments)
+      .where(
+        and(
+          eq(salePayments.saleId, saleId),
+          eq(salePayments.businessId, businessId),
+        ),
+      );
+    for (const payment of salePaymentRows) {
+      const [collectionEntry] = await tx
+        .select({ id: journalEntries.id })
+        .from(journalEntries)
+        .where(
+          and(
+            eq(journalEntries.businessId, businessId),
+            eq(journalEntries.sourceType, "sale_due_collection"),
+            eq(journalEntries.sourceId, payment.id),
+            eq(journalEntries.status, "posted"),
+          ),
+        )
+        .limit(1);
+      if (collectionEntry) {
+        await reverseEntry(tx, {
+          businessId,
+          entryId: collectionEntry.id,
+          reason: `Due collection reversed: sale ${sale.invoiceNumber} voided`,
+          actorUserId,
+        });
+      }
     }
 
     await recordAuditInTx(tx, {

@@ -190,6 +190,7 @@ export async function exportSalesLines(
   businessId: number,
   range: { from: string; to: string },
   locationId: number | undefined,
+  includeCost: boolean,
 ): Promise<CsvFile> {
   const conditions: SQL[] = [
     eq(saleItems.businessId, businessId),
@@ -199,6 +200,9 @@ export async function exportSalesLines(
   if (locationId) {
     conditions.push(eq(sales.locationId, locationId));
   }
+  // L3-001: the cost column only ever leaves the server for callers with
+  // products.view_cost — the header is dropped entirely without it so the
+  // CSV shape differs rather than shipping a column of blanks.
   const rows = await db
     .select({
       saleId: sales.id,
@@ -208,7 +212,7 @@ export async function exportSalesLines(
       quantity: saleItems.quantity,
       sellingPrice: saleItems.sellingPrice,
       lineTotal: saleItems.lineTotal,
-      costAtSale: saleItems.costAtSale,
+      ...(includeCost ? { costAtSale: saleItems.costAtSale } : {}),
     })
     .from(saleItems)
     .innerJoin(sales, eq(sales.id, saleItems.saleId))
@@ -225,7 +229,7 @@ export async function exportSalesLines(
       "quantity",
       "selling_price",
       "line_total",
-      "cost_at_sale",
+      ...(includeCost ? ["cost_at_sale"] : []),
     ],
     rows.map((r) => [
       r.saleId,
@@ -235,7 +239,13 @@ export async function exportSalesLines(
       r.quantity === null ? "" : Number(r.quantity),
       r.sellingPrice === null ? "" : Number(r.sellingPrice),
       r.lineTotal === null ? "" : Number(r.lineTotal),
-      r.costAtSale === null ? "" : Number(r.costAtSale),
+      ...(includeCost
+        ? [
+            "costAtSale" in r && r.costAtSale !== null && r.costAtSale !== undefined
+              ? Number(r.costAtSale)
+              : "",
+          ]
+        : []),
     ]),
   );
 }

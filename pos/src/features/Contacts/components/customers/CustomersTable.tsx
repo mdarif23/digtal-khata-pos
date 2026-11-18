@@ -100,13 +100,17 @@ export function CustomersTable({
                       ) : (
                         <span className="text-sm text-muted-foreground">No due</span>
                       )}
-                      {/* E1-004: correct the customer's contact details. */}
+                      {/* E1-004: correct the customer's contact details.
+                          E3-001: seed the ACTUAL credit limit — the dialog
+                          submits the field verbatim, so omitting it used to
+                          wipe every limit to unlimited on save. */}
                       <CustomerDialog
                         editCustomer={{
                           id: customer.id,
                           name: customer.name,
                           phone: customer.phone ?? "",
                           address: customer.address ?? "",
+                          creditLimit: customer.creditLimit ?? null,
                         }}
                       />
                     </div>

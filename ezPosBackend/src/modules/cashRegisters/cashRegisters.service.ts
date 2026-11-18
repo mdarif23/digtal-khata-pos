@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import { publishRealtime } from "../realtime/realtime.service.js";
 import { notifyRegisterDiscrepancy } from "../../services/notifications.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
@@ -115,13 +115,24 @@ async function computeExpectedCash(
   tx: Tx,
   sessionId: number,
   openingCash: number,
+  /** G2-001: only transactions inside the CURRENT shift window count —
+   * a reopen reuses the session row, and the prior shift's movements are
+   * already baked into the counted sheet that became the new opening. */
+  shiftStartedAt: Date | null = null,
 ): Promise<number> {
   const [row] = await tx
     .select({
       delta: sql<string>`COALESCE(SUM(${CASH_MOVEMENT_DELTA}), 0)`,
     })
     .from(registerTransactions)
-    .where(eq(registerTransactions.sessionId, sessionId));
+    .where(
+      and(
+        eq(registerTransactions.sessionId, sessionId),
+        shiftStartedAt
+          ? gt(registerTransactions.createdAt, shiftStartedAt)
+          : undefined,
+      ),
+    );
   return roundMoney(openingCash + Number(row?.delta ?? 0));
 }
 
@@ -183,6 +194,7 @@ const sessionSelect = {
   notes: registerSessions.notes,
   openedAt: registerSessions.openedAt,
   closedAt: registerSessions.closedAt,
+  reopenedAt: registerSessions.reopenedAt,
 };
 
 function sessionBaseQuery() {
@@ -500,7 +512,12 @@ export async function getCurrentSession(
     )
     .limit(1);
   if (!row) return null;
-  const expected = await computeExpectedCash(db, row.id, Number(row.openingCash));
+  const expected = await computeExpectedCash(
+    db,
+    row.id,
+    Number(row.openingCash),
+    row.reopenedAt,
+  );
   return toSummary(row, expected);
 }
 
@@ -612,7 +629,12 @@ export async function addCashMovement(
       },
     });
 
-    const expected = await computeExpectedCash(tx, sessionId, Number(session.openingCash));
+    const expected = await computeExpectedCash(
+      tx,
+      sessionId,
+      Number(session.openingCash),
+      session.reopenedAt,
+    );
     return {
       id: session.id,
       registerId: session.registerId,
@@ -717,7 +739,7 @@ export async function getSessionDetail(
 
   const expected =
     row.status === "open"
-      ? await computeExpectedCash(db, row.id, Number(row.openingCash))
+      ? await computeExpectedCash(db, row.id, Number(row.openingCash), row.reopenedAt)
       : Number(row.expectedCash ?? 0);
 
   return {
@@ -772,6 +794,7 @@ export async function closeSession(
       tx,
       sessionId,
       Number(session.openingCash),
+      session.reopenedAt,
     );
     const counted = roundMoney(countedCash);
     const difference = roundMoney(counted - expected);
@@ -890,6 +913,7 @@ export async function reconcileSession(
       tx,
       sessionId,
       Number(session.openingCash),
+      session.reopenedAt,
     );
     const counted = roundMoney(countedCash);
     const difference = roundMoney(counted - expected);
@@ -1055,6 +1079,11 @@ export async function reopenSession(
         countedCash: null,
         difference: null,
         closedAt: null,
+        // G2-001: start a NEW shift window — expected cash from now on
+        // counts only transactions created after this instant. Without it
+        // the same session row re-sums every prior-shift movement on top
+        // of the new opening (guaranteed false variance at the next close).
+        reopenedAt: new Date(),
       })
       .where(eq(registerSessions.id, sessionId));
 

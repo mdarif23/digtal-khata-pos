@@ -106,14 +106,19 @@ export async function updateCustomer(req: Request, res: Response) {
       {
         name: parsed.data.name,
         phone: parsed.data.phone,
+        // E3-001/E3-007 (K2-002): undefined = not provided → preserve the
+        // stored value; null / "" = an explicit clear by the caller.
         email:
-          parsed.data.email && parsed.data.email.trim() !== ""
-            ? parsed.data.email.trim().toLowerCase()
-            : null,
-        address: parsed.data.address ?? null,
+          parsed.data.email === undefined
+            ? undefined
+            : parsed.data.email && parsed.data.email.trim() !== ""
+              ? parsed.data.email.trim().toLowerCase()
+              : null,
+        address:
+          parsed.data.address === undefined ? undefined : parsed.data.address,
         creditLimit:
           parsed.data.creditLimit === undefined
-            ? null
+            ? undefined
             : parsed.data.creditLimit,
       },
       req.user?.id ?? null,

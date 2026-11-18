@@ -636,6 +636,13 @@
       "when": 1794930000000,
       "tag": "0090_woocommerce_payment_method",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1795016000000,
+      "tag": "0091_register_session_reopened_at",
+      "breakpoints": true
     }
   ]
 }

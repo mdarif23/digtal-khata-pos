@@ -63,9 +63,15 @@ export async function postExpenseLedgerEntry(
   params: {
     businessId: number;
     expense: ExpenseLedgerInput;
+    // F2-001: paymentId/amount only apply on CREATION (the operational
+    // row gets the resolved payment account stamped). The edit repost
+    // passes just { method, registerSessionId } from the ORIGINAL initial
+    // payment so the cash credit line is reproduced exactly — the old
+    // repost passed null and the entry went out unbalanced (DR expense ≠
+    // CR 2010 + cash), rolling the whole edit back.
     initialPayment: {
-      paymentId: number;
-      amount: number;
+      paymentId?: number;
+      amount?: number;
       method: string;
       registerSessionId: number | null;
     } | null;
@@ -104,8 +110,10 @@ export async function postExpenseLedgerEntry(
       locationId: expense.locationId,
       description: "Initial settlement",
     });
-    // Keep the operational row and the GL line on the same payment account.
-    if (paymentAccountId != null) {
+    // Keep the operational row and the GL line on the same payment account
+    // (creation only — the repost reuses the original payment's method and
+    // must not re-stamp the row).
+    if (paymentAccountId != null && params.initialPayment.paymentId != null) {
       await tx
         .update(expensePayments)
         .set({ paymentAccountId })

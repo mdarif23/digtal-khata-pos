@@ -26,6 +26,7 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { recordAudit } from "../../services/audit.js";
+import { isApprovalRequired } from "../../services/managerApproval.js";
 import {
   createSalePayloadSchema,
   type CreateSalePayload,
@@ -261,13 +262,43 @@ interface OfflineContext {
   userId: number;
   /** True when the syncing user holds the wildcard (owner) permission. */
   callerIsOwner: boolean;
+  /**
+   * K3-001: effective permission set for the syncing user, snapshotted ONCE
+   * per sync batch. Every op is permission-gated against it — the sync
+   * route deliberately has no per-route requirePermission (ops are
+   * heterogeneous), so the gates live here.
+   */
+  permissions?: Set<string>;
+}
+
+/** K3-001: op-level permission check against the batch snapshot (fail closed). */
+function holdsPermission(ctx: OfflineContext, permission: string): boolean {
+  const granted = ctx.permissions;
+  if (!granted) return false;
+  return granted.has(WILDCARD_PERMISSION) || granted.has(permission);
+}
+
+/** Uniform K3-001 rejection for a permission-gated offline op. */
+function permissionDenied(opId: string, permission: string): OfflineOpResult {
+  return {
+    opId,
+    status: "failed",
+    error: `Offline replay requires the ${permission} permission.`,
+  };
 }
 
 export async function applyOfflineOps(
-  ctx: OfflineContext,
+  rawCtx: OfflineContext,
   ops: OfflineOp[],
 ): Promise<OfflineOpResult[]> {
   const results: OfflineOpResult[] = [];
+  const ctx: OfflineContext = {
+    ...rawCtx,
+    permissions: await loadEffectivePermissions(
+      rawCtx.businessId,
+      rawCtx.userId,
+    ).catch(() => new Set<string>()),
+  };
   for (const op of ops) {
     try {
       switch (op.type) {
@@ -407,32 +438,30 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
   }
   const sale = parsed.data;
 
-  // A3-006: the online path 403s discounts/price overrides from callers
-  // without pos.apply_discount / pricing.price_override — replay must not
-  // become a bypass. Permissions are re-read at sync time (role changes
-  // take effect immediately, same as requireBusinessContext).
+  // A3-006/K3-001: the online path gates sale creation AND discounts /
+  // price overrides on permissions — replay must not become a bypass.
+  // Checked against the batch permission snapshot (role changes take
+  // effect on the NEXT batch, same freshness contract as the session).
+  if (!holdsPermission(ctx, "pos.create_sale")) {
+    return permissionDenied(op.opId, "pos.create_sale");
+  }
   const hasDiscount =
     (sale.discount?.value ?? 0) > 0 ||
     sale.items.some((item) => (item.discount?.value ?? 0) > 0);
   const hasOverride = sale.items.some((item) => item.priceOverride != null);
-  if (hasDiscount || hasOverride) {
-    const granted = await loadEffectivePermissions(ctx.businessId, ctx.userId);
-    const holds = (key: string) =>
-      granted.has(WILDCARD_PERMISSION) || granted.has(key);
-    if (hasDiscount && !holds("pos.apply_discount")) {
-      return {
-        opId: op.opId,
-        status: "failed",
-        error: "You do not have permission to apply discounts.",
-      };
-    }
-    if (hasOverride && !holds("pricing.price_override")) {
-      return {
-        opId: op.opId,
-        status: "failed",
-        error: "You do not have permission to override prices.",
-      };
-    }
+  if (hasDiscount && !holdsPermission(ctx, "pos.apply_discount")) {
+    return {
+      opId: op.opId,
+      status: "failed",
+      error: "You do not have permission to apply discounts.",
+    };
+  }
+  if (hasOverride && !holdsPermission(ctx, "pricing.price_override")) {
+    return {
+      opId: op.opId,
+      status: "failed",
+      error: "You do not have permission to override prices.",
+    };
   }
 
   const eligibility = await lineEligibility(
@@ -580,6 +609,10 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
 }
 
 async function applyCustomerOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
+  // K3-001: creation is customers.create online; replay must hold it too.
+  if (!holdsPermission(ctx, "customers.create")) {
+    return permissionDenied(op.opId, "customers.create");
+  }
   const payload = op.payload as {
     clientUuid?: string;
     name?: string;
@@ -618,6 +651,11 @@ async function applyCustomerOp(ctx: OfflineContext, op: OfflineOp): Promise<Offl
 }
 
 async function applyDrawerOpenOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
+  // K3-001/J3-001: opening a drawer is cash_register.open online — the DB
+  // exclude constraint was the only guard, and the replay wrote no audit.
+  if (!holdsPermission(ctx, "cash_register.open")) {
+    return permissionDenied(op.opId, "cash_register.open");
+  }
   const payload = op.payload as {
     clientSessionId?: string;
     registerId?: number;
@@ -661,6 +699,20 @@ async function applyDrawerOpenOp(ctx: OfflineContext, op: OfflineOp): Promise<Of
       })
       .returning({ id: registerSessions.id });
     if (!session) throw new Error("Session insert returned no row.");
+    // K3-001: the online open audits (register.opened) — the replay must
+    // leave the same trail.
+    recordAudit({
+      businessId: ctx.businessId,
+      actorUserId: ctx.userId,
+      action: "register.opened",
+      entityType: "register_session",
+      entityId: session.id,
+      metadata: {
+        registerId: payload.registerId,
+        openingCash,
+        offlineReplay: true,
+      },
+    });
     return { opId: op.opId, status: "applied", sessionId: session.id };
   } catch (err) {
     if ((err as { code?: string }).code === "23P01") {
@@ -694,6 +746,13 @@ async function findSessionByClientId(
 }
 
 async function applyDrawerMovementOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
+  // K3-001/J3-001: movements are cash_movement.create online, session-scoped
+  // to their owner, and (G1-01) subject to the manager-approval policy —
+  // the replay path skipped ALL three: any terminal-bound full-access user
+  // could move cash out of any drawer at the location with zero checks.
+  if (!holdsPermission(ctx, "cash_movement.create")) {
+    return permissionDenied(op.opId, "cash_movement.create");
+  }
   const payload = op.payload as {
     clientSessionId?: string;
     clientOpId?: string;
@@ -716,11 +775,31 @@ async function applyDrawerMovementOp(ctx: OfflineContext, op: OfflineOp): Promis
   if (session.status !== "open") {
     throw new ConflictError("This drawer session is already closed.");
   }
+  // Same ownership rule as assertSessionMayBeOperated online: the session
+  // owner — or the owner account — may operate it.
+  if (session.userId !== ctx.userId && !ctx.callerIsOwner) {
+    return {
+      opId: op.opId,
+      status: "failed",
+      error: "You can only operate your own register sessions.",
+    };
+  }
   const amount = roundMoney(Number(payload.amount ?? 0));
   if (!(amount > 0)) throw new BadRequestError("Amount must be greater than zero.");
   const MANUAL_TYPES = ["cash_in", "cash_out", "safe_deposit", "safe_withdrawal", "adjustment_in", "adjustment_out"] as const;
   if (!(MANUAL_TYPES as readonly string[]).includes(payload.type)) {
     throw new BadRequestError(`Unsupported offline movement type: ${payload.type}`);
+  }
+  // G1-01 policy, fail-closed: the offline UI never collects an approval
+  // token, so when the business mandates approval for cash movements the
+  // replay CANNOT satisfy it — the op fails (never silently applied).
+  if (await isApprovalRequired(ctx.businessId, "cash_movement")) {
+    return {
+      opId: op.opId,
+      status: "failed",
+      error:
+        "This business requires manager approval for cash movements — record this movement while online.",
+    };
   }
   await db.insert(registerTransactions).values({
     businessId: ctx.businessId,
@@ -732,10 +811,30 @@ async function applyDrawerMovementOp(ctx: OfflineContext, op: OfflineOp): Promis
     clientOpId: payload.clientOpId,
     note: payload.note ?? null,
   });
+  // K3-001: same audit trail as the online movement (cash.movement).
+  recordAudit({
+    businessId: ctx.businessId,
+    actorUserId: ctx.userId,
+    action: "cash.movement",
+    entityType: "register_session",
+    entityId: session.id,
+    metadata: {
+      movementType: payload.type,
+      amount,
+      isDrop: payload.type === "safe_deposit",
+      note: payload.note ?? null,
+      offlineReplay: true,
+    },
+  });
   return { opId: op.opId, status: "applied", sessionId: session.id };
 }
 
 async function applyDrawerCloseOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
+  // K3-001: closing is cash_register.close online; closeSession (shared
+  // with the online path) enforces ownership + approval + its own audit.
+  if (!holdsPermission(ctx, "cash_register.close")) {
+    return permissionDenied(op.opId, "cash_register.close");
+  }
   const payload = op.payload as {
     clientSessionId?: string;
     countedCash?: number;
@@ -764,6 +863,12 @@ async function applyDrawerCloseOp(ctx: OfflineContext, op: OfflineOp): Promise<O
 }
 
 async function applyReturnOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
+  // K3-001: refunds are sales.return online (with a manager-approval
+  // policy and the offline cap as the only brakes here) — the replay must
+  // at least hold the permission.
+  if (!holdsPermission(ctx, "sales.return")) {
+    return permissionDenied(op.opId, "sales.return");
+  }
   const payload = op.payload as {
     originalSaleId?: number;
     reason?: string;

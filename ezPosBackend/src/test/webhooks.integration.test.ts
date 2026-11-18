@@ -245,9 +245,35 @@ describe("outbound webhooks integration", { skip: !runIntegration }, () => {
     assert.equal(payload.event, "order.created");
     assert.equal(payload.data.orderId, order.saleId);
 
-    // Confirm → order.paid delivery.
+    // Confirm → order.paid delivery. O3-001: order.paid now means money
+    // actually moved — a bare confirm of an order with NO captured
+    // payments is a COD confirm and must NOT claim paid; the collection
+    // (markOnlineOrderPaid → prepaid confirm) is what emits it.
+    const beforeCod = received.length;
+    const codOrder = await createOnlineOrder({
+      businessId: owner.businessId,
+      channel: "custom_storefront",
+      integrationId: null,
+      externalOrderId: null,
+      locationId: null,
+      customer: { name: "Buyer" },
+      lines: [{ variantId, quantity: 1 }],
+      idempotencyKey: `whk-cod-${Date.now()}`,
+    });
+    await processWebhookDeliveries();
+    assert.equal(
+      JSON.parse(received[received.length - 1]!.body).event,
+      "order.created",
+    );
     await import("../modules/commerce/orders.service.js").then((m) =>
-      m.confirmOnlineOrder(owner.businessId, order.saleId),
+      m.confirmOnlineOrder(owner.businessId, codOrder.saleId),
+    );
+    await processWebhookDeliveries();
+    // Exactly one new delivery (the COD order.created) — no order.paid.
+    assert.equal(received.length, beforeCod + 1);
+
+    await import("../modules/commerce/orders.service.js").then((m) =>
+      m.markOnlineOrderPaid(owner.businessId, order.saleId),
     );
     const sweep2 = await processWebhookDeliveries();
     assert.ok(sweep2.delivered >= 1);

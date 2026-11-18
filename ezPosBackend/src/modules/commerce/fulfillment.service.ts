@@ -20,6 +20,7 @@ import {
 } from "./orders.service.js";
 import { recordOrderEventInTx } from "./orderTimeline.service.js";
 import { postDueCollectionLedgerEntry } from "../sales/sales.ledger.js";
+import { emitWebhookEventInTx } from "../webhooks/webhookDelivery.service.js";
 import { publishRealtime } from "../realtime/realtime.service.js";
 
 /**
@@ -58,6 +59,8 @@ async function getEditableSaleInTx(
       fulfillmentStatus: sales.fulfillmentStatus,
       paymentStatus: sales.paymentStatus,
       dueAmount: sales.dueAmount,
+      // O3-001: needed for the order.paid webhook payload on COD collection.
+      finalTotal: sales.finalTotal,
       customerId: sales.customerId,
       locationId: sales.locationId,
     })
@@ -580,6 +583,15 @@ export async function deliverOrder(
         note: `COD collected — ${method} ${amount.toFixed(2)}`,
         metadata: { method, amount, remainingDue: remaining },
       });
+      // O3-001: COD orders only claim order.paid once the money actually
+      // landed (confirm deliberately skips it for COD — see orders.service).
+      if (remaining === 0) {
+        await emitWebhookEventInTx(tx, businessId, "order.paid", {
+          orderId,
+          invoiceNumber: sale.invoiceNumber,
+          total: Number(sale.finalTotal ?? 0),
+        });
+      }
     }
   });
 }
