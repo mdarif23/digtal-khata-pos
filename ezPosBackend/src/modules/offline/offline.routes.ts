@@ -133,6 +133,9 @@ router.post(
       if (terminalId === null || !req.terminal) {
         return res.status(400).json({
           success: false,
+          // Machine code: the POS offline panel surfaces a remediation hint
+          // for exactly this failure (bind the device, then Retry).
+          code: "TERMINAL_NOT_BOUND",
           message: "Offline sync requires a bound terminal.",
         });
       }

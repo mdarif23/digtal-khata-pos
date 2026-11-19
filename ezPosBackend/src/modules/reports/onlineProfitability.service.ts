@@ -283,7 +283,7 @@ export async function getProfitabilityTrends(
   const { pop, tz } = await populationContext(businessId, filters);
   const result = await db.execute(sql`
     with daily as (
-      select to_char(s.purchase_date, 'YYYY-MM-DD') as day,
+      select to_char(s.created_at AT TIME ZONE ${tz}, 'YYYY-MM-DD') as day,
         coalesce(sum(case when s.status in ('completed', 'refunded')
           then s.final_total - s.vat - s.delivery_fee else 0 end), 0)::float8 as revenue_gross,
         coalesce(sum(case when s.status in ('completed', 'refunded') then x.cogs else 0 end), 0)::float8 as cogs,

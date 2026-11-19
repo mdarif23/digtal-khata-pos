@@ -103,6 +103,11 @@ const cartItemPayloadSchema = z.object({
     })
     .nullable(),
   serialNumbers: z.array(z.string().trim().min(1)).optional(),
+  // U4 (A2-001): manual FEFO batch selection — the schema used to strip
+  // batchId from every cart payload, making manual batch picks unreachable
+  // online AND offline (the offline sync replays the same stripped payload).
+  // The BE schema already accepts it and policy-gates the choice.
+  batchId: z.number().int().positive().nullish(),
   // Packaging-unit selling: null = base unit line.
   uomConversionId: z.number().int().positive().nullable().optional(),
   // Phase 6: permission-gated price override (unit price in the selected

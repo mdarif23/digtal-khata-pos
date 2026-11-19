@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Plus } from "lucide-react";
+import { KeyRound, Pencil, Plus, RefreshCcw, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,12 +17,16 @@ import {
 } from "@/components/ui/dialog";
 import {
   getCommSettingsApi,
+  deleteProviderApi,
+  deleteTemplateApi,
   getWebhookSecretApi,
   listMessagesApi,
   listProvidersApi,
   listTemplatesApi,
   putCommSettingsApi,
   putProviderApi,
+  rotateWebhookSecretApi,
+  updateProviderApi,
   putTemplateApi,
   type CommChannel,
   type CommMessageRow,
@@ -71,6 +75,9 @@ export function CommsSettingsPage() {
   const [settings, setSettings] = useState<CommSettings | null>(null);
   const [messages, setMessages] = useState<CommMessageRow[] | null>(null);
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+  // E3-analysis: null = add mode; a provider row = edit mode (identity
+  // fields locked, config sent only when the user retypes values).
+  const [editingProviderId, setEditingProviderId] = useState<number | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<CommTemplate | null>(null);
   const [newProvider, setNewProvider] = useState({
     channel: "sms" as CommChannel,
@@ -106,23 +113,112 @@ export function CommsSettingsPage() {
 
   async function saveProvider() {
     try {
-      const config: Record<string, unknown> =
-        newProvider.providerKey === "generic_http"
-          ? { url: newProvider.url, apiKey: newProvider.apiKey, method: "POST" }
-          : {};
-      await putProviderApi({
-        channel: newProvider.channel,
-        providerKey: newProvider.providerKey,
-        displayName: null,
-        config,
-        isDefault: true,
-        isActive: true,
-      });
+      if (editingProviderId !== null) {
+        // EDIT: identity fields immutable. Config is sent only when the
+        // user typed new values (empty fields = unchanged) — the dialog
+        // note explains how to wipe a config via the API.
+        const typedConfig =
+          newProvider.providerKey === "generic_http" &&
+          (newProvider.url !== "" || newProvider.apiKey !== "")
+            ? { url: newProvider.url, apiKey: newProvider.apiKey, method: "POST" }
+            : undefined;
+        await updateProviderApi(editingProviderId, {
+          displayName: null,
+          ...(typedConfig !== undefined ? { config: typedConfig } : {}),
+        });
+        toast.add({ title: "Provider updated.", type: "success" });
+      } else {
+        const config: Record<string, unknown> =
+          newProvider.providerKey === "generic_http"
+            ? { url: newProvider.url, apiKey: newProvider.apiKey, method: "POST" }
+            : {};
+        await putProviderApi({
+          channel: newProvider.channel,
+          providerKey: newProvider.providerKey,
+          displayName: null,
+          config,
+          isDefault: true,
+          isActive: true,
+        });
+        toast.add({ title: "Provider saved (config encrypted).", type: "success" });
+      }
       setProviderDialogOpen(false);
+      setEditingProviderId(null);
       setProviders(await listProvidersApi());
-      toast.add({ title: "Provider saved (config encrypted).", type: "success" });
     } catch (error) {
       toast.add({ title: extractError(error, "Unable to save the provider."), type: "error" });
+    }
+  }
+
+  async function toggleProvider(id: number, isActive: boolean) {
+    try {
+      await updateProviderApi(id, { isActive });
+      setProviders(await listProvidersApi());
+    } catch (error) {
+      toast.add({ title: extractError(error, "Unable to update the provider."), type: "error" });
+    }
+  }
+
+  async function setDefaultProvider(id: number) {
+    try {
+      await updateProviderApi(id, { isDefault: true, isActive: true });
+      setProviders(await listProvidersApi());
+      toast.add({ title: "Default provider updated.", type: "success" });
+    } catch (error) {
+      toast.add({ title: extractError(error, "Unable to set the default."), type: "error" });
+    }
+  }
+
+  function editProvider(p: CommProvider) {
+    setEditingProviderId(p.id);
+    setNewProvider({
+      channel: p.channel,
+      providerKey: p.providerKey,
+      url: "",
+      apiKey: "",
+    });
+    setProviderDialogOpen(true);
+  }
+
+  async function removeProvider(p: CommProvider) {
+    if (
+      !window.confirm(
+        "Delete this provider? Sends through this channel will fail with no provider configured.",
+      )
+    )
+      return;
+    try {
+      await deleteProviderApi(p.id);
+      toast.add({ title: "Provider deleted.", type: "success" });
+      setProviders(await listProvidersApi());
+    } catch (error) {
+      toast.add({ title: extractError(error, "Unable to delete the provider."), type: "error" });
+    }
+  }
+
+  async function resetTemplate(t: CommTemplate) {
+    if (!window.confirm("Reset this template to the built-in default?")) return;
+    try {
+      await deleteTemplateApi(t.id);
+      toast.add({ title: "Template reset to the built-in default.", type: "success" });
+      setTemplates(await listTemplatesApi());
+    } catch (error) {
+      toast.add({ title: extractError(error, "Unable to reset the template."), type: "error" });
+    }
+  }
+
+  async function rotateSecret() {
+    if (
+      !window.confirm(
+        "Rotate the webhook secret? The old secret stops working immediately — your provider must be updated with the new one.",
+      )
+    )
+      return;
+    try {
+      setWebhookSecret(await rotateWebhookSecretApi());
+      toast.add({ title: "Webhook secret rotated.", type: "success" });
+    } catch (error) {
+      toast.add({ title: extractError(error, "Unable to rotate the secret."), type: "error" });
     }
   }
 
@@ -183,7 +279,21 @@ export function CommsSettingsPage() {
       <section className="grid gap-3 rounded-md border p-4">
         <div className="flex items-center justify-between">
           <h2 className="font-medium">Providers</h2>
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setProviderDialogOpen(true)}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => {
+              setEditingProviderId(null);
+              setNewProvider({
+                channel: "sms",
+                providerKey: "generic_http",
+                url: "",
+                apiKey: "",
+              });
+              setProviderDialogOpen(true);
+            }}
+          >
             <Plus className="size-4" /> Add provider
           </Button>
         </div>
@@ -199,7 +309,9 @@ export function CommsSettingsPage() {
                   <th className="p-2 font-medium">Channel</th>
                   <th className="p-2 font-medium">Provider</th>
                   <th className="p-2 font-medium">Default</th>
+                  <th className="p-2 font-medium">Active</th>
                   <th className="p-2 font-medium">Config</th>
+                  <th className="p-2 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -208,14 +320,49 @@ export function CommsSettingsPage() {
                     <td className="p-2">{p.channel}</td>
                     <td className="p-2 font-mono text-xs">{p.providerKey}</td>
                     <td className="p-2">
-                      <Badge variant={p.isDefault ? "default" : "secondary"}>
-                        {p.isDefault ? "default" : "—"}
-                      </Badge>
+                      {p.isDefault ? (
+                        <Badge variant="default">default</Badge>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void setDefaultProvider(p.id)}
+                        >
+                          Set default
+                        </Button>
+                      )}
+                    </td>
+                    <td className="p-2">
+                      <Switch
+                        checked={p.isActive}
+                        onCheckedChange={(next) => void toggleProvider(p.id, next)}
+                        aria-label={`Provider ${p.providerKey} active`}
+                      />
                     </td>
                     <td className="p-2 font-mono text-xs text-muted-foreground">
                       {p.configPreview
                         ? JSON.stringify(p.configPreview).slice(0, 80)
                         : "—"}
+                    </td>
+                    <td className="p-2">
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => editProvider(p)}
+                          aria-label="Edit provider"
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void removeProvider(p)}
+                          aria-label="Delete provider"
+                        >
+                          <Trash2 className="size-4 text-destructive" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -269,14 +416,24 @@ export function CommsSettingsPage() {
           </div>
           <div className="grid gap-1.5">
             <Label>Delivery webhook secret</Label>
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-fit gap-1.5"
-              onClick={() => void showWebhookSecret()}
-            >
-              <KeyRound className="size-4" /> Reveal / regenerate
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => void showWebhookSecret()}
+              >
+                <KeyRound className="size-4" /> Reveal
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => void rotateSecret()}
+              >
+                <RefreshCcw className="size-4" /> Rotate
+              </Button>
+            </div>
             {webhookSecret ? (
               <p className="break-all rounded-md bg-muted p-2 font-mono text-xs">
                 {webhookSecret}
@@ -301,9 +458,19 @@ export function CommsSettingsPage() {
                   <span className="text-sm font-medium">
                     {t.templateKey} <Badge variant="outline">{t.channel}</Badge>
                   </span>
-                  <Button size="sm" variant="outline" onClick={() => void saveTemplate(t)}>
-                    Save
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button size="sm" variant="outline" onClick={() => void saveTemplate(t)}>
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void resetTemplate(t)}
+                      aria-label="Reset to built-in default"
+                    >
+                      <RotateCcw className="size-4" /> Reset
+                    </Button>
+                  </div>
                 </div>
                 <Input
                   value={t.body}
@@ -373,10 +540,15 @@ export function CommsSettingsPage() {
       <Dialog open={providerDialogOpen} onOpenChange={setProviderDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add provider</DialogTitle>
+            <DialogTitle>
+              {editingProviderId !== null ? "Edit provider" : "Add provider"}
+            </DialogTitle>
             <DialogDescription>
               Configs are encrypted at rest; only masked previews are shown
-              afterwards. Set the default provider per channel.
+              afterwards.{" "}
+              {editingProviderId !== null
+                ? "Leave the config fields empty to keep the stored config. Channel and provider cannot change on an existing provider."
+                : "Set the default provider per channel."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -384,6 +556,7 @@ export function CommsSettingsPage() {
               <Label>Channel</Label>
               <select
                 className="rounded-md border bg-background p-2 text-sm"
+                disabled={editingProviderId !== null}
                 value={newProvider.channel}
                 onChange={(e) => {
                   const channel = e.target.value as CommChannel;
@@ -403,6 +576,7 @@ export function CommsSettingsPage() {
               <Label>Provider</Label>
               <select
                 className="rounded-md border bg-background p-2 text-sm"
+                disabled={editingProviderId !== null}
                 value={newProvider.providerKey}
                 onChange={(e) =>
                   setNewProvider({ ...newProvider, providerKey: e.target.value })
@@ -445,7 +619,9 @@ export function CommsSettingsPage() {
             ) : null}
           </div>
           <DialogFooter>
-            <Button onClick={() => void saveProvider()}>Save provider</Button>
+            <Button onClick={() => void saveProvider()}>
+              {editingProviderId !== null ? "Update provider" : "Save provider"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

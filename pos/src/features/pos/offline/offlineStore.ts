@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import axios from "../../../api/axios.js";
+import axios, { getBoundTerminalId } from "../../../api/axios.js";
 import { refreshStockAfterTransaction } from "../stores/useSalesStore.js";
 import {
   appendSyncLog,
@@ -142,6 +142,18 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
           ? `Offline sale recorded — ৳${entry.summary.total.toFixed(2)}, ${entry.summary.itemCount} item(s)`
           : `Offline ${input.kind} recorded`,
     });
+    // Terminal binding gates SYNC (allocations are terminal-scoped) — a
+    // device that records offline while unbound can never replay until it
+    // binds. Warn at record time so the cashier knows BEFORE reopening.
+    if (getBoundTerminalId() === null) {
+      await appendSyncLog({
+        at: new Date().toISOString(),
+        kind: "conflict",
+        clientSaleId,
+        detail:
+          "This device has no bound terminal — sync requires one. Bind this computer in Settings → Hardware when back online.",
+      });
+    }
     await get().refresh();
     return clientSaleId;
   },

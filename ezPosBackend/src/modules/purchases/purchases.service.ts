@@ -621,16 +621,14 @@ export async function getPurchaseDetail(businessId: number, purchaseId: number) 
     supplierCreditBalance = Math.max(0, Number(ledgerAgg?.credits ?? 0));
   }
 
-  const canReturn = purchase.supplierId !== null && receivingLocationId !== null;
+  // Walk-in (supplier-less) purchases are returnable too (migration 0093) —
+  // only the supplier credit note is supplier-dependent.
+  const canReturn = receivingLocationId !== null;
   const returnContext = {
     locationId: receivingLocationId,
     locationName: receivingLocation?.name ?? null,
     canReturn,
-    reason: canReturn
-      ? null
-      : purchase.supplierId === null
-        ? ("no_supplier" as const)
-        : ("not_received" as const),
+    reason: canReturn ? null : ("not_received" as const),
     items: items.map((item) => ({
       purchaseItemId: item.id,
       orderedQuantity: Number(item.quantity),

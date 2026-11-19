@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, desc, eq, gte, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt, lte, ne, sql } from "drizzle-orm";
 import { db } from "../db/schema/index.js";
 import {
   commMessages,
@@ -454,8 +454,14 @@ export async function upsertProvider(
       ],
       set: {
         ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
-        ...(input.config !== undefined && input.config !== null
-          ? { configEncrypted: encryptConfig(input.config) }
+        // I3-005-family fix: an EXPLICIT null clears the stored config
+        // (absent = leave unchanged) — previously config could never be
+        // reset, so a wrong URL/key was permanent.
+        ...(input.config !== undefined
+          ? {
+              configEncrypted:
+                input.config === null ? null : encryptConfig(input.config),
+            }
           : {}),
         ...(input.isDefault !== undefined ? { isDefault: input.isDefault } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
@@ -465,6 +471,194 @@ export async function upsertProvider(
     .returning({ id: commProviders.id });
   if (!row) throw new Error("Provider upsert returned no row.");
   return row;
+}
+
+/**
+ * Id-based provider edit (comms.manage): identity fields (channel,
+ * providerKey) are immutable; config explicit-null clears. Audited —
+ * metadata NEVER contains config values (they are secrets).
+ */
+export async function updateProviderById(
+  businessId: number,
+  providerId: number,
+  actorUserId: number | null,
+  input: {
+    displayName?: string | null | undefined;
+    config?: Record<string, unknown> | null | undefined;
+    isDefault?: boolean | undefined;
+    isActive?: boolean | undefined;
+  },
+) {
+  const [existing] = await db
+    .select()
+    .from(commProviders)
+    .where(
+      and(
+        eq(commProviders.businessId, businessId),
+        eq(commProviders.id, providerId),
+      ),
+    )
+    .limit(1);
+  if (!existing) throw new NotFoundError("Provider not found.");
+  if (input.isDefault) {
+    await db
+      .update(commProviders)
+      .set({ isDefault: false, updatedAt: new Date() })
+      .where(
+        and(
+          eq(commProviders.businessId, businessId),
+          eq(commProviders.channel, existing.channel),
+          eq(commProviders.isDefault, true),
+          ne(commProviders.id, providerId),
+        ),
+      );
+  }
+  const [updated] = await db
+    .update(commProviders)
+    .set({
+      ...(input.displayName !== undefined
+        ? { displayName: input.displayName ?? null }
+        : {}),
+      ...(input.config !== undefined
+        ? {
+            configEncrypted:
+              input.config === null ? null : encryptConfig(input.config),
+          }
+        : {}),
+      ...(input.isDefault !== undefined ? { isDefault: input.isDefault } : {}),
+      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(commProviders.businessId, businessId),
+        eq(commProviders.id, providerId),
+      ),
+    )
+    .returning({ id: commProviders.id });
+  if (!updated) throw new NotFoundError("Provider not found.");
+  recordAudit({
+    businessId,
+    actorUserId,
+    action: "comms.provider_updated",
+    entityType: "comm_provider",
+    entityId: providerId,
+    metadata: {
+      channel: existing.channel,
+      providerKey: existing.providerKey,
+      configChanged: input.config !== undefined,
+      configCleared: input.config === null,
+      isDefault: input.isDefault,
+      isActive: input.isActive,
+    },
+  });
+  return updated;
+}
+
+/** Id-based provider removal (comms.manage). Audited. */
+export async function deleteProviderById(
+  businessId: number,
+  providerId: number,
+  actorUserId: number | null,
+) {
+  const [existing] = await db
+    .select({
+      channel: commProviders.channel,
+      providerKey: commProviders.providerKey,
+    })
+    .from(commProviders)
+    .where(
+      and(
+        eq(commProviders.businessId, businessId),
+        eq(commProviders.id, providerId),
+      ),
+    )
+    .limit(1);
+  if (!existing) throw new NotFoundError("Provider not found.");
+  await db
+    .delete(commProviders)
+    .where(
+      and(
+        eq(commProviders.businessId, businessId),
+        eq(commProviders.id, providerId),
+      ),
+    );
+  recordAudit({
+    businessId,
+    actorUserId,
+    action: "comms.provider_deleted",
+    entityType: "comm_provider",
+    entityId: providerId,
+    metadata: existing,
+  });
+}
+
+/**
+ * Removes a template OVERRIDE — renderTemplate falls back to the built-in
+ * default. Built-in templates have no row and 404 here. Audited.
+ */
+export async function deleteTemplateById(
+  businessId: number,
+  templateId: number,
+  actorUserId: number | null,
+) {
+  const [existing] = await db
+    .select({
+      templateKey: commTemplates.templateKey,
+      channel: commTemplates.channel,
+    })
+    .from(commTemplates)
+    .where(
+      and(
+        eq(commTemplates.businessId, businessId),
+        eq(commTemplates.id, templateId),
+      ),
+    )
+    .limit(1);
+  if (!existing) throw new NotFoundError("Template not found.");
+  await db
+    .delete(commTemplates)
+    .where(
+      and(
+        eq(commTemplates.businessId, businessId),
+        eq(commTemplates.id, templateId),
+      ),
+    );
+  recordAudit({
+    businessId,
+    actorUserId,
+    action: "comms.template_deleted",
+    entityType: "comm_template",
+    entityId: templateId,
+    metadata: existing,
+  });
+}
+
+/**
+ * Rotates the inbound webhook signing secret: the old secret stops working
+ * immediately (providers must be pointed at the new one). Audited.
+ */
+export async function rotateWebhookSecret(
+  businessId: number,
+  actorUserId: number | null,
+): Promise<string> {
+  const secret = randomBytes(24).toString("hex");
+  await db
+    .insert(commSettings)
+    .values({ businessId, webhookSecret: secret })
+    .onConflictDoUpdate({
+      target: commSettings.businessId,
+      set: { webhookSecret: secret, updatedAt: new Date() },
+    });
+  recordAudit({
+    businessId,
+    actorUserId,
+    action: "comms.webhook_secret_rotated",
+    entityType: "comm_settings",
+    entityId: businessId,
+    metadata: {},
+  });
+  return secret;
 }
 
 async function defaultProviderFor(

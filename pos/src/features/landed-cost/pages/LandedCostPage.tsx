@@ -130,6 +130,12 @@ function LandedCostEditor({ purchaseId }: { purchaseId: number }) {
   const status = context.existingStatus;
 
   const [method, setMethod] = useState<LandedCostMethod>("quantity");
+  // Walk-in purchases have no vendor — "Supplier payable" settlement would
+  // always 400 ("needs the vendor for the payable"), so it is not offered.
+  const settlementOptions = SETTLEMENT_OPTIONS.filter(
+    (option) =>
+      context.purchase.supplierId != null || option.value !== "supplier_payable",
+  );
   const [expenses, setExpenses] = useState<ExpenseRow[]>([newExpenseRow()]);
   const [manualLines, setManualLines] = useState<Record<number, string>>({});
   const [confirmingPost, setConfirmingPost] = useState(false);
@@ -449,7 +455,7 @@ function LandedCostEditor({ purchaseId }: { purchaseId: number }) {
                   <div className="sm:col-span-3">
                     <Label className="text-xs text-slate-500">Settlement</Label>
                     <Select
-                      items={SETTLEMENT_OPTIONS.map((option) => ({
+                      items={settlementOptions.map((option) => ({
                         value: option.value,
                         label: option.label,
                       }))}
@@ -471,7 +477,7 @@ function LandedCostEditor({ purchaseId }: { purchaseId: number }) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {SETTLEMENT_OPTIONS.map((option) => (
+                        {settlementOptions.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
                           </SelectItem>

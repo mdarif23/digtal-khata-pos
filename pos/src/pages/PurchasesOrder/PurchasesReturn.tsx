@@ -595,14 +595,9 @@ export const PurchaseViewItems = () => {
       />
     );
   }
-  if (!purchaseOrder.supplierId) {
-    return (
-      <ReturnState
-        title="Supplier required"
-        message="This purchase has no supplier. The current purchase return records require a supplier account."
-      />
-    );
-  }
+  // Walk-in purchases are returnable (migration 0093) — only the supplier
+  // credit note is supplier-dependent, and the page hides that panel when
+  // there is no payee.
 
   return (
     <div className="min-h-[calc(100vh-1rem)] bg-muted/30 p-4 md:p-6">

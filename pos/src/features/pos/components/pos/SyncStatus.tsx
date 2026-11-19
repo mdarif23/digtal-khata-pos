@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog.js";
 import { useOfflineStore } from "../../offline/offlineStore.js";
-import api from "../../../../api/axios.js";
+import api, { getBoundTerminalId } from "../../../../api/axios.js";
 
 /**
  * Register-side offline status (Module 10): an offline pill when the
@@ -150,6 +150,23 @@ function SyncHistoryDialog({
                 {entry.attempts} attempt(s)
                 {entry.lastError ? ` · ${entry.lastError}` : ""}
               </div>
+              {entry.status === "failed" &&
+              (entry.errorCode === "TERMINAL_NOT_BOUND" ||
+                entry.lastError?.includes("bound terminal")) ? (
+                // The sync engine requires a bound terminal (allocations are
+                // terminal-scoped) — the retry alone can never succeed until
+                // this device is bound.
+                <p className="mt-1 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                  Bind this computer to a terminal in{" "}
+                  <a
+                    href="/settings/hardware"
+                    className="underline"
+                  >
+                    Settings → Hardware
+                  </a>
+                  , then press “Re-queue reviewed”.
+                </p>
+              ) : null}
             </div>
           ))}
         </div>

@@ -23,7 +23,9 @@ export const purchaseReturns = pgTable(
       .notNull()
       .references(() => businesses.id),
     purchaseId: integer("purchase_id").notNull(),
-    supplierId: integer("supplier_id").notNull(),
+    /** Nullable (migration 0093): walk-in purchases have no supplier — the
+     * return's credit-note insert is skipped for them. */
+    supplierId: integer("supplier_id"),
     returnDate: timestamp("return_date", { mode: "string" })
       .defaultNow()
       .notNull(),

@@ -275,6 +275,27 @@ export const ReceiveItems = () => {
   // must be payable in full. Rounded to the 2-dp money grid: raw float sums
   // land just below the real balance (320.33999999999997) and clamp the
   // final ৳0.34 payment.
+  //
+  // The quantities being received RIGHT NOW live in the FORM (watchedItems),
+  // not the store rows — the old code read a phantom `item.receiveNow` off
+  // the API rows and always got 0, so the payment field clamped to zero on
+  // every first receive (fatal for walk-in purchases, whose ONLY payment
+  // path is receive time). Overlay the live entered quantities, converted
+  // to base when a packaging unit applies.
+  const liveReceiveNowBase = (() => {
+    const map = new Map<number, number>();
+    for (const watched of watchedItems) {
+      const storeItem = receiveItems.find((r) => r.id === watched.itemId);
+      if (!storeItem) continue;
+      const factor = lineUnitDefaults.get(watched.itemId)?.factor ?? 1;
+      const entered = Number(watched.receiveNow) || 0;
+      map.set(
+        storeItem.id,
+        watched.uomConversionId != null ? entered * factor : entered,
+      );
+    }
+    return map;
+  })();
   const invoiceReceivedValue = (() => {
     let orderedLineValue = 0;
     let receivedLineValue = 0;
@@ -288,7 +309,8 @@ export const ReceiveItems = () => {
       if (lineValue <= 0) continue;
       orderedLineValue += lineValue;
       const receivedQty = Math.min(
-        (Number(item.receivedQuantity) || 0) + (Number(item.receiveNow) || 0),
+        (Number(item.receivedQuantity) || 0) +
+          (liveReceiveNowBase.get(item.id) ?? 0),
         orderedQty,
       );
       if (receivedQty <= 0) continue;

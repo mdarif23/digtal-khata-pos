@@ -467,7 +467,10 @@ describe("purchase return integration", { skip: !runIntegration }, () => {
     assert.match(String(body?.message), /Insufficient on-hand stock/);
   });
 
-  it("requires a supplier on the purchase", async () => {
+  it("returns a walk-in (supplier-less) purchase without a credit note", async () => {
+    // Migration 0093: returns are stock events — a walk-in purchase (whose
+    // ONLY payment path is receive time) used to be permanently stuck with
+    // unwanted stock. The credit note is what needs a supplier.
     const owner = await createOwnerCtx(baseUrl, "Return NoSupplier Co");
     const variantId = await seedVariant(owner.businessId);
     const { purchaseId, items } = await createReceivedPurchase(
@@ -481,8 +484,12 @@ describe("purchase return integration", { skip: !runIntegration }, () => {
     const { status, body } = await returnItems(owner, purchaseId, [
       { purchaseItemId: items[0]!.id, quantity: 1 },
     ]);
-    assert.equal(status, 400);
-    assert.match(String(body?.message), /supplier must be assigned/);
+    assert.equal(status, 201);
+    assert.equal(
+      body?.data?.supplierBalance?.supplierCreditCreated,
+      0,
+      "no payee — no phantom credit",
+    );
   });
 
   it("keeps a fully paid purchase paid after a return", async () => {

@@ -489,14 +489,18 @@ export async function createPurchaseReturn(
       });
     }
 
-    await tx.insert(supplierLedger).values({
-      businessId,
-      supplierId: purchase.supplierId,
-      transactionType: "PURCHASE_RETURN",
-      referenceId: purchaseReturn.id,
-      credit: totalAmount,
-      note: reason?.trim() || `Purchase return #${purchaseReturn.id}`,
-    });
+    // Walk-in purchases have no supplier — a credit note needs a payee;
+    // recording one against nobody would be a phantom credit.
+    if (purchase.supplierId !== null) {
+      await tx.insert(supplierLedger).values({
+        businessId,
+        supplierId: purchase.supplierId,
+        transactionType: "PURCHASE_RETURN",
+        referenceId: purchaseReturn.id,
+        credit: totalAmount,
+        note: reason?.trim() || `Purchase return #${purchaseReturn.id}`,
+      });
+    }
 
     // Landed-cost reversal (Part F): returned units take their allocated
     // landed cost out of inventory — traceable, never silent. The reversal
@@ -561,10 +565,11 @@ export async function createPurchaseReturn(
           outstandingBefore,
           goodsCredit: totalAmount,
           outstandingAfter: updatedDueAmount,
-          supplierCreditCreated: Math.max(
-            0,
-            totalAmount - outstandingBefore,
-          ),
+          // Walk-in returns create no credit — there is no payee.
+          supplierCreditCreated:
+            purchase.supplierId === null
+              ? 0
+              : Math.max(0, totalAmount - outstandingBefore),
         },
         returnedSerials,
       },

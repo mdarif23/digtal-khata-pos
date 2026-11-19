@@ -650,6 +650,13 @@
       "when": 1795101000000,
       "tag": "0092_quotation_converting_claim",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1795188000000,
+      "tag": "0093_walkin_purchase_returns",
+      "breakpoints": true
     }
   ]
 }

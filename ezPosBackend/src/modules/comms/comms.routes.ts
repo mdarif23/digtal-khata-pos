@@ -15,8 +15,12 @@ import { sendSafeError } from "../../utils/safeError.js";
 import { BadRequestError } from "../../utils/handleError.js";
 import {
   applyDeliveryWebhook,
+  deleteProviderById,
+  deleteTemplateById,
   ensureWebhookSecret,
   getCommSettings,
+  rotateWebhookSecret,
+  updateProviderById,
   getCommSettingsWithDefaults,
   listMessages,
   listProviders,
@@ -82,6 +86,81 @@ router.put("/api/comms/providers", ...manage, async (req: Request, res: Response
     return res.status(200).json({ success: true, data });
   } catch (err: unknown) {
     return sendSafeError(res, err, "Unable to save the provider.");
+  }
+});
+
+// ---- provider edit/delete by id (comms.manage; audited) ----
+const providerUpdateSchema = z.object({
+  displayName: z.string().trim().max(80).nullable().optional(),
+  // Explicit null CLEARS the stored config; absent = unchanged.
+  config: z.record(z.string(), z.unknown()).nullable().optional(),
+  isDefault: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
+
+router.put("/api/comms/providers/:providerId", ...manage, async (req: Request, res: Response) => {
+  try {
+    const providerId = Number(req.params.providerId);
+    if (!Number.isInteger(providerId) || providerId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid provider ID." });
+    }
+    const parsed = providerUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid provider update.",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const data = await updateProviderById(
+      getBusinessId(req),
+      providerId,
+      req.user?.id ?? null,
+      parsed.data,
+    );
+    return res.status(200).json({ success: true, data });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to update the provider.");
+  }
+});
+
+router.delete("/api/comms/providers/:providerId", ...manage, async (req: Request, res: Response) => {
+  try {
+    const providerId = Number(req.params.providerId);
+    if (!Number.isInteger(providerId) || providerId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid provider ID." });
+    }
+    await deleteProviderById(
+      getBusinessId(req),
+      providerId,
+      req.user?.id ?? null,
+    );
+    return res.status(200).json({ success: true });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to delete the provider.");
+  }
+});
+
+router.delete("/api/comms/templates/:templateId", ...manage, async (req: Request, res: Response) => {
+  try {
+    const templateId = Number(req.params.templateId);
+    if (!Number.isInteger(templateId) || templateId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid template ID." });
+    }
+    await deleteTemplateById(
+      getBusinessId(req),
+      templateId,
+      req.user?.id ?? null,
+    );
+    return res.status(200).json({ success: true });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to reset the template.");
   }
 });
 
@@ -245,6 +324,20 @@ router.post("/api/comms/webhook-secret", ...manage, async (req: Request, res: Re
     return res.status(200).json({ success: true, data: { secret } });
   } catch (err: unknown) {
     return sendSafeError(res, err, "Unable to prepare the webhook secret.");
+  }
+});
+
+// Rotation: the old secret stops working immediately (a leaked secret can
+// be retired — the reveal endpoint alone could never do that). Audited.
+router.post("/api/comms/webhook-secret/rotate", ...manage, async (req: Request, res: Response) => {
+  try {
+    const secret = await rotateWebhookSecret(
+      getBusinessId(req),
+      req.user?.id ?? null,
+    );
+    return res.status(200).json({ success: true, data: { secret } });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to rotate the webhook secret.");
   }
 });
 

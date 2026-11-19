@@ -431,6 +431,9 @@ interface HeldItemPayload {
   uomConversionId?: number | null;
   /** Quantity in the selected unit (mirrors quantity). */
   enteredQuantity?: number;
+  /** U2: the packaging factor at hold time — lets a resume convert to
+   * base when the packaging unit was deactivated since the hold. */
+  conversionFactor?: number | null;
 }
 
 interface HeldSaleRow {
@@ -492,6 +495,7 @@ export const useHoldCartStore = create<HoldCartStore>()((set, get) => ({
         productName: item.name,
         uomConversionId: item.uomConversionId ?? null,
         enteredQuantity: item.enteredQuantity ?? item.quantity,
+        conversionFactor: item.conversionFactor ?? null,
         batchId: item.batchId ?? null,
       })),
     };
@@ -545,6 +549,7 @@ export async function resumeHeldItems(
     uomConversionId?: number | null;
     enteredQuantity?: number;
     batchId?: number | null;
+    conversionFactor?: number | null;
   }[],
 ): Promise<{ lines: CartType[]; missing: string[] }> {
   const products = readProductsCache();
@@ -603,6 +608,27 @@ export async function resumeHeldItems(
         unitAbbreviation: heldUnit.unitAbbreviation,
         conversionFactor: heldUnit.conversionFactor,
         unitPrice: heldUnit.salePrice,
+      });
+    } else if (item.uomConversionId != null && (item.conversionFactor ?? 0) > 0) {
+      // U2: the packaging unit no longer resolves (deactivated since the
+      // hold, or sell-units unavailable). The stored factor converts the
+      // entered quantity honestly into a BASE line — the old fallback
+      // reinterpreted "2 Box @ ৳1,500" as "2 Pcs @ ৳125" silently.
+      const factor = item.conversionFactor!;
+      const baseQuantity = Math.round(enteredQuantity * factor * 1000) / 1000;
+      lines.push({
+        ...product,
+        variants: [variant],
+        quantity: baseQuantity,
+        enteredQuantity: baseQuantity,
+        discount: item.discount ?? null,
+        serialNumbers: item.serialNumbers ?? [],
+        batchId: item.batchId ?? null,
+        uomConversionId: null,
+        unitName: null,
+        unitAbbreviation: null,
+        conversionFactor: 1,
+        unitPrice: Number(variant.sellingPrice),
       });
     } else {
       lines.push({

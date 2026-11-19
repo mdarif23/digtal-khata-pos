@@ -32,6 +32,7 @@ import {
   type CreateSalePayload,
 } from "../sales/schemas/sales.schema.js";
 import * as salesService from "../sales/sales.service.js";
+import { resolveUomContext } from "../uom/uom.service.js";
 import * as cashRegistersService from "../cashRegisters/cashRegisters.service.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 
@@ -361,14 +362,41 @@ async function createConflict(
   return row!.id;
 }
 
+/**
+ * U1: a sale line's quantity in BASE units. Cart quantities are ENTERED
+ * packaging units ("2 Box"); the allocation ledger and stock both speak
+ * base — consuming entered units let a pack-selling terminal oversell its
+ * allowance ~factor×. History replay uses requireActive:false so a
+ * deactivated packaging unit still converts honestly.
+ */
+async function offlineLineBaseQty(
+  ctx: OfflineContext,
+  item: { variantId: number; quantity: number; uomConversionId?: number | null | undefined },
+  eligibility: Map<number, { productId: number }>,
+): Promise<number> {
+  if (item.uomConversionId == null) return item.quantity;
+  const line = eligibility.get(item.variantId);
+  if (!line) return item.quantity;
+  const uom = await resolveUomContext(
+    db,
+    ctx.businessId,
+    line.productId,
+    item.variantId,
+    item.uomConversionId,
+    { requireActive: false },
+  );
+  return roundMoney(item.quantity * uom.factor);
+}
+
 /** Per-variant offline eligibility for a sale's lines. */
 async function lineEligibility(
   businessId: number,
   variantIds: number[],
-): Promise<Map<number, { policy: string; trackingType: string }>> {
+): Promise<Map<number, { policy: string; trackingType: string; productId: number }>> {
   const rows = await db
     .select({
       variantId: productVariants.id,
+      productId: productVariants.productId,
       policy: products.offlinePolicy,
       trackingType: products.trackingType,
     })
@@ -380,7 +408,7 @@ async function lineEligibility(
   return new Map(
     rows.map((r) => [
       r.variantId,
-      { policy: r.policy, trackingType: r.trackingType ?? "none" },
+      { policy: r.policy, trackingType: r.trackingType ?? "none", productId: r.productId },
     ]),
   );
 }
@@ -540,10 +568,16 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
   }
 
   // Negative stock (oversell while offline) — the stock truth changed
-  // against the sale's assumption: flag for review.
+  // against the sale's assumption: flag for review. U1: cart quantities are
+  // ENTERED packaging units while stock/allocations speak BASE — convert
+  // each line through the same UOM context the online engine uses.
   const soldVariants = new Map<number, number>();
   for (const item of sale.items) {
-    soldVariants.set(item.variantId, (soldVariants.get(item.variantId) ?? 0) + item.quantity);
+    const baseQty = await offlineLineBaseQty(ctx, item, eligibility);
+    soldVariants.set(
+      item.variantId,
+      (soldVariants.get(item.variantId) ?? 0) + baseQty,
+    );
   }
   for (const [variantId, qty] of soldVariants) {
     const [stockRow] = await db
@@ -562,22 +596,23 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
         op.opId,
         op.type,
         "negative_stock_open_mode",
-        `Offline sale left variant ${variantId} at ${stockRow.quantity} units at this location (sold ${qty}).`,
+        `Offline sale left variant ${variantId} at ${stockRow.quantity} base units at this location (sold ${qty}).`,
         { variantId, quantityAfter: Number(stockRow.quantity) },
       );
     }
   }
 
-  // Consume allocations and flag overages.
+  // Consume allocations and flag overages (BASE units — see U1 above).
   for (const item of sale.items) {
     const line = eligibility.get(item.variantId)!;
     if (line.policy !== "allocated") continue;
+    const baseQty = await offlineLineBaseQty(ctx, item, eligibility);
     const updated = await pool.query(
       `UPDATE offline_allocations
        SET consumed_qty = consumed_qty + $1, updated_at = now()
        WHERE terminal_id = $2 AND variant_id = $3 AND status = 'active'
        RETURNING allocated_qty, consumed_qty`,
-      [item.quantity, ctx.terminalId, item.variantId],
+      [baseQty, ctx.terminalId, item.variantId],
     );
     const row = updated.rows[0];
     if (row && Number(row.consumed_qty) > Number(row.allocated_qty)) {
@@ -586,7 +621,7 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
         op.opId,
         op.type,
         "allocation_exceeded",
-        `Terminal sold ${row.consumed_qty} of variant ${item.variantId} offline against an allowance of ${row.allocated_qty}.`,
+        `Terminal sold ${row.consumed_qty} of variant ${item.variantId} offline against an allowance of ${row.allocated_qty} (base units).`,
         { variantId: item.variantId, allocated: row.allocated_qty, consumed: row.consumed_qty },
       );
       return {
