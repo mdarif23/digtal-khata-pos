@@ -96,7 +96,12 @@ import {
 import { redeemGiftCardInTx } from "../../services/giftCards.js";
 import { giftCardTransactions } from "../../db/schema/giftCards.js";
 import { journalEntries } from "../../db/schema/journalEntries.js";
-import { reverseEntry } from "../../services/ledger.js";
+import { reverseEntry, postJournalEntry } from "../../services/ledger.js";
+import {
+  landedCostAdjustments,
+  landedCostAllocations,
+  landedCosts,
+} from "../../db/schema/landedCosts.js";
 import { couponRedemptions, coupons } from "../../db/schema/coupons.js";
 import {
   evaluateCouponInTx,
@@ -4415,6 +4420,9 @@ export async function cancelSale(
         finalTotal: sales.finalTotal,
         dueAmount: sales.dueAmount,
         paymentStatus: sales.paymentStatus,
+        // D2-001: landed-cost documents posted after this sale expensed its
+        // units' landed share — the void must reverse exactly those.
+        createdAt: sales.createdAt,
       })
       .from(sales)
       .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
@@ -4859,6 +4867,105 @@ export async function cancelSale(
           isNull(receiptShareTokens.revokedAt),
         ),
       );
+
+    // 12d. D2-001: landed-cost share of the RESTORED units. A landed-cost
+    // document posted AFTER this sale expensed the then-sold units' share
+    // ("Landed cost on already-sold units", DR 5010). Voiding returns those
+    // units to batches whose per-unit value already includes the share —
+    // the next sale would expense it AGAIN while the original debit never
+    // reversed (GL: 1050 rises with no offset, COGS double-counted). Every
+    // document posted after the sale, per restored batch, has a persisted
+    // per-unit allocation row — move that share back to inventory
+    // (DR 1050 / CR 5010) and record it as landedCostAdjustments.
+    // (landedCostAdjustments.createdBy is NOT NULL — the adjustment only
+    // happens for user-driven voids.)
+    if (
+      sale.createdAt &&
+      restoredBatches.length > 0 &&
+      actorUserId != null
+    ) {
+      const restoredBatchIds = [
+        ...new Set(restoredBatches.map((r) => r.batchId)),
+      ];
+      const postSaleRows = await tx
+        .select({
+          landedCostId: landedCostAllocations.landedCostId,
+          inventoryBatchId: landedCostAllocations.inventoryBatchId,
+          allocatedPerUnit: landedCostAllocations.allocatedPerUnit,
+        })
+        .from(landedCostAllocations)
+        .innerJoin(
+          landedCosts,
+          eq(landedCosts.id, landedCostAllocations.landedCostId),
+        )
+        .where(
+          and(
+            eq(landedCostAllocations.businessId, businessId),
+            inArray(landedCostAllocations.inventoryBatchId, restoredBatchIds),
+            gt(landedCosts.postedAt, sale.createdAt),
+            // Only posted (or later adjusted) documents carry expensed share.
+            inArray(landedCosts.status, ["posted", "adjusted"]),
+          ),
+        );
+      const reversalByDoc = new Map<number, number>();
+      for (const row of postSaleRows) {
+        const lot = restoredBatches.find(
+          (r) => r.batchId === row.inventoryBatchId,
+        );
+        if (!lot) continue;
+        const share = roundMoney(Number(row.allocatedPerUnit) * lot.quantity);
+        if (share <= 0.005) continue;
+        reversalByDoc.set(
+          row.landedCostId,
+          roundMoney((reversalByDoc.get(row.landedCostId) ?? 0) + share),
+        );
+      }
+      let totalReversal = 0;
+      for (const [docId, amount] of reversalByDoc) {
+        if (amount <= 0.005) continue;
+        totalReversal = roundMoney(totalReversal + amount);
+        await tx.insert(landedCostAdjustments).values({
+          businessId,
+          landedCostId: docId,
+          adjustmentType: "reversal",
+          previousAllocatedAmount: 0,
+          newAllocatedAmount: 0,
+          // The document's total allocation does not change — the SPLIT
+          // does: expensed COGS moves back to inventory.
+          adjustmentAmount: 0,
+          inventoryAmount: amount,
+          cogsAmount: -amount,
+          reason: `Sale ${sale.invoiceNumber} voided — ${amount.toFixed(2)} of landed cost moved from expensed COGS back to inventory (restored units)`,
+          referenceType: "sale_void",
+          referenceId: saleId,
+          createdBy: actorUserId,
+        });
+      }
+      if (totalReversal > 0.005) {
+        await postJournalEntry(tx, {
+          businessId,
+          memo: `Landed-cost share of voided sale ${sale.invoiceNumber} returned to inventory`,
+          sourceType: "sale_void_landed_cost",
+          sourceId: saleId,
+          cashFlowCategory: "operating",
+          lines: [
+            {
+              accountCode: "1050",
+              debit: totalReversal,
+              locationId,
+              description: "Landed cost returned to inventory (sale void)",
+            },
+            {
+              accountCode: "5010",
+              credit: totalReversal,
+              locationId,
+              description: "Landed cost COGS reversal (sale void)",
+            },
+          ],
+          actorUserId,
+        });
+      }
+    }
 
     await recordAuditInTx(tx, {
       businessId,

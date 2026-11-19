@@ -8,6 +8,9 @@ export type InputValue = {
   address: string;
   /** P3 Phase 1 (F2): max outstanding receivable; null/undefined = unlimited. */
   creditLimit?: number | null;
+  /** E1-012: communication consent (surfaces on the Contacts edit dialog). */
+  marketingOptIn?: boolean;
+  transactionalOptOut?: boolean;
 };
 export interface CustomerStore {
   customerInfo: InputValue;

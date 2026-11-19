@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
+import { getBusinessTimezone } from "../../services/ledger.js";
+import { businessLocalToUtcWall } from "../../utils/money.js";
 import { variantOptionsJoinSql } from "../../utils/variantDisplay.js";
 import { expenses } from "../../db/schema/expenses.js";
 import { expenseCategories } from "../../db/schema/expenseCategories.js";
@@ -120,10 +122,30 @@ function round2(value: number): number {
 }
 
 /** WHERE fragment scoping the online sales population (parameter-bound). */
-function populationSql(businessId: number, filters: ProfitabilityFilters): SQL {
+/**
+ * Population + timezone context. I3-4: BOTH sales and refunds are windowed
+ * on `created_at` (timestamptz) with BUSINESS-timezone bounds — the sales
+ * side used to window on the stale naive `purchase_date` cast to
+ * timestamptz in the SERVER zone while refunds used created_at, so a
+ * midnight-adjacent order and its refund landed on different days.
+ * Returns the tz so day buckets can follow the same calendar.
+ */
+async function populationContext(
+  businessId: number,
+  filters: ProfitabilityFilters,
+): Promise<{ pop: SQL; tz: string }> {
+  const tz = await getBusinessTimezone(db, businessId);
   const parts = [sql`s.business_id = ${businessId}`, sql`s.channel NOT IN ('pos', 'offline')`];
-  if (filters.from) parts.push(sql`s.purchase_date >= ${`${filters.from}T00:00:00`}::timestamptz`);
-  if (filters.to) parts.push(sql`s.purchase_date <= ${`${filters.to}T23:59:59.999`}::timestamptz`);
+  if (filters.from) {
+    parts.push(
+      sql`s.created_at >= ${businessLocalToUtcWall(filters.from, "00:00:00", tz)}::timestamp`,
+    );
+  }
+  if (filters.to) {
+    parts.push(
+      sql`s.created_at <= ${businessLocalToUtcWall(filters.to, "23:59:59.999", tz)}::timestamp`,
+    );
+  }
   if (filters.locationId) parts.push(sql`s.location_id = ${filters.locationId}`);
   if (filters.channel) parts.push(sql`s.channel = ${filters.channel}`);
   if (filters.courierName) {
@@ -136,7 +158,7 @@ function populationSql(businessId: number, filters: ProfitabilityFilters): SQL {
       sql`exists (select 1 from sale_payments sp where sp.sale_id = s.id and sp.payment_method = ${filters.paymentMethod})`,
     );
   }
-  return sql.join(parts, sql` and `);
+  return { pop: sql.join(parts, sql` and `), tz };
 }
 
 type SQL = ReturnType<typeof sql>;
@@ -149,7 +171,7 @@ export async function getProfitabilitySummary(
   businessId: number,
   filters: ProfitabilityFilters,
 ): Promise<ProfitabilitySummary> {
-  const pop = populationSql(businessId, filters);
+  const { pop, tz } = await populationContext(businessId, filters);
   const result = await db.execute(sql`
     with pop as (
       select s.id, s.status, s.final_total, s.vat, s.delivery_fee,
@@ -258,7 +280,7 @@ export async function getProfitabilityTrends(
   businessId: number,
   filters: ProfitabilityFilters,
 ): Promise<TrendPoint[]> {
-  const pop = populationSql(businessId, filters);
+  const { pop, tz } = await populationContext(businessId, filters);
   const result = await db.execute(sql`
     with daily as (
       select to_char(s.purchase_date, 'YYYY-MM-DD') as day,
@@ -283,7 +305,7 @@ export async function getProfitabilityTrends(
       group by 1
     ),
     refund_days as (
-      select to_char(r.created_at, 'YYYY-MM-DD') as day,
+      select to_char(r.created_at AT TIME ZONE ${tz}, 'YYYY-MM-DD') as day,
         coalesce(sum(r.refund_total), 0)::float8 as refunded
       from sale_refunds r
       where r.business_id = ${businessId}
@@ -350,7 +372,7 @@ export async function getProfitabilityProducts(
   const page = Math.max(1, options.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 25));
   const offset = (page - 1) * pageSize;
-  const pop = populationSql(businessId, filters);
+  const { pop, tz } = await populationContext(businessId, filters);
   const orderClause =
     options.sort === "margin"
       ? sql`order by case when net_revenue > 0 then gross_profit / net_revenue else -1 end desc`
@@ -464,7 +486,7 @@ export async function getProfitabilityChannels(
   businessId: number,
   filters: Omit<ProfitabilityFilters, "channel">,
 ): Promise<ChannelProfitRow[]> {
-  const pop = populationSql(businessId, filters);
+  const { pop, tz } = await populationContext(businessId, filters);
   const result = await db.execute(sql`
     with per_channel as (
       select s.channel::text as channel,

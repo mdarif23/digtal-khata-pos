@@ -8,6 +8,7 @@ import { callerHasPermission } from "../../middleware/permissions.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { WILDCARD_PERMISSION } from "../../rbac/permissions.js";
 import { getRegisterSessionReport } from "./cashRegisters.service.js";
+import { listAccessibleLocationIds } from "../locations/locations.service.js";
 import {
   addCashMovement,
   closeSession,
@@ -204,12 +205,18 @@ export async function getSessionHandler(req: Request, res: Response) {
         .json({ success: false, message: "Invalid session ID." });
     }
     const { userId, callerIsOwner } = actor(req);
+    const hasSettingsView = callerHasPermission(req, "settings.view");
+    // L3-003: settings.view holders may only read sessions at their
+    // assigned locations (counted cash is money data).
     const data = await getSessionDetail(
       getBusinessId(req),
       userId,
       callerIsOwner,
-      callerHasPermission(req, "settings.view"),
+      hasSettingsView,
       sessionId,
+      callerIsOwner
+        ? null
+        : await listAccessibleLocationIds(getBusinessId(req), userId, false),
     );
     return res.status(200).json({ success: true, data });
   } catch (err: unknown) {

@@ -364,7 +364,7 @@ export async function getProductSalesReport(businessId: number, params: DateRang
       COALESCE(b.name, '-') AS "brandName",
       pv.sku,
       COALESCE(u.abbreviation, u.name) AS "unitLabel",
-      SUM(si.quantity)::int AS "qtySold",
+      ROUND(SUM(si.quantity)::numeric, 3)::float8 AS "qtySold",
       COALESCE(SUM(si.selling_price * si.quantity), 0)::numeric AS "grossSales",
       COALESCE(SUM(si.discount * (si.quantity - COALESCE(rf.refunded_qty, 0))), 0)::numeric AS "totalDiscount",
       COALESCE(SUM(si.line_total - COALESCE(rf.refunded_money, 0)), 0)::numeric AS "netSales",
@@ -849,7 +849,7 @@ export async function getStockReport(businessId: number, params: DateRangeQuery,
   const valuationQuery = await db.execute(sql`
     SELECT
       COALESCE(SUM(quantity_remaining * landed_cost_per_unit), 0)::numeric AS "totalValuation",
-      COALESCE(SUM(quantity_remaining), 0)::int AS "totalUnits"
+      ROUND(COALESCE(SUM(quantity_remaining), 0)::numeric, 3)::float8 AS "totalUnits"
     FROM inventory_batches
     WHERE business_id = ${businessId}${locationFilter("inventory_batches", locationId)}
   `);
@@ -888,7 +888,7 @@ export async function getStockMovementReport(businessId: number, params: DateRan
       ${variantNameSql(sql`p.name`, sql`vol.option_label`)} AS "variantName",
       pv.sku,
       im.movement_type AS "movementType",
-      im.quantity::int,
+      ROUND(im.quantity::numeric, 3)::float8 AS "quantity",
       im.reference_type AS "referenceType",
       COALESCE(im.reference_id, 0)::int AS "referenceId"
     FROM inventory_movements im
@@ -1449,7 +1449,7 @@ export async function getInventoryShrinkageReport(businessId: number, params: Da
   const summary = await db.execute(sql`
     SELECT 
       COUNT(im.id)::int AS "incidentCount",
-      COALESCE(SUM(ABS(im.quantity)), 0)::int AS "totalUnitsLost",
+      ROUND(COALESCE(SUM(ABS(im.quantity)), 0)::numeric, 3)::float8 AS "totalUnitsLost",
       COALESCE(SUM(ABS(im.quantity) * COALESCE(ib.purchase_price, pv.selling_price * 0.7)), 0)::numeric AS "totalCostLoss",
       COALESCE(SUM(ABS(im.quantity) * pv.selling_price), 0)::numeric AS "totalRetailLoss"
     FROM inventory_movements im
@@ -2067,15 +2067,20 @@ export async function getCustomerRetentionReport(
   businessId: number,
   months = 6,
 ): Promise<RetentionRow[]> {
+  // I3-3: buckets follow the BUSINESS calendar — bare date_trunc cut in the
+  // server zone, putting late-evening Dhaka sales into the previous month.
+  const tz = await getBusinessTimezone(db, businessId);
   const result = await db.execute(sql`
     WITH monthly AS (
-      SELECT date_trunc('month', s.created_at) AS month,
+      SELECT date_trunc('month', s.created_at AT TIME ZONE ${tz}) AS month,
              s.customer_id
       FROM sales s
       WHERE s.business_id = ${businessId}
         AND s.status IN ('completed', 'refunded')
         AND s.customer_id IS NOT NULL
-        AND s.created_at >= date_trunc('month', now()) - ((${months} || ' months')::interval)
+        AND (s.created_at AT TIME ZONE ${tz})
+              >= date_trunc('month', (now() AT TIME ZONE ${tz}))
+                - ((${months} || ' months')::interval)
       GROUP BY 1, 2
     )
     SELECT to_char(month, 'YYYY-MM') AS month,
@@ -2170,16 +2175,18 @@ export async function getSalesForecastReport(
   businessId: number,
   locationId?: number,
 ): Promise<SalesForecast> {
+  // I3-3: business-calendar day buckets (see the retention note above).
+  const tz = await getBusinessTimezone(db, businessId);
   const result = await db.execute(sql`
     SELECT d::date::text AS day,
            COALESCE(SUM(s.final_total), 0)::numeric AS revenue
     FROM generate_series(
-      date_trunc('day', now()) - INTERVAL '89 days',
-      date_trunc('day', now()),
+      date_trunc('day', (now() AT TIME ZONE ${tz})) - INTERVAL '89 days',
+      date_trunc('day', (now() AT TIME ZONE ${tz})),
       INTERVAL '1 day'
     ) d
     LEFT JOIN sales s
-      ON date_trunc('day', s.created_at) = d
+      ON date_trunc('day', s.created_at AT TIME ZONE ${tz}) = d
       AND s.business_id = ${businessId}
       AND s.status IN ('completed', 'refunded')
       ${locationId !== undefined ? sql`AND s.location_id = ${locationId}` : sql``}

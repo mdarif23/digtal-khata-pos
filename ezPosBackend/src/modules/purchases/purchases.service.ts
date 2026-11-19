@@ -13,7 +13,7 @@ import { supplierLedger } from "../../db/schema/supplierLedger.js";
 import { purchaseReturnItems } from "../../db/schema/purchaseReturnItems.js";
 import { purchases } from "../../db/schema/purchases.js";
 import { landedCosts } from "../../db/schema/landedCosts.js";
-import { and, asc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { roundMoney } from "../../utils/roundMoney.js";
 import {
   postPurchasePaymentLedgerEntry,
@@ -343,6 +343,11 @@ function withLandedCostStatus<
 }
 
 export async function getPurchasesSummary(businessId: number) {
+  // D3-007: this legacy endpoint served FOUR unbounded full-table loads
+  // per request. The receive flow only works from the recent end anyway —
+  // cap each bucket to the most recent 500 (the paginated /purchases/list
+  // remains the complete view).
+  const bucketCap = 500;
   const [
     orderedPurchase,
     allPurchases,
@@ -355,22 +360,31 @@ export async function getPurchasesSummary(businessId: number) {
           eq(purchases.status, "ordered"),
           eq(purchases.businessId, businessId),
         ),
-      ),
-    purchasesWithLandedCostQuery().where(eq(purchases.businessId, businessId)),
+      )
+      .orderBy(desc(purchases.id))
+      .limit(bucketCap),
+    purchasesWithLandedCostQuery()
+      .where(eq(purchases.businessId, businessId))
+      .orderBy(desc(purchases.id))
+      .limit(bucketCap),
     purchasesWithLandedCostQuery()
       .where(
         and(
           inArray(purchases.paymentStatus, ["partial", "unpaid"]),
           eq(purchases.businessId, businessId),
         ),
-      ),
+      )
+      .orderBy(desc(purchases.id))
+      .limit(bucketCap),
     purchasesWithLandedCostQuery()
       .where(
         and(
           inArray(purchases.paymentStatus, ["paid"]),
           eq(purchases.businessId, businessId),
         ),
-      ),
+      )
+      .orderBy(desc(purchases.id))
+      .limit(bucketCap),
   ]);
   return {
     orderedPurchase: orderedPurchase.map(withLandedCostStatus),

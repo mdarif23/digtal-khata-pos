@@ -219,8 +219,11 @@ export function PromotionsPage() {
       variantId: scope === "variant" ? scopeIdNum : null,
       discountType,
       discountValue: Number(discountValue),
-      startsAt: startsAt ? new Date(`${startsAt}T00:00:00`).toISOString() : null,
-      endsAt: endsAt ? new Date(`${endsAt}T23:59:59`).toISOString() : null,
+      // I3-6: date-only boundaries are interpreted on the BUSINESS calendar
+      // by the backend — a browser-local midnight excluded late-evening
+      // sales for staff in a different timezone than the business.
+      startsAt: startsAt || null,
+      endsAt: endsAt || null,
       minOrderValue: minOrderValue === "" ? 0 : Number(minOrderValue),
       minQuantity: minQuantity === "" ? null : Number(minQuantity),
       maxDiscountAmount: maxDiscountAmount === "" ? null : Number(maxDiscountAmount),

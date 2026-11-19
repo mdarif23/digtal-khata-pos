@@ -6,6 +6,8 @@ import { couponKeys, useCouponsQuery } from "../useCoupons.js";
 import { queryClient } from "@/lib/queryClient.js";
 
 vi.mock("../../../../api/axios.js", () => ({
+  // R3-001: coupon keys are business-scoped — the mock needs the helper.
+  getActiveBusinessId: () => 1,
   default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }));
 
@@ -54,6 +56,7 @@ describe("useCouponsQuery (Phase 6 Feature 1 — coupons domain)", () => {
 
   it("keys the list", () => {
     expect(couponKeys.all).toEqual(["coupons"]);
-    expect(couponKeys.list()).toEqual(["coupons", "list"]);
+    // R3-001: keys carry the active business id.
+    expect(couponKeys.list()).toEqual(["coupons", 1, "list"]);
   });
 });

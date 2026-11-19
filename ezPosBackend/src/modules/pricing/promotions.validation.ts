@@ -19,8 +19,8 @@ function refinePromotionShape(
     variantId: number | null;
     discountType: "percentage" | "fixed";
     discountValue: number;
-    startsAt: Date | null;
-    endsAt: Date | null;
+    startsAt: Date | string | null;
+    endsAt: Date | string | null;
   },
   ctx: z.RefinementCtx,
 ): void {
@@ -51,6 +51,13 @@ function refinePromotionShape(
 }
 
 const timestampField = z.coerce.date().nullable();
+// I3-6: date-only 'YYYY-MM-DD' boundaries arrive as STRINGS and are
+// interpreted on the business calendar by the service (00:00:00 for starts,
+// 23:59:59.999 for ends). Full ISO timestamps keep working unchanged.
+const dateOnlyPattern = /^d{4}-d{2}-d{2}$/;
+const dateBoundField = z
+  .union([z.string().regex(dateOnlyPattern), z.coerce.date()])
+  .nullable();
 
 /**
  * H3-1: the engine silently SKIPS promotions whose rule doesn't match the
@@ -141,8 +148,8 @@ export const promotionCreateSchema = z
     ...scopeFields,
     discountType: z.enum(["percentage", "fixed"]),
     discountValue: z.number().min(0),
-    startsAt: timestampField.optional(),
-    endsAt: timestampField.optional(),
+    startsAt: dateBoundField.optional(),
+    endsAt: dateBoundField.optional(),
     minQuantity: z.number().int().min(1).nullable().optional(),
     minOrderValue: z.number().min(0).optional(),
     maxDiscountAmount: z.number().min(0).nullable().optional(),
@@ -187,8 +194,8 @@ export const promotionUpdateSchema = z
     ...scopeFields,
     discountType: z.enum(["percentage", "fixed"]).optional(),
     discountValue: z.number().min(0).optional(),
-    startsAt: timestampField.optional(),
-    endsAt: timestampField.optional(),
+    startsAt: dateBoundField.optional(),
+    endsAt: dateBoundField.optional(),
     minQuantity: z.number().int().min(1).nullable().optional(),
     minOrderValue: z.number().min(0).optional(),
     maxDiscountAmount: z.number().min(0).nullable().optional(),

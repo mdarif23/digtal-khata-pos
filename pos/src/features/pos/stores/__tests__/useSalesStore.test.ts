@@ -30,6 +30,8 @@ vi.mock("../hooks/useSellUnits.js", () => ({
 }));
 
 import axios from "../../../../api/axios.js";
+import { getErrorMessage } from "@/utils/getErrorMessage.js";
+import { voidSaleApi } from "../../sales.api.js";
 import { useSalesStore } from "../useSalesStore.js";
 import { saleKeys } from "../../hooks/useSales.js";
 
@@ -75,6 +77,48 @@ describe("useSalesStore (actions after the list moved to TanStack Query)", () =>
     ).rejects.toThrow("network down");
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: saleKeys.list(),
+    });
+  });
+});
+
+describe("void sale contract (R3-005 — the 403→approval→token retry loop)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("a policy-403 rejects with the exact message the UI regex matches", async () => {
+    // Real axios rejects 4xx through its interceptors — simulate the shape
+    // the UI's catch actually sees.
+    const rejection = {
+      isAxiosError: true,
+      response: {
+        status: 403,
+        data: {
+          success: false,
+          message: "A manager approval is required to void a sale.",
+        },
+      },
+    };
+    mockedPost.mockRejectedValueOnce(rejection);
+    // The API call rejects with the axios-shaped error...
+    await expect(voidSaleApi(9, "duplicate")).rejects.toEqual(rejection);
+    // ...and the message the UI extracts (Sales.tsx's catch) matches the
+    // approval regex that opens the dialog.
+    expect(getErrorMessage(rejection)).toMatch(/manager approval is required/i);
+    expect(mockedPost).toHaveBeenCalledWith("/sales/9/cancel", {
+      reason: "duplicate",
+    });
+  });
+
+  it("the retry carries the minted approval token", async () => {
+    mockedPost.mockResolvedValueOnce({
+      status: 200,
+      data: { success: true, data: { saleId: 9, status: "cancelled" } },
+    });
+    await voidSaleApi(9, "duplicate", "tok_abc123");
+    expect(mockedPost).toHaveBeenCalledWith("/sales/9/cancel", {
+      reason: "duplicate",
+      approvalToken: "tok_abc123",
     });
   });
 });

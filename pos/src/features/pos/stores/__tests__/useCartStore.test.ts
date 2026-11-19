@@ -406,4 +406,31 @@ describe("UOM cart lines", () => {
     // carrying the entered quantity (resume never breaks).
     expect(lines[0]!.quantity).toBe(2);
   });
+
+  describe("setLineBatch (P3 Phase 2 F.1 — R3-005 pins the transitions)", () => {
+    const line = (variantId: number) => ({ ...product(variantId, [variant(variantId)]) });
+
+    it("attaches a batch to the matching line only", () => {
+      useCartStore.setState({ cart: [line(11), line(12)] });
+      useCartStore
+        .getState()
+        .setLineBatch(11, { id: 71, batchNumber: "B-71" } as never);
+      const [first, second] = useCartStore.getState().cart;
+      expect(first?.batchId).toBe(71);
+      expect(first?.batchNumber).toBe("B-71");
+      expect(second?.batchId ?? null).toBeNull();
+    });
+
+    it("replaces an existing selection and clears to null", () => {
+      useCartStore.setState({ cart: [line(11)] });
+      const store = useCartStore.getState();
+      store.setLineBatch(11, { id: 71, batchNumber: "B-71" } as never);
+      store.setLineBatch(11, { id: 72, batchNumber: "B-72" } as never);
+      expect(useCartStore.getState().cart[0]?.batchId).toBe(72);
+      store.setLineBatch(11, null);
+      const cleared = useCartStore.getState().cart[0];
+      expect(cleared?.batchId ?? null).toBeNull();
+      expect(cleared?.batchNumber ?? null).toBeNull();
+    });
+  });
 });

@@ -1,54 +1,125 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router";
 import Pos from "../features/pos/pages/PosPage";
-import { CustomersPage } from "../features/Contacts/pages/CustomersPage";
-import ProductStockForm from "../features/products/pages/AddProductPage";
-import DashboardComponent from "../pages/Dashboard/Dashboard";
-import { Sales } from "../features/pos/pages/Sales";
+const CustomersPage = lazy(() =>
+  import("../features/Contacts/pages/CustomersPage").then((m2) => ({ default: m2.CustomersPage })),
+);
+const ProductStockForm = lazy(() => import("../features/products/pages/AddProductPage"));
+const DashboardComponent = lazy(() => import("../pages/Dashboard/Dashboard"));
+const Sales = lazy(() =>
+  import("../features/pos/pages/Sales").then((m2) => ({ default: m2.Sales })),
+);
 import { Expense } from "../features/Expense/Expense";
-import { PurchasesOrder } from "../features/purchases/pages/Purchases";
-import { PurchasesList } from "../features/purchases/pages/PurchasesList";
-import { ReceiveItems } from "../features/purchases/pages/ReceiveItems";
-import { PurchaseViewItems } from "../pages/PurchasesOrder/PurchasesReturn";
+const PurchasesOrder = lazy(() =>
+  import("../features/purchases/pages/Purchases").then((m2) => ({ default: m2.PurchasesOrder })),
+);
+const PurchasesList = lazy(() =>
+  import("../features/purchases/pages/PurchasesList").then((m2) => ({ default: m2.PurchasesList })),
+);
+const ReceiveItems = lazy(() =>
+  import("../features/purchases/pages/ReceiveItems").then((m2) => ({ default: m2.ReceiveItems })),
+);
+const PurchaseViewItems = lazy(() =>
+  import("../pages/PurchasesOrder/PurchasesReturn").then((m2) => ({ default: m2.PurchaseViewItems })),
+);
 import AppLayout from "@/layouts/AppLayout";
-import Products from "../features/products/pages/ProductsPage";
-import { Categories } from "@/features/products/pages/Categories";
-import { Brands } from "@/features/products/pages/Brands";
-import { Units } from "@/features/products/pages/Units";
-import { Suppliers } from "@/features/Contacts/pages/Suppliers";
-import { VariantManager } from "@/features/products/pages/Variants";
-import { StockAdjustment } from "@/features/products/pages/StockAdjustment";
+const Products = lazy(() => import("../features/products/pages/ProductsPage"));
+const Categories = lazy(() =>
+  import("@/features/products/pages/Categories").then((m2) => ({ default: m2.Categories })),
+);
+const Brands = lazy(() =>
+  import("@/features/products/pages/Brands").then((m2) => ({ default: m2.Brands })),
+);
+const Units = lazy(() =>
+  import("@/features/products/pages/Units").then((m2) => ({ default: m2.Units })),
+);
+const Suppliers = lazy(() =>
+  import("@/features/Contacts/pages/Suppliers").then((m2) => ({ default: m2.Suppliers })),
+);
+const VariantManager = lazy(() =>
+  import("@/features/products/pages/Variants").then((m2) => ({ default: m2.VariantManager })),
+);
+const StockAdjustment = lazy(() =>
+  import("@/features/products/pages/StockAdjustment").then((m2) => ({ default: m2.StockAdjustment })),
+);
 import { DueManagementPage } from "@/features/due-management/DueManagementPage";
-import ReportsHub from "@/features/reports/pages/ReportsHub";
+const ReportsHub = lazy(() => import("@/features/reports/pages/ReportsHub"));
 import ForbiddenPage from "@/pages/ForbiddenPage";
 import { RouteErrorBoundary } from "@/components/common/RouteErrorBoundary";
 import { RequirePermission } from "@/components/common/PermissionGuard";
 import { RequireMode } from "@/components/common/ModeGuard";
-import { BusinessOperationsPage } from "@/features/business-operations/pages/BusinessOperationsPage";
-import { UsersPage } from "@/features/users/pages/UsersPage";
-import { LocationsPage } from "@/features/locations/pages/LocationsPage";
-import { StockTransfersPage } from "@/features/stockTransfers/pages/StockTransfersPage";
-import { RolesPage } from "@/features/roles/pages/RolesPage";
+const BusinessOperationsPage = lazy(() =>
+  import("@/features/business-operations/pages/BusinessOperationsPage").then((m2) => ({ default: m2.BusinessOperationsPage })),
+);
+const UsersPage = lazy(() =>
+  import("@/features/users/pages/UsersPage").then((m2) => ({ default: m2.UsersPage })),
+);
+const LocationsPage = lazy(() =>
+  import("@/features/locations/pages/LocationsPage").then((m2) => ({ default: m2.LocationsPage })),
+);
+const StockTransfersPage = lazy(() =>
+  import("@/features/stockTransfers/pages/StockTransfersPage").then((m2) => ({ default: m2.StockTransfersPage })),
+);
+const RolesPage = lazy(() =>
+  import("@/features/roles/pages/RolesPage").then((m2) => ({ default: m2.RolesPage })),
+);
 import { PaymentIntentReturn } from "@/features/pos/pages/PaymentIntentReturn";
-import { TaxRatesPage } from "@/features/taxes/pages/TaxRatesPage";
-import { ProductPricingPage } from "@/features/pricing/pages/ProductPricingPage";
-import { PricingRulesPage } from "@/features/pricing/pages/PricingRulesPage";
-import { PricingSettingsPage } from "@/features/pricing/pages/PricingSettingsPage";
-import { CustomerGroupsPage } from "@/features/pricing/pages/CustomerGroupsPage";
-import { PromotionsPage } from "@/features/pricing/pages/PromotionsPage";
-import { PriceHistoryPage } from "@/features/pricing/pages/PriceHistoryPage";
-import { PriceProposalsPage } from "@/features/pricing/pages/PriceProposalsPage";
-import { BulkUpdatePage } from "@/features/pricing/pages/BulkUpdatePage";
-import { PricingReportsPage } from "@/features/pricing/pages/PricingReportsPage";
-import ReceiptSettingsPage from "@/features/receipt-settings/pages/ReceiptSettingsPage";
-import BackupSettingsPage from "../features/backups/pages/BackupSettingsPage";
-import { StockCountPage } from "@/features/products/pages/StockCountPage";
-import { ReorderPage } from "@/features/purchases/pages/ReorderPage";
-import { PriceMonitoringPage } from "@/features/procurement/pages/PriceMonitoringPage";
-import { VariantPriceHistoryPage } from "@/features/procurement/pages/VariantPriceHistoryPage";
-import { PriceCheckPage } from "@/features/procurement/pages/PriceCheckPage";
-import { SupplierDetailsPage } from "@/features/procurement/pages/SupplierDetailsPage";
-import { ReorderDashboardPage } from "@/features/procurement/pages/ReorderDashboardPage";
-import { GiftCardsPage } from "@/features/pos/pages/GiftCardsPage";
+const TaxRatesPage = lazy(() =>
+  import("@/features/taxes/pages/TaxRatesPage").then((m2) => ({ default: m2.TaxRatesPage })),
+);
+const ProductPricingPage = lazy(() =>
+  import("@/features/pricing/pages/ProductPricingPage").then((m2) => ({ default: m2.ProductPricingPage })),
+);
+const PricingRulesPage = lazy(() =>
+  import("@/features/pricing/pages/PricingRulesPage").then((m2) => ({ default: m2.PricingRulesPage })),
+);
+const PricingSettingsPage = lazy(() =>
+  import("@/features/pricing/pages/PricingSettingsPage").then((m2) => ({ default: m2.PricingSettingsPage })),
+);
+const CustomerGroupsPage = lazy(() =>
+  import("@/features/pricing/pages/CustomerGroupsPage").then((m2) => ({ default: m2.CustomerGroupsPage })),
+);
+const PromotionsPage = lazy(() =>
+  import("@/features/pricing/pages/PromotionsPage").then((m2) => ({ default: m2.PromotionsPage })),
+);
+const PriceHistoryPage = lazy(() =>
+  import("@/features/pricing/pages/PriceHistoryPage").then((m2) => ({ default: m2.PriceHistoryPage })),
+);
+const PriceProposalsPage = lazy(() =>
+  import("@/features/pricing/pages/PriceProposalsPage").then((m2) => ({ default: m2.PriceProposalsPage })),
+);
+const BulkUpdatePage = lazy(() =>
+  import("@/features/pricing/pages/BulkUpdatePage").then((m2) => ({ default: m2.BulkUpdatePage })),
+);
+const PricingReportsPage = lazy(() =>
+  import("@/features/pricing/pages/PricingReportsPage").then((m2) => ({ default: m2.PricingReportsPage })),
+);
+const ReceiptSettingsPage = lazy(() => import("@/features/receipt-settings/pages/ReceiptSettingsPage"));
+const BackupSettingsPage = lazy(() => import("../features/backups/pages/BackupSettingsPage"));
+const StockCountPage = lazy(() =>
+  import("@/features/products/pages/StockCountPage").then((m2) => ({ default: m2.StockCountPage })),
+);
+const ReorderPage = lazy(() =>
+  import("@/features/purchases/pages/ReorderPage").then((m2) => ({ default: m2.ReorderPage })),
+);
+const PriceMonitoringPage = lazy(() =>
+  import("@/features/procurement/pages/PriceMonitoringPage").then((m2) => ({ default: m2.PriceMonitoringPage })),
+);
+const VariantPriceHistoryPage = lazy(() =>
+  import("@/features/procurement/pages/VariantPriceHistoryPage").then((m2) => ({ default: m2.VariantPriceHistoryPage })),
+);
+const PriceCheckPage = lazy(() =>
+  import("@/features/procurement/pages/PriceCheckPage").then((m2) => ({ default: m2.PriceCheckPage })),
+);
+const SupplierDetailsPage = lazy(() =>
+  import("@/features/procurement/pages/SupplierDetailsPage").then((m2) => ({ default: m2.SupplierDetailsPage })),
+);
+const ReorderDashboardPage = lazy(() =>
+  import("@/features/procurement/pages/ReorderDashboardPage").then((m2) => ({ default: m2.ReorderDashboardPage })),
+);
+const GiftCardsPage = lazy(() =>
+  import("@/features/pos/pages/GiftCardsPage").then((m2) => ({ default: m2.GiftCardsPage })),
+);
 import { AuditLogsPage } from "@/features/audit/AuditLogsPage";
 import { LoyaltySettingsPage } from "@/features/loyalty/LoyaltySettingsPage";
 import { QuotationsPage } from "@/features/quotations/QuotationsPage";
@@ -57,36 +128,90 @@ import { ReceiptSharePage } from "@/features/receipt-share/ReceiptSharePage";
 import { CfdDisplayPage } from "@/features/pos/cfd/CfdDisplayPage";
 import { CommissionPage } from "@/features/commission/CommissionPage";
 import { TargetsPage } from "@/features/commission/TargetsPage";
-import { ProductionPage } from "@/features/products/pages/ProductionPage";
-import { CouponsPage } from "@/features/promotions/pages/CouponsPage";
-import { AttendancePage } from "@/features/pos/pages/AttendancePage";
-import { OnlineOrdersPage } from "@/features/online-orders/pages/OnlineOrdersPage";
-import { OnlineOrderDetailsPage } from "@/features/online-orders/pages/OnlineOrderDetailsPage";
-import { LandedCostPage } from "@/features/landed-cost/pages/LandedCostPage";
+const ProductionPage = lazy(() =>
+  import("@/features/products/pages/ProductionPage").then((m2) => ({ default: m2.ProductionPage })),
+);
+const CouponsPage = lazy(() =>
+  import("@/features/promotions/pages/CouponsPage").then((m2) => ({ default: m2.CouponsPage })),
+);
+const AttendancePage = lazy(() =>
+  import("@/features/pos/pages/AttendancePage").then((m2) => ({ default: m2.AttendancePage })),
+);
+const OnlineOrdersPage = lazy(() =>
+  import("@/features/online-orders/pages/OnlineOrdersPage").then((m2) => ({ default: m2.OnlineOrdersPage })),
+);
+const OnlineOrderDetailsPage = lazy(() =>
+  import("@/features/online-orders/pages/OnlineOrderDetailsPage").then((m2) => ({ default: m2.OnlineOrderDetailsPage })),
+);
+const LandedCostPage = lazy(() =>
+  import("@/features/landed-cost/pages/LandedCostPage").then((m2) => ({ default: m2.LandedCostPage })),
+);
 import { ImportWizardPage } from "@/features/products/import/ImportWizardPage";
 import { ImportHistoryPage } from "@/features/products/import/ImportHistoryPage";
 import { RegisterPage } from "@/features/cashRegisters/RegisterPage";
-import { HardwareSettingsPage } from "@/features/hardware/pages/HardwareSettingsPage";
-import { BarcodeGeneratorPage } from "@/features/barcodes/pages/BarcodeGeneratorPage";
-import { FinanceOverviewPage } from "@/features/finance/pages/FinanceOverviewPage";
-import { FinanceReportsPage } from "@/features/finance/pages/FinanceReportsPage";
-import { OwnersPage } from "@/features/finance/pages/OwnersPage";
-import { ProfitAllocationPage } from "@/features/finance/pages/ProfitAllocationPage";
-import { PayrollPage } from "@/features/finance/pages/PayrollPage";
-import { CashFlowPage } from "@/features/finance/pages/CashFlowPage";
-import { BalanceSheetPage } from "@/features/finance/pages/BalanceSheetPage";
-import { GrowthPage } from "@/features/finance/pages/GrowthPage";
-import { LoansPage } from "@/features/finance/pages/LoansPage";
-import { AssetsPage } from "@/features/finance/pages/AssetsPage";
-import { JournalPage } from "@/features/finance/pages/JournalPage";
-import { WarrantyOverviewPage } from "@/features/warranty/pages/WarrantyOverviewPage";
-import { WarrantyRegistryPage } from "@/features/warranty/pages/WarrantyRegistryPage";
-import { WarrantyRegistryDetailPage } from "@/features/warranty/pages/WarrantyRegistryDetailPage";
-import { WarrantyClaimsPage } from "@/features/warranty/pages/WarrantyClaimsPage";
-import { WarrantyClaimDetailPage } from "@/features/warranty/pages/WarrantyClaimDetailPage";
-import { SupplierWarrantiesPage } from "@/features/warranty/pages/SupplierWarrantiesPage";
-import { SupplierClaimsPage } from "@/features/warranty/pages/SupplierClaimsPage";
-import { SupplierClaimDetailPage } from "@/features/warranty/pages/SupplierClaimDetailPage";
+const HardwareSettingsPage = lazy(() =>
+  import("@/features/hardware/pages/HardwareSettingsPage").then((m2) => ({ default: m2.HardwareSettingsPage })),
+);
+const BarcodeGeneratorPage = lazy(() =>
+  import("@/features/barcodes/pages/BarcodeGeneratorPage").then((m2) => ({ default: m2.BarcodeGeneratorPage })),
+);
+const FinanceOverviewPage = lazy(() =>
+  import("@/features/finance/pages/FinanceOverviewPage").then((m2) => ({ default: m2.FinanceOverviewPage })),
+);
+const FinanceReportsPage = lazy(() =>
+  import("@/features/finance/pages/FinanceReportsPage").then((m2) => ({ default: m2.FinanceReportsPage })),
+);
+const OwnersPage = lazy(() =>
+  import("@/features/finance/pages/OwnersPage").then((m2) => ({ default: m2.OwnersPage })),
+);
+const ProfitAllocationPage = lazy(() =>
+  import("@/features/finance/pages/ProfitAllocationPage").then((m2) => ({ default: m2.ProfitAllocationPage })),
+);
+const PayrollPage = lazy(() =>
+  import("@/features/finance/pages/PayrollPage").then((m2) => ({ default: m2.PayrollPage })),
+);
+const CashFlowPage = lazy(() =>
+  import("@/features/finance/pages/CashFlowPage").then((m2) => ({ default: m2.CashFlowPage })),
+);
+const BalanceSheetPage = lazy(() =>
+  import("@/features/finance/pages/BalanceSheetPage").then((m2) => ({ default: m2.BalanceSheetPage })),
+);
+const GrowthPage = lazy(() =>
+  import("@/features/finance/pages/GrowthPage").then((m2) => ({ default: m2.GrowthPage })),
+);
+const LoansPage = lazy(() =>
+  import("@/features/finance/pages/LoansPage").then((m2) => ({ default: m2.LoansPage })),
+);
+const AssetsPage = lazy(() =>
+  import("@/features/finance/pages/AssetsPage").then((m2) => ({ default: m2.AssetsPage })),
+);
+const JournalPage = lazy(() =>
+  import("@/features/finance/pages/JournalPage").then((m2) => ({ default: m2.JournalPage })),
+);
+const WarrantyOverviewPage = lazy(() =>
+  import("@/features/warranty/pages/WarrantyOverviewPage").then((m2) => ({ default: m2.WarrantyOverviewPage })),
+);
+const WarrantyRegistryPage = lazy(() =>
+  import("@/features/warranty/pages/WarrantyRegistryPage").then((m2) => ({ default: m2.WarrantyRegistryPage })),
+);
+const WarrantyRegistryDetailPage = lazy(() =>
+  import("@/features/warranty/pages/WarrantyRegistryDetailPage").then((m2) => ({ default: m2.WarrantyRegistryDetailPage })),
+);
+const WarrantyClaimsPage = lazy(() =>
+  import("@/features/warranty/pages/WarrantyClaimsPage").then((m2) => ({ default: m2.WarrantyClaimsPage })),
+);
+const WarrantyClaimDetailPage = lazy(() =>
+  import("@/features/warranty/pages/WarrantyClaimDetailPage").then((m2) => ({ default: m2.WarrantyClaimDetailPage })),
+);
+const SupplierWarrantiesPage = lazy(() =>
+  import("@/features/warranty/pages/SupplierWarrantiesPage").then((m2) => ({ default: m2.SupplierWarrantiesPage })),
+);
+const SupplierClaimsPage = lazy(() =>
+  import("@/features/warranty/pages/SupplierClaimsPage").then((m2) => ({ default: m2.SupplierClaimsPage })),
+);
+const SupplierClaimDetailPage = lazy(() =>
+  import("@/features/warranty/pages/SupplierClaimDetailPage").then((m2) => ({ default: m2.SupplierClaimDetailPage })),
+);
 
 const REPORTS_PERMISSIONS = [
   "reports.sales.view",
@@ -823,6 +948,23 @@ const router = createBrowserRouter([
   },
 ]);
 
+/** R3-003: shown while a route chunk loads (no app-shell flicker). */
+function RouteSuspenseFallback() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading page"
+      className="flex h-screen w-full items-center justify-center bg-background"
+    >
+      <div className="size-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" />
+    </div>
+  );
+}
+
 export default function AppRoutes() {
-  return <RouterProvider router={router} />;
+  return (
+    <Suspense fallback={<RouteSuspenseFallback />}>
+      <RouterProvider router={router} />
+    </Suspense>
+  );
 }

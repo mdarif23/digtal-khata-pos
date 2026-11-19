@@ -85,7 +85,8 @@ describe("roles hooks (Phase 6 Feature 1 — roles domain)", () => {
     expect(
       mockedGet.mock.calls.some(([url]) => String(url).includes("permission")),
     ).toBe(true);
-    expect(roleKeys.permissionCatalog()).toEqual(["permissions-catalog"]);
+    // R3-001: the catalog key carries the active business id.
+    expect(roleKeys.permissionCatalog()).toEqual(["permissions-catalog", 1]);
   });
 
   it("role-users query stays disabled until the dialog opens", async () => {

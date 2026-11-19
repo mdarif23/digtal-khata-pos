@@ -24,6 +24,7 @@ import {
   type QuotationStatus,
 } from "./quotations.api";
 import { formatCurrency } from "@/features/reports/utils/reportUtils";
+import { hasPermission } from "@/auth/sessionStore";
 import { quotationKeys, useQuotationsQuery } from "./hooks/useQuotations.js";
 
 function extractError(error: unknown, fallback: string): string {
@@ -187,8 +188,14 @@ export function QuotationsPage() {
     win.print();
   }
 
+  // E3-011: the BE enforces quotations.create (transitions) and
+  // quotations.convert — the controls used to render working-looking for
+  // everyone and 403'd on click.
+  const canTransition = hasPermission("quotations.create");
   const canConvert =
-    detail !== null && (detail.status === "accepted" || detail.status === "sent");
+    hasPermission("quotations.convert") &&
+    detail !== null &&
+    (detail.status === "accepted" || detail.status === "sent");
 
   return (
     <div className="grid gap-4 p-4 lg:p-6">
@@ -326,22 +333,22 @@ export function QuotationsPage() {
                 <p className="text-xs text-muted-foreground">Terms: {detail.terms}</p>
               ) : null}
               <div className="flex flex-wrap gap-2">
-                {detail.status === "draft" ? (
+                {detail.status === "draft" && canTransition ? (
                   <Button size="sm" variant="outline" disabled={acting} onClick={() => void doTransition(detail.id, "sent")}>
                     Mark sent
                   </Button>
                 ) : null}
-                {["draft", "sent"].includes(detail.status) ? (
+                {["draft", "sent"].includes(detail.status) && canTransition ? (
                   <Button size="sm" disabled={acting} onClick={() => void doTransition(detail.id, "accepted")}>
                     Accept
                   </Button>
                 ) : null}
-                {["draft", "sent"].includes(detail.status) ? (
+                {["draft", "sent"].includes(detail.status) && canTransition ? (
                   <Button size="sm" variant="outline" disabled={acting} onClick={() => void doTransition(detail.id, "rejected")}>
                     Reject
                   </Button>
                 ) : null}
-                {["draft", "sent", "accepted"].includes(detail.status) ? (
+                {["draft", "sent", "accepted"].includes(detail.status) && canTransition ? (
                   <Button size="sm" variant="ghost" disabled={acting} onClick={() => void doTransition(detail.id, "cancelled")}>
                     Cancel
                   </Button>

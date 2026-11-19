@@ -111,6 +111,10 @@ export function CustomersTable({
                           phone: customer.phone ?? "",
                           address: customer.address ?? "",
                           creditLimit: customer.creditLimit ?? null,
+                          // E1-012: seed the consent toggles.
+                          marketingOptIn: customer.marketingOptIn ?? false,
+                          transactionalOptOut:
+                            customer.transactionalOptOut ?? false,
                         }}
                       />
                     </div>

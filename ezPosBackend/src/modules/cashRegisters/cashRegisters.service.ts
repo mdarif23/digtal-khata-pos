@@ -681,6 +681,12 @@ export async function getSessionDetail(
   callerIsOwner: boolean,
   hasSettingsView: boolean,
   sessionId: number,
+  /**
+   * L3-003: location scope for settings.view holders — a manager may only
+   * inspect sessions at locations they are ASSIGNED to (counted cash is
+   * money data). Owners (wildcard) keep the business-wide view.
+   */
+  accessibleLocationIds: number[] | null = null,
 ): Promise<SessionSummary & { transactions: RegisterTransactionView[] }> {
   const [row] = await sessionBaseQuery()
     .where(
@@ -694,7 +700,7 @@ export async function getSessionDetail(
     throw new NotFoundError("Session not found.");
   }
   // Cashiers may only inspect their own sessions; settings.view holders
-  // and owners may inspect any session at the business.
+  // and owners may inspect sessions within their location scope.
   const sessionUserIdRow = await db
     .select({ userId: registerSessions.userId })
     .from(registerSessions)
@@ -702,6 +708,16 @@ export async function getSessionDetail(
   const ownerId = sessionUserIdRow[0]?.userId;
   if (ownerId !== undefined && ownerId !== callerUserId && !callerIsOwner && !hasSettingsView) {
     throw new ForbiddenError("You can only view your own register sessions.");
+  }
+  if (
+    !callerIsOwner &&
+    hasSettingsView &&
+    accessibleLocationIds !== null &&
+    (row.locationId === 0 || !accessibleLocationIds.includes(row.locationId))
+  ) {
+    throw new ForbiddenError(
+      "This register session belongs to a location you are not assigned to.",
+    );
   }
   const transactions = await db
     .select({

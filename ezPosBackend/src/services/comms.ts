@@ -873,6 +873,10 @@ export async function runDueReminderSweep(): Promise<{ sent: number }> {
           eq(sales.status, "completed"),
         ),
       )
+      // N3-003: the unordered cap always returned the same oldest PKs —
+      // businesses with >200 due sales reminded only one frozen cohort.
+      // Largest dues first; the next sweep reaches the rest.
+      .orderBy(desc(sales.dueAmount))
       .limit(200);
     for (const sale of dueSales) {
       if (sale.customerId === null) continue;

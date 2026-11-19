@@ -286,10 +286,14 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
     // WP-014 (refined per A3-001): mode-blocked entries (the business
     // switched to a model whose surface gate 403s this op) are skipped —
     // they can never succeed in this mode; re-queueing them loops forever.
-    // Matched on the SURFACE_NOT_ACTIVE code, not the message substring
-    // (gates use custom wordings per surface).
+    // Matched on the SURFACE_NOT_ACTIVE code; R3-002: legacy entries that
+    // failed before the errorCode field existed still carry only the
+    // English message — skip those too for this transition release.
     const entries = (await listOutbox()).filter(
-      (e) => e.status === "failed" && e.errorCode !== "SURFACE_NOT_ACTIVE",
+      (e) =>
+        e.status === "failed" &&
+        e.errorCode !== "SURFACE_NOT_ACTIVE" &&
+        !e.lastError?.includes("not active for the current operating model"),
     );
     for (const entry of entries) {
       entry.status = "pending";

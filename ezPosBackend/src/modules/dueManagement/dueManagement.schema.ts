@@ -3,7 +3,17 @@ import { z } from "zod";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const dateString = z
   .string()
-  .regex(DATE_PATTERN, "Expected date format YYYY-MM-DD.");
+  .regex(DATE_PATTERN, "Expected date format YYYY-MM-DD.")
+  // D3-004: the regex admits impossible calendar dates ("2026-02-30"),
+  // which then blew up as a 500 at the Postgres insert. Validate against
+  // the real calendar.
+  .refine((value) => {
+    const parsed = new Date(`${value}T00:00:00Z`);
+    return (
+      !Number.isNaN(parsed.getTime()) &&
+      parsed.toISOString().slice(0, 10) === value
+    );
+  }, "That date does not exist on the calendar.");
 
 export const dueSummaryQuerySchema = z.object({
   overdueDays: z.coerce.number().int().min(1).max(365).default(30),
