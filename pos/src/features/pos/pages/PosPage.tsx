@@ -441,7 +441,7 @@ function Pos() {
           className="flex min-h-[620px] flex-col lg:min-h-0"
         >
           <Card className="flex min-h-0 flex-1 flex-col overflow-hidden shadow-sm">
-            <CardHeader className="shrink-0 border-b bg-muted/20 p-4">
+            <CardHeader className="shrink-0 border-b bg-muted/20 p-3">
               <CartHeader form={form} cartItemCount={cart.length} />
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">

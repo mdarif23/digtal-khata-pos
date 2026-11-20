@@ -685,13 +685,15 @@ function CartItemRow({ item }: { item: CartItem }) {
 
   return (
     <Card className="overflow-hidden shadow-none">
-      <CardContent className="p-3 sm:p-4">
-        <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
-          <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-muted/40 sm:h-20 sm:w-20">
+      {/* Compact density: the POS must show 5+ lines on a laptop — controls
+          share ONE toolbar row instead of stacking three always-open blocks. */}
+      <CardContent className="p-2 sm:p-3">
+        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-muted/40">
             <ProductImage src={item.imageUrl ?? null} alt={item.name} />
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="truncate font-medium">{item.name}</span>
             <span className="text-sm text-muted-foreground">
               {unitPrice.toFixed(2)} × {quantity}
@@ -708,25 +710,27 @@ function CartItemRow({ item }: { item: CartItem }) {
               )}
             </span>
 
-            {(isUomLine || hasPackagingUnits) && !isSerial && (
-              <UnitSwitcher
-                units={units}
-                currentUomConversionId={lineUnit}
-                currentLabel={chipLabel}
-                onSwitch={handleSwitchUnit}
+            <div className="flex flex-wrap items-center gap-1">
+              {(isUomLine || hasPackagingUnits) && !isSerial && (
+                <UnitSwitcher
+                  units={units}
+                  currentUomConversionId={lineUnit}
+                  currentLabel={chipLabel}
+                  onSwitch={handleSwitchUnit}
+                />
+              )}
+
+              <CartItemDiscount
+                variantId={variantId}
+                discount={item.discount}
+                lineBase={line.base}
+                lineTotal={line.total}
+                hasDiscount={line.discountAmount > 0}
+                addDiscount={addDiscount}
               />
-            )}
 
-            <CartItemDiscount
-              variantId={variantId}
-              discount={item.discount}
-              lineBase={line.base}
-              lineTotal={line.total}
-              hasDiscount={line.discountAmount > 0}
-              addDiscount={addDiscount}
-            />
-
-            <PriceOverrideDialog item={item} variantId={variantId} lineUnit={lineUnit} />
+              <PriceOverrideDialog item={item} variantId={variantId} lineUnit={lineUnit} />
+            </div>
           </div>
 
           {isSerial ? (
@@ -939,9 +943,9 @@ export function CartCalculation({
   useHotkeyAction("discount", () => setDiscountSignal((n) => n + 1));
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <CartTextModal totals={totals} />
-      <div className="grid grid-cols-6 gap-1 py-2">
+      <div className="grid grid-cols-6 gap-1 py-1">
         <div className="col-span-2">
           <ClearCartDialog />
         </div>
@@ -959,7 +963,7 @@ export function CartCalculation({
             <Button
               type="button"
               variant="outline"
-              className="h-10 w-full"
+              className="h-8 w-full text-xs"
               disabled={cart.length === 0}
               onClick={() => setQuoteOpen(true)}
             >
@@ -1005,7 +1009,7 @@ function CartTextModal({
 
   return (
     <>
-      <div className="flex justify-between border-b pb-2 text-sm text-muted-foreground">
+      <div className="flex justify-between border-b pb-1 text-sm text-muted-foreground">
         <span>
           {totalItemsCount === 1
             ? t("pos:lineItemOne", { defaultValue: "1 line item" })
@@ -1019,24 +1023,24 @@ function CartTextModal({
           {t("pos:qtyLabel", { defaultValue: "Qty:" })} {totalQuantityCount}
         </span>
       </div>
-      <div className="flex justify-between py-1.5 text-sm">
+      <div className="flex justify-between py-1 text-sm">
         <span>{t("common:subtotal", { defaultValue: "Subtotal" })}</span>
         <span>{tk(totals.itemsBase)}</span>
       </div>
       {totals.itemDiscount > 0 && (
-        <div className="flex justify-between py-1.5 text-sm text-success">
+        <div className="flex justify-between py-1 text-sm text-success">
           <span>{t("pos:itemDiscounts", { defaultValue: "Item discounts" })}</span>
           <span>-{tk(totals.itemDiscount)}</span>
         </div>
       )}
       {totals.cartDiscountAmount > 0 && (
-        <div className="flex justify-between py-1.5 text-sm text-success">
+        <div className="flex justify-between py-1 text-sm text-success">
           <span>{t("common:discount", { defaultValue: "Discount" })}</span>
           <span>-{tk(totals.cartDiscountAmount)}</span>
         </div>
       )}
       {"group" in totals && totals.group && totals.group.discountAmount > 0 && (
-        <div className="flex justify-between py-1.5 text-sm text-success">
+        <div className="flex justify-between py-1 text-sm text-success">
           <span>
             {t("pos:groupPricing", {
               defaultValue: "{{name}} pricing",
@@ -1092,7 +1096,7 @@ function CartTextModal({
         </div>
       )}
       {totals.vat > 0 && (
-        <div className="flex justify-between py-1.5 text-sm">
+        <div className="flex justify-between py-1 text-sm">
           <span>
             {"usesTaxRules" in totals && totals.usesTaxRules
               ? t("pos:vatProductRules", {
@@ -1110,15 +1114,15 @@ function CartTextModal({
       {(totals.charges ?? []).map((charge, i) => (
         <div
           key={`${charge.label}-${i}`}
-          className="flex justify-between py-1.5 text-sm"
+          className="flex justify-between py-1 text-sm"
         >
           <span className="truncate pr-2">{charge.label}</span>
           <span className="tabular-nums">{tk(Number(charge.amount) || 0)}</span>
         </div>
       ))}
-      <div className="flex items-center justify-between border-t pt-2 font-semibold">
+      <div className="flex items-center justify-between border-t pt-1 font-semibold">
         <span>{t("pos:totalDue", { defaultValue: "Total due" })}</span>
-        <span className="text-lg tracking-tight tabular-nums">
+        <span className="text-base tracking-tight tabular-nums">
           {tk(totals.finalTotal)}
         </span>
       </div>
@@ -1323,7 +1327,7 @@ export function CartItemDiscount({
   };
 
   return (
-    <div className="flex items-center space-x-2">
+    <div className="flex items-center gap-1">
       <Input
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -1334,7 +1338,7 @@ export function CartItemDiscount({
             commit(value, type);
           }
         }}
-        className="h-8 w-20"
+        className="h-7 w-16 text-xs"
         type="number"
         min={0}
         placeholder={
@@ -1357,7 +1361,7 @@ export function CartItemDiscount({
         })}
       />
       {hasDiscount && (
-        <span className="text-sm font-medium text-green-600">
+        <span className="text-xs font-medium text-green-600">
           = {tk(lineTotal)}
         </span>
       )}
