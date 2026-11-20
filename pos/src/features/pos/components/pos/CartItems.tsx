@@ -580,6 +580,7 @@ function CartItemRow({ item }: { item: CartItem }) {
   const removeCartItem = useCartStore((s) => s.removeCartItem);
   const addCustomCartQuantity = useCartStore((s) => s.addCustomCartQuantity);
   const switchLineUnit = useCartStore((s) => s.switchLineUnit);
+  const addToCart = useCartStore((s) => s.addToCart);
   const addDiscount = useCartStore((s) => s.addDiscount);
   const addSerialItem = useCartStore((s) => s.addSerialItem);
   const catalogProducts = useProductsQuery().data ?? [];
@@ -647,18 +648,34 @@ function CartItemRow({ item }: { item: CartItem }) {
   const handleSwitchUnit = (unit: SellUnitOption) => {
     const result = switchLineUnit(variantId, lineUnit, unit);
     if (!result.ok) {
+      if (result.reason === "below-one-package") {
+        // The cashier picking a unit on a sub-package line means "I also
+        // want to sell one of these" — add a NEW line in that unit instead
+        // of refusing (commercial per-line pattern: Square/Loyverse pick the
+        // unit per line). A fresh line is explicit and reversible; silently
+        // converting 1 pc into 1 box would 12× the goods. Line-level
+        // discount/price override are deliberately not carried over — they
+        // were scoped to the old unit's line.
+        if (!tryTakeVariantStock(variantId, unit.conversionFactor)) {
+          showStockError();
+          return;
+        }
+        addToCart({ ...item, discount: null, priceOverride: null }, unit);
+        toast.add({
+          type: "info",
+          description: t("pos:addedNewLineInUnit", {
+            defaultValue:
+              "Less than 1 {{unit}} on that line — added 1 {{unit}} as a new line.",
+            unit: unit.unitName,
+          }),
+        });
+        return;
+      }
       toast.add({
         type: "error",
-        description:
-          result.reason === "below-one-package"
-            ? t("pos:belowOnePackage", {
-                defaultValue:
-                  "That is less than 1 {{unit}} — line left unchanged.",
-                unit: unit.unitName,
-              })
-            : t("pos:unitSwitchFailed", {
-                defaultValue: "Could not switch the unit.",
-              }),
+        description: t("pos:unitSwitchFailed", {
+          defaultValue: "Could not switch the unit.",
+        }),
       });
       return;
     }
