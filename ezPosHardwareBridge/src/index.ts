@@ -59,9 +59,17 @@ async function prompt(question: string): Promise<string> {
 }
 
 async function commandPair(args: string[]): Promise<void> {
-  const backendUrl =
+  // Forgiving URL handling for hand-typed input: default the scheme, drop a
+  // trailing /api (the POS copies its API base URL, which ends in /api — the
+  // bridge appends /api/... itself), and strip a trailing slash.
+  const rawUrl =
     argValue(args, "--backend") ??
-    (await prompt("Backend URL (e.g. https://api.ezpos.example): "));
+    (await prompt("Backend URL (e.g. http://localhost:3000): "));
+  let backendUrl = rawUrl.trim();
+  if (!/^https?:\/\//i.test(backendUrl)) backendUrl = `http://${backendUrl}`;
+  backendUrl = backendUrl
+    .replace(/\/api\/?$/i, "")
+    .replace(/\/$/, "");
   // First positional argument is the code (flags and their values skipped).
   const positional = args.find(
     (arg, index) =>

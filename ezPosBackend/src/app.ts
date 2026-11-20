@@ -4,6 +4,7 @@ import express, {
   type Response,
 } from "express";
 import cors from "cors";
+import { fileURLToPath } from "node:url";
 import productRouter from "./modules/products/products.routes.js";
 import salesRouter from "./modules/sales/sales.routes.js";
 import saleIntentsRouter from "./modules/sales/saleIntents.routes.js";
@@ -145,6 +146,22 @@ export function buildApp() {
       res.status(503).json({ status: "unhealthy" });
     }
   });
+
+  // Hardware-bridge distribution: the Windows zip built by
+  // ezPosHardwareBridge (`npm run dist:zip`) is a plain build artifact with
+  // no business data, served pre-auth so an IT technician can download it
+  // before any sign-in exists. The pairing dialog links here. The artifact
+  // is MUTABLE (same filename, rebuilt on every bridge change) — browsers
+  // must revalidate every time or they silently serve a stale zip.
+  app.use(
+    "/downloads",
+    express.static(
+      fileURLToPath(new URL("../public/downloads", import.meta.url)),
+      {
+        setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+      },
+    ),
+  );
 
   app.use("/", productRouter);
   app.use("/", uomRouter);
