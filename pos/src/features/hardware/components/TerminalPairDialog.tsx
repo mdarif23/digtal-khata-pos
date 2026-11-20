@@ -93,7 +93,12 @@ export function TerminalPairDialog(props: {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      {/* max-h + scroll: the code box, steps list and footer exceed the
+          viewport height on smaller screens — the base DialogContent has no
+          overflow handling of its own. min-w-0 chain keeps the long pair
+          command scrolling INSIDE its code box instead of widening the
+          dialog. */}
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
             {attachMode
@@ -133,7 +138,7 @@ export function TerminalPairDialog(props: {
           </div>
         ) : (
           <div className="grid gap-4">
-            <div className="rounded-lg border bg-muted/40 p-4 text-center">
+            <div className="overflow-x-auto rounded-lg border bg-muted/40 p-4 text-center">
               <div className="font-mono text-3xl font-bold tracking-[0.35em]">
                 {issued.code}
               </div>
@@ -190,7 +195,7 @@ export function TerminalPairDialog(props: {
             </li>
             <li>
               Run the pair command in the unzipped folder:
-              <div className="mt-1 flex items-center gap-2">
+              <div className="mt-1 flex min-w-0 items-center gap-2">
                 <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded bg-muted px-2 py-1.5 font-mono text-xs">
                   {issued
                     ? pairCommand
