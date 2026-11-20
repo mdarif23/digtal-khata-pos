@@ -23,7 +23,7 @@ import {
   useUpdateTerminal,
 } from "../hooks/useTerminals";
 import { setPreferredTerminalId, getPreferredTerminalId } from "../drawerCommands";
-import api from "../../../api/axios.js";
+import api, { bindThisTerminal, getBoundTerminalId } from "../../../api/axios.js";
 import type { TerminalSummary } from "../terminals.api";
 
 function extractError(error: unknown, fallback: string): string {
@@ -63,6 +63,9 @@ export function TerminalCard(props: { terminal: TerminalSummary }) {
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
 
   const isPreferred = getPreferredTerminalId() === terminal.id;
+  // Terminal binding ("this PC IS terminal X") — distinct from the drawer
+  // preference above and from pairing. Binding is persisted + reloads.
+  const isThisPc = getBoundTerminalId() === terminal.id;
 
   async function onToggleStatus() {
     try {
@@ -119,7 +122,8 @@ export function TerminalCard(props: { terminal: TerminalSummary }) {
         <Badge variant={terminal.paired ? "default" : "outline"}>
           {terminal.paired ? "Paired" : "Not paired"}
         </Badge>
-        {isPreferred ? <Badge variant="outline">This counter</Badge> : null}
+        {isPreferred ? <Badge variant="outline">Drawer here</Badge> : null}
+        {isThisPc ? <Badge variant="default">This PC</Badge> : null}
         <span className="ml-auto text-xs text-slate-500">
           {terminal.lastSeenAt
             ? `Last seen ${formatDateTime(terminal.lastSeenAt)}`
@@ -210,7 +214,25 @@ export function TerminalCard(props: { terminal: TerminalSummary }) {
               });
             }}
           >
-            Use as this counter
+            Use this drawer here
+          </Button>
+        ) : null}
+        {terminal.status === "active" && !isThisPc ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => bindThisTerminal(terminal.id)}
+          >
+            Bind this computer
+          </Button>
+        ) : null}
+        {isThisPc ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => bindThisTerminal(null)}
+          >
+            Unbind this PC
           </Button>
         ) : null}
         <PermissionButton

@@ -10,7 +10,17 @@ import { TerminalCard } from "../components/TerminalCard";
 import { TerminalPairDialog } from "../components/TerminalPairDialog";
 import { LocalSyncStatus } from "../components/LocalSyncStatus";
 import { useTerminals } from "../hooks/useTerminals";
-import api from "../../../api/axios.js";
+import api, {
+  API_BASE_URL,
+  bindThisTerminal,
+  getBoundTerminalId,
+} from "../../../api/axios.js";
+
+/** The bridge appends /api/... itself — setup commands need the bare origin. */
+const backendOrigin = API_BASE_URL.replace(/\/api\/?$/, "");
+
+/** The zip built by the bridge's `npm run dist:zip`, served by the backend. */
+const bridgeZipUrl = `${backendOrigin}/downloads/ezpos-bridge-win64.zip`;
 
 /**
  * Hardware settings (Phase 3): the local receipt-printer controls (USB /
@@ -24,6 +34,25 @@ export function HardwareSettingsPage() {
   const terminals = useTerminals();
   const [pairOpen, setPairOpen] = useState(false);
   const [requireTerminal, setRequireTerminal] = useState<boolean | null>(null);
+
+  // This PC's terminal binding ("this browser IS terminal X") — distinct
+  // from pairing (the bridge's secret) and from the drawer preference.
+  const boundId = getBoundTerminalId();
+  const boundTerminal =
+    boundId !== null
+      ? (terminals.data ?? []).find((t) => t.id === boundId)
+      : undefined;
+  let thisPcLine: string;
+  if (boundId === null) {
+    thisPcLine =
+      "Not bound to a terminal. After a terminal is paired below, click “Bind this computer” on it so offline sales can sync from this PC.";
+  } else if (terminals.isLoading) {
+    thisPcLine = `Bound to terminal #${boundId}.`;
+  } else if (boundTerminal) {
+    thisPcLine = `Bound to “${boundTerminal.name}” — offline sales from this PC sync under this terminal.`;
+  } else {
+    thisPcLine = `Bound to terminal #${boundId}, which is not in this location’s list.`;
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -263,17 +292,64 @@ export function HardwareSettingsPage() {
 
       <HardwareSettings />
 
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
+        <div className="space-y-1">
+          <h3 className="font-medium">This computer</h3>
+          <p className="text-sm text-muted-foreground">{thisPcLine}</p>
+        </div>
+        {boundId !== null ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => bindThisTerminal(null)}
+          >
+            Unbind
+          </Button>
+        ) : null}
+      </div>
+
       <div className="space-y-3">
         {terminals.isLoading ? (
           <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground/80">
             <Spinner className="size-4" /> Loading terminals…
           </div>
         ) : (terminals.data?.length ?? 0) === 0 ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground/80">
-            <p className="text-sm">
-              No POS terminals at this location yet. Install the ezPos
-              hardware bridge on the Windows machine and pair it with a
-              one-time code.
+          <div className="space-y-3 rounded-xl border border-dashed border-border p-6">
+            <div>
+              <h3 className="font-medium">Set up a POS terminal</h3>
+              <p className="text-sm text-muted-foreground">
+                A terminal is one Windows POS machine (receipt printer + cash
+                drawer). Three steps, once per machine:
+              </p>
+            </div>
+            <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
+              <li>
+                <a href={bridgeZipUrl} className="underline" download>
+                  Download the bridge zip
+                </a>{" "}
+                and unzip it on the machine — Windows 10/11, nothing else to
+                install.
+              </li>
+              <li>
+                Click “Pair a terminal” above and generate a one-time code.
+              </li>
+              <li>
+                In the unzipped folder on the machine, run{" "}
+                <code className="font-mono text-xs">
+                  pair.cmd --backend {backendOrigin} --name "Counter 1"
+                </code>{" "}
+                and paste the code when it asks.
+              </li>
+              <li>
+                Keep <code className="font-mono text-xs">run.cmd</code>{" "}
+                running on the machine — it polls the backend for authorized
+                drawer commands.
+              </li>
+            </ol>
+            <p className="text-xs text-muted-foreground/80">
+              SETUP.txt inside the zip covers printers and service install.
+              After pairing, click “Bind this computer” on the terminal so
+              this PC’s offline sales sync.
             </p>
           </div>
         ) : (
