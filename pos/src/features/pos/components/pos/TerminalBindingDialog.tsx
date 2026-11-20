@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
+import { useSessionStore } from "@/auth/sessionStore";
+import { usePermissions } from "@/hooks/usePermissions.js";
+import { toast } from "@/components/ui/toast";
 import axios from "../../../../api/axios.js";
 import { bindThisTerminal, getBoundTerminalId } from "../../../../api/axios.js";
-import { Button } from "@/components/ui/button";
+import { createTerminalApi } from "@/features/hardware/terminals.api.js";
+import { Button } from "@/components/ui/button.js";
+import { Spinner } from "@/components/ui/spinner.js";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +14,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@/components/ui/dialog.js";
 
 interface TerminalOption {
   id: number;
@@ -25,14 +30,22 @@ interface TerminalOption {
  * credential — every request stays authorized by the user's session, and
  * the backend re-validates the terminal per sale.
  *
- * Hidden entirely when a terminal is already bound, when the terminal list
- * is unavailable, or when the location has no active terminals (and the
- * business does not require binding).
+ * The Bangladesh-typical shop is ONE PC: when no terminals exist at all and
+ * the user can manage terminals, this dialog becomes a ONE-CLICK setup —
+ * "Set up this PC" creates the terminal record and binds it, so offline
+ * selling works without ever visiting Settings or installing the bridge
+ * (drawer hardware attaches later through the bridge pairing). Managers
+ * without permission (or optional binding) keep the old behavior: hidden
+ * unless terminals exist or the business requires binding.
  */
 export function TerminalBindingDialog() {
+  const { hasPermission } = usePermissions();
+  const activeLocationName = useSessionStore((s) => s.activeLocationName);
   const [open, setOpen] = useState(false);
   const [required, setRequired] = useState(false);
   const [terminals, setTerminals] = useState<TerminalOption[] | null>(null);
+  const [offerSetup, setOfferSetup] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     if (getBoundTerminalId() !== null) return; // already bound — nothing to ask
@@ -50,7 +63,17 @@ export function TerminalBindingDialog() {
         const active = (terminalRes.data.data ?? []).filter(
           (terminal) => terminal.status === "active",
         );
-        if (active.length === 0 && !requireTerminal) return;
+        if (active.length === 0) {
+          if (hasPermission("pos_terminal.manage")) {
+            // One-PC shop, nothing registered yet — offer the one-click
+            // setup right here instead of sending the owner to Settings.
+            setOfferSetup(true);
+            setRequired(requireTerminal);
+            setOpen(true);
+            return;
+          }
+          if (!requireTerminal) return;
+        }
         setTerminals(active);
         setRequired(requireTerminal);
         setOpen(true);
@@ -59,12 +82,27 @@ export function TerminalBindingDialog() {
         // the POS behaves exactly as before.
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    // hasPermission is a stable store read; the dialog decides once per boot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (terminals === null) return null;
+  async function setupThisPc() {
+    setCreating(true);
+    try {
+      const terminal = await createTerminalApi(activeLocationName ?? "Counter 1");
+      // Persist the binding and reload (same convention as bindThisTerminal).
+      bindThisTerminal(terminal.id);
+    } catch {
+      setCreating(false);
+      toast.add({
+        title: "Unable to set up this PC — try again in Settings → Hardware.",
+        type: "error",
+        priority: "high",
+      });
+    }
+  }
+
+  if (terminals === null && !offerSetup) return null;
 
   return (
     <Dialog
@@ -75,49 +113,85 @@ export function TerminalBindingDialog() {
       }}
     >
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Is this computer a registered terminal?</DialogTitle>
-          <DialogDescription>
-            Bind this PC to a terminal so its sales and cash drawer sessions
-            are attributed to it. You can change this later in Settings →
-            Hardware.
-            {required
-              ? " This business requires sales from a registered terminal."
-              : ""}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-2">
-          {(terminals ?? []).map((terminal) => (
-            <Button
-              key={terminal.id}
-              variant="outline"
-              className="justify-start"
-              onClick={() => bindThisTerminal(terminal.id)}
-            >
-              This is “{terminal.name}”
-            </Button>
-          ))}
-          {(terminals ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No active terminals at this location yet. Ask a manager to add
-              one in Settings → Hardware.
-            </p>
-          ) : null}
-        </div>
-        {!required ? (
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setOpen(false);
-                // Deliberately NOT persisted: ask again next boot — binding
-                // stays an explicit, repeatable choice.
-              }}
-            >
-              This PC is not a terminal
-            </Button>
-          </DialogFooter>
-        ) : null}
+        {offerSetup ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Set up this PC as your sales terminal?</DialogTitle>
+              <DialogDescription>
+                One click — this PC gets a terminal record so offline sales
+                can sync from it. No hardware needed now; a cash drawer can
+                be connected later in Settings → Hardware. You can change
+                this any time.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2">
+              {!required ? (
+                <Button
+                  variant="ghost"
+                  disabled={creating}
+                  onClick={() => setOpen(false)}
+                >
+                  Not now
+                </Button>
+              ) : null}
+              <Button disabled={creating} onClick={() => void setupThisPc()}>
+                {creating ? (
+                  <>
+                    <Spinner className="size-4" /> Setting up…
+                  </>
+                ) : (
+                  "Yes, set up this PC"
+                )}
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>Is this computer a registered terminal?</DialogTitle>
+              <DialogDescription>
+                Bind this PC to a terminal so its sales and cash drawer
+                sessions are attributed to it. You can change this later in
+                Settings → Hardware.
+                {required
+                  ? " This business requires sales from a registered terminal."
+                  : ""}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-2">
+              {(terminals ?? []).map((terminal) => (
+                <Button
+                  key={terminal.id}
+                  variant="outline"
+                  className="justify-start"
+                  onClick={() => bindThisTerminal(terminal.id)}
+                >
+                  This is “{terminal.name}”
+                </Button>
+              ))}
+              {(terminals ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No active terminals at this location yet. Ask a manager to
+                  add one in Settings → Hardware.
+                </p>
+              ) : null}
+            </div>
+            {!required ? (
+              <DialogFooter>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setOpen(false);
+                    // Deliberately NOT persisted: ask again next boot — binding
+                    // stays an explicit, repeatable choice.
+                  }}
+                >
+                  This PC is not a terminal
+                </Button>
+              </DialogFooter>
+            ) : null}
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

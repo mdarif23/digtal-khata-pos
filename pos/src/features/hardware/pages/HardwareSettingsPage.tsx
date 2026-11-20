@@ -5,11 +5,21 @@ import { toast } from "@/components/ui/toast";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { HardwareSettings } from "@/features/pos/components/receipt/HardwareSettings";
 import { TerminalCard } from "../components/TerminalCard";
 import { TerminalPairDialog } from "../components/TerminalPairDialog";
 import { LocalSyncStatus } from "../components/LocalSyncStatus";
+import { createTerminalApi } from "../terminals.api";
 import { useTerminals } from "../hooks/useTerminals";
+import { useSessionStore } from "../../../auth/sessionStore.js";
 import api, {
   API_BASE_URL,
   bindThisTerminal,
@@ -33,6 +43,12 @@ const bridgeZipUrl = `${backendOrigin}/downloads/ezpos-bridge-win64.zip`;
 export function HardwareSettingsPage() {
   const terminals = useTerminals();
   const [pairOpen, setPairOpen] = useState(false);
+  /** When set, the pair dialog mints a code FOR this existing terminal. */
+  const [pairTarget, setPairTarget] = useState<{ id: number; name: string } | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addCreating, setAddCreating] = useState(false);
+  const activeLocationName = useSessionStore((s) => s.activeLocationName);
   const [requireTerminal, setRequireTerminal] = useState<boolean | null>(null);
 
   // This PC's terminal binding ("this browser IS terminal X") — distinct
@@ -160,7 +176,25 @@ export function HardwareSettingsPage() {
             Receipt printers and cash drawers for the active location.
           </p>
         </div>
-        <Button onClick={() => setPairOpen(true)}>Pair a terminal</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setAddName(activeLocationName ?? "Counter 1");
+              setAddOpen(true);
+            }}
+          >
+            Add terminal
+          </Button>
+          <Button
+            onClick={() => {
+              setPairTarget(null);
+              setPairOpen(true);
+            }}
+          >
+            Connect cash drawer hardware
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
@@ -318,8 +352,10 @@ export function HardwareSettingsPage() {
             <div>
               <h3 className="font-medium">Set up a POS terminal</h3>
               <p className="text-sm text-muted-foreground">
-                A terminal is one Windows POS machine (receipt printer + cash
-                drawer). Three steps, once per machine:
+                <strong>No drawer hardware?</strong> Just click{" "}
+                <strong>Add terminal</strong> above, name this PC, and bind it
+                when the POS asks — that is all offline selling needs. The
+                steps below are only for an auto-opening cash drawer:
               </p>
             </div>
             <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
@@ -331,14 +367,13 @@ export function HardwareSettingsPage() {
                 install.
               </li>
               <li>
-                Click “Pair a terminal” above and generate a one-time code.
+                Click “Connect cash drawer hardware” above and generate a
+                one-time code.
               </li>
               <li>
-                In the unzipped folder on the machine, run{" "}
-                <code className="font-mono text-xs">
-                  pair.cmd --backend {backendOrigin} --name "Counter 1"
-                </code>{" "}
-                and paste the code when it asks.
+                In the unzipped folder on the machine, run the copied{" "}
+                <code className="font-mono text-xs">pair.cmd …</code>{" "}
+                command — the code is already in it.
               </li>
               <li>
                 Keep <code className="font-mono text-xs">run.cmd</code>{" "}
@@ -354,7 +389,14 @@ export function HardwareSettingsPage() {
           </div>
         ) : (
           (terminals.data ?? []).map((terminal) => (
-            <TerminalCard key={terminal.id} terminal={terminal} />
+            <TerminalCard
+              key={terminal.id}
+              terminal={terminal}
+              onConnectDrawer={(target) => {
+                setPairTarget({ id: target.id, name: target.name });
+                setPairOpen(true);
+              }}
+            />
           ))
         )}
       </div>
@@ -367,11 +409,62 @@ export function HardwareSettingsPage() {
 
       <TerminalPairDialog
         open={pairOpen}
+        terminal={pairTarget}
         onOpenChange={(open) => {
           setPairOpen(open);
           if (!open) void terminals.refetch();
         }}
       />
+
+      {/* Hardware-less terminal creation: one click for offline selling. */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add terminal</DialogTitle>
+            <DialogDescription>
+              Registers a PC for offline selling and sale attribution — no
+              hardware needed. Bind this PC to it when the POS asks. A cash
+              drawer can be connected later from the terminal's card.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="add-terminal-name">Terminal name</Label>
+            <Input
+              id="add-terminal-name"
+              value={addName}
+              maxLength={100}
+              onChange={(event) => setAddName(event.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              disabled={addCreating || addName.trim() === ""}
+              onClick={async () => {
+                setAddCreating(true);
+                try {
+                  await createTerminalApi(addName.trim());
+                  toast.add({
+                    title: `Terminal “${addName.trim()}” added. Reload the POS on that PC and bind it.`,
+                    type: "success",
+                  });
+                  setAddOpen(false);
+                  void terminals.refetch();
+                } catch {
+                  toast.add({
+                    title: "Unable to add the terminal.",
+                    type: "error",
+                    priority: "high",
+                  });
+                } finally {
+                  setAddCreating(false);
+                }
+              }}
+            >
+              {addCreating ? "Adding…" : "Add terminal"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

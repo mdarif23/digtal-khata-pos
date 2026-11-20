@@ -657,6 +657,13 @@
       "when": 1795188000000,
       "tag": "0093_walkin_purchase_returns",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1795274000000,
+      "tag": "0094_terminal_pairing_codes_terminal_id",
+      "breakpoints": true
     }
   ]
 }

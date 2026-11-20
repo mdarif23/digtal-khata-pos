@@ -48,7 +48,11 @@ const COMMAND_STATUS_STYLES: Record<string, string> = {
 };
 
 /** One terminal: status, identity actions, and its command history. */
-export function TerminalCard(props: { terminal: TerminalSummary }) {
+export function TerminalCard(props: {
+  terminal: TerminalSummary;
+  /** Hardware-less terminals: mint a code that attaches the bridge HERE. */
+  onConnectDrawer?: (terminal: TerminalSummary) => void;
+}) {
   const terminal = props.terminal;
   const update = useUpdateTerminal();
   const remove = useDeleteTerminal();
@@ -234,6 +238,16 @@ export function TerminalCard(props: { terminal: TerminalSummary }) {
           >
             Unbind this PC
           </Button>
+        ) : null}
+        {!terminal.paired && props.onConnectDrawer ? (
+          <PermissionButton
+            permission="pos_terminal.manage"
+            size="sm"
+            variant="outline"
+            onClick={() => props.onConnectDrawer!(terminal)}
+          >
+            Connect drawer hardware
+          </PermissionButton>
         ) : null}
         <PermissionButton
           permission="pos_terminal.manage"
