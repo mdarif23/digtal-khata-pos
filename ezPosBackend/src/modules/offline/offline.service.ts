@@ -720,6 +720,45 @@ async function applyDrawerOpenOp(ctx: OfflineContext, op: OfflineOp): Promise<Of
   if (!register) throw new NotFoundError("Register not found at this location.");
   const openingCash = roundMoney(Number(payload.openingCash ?? 0));
   if (openingCash < 0) throw new BadRequestError("Opening cash cannot be negative.");
+  // Offline/online reconciliation: the register may already have an OPEN
+  // session that was opened online after this op was recorded (or by an
+  // earlier replay path). The "one open session per register" guard makes a
+  // second insert impossible, and previously the raw query error leaked to
+  // the sync dialog, sticking every queued op behind it. The online session
+  // is the system of record — adopt it instead of failing the op forever.
+  // Same-user only: operating someone else's drawer would break the
+  // session-ownership rule the movement ops enforce.
+  const [openSession] = await db
+    .select({ id: registerSessions.id, userId: registerSessions.userId })
+    .from(registerSessions)
+    .where(
+      and(
+        eq(registerSessions.businessId, ctx.businessId),
+        eq(registerSessions.registerId, payload.registerId!),
+        eq(registerSessions.status, "open"),
+      ),
+    )
+    .limit(1);
+  if (openSession) {
+    if (openSession.userId !== ctx.userId && !ctx.callerIsOwner) {
+      throw new ConflictError(
+        "This register (or user) already has an open session on the server.",
+      );
+    }
+    recordAudit({
+      businessId: ctx.businessId,
+      actorUserId: ctx.userId,
+      action: "register.opened",
+      entityType: "register_session",
+      entityId: openSession.id,
+      metadata: {
+        registerId: payload.registerId,
+        adoptedSessionId: openSession.id,
+        offlineReplay: true,
+      },
+    });
+    return { opId: op.opId, status: "applied", sessionId: openSession.id };
+  }
   try {
     const [session] = await db
       .insert(registerSessions)
@@ -750,8 +789,10 @@ async function applyDrawerOpenOp(ctx: OfflineContext, op: OfflineOp): Promise<Of
     });
     return { opId: op.opId, status: "applied", sessionId: session.id };
   } catch (err) {
-    if ((err as { code?: string }).code === "23P01") {
-      // exclude constraint: register or user already has an open session.
+    const pgCode = (err as { code?: string }).code;
+    if (pgCode === "23P01" || pgCode === "23505") {
+      // Exclude/unique guard: register or user already has an open session
+      // (raced between the adoption lookup and this insert).
       throw new ConflictError(
         "This register (or user) already has an open session on the server.",
       );
