@@ -580,7 +580,7 @@ function CartItemRow({ item }: { item: CartItem }) {
   const removeCartItem = useCartStore((s) => s.removeCartItem);
   const addCustomCartQuantity = useCartStore((s) => s.addCustomCartQuantity);
   const switchLineUnit = useCartStore((s) => s.switchLineUnit);
-  const addToCart = useCartStore((s) => s.addToCart);
+  const replaceLineUnit = useCartStore((s) => s.replaceLineUnit);
   const addDiscount = useCartStore((s) => s.addDiscount);
   const addSerialItem = useCartStore((s) => s.addSerialItem);
   const catalogProducts = useProductsQuery().data ?? [];
@@ -649,23 +649,21 @@ function CartItemRow({ item }: { item: CartItem }) {
     const result = switchLineUnit(variantId, lineUnit, unit);
     if (!result.ok) {
       if (result.reason === "below-one-package") {
-        // The cashier picking a unit on a sub-package line means "I also
-        // want to sell one of these" — add a NEW line in that unit instead
-        // of refusing (commercial per-line pattern: Square/Loyverse pick the
-        // unit per line). A fresh line is explicit and reversible; silently
-        // converting 1 pc into 1 box would 12× the goods. Line-level
-        // discount/price override are deliberately not carried over — they
-        // were scoped to the old unit's line.
+        // "Make this line that unit": the cashier picking Box on a sub-
+        // package line means "sell a box" — re-ring THE SAME LINE as 1 of
+        // the picked unit (no second line). The old unit's base amount is
+        // released to stock and the new unit's is reserved; a line discount
+        // / price override belonged to the old unit's line and is cleared.
         if (!tryTakeVariantStock(variantId, unit.conversionFactor)) {
           showStockError();
           return;
         }
-        addToCart({ ...item, discount: null, priceOverride: null }, unit);
+        returnVariantStock(variantId, quantity * conversionFactor);
+        replaceLineUnit(variantId, lineUnit, unit);
         toast.add({
           type: "info",
-          description: t("pos:addedNewLineInUnit", {
-            defaultValue:
-              "Less than 1 {{unit}} on that line — added 1 {{unit}} as a new line.",
+          description: t("pos:unitSwitchReset", {
+            defaultValue: "Switched to {{unit}} — quantity reset to 1.",
             unit: unit.unitName,
           }),
         });

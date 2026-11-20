@@ -290,6 +290,27 @@ export const useCartStore = create<CartStore>((set, get) => ({
     set({ cart });
     return { ok: true, convertedQuantity, merged } as const;
   },
+  replaceLineUnit: (variantId, fromUomConversionId, unit) =>
+    set((state) => ({
+      cart: state.cart.map((p) => {
+        if (
+          !(
+            p.variants.some((v) => v.id === variantId) &&
+            lineUnitId(p) === (fromUomConversionId ?? null)
+          )
+        ) {
+          return p;
+        }
+        return {
+          ...p,
+          quantity: 1,
+          enteredQuantity: 1,
+          discount: null,
+          priceOverride: null,
+          ...unitFieldsFor(unit, Number(p.variants[0]?.sellingPrice ?? 0)),
+        };
+      }),
+    })),
   resetCart: (options) => {
     if (options?.restoreStock) {
       for (const item of get().cart) {
