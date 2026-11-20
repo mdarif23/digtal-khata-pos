@@ -40,6 +40,10 @@ import { createEntityPromiseToast } from "@/lib/toast-utils.js";
 import { useCustomerStore } from "@/store/useCustomerStore.js";
 import type { SaleReceiptData } from "../types/receipt.types.js";
 import { SaleSuccessDialog } from "../components/receipt/SaleSuccessDialog.js";
+import {
+  OfflineSaleRecordedDialog,
+  type OfflineSaleRecord,
+} from "../components/receipt/OfflineSaleRecordedDialog.js";
 import { LocationBadge } from "@/components/common/LocationBadge";
 import { RegisterDialog } from "@/features/cashRegisters/components/RegisterDialog";
 import { SyncStatusIndicator } from "@/features/pos/components/pos/SyncStatus.js";
@@ -50,6 +54,7 @@ import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
 import { useRealtimeStore } from "@/features/pos/offline/realtime.js";
 import axios from "../../../api/axios.js";
 import { TerminalBindingDialog } from "@/features/pos/components/pos/TerminalBindingDialog.js";
+import { buildOfflineReceipt } from "../offlineReceipt.js";
 
 function Pos() {
   const { t } = useTranslation();
@@ -61,6 +66,13 @@ function Pos() {
   const createSale = useSalesStore((s) => s.createSale);
   const [lastReceipt, setLastReceipt] = useState<SaleReceiptData | null>(null);
   const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false);
+  // Offline twin of the success dialog: the cashier gets the same
+  // sale-is-done confirmation for outbox-recorded sales.
+  const [lastOfflineRecord, setLastOfflineRecord] =
+    useState<OfflineSaleRecord | null>(null);
+  const [lastOfflineReceipt, setLastOfflineReceipt] =
+    useState<SaleReceiptData | null>(null);
+  const [isOfflineDialogOpen, setIsOfflineDialogOpen] = useState(false);
 
   // Real-time register updates (Module 11): server-pushed signals bump
   // revision counters; the affected stores refresh through their normal
@@ -128,7 +140,10 @@ function Pos() {
   });
   const { printReceipt } = usePrintReceipt();
   useHotkeyAction("print-receipt", () => {
-    if (lastReceipt) void printReceipt(lastReceipt);
+    // F7 reprints the last receipt — online (server receipt) or the last
+    // offline slip while its dialog is around.
+    const receipt = lastReceipt ?? lastOfflineReceipt;
+    if (receipt) void printReceipt(receipt);
   });
 
   // ---- Customer-facing display push (Phase 3) ----------------------------
@@ -231,22 +246,49 @@ function Pos() {
         (sum, payment) => sum + Number(payment.amount ?? 0),
         0,
       );
-      await useOfflineStore.getState().recordOfflineSale({
-        payload,
-        summary: {
-          total,
-          itemCount: payload.items.length,
-          customerName: null,
-        },
+      const clientSaleId = await useOfflineStore
+        .getState()
+        .recordOfflineSale({
+          payload,
+          summary: {
+            total,
+            itemCount: payload.items.length,
+            customerName: null,
+          },
+        });
+      // Same confirmation UX as the online receipt dialog — honest about
+      // the offline state (no invoice number yet, cash/due only). The
+      // printable slip is built from the SAME local totals the cashier
+      // confirmed (the server quote is unavailable offline).
+      const paid = payload.payments
+        .filter((payment) => payment.method === "cash")
+        .reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
+      const offlineCustomer = useCustomerStore.getState().showCustomerInfo;
+      const offlineReceipt = buildOfflineReceipt({
+        cart,
+        totals,
+        payments: payload.payments,
+        clientSaleId,
+        customer:
+          offlineCustomer && offlineCustomer.id > 0
+            ? {
+                id: offlineCustomer.id,
+                name: offlineCustomer.name,
+                phone: offlineCustomer.phone ?? null,
+                address: offlineCustomer.address ?? null,
+              }
+            : null,
       });
-      toast.add({
-        type: "info",
-        description: t("pos:offlineRecorded", {
-          defaultValue:
-            "No connection — the sale is recorded offline and will sync automatically (duplicates are impossible).",
-        }),
-        priority: "high",
+      setLastOfflineRecord({
+        reference: clientSaleId,
+        total,
+        paid,
+        due: Math.max(total - paid, 0),
+        itemCount: payload.items.length,
+        customerName: null,
       });
+      setLastOfflineReceipt(offlineReceipt);
+      setIsOfflineDialogOpen(true);
       // Clear checkout inputs and modal
       resetCart();
       setIsPaymentDialogOpen(false);
@@ -430,6 +472,19 @@ function Pos() {
         onNewSale={() => {
           setLastReceipt(null);
           setIsSuccessDialogOpen(false);
+        }}
+      />
+
+      {/* Offline twin: outbox-recorded sales get the same confirmation UX */}
+      <OfflineSaleRecordedDialog
+        record={lastOfflineRecord}
+        receipt={lastOfflineReceipt}
+        open={isOfflineDialogOpen}
+        onOpenChange={setIsOfflineDialogOpen}
+        onNewSale={() => {
+          setLastOfflineRecord(null);
+          setLastOfflineReceipt(null);
+          setIsOfflineDialogOpen(false);
         }}
       />
     </main>
