@@ -974,14 +974,15 @@ export function CartCalculation({
             </Button>
           </div>
         )}
-        {/* full-width row: a 1/6 cell clipped the placeholder text */}
-        <div className="col-span-6">
+        {/* Full-width rows (12/12): the coupon placeholder and the charge
+            button must span the whole footer. */}
+        <div className="col-span-12">
           <CouponInput form={form} />
         </div>
-        <div className="col-span-6">
+        <div className="col-span-12">
           <ChargesEditor form={form} />
         </div>
-        <div className="col-span-6">
+        <div className="col-span-12">
           {/* payment charges the authoritative quote total — it already
               includes the coupon discount and the inclusive/exclusive tax
               split; deriving it from afterDiscount + vat double-counts */}
