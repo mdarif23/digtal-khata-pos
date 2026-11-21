@@ -40,20 +40,21 @@ export function CartHeader({
   cartItemCount: number;
 }) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
             Current sale
           </p>
-          <h2 className="mt-1 text-lg font-semibold tracking-tight">
-            Order details
+          <h2 className="truncate text-sm font-semibold tracking-tight">
+            Order details{" "}
+            <span className="font-normal text-muted-foreground">
+              · {cartItemCount}{" "}
+              {cartItemCount === 1 ? "line item" : "line items"}
+            </span>
           </h2>
-          <p className="text-xs text-muted-foreground">
-            {cartItemCount} {cartItemCount === 1 ? "line item" : "line items"}
-          </p>
         </div>
-        <div className="w-28 shrink-0 sm:w-40">
+        <div className="w-28 shrink-0">
           <SaleDatePicker form={form} />
         </div>
       </div>

@@ -939,25 +939,28 @@ export function CartCalculation({
   const [quoteOpen, setQuoteOpen] = useState(false);
   const { hasPermission } = usePermissions();
   const { t } = useTranslation();
+  const quoteShown = hasPermission("quotations.create");
   // Phase 3 hotkey: F4 opens the discount dialog.
   useHotkeyAction("discount", () => setDiscountSignal((n) => n + 1));
 
   return (
     <div className="space-y-1.5">
       <CartTextModal totals={totals} />
-      <div className="grid grid-cols-6 gap-1 py-1">
-        <div className="col-span-2">
+      {/* One action line always: 4 buttons share the row (3 when quotation
+          permission is absent) instead of wrapping to a second row. */}
+      <div className="grid grid-cols-12 gap-1 py-1">
+        <div className={quoteShown ? "col-span-3" : "col-span-4"}>
           <ClearCartDialog />
         </div>
-        <div className="col-span-2">
+        <div className={quoteShown ? "col-span-3" : "col-span-4"}>
           <HoldDropdownMenu />
         </div>
-        <div className="col-span-2">
+        <div className={quoteShown ? "col-span-3" : "col-span-4"}>
           {/* discount is applied on the amount after item discounts */}
           <DiscountModal form={form} subTotal={totals.itemsTotal} openSignal={discountSignal} />
         </div>
-        {hasPermission("quotations.create") && (
-          <div className="col-span-2">
+        {quoteShown && (
+          <div className="col-span-3">
             {/* E1-002: capture the cart as a quotation draft */}
             <SaveQuotationDialog open={quoteOpen} onOpenChange={setQuoteOpen} totals={totals} />
             <Button

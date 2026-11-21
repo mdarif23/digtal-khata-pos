@@ -404,26 +404,36 @@ function Pos() {
       <div className="mx-auto flex min-h-[calc(100dvh-1.5rem)] max-w-[1800px] flex-col gap-3 sm:min-h-[calc(100dvh-2rem)] lg:grid lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1.55fr)_minmax(380px,0.9fr)] lg:gap-4">
         <div className="col-span-full flex flex-wrap items-center justify-between gap-2">
           <LocationBadge />
+          {/* Commercial toolbar pattern: same controls, grouped into scannable
+              clusters (status · work · preferences) with hairline dividers. */}
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <NotificationBell revision={notificationRevision} />
-            <SyncStatusIndicator />
-            <LanguageToggle />
-            <ThemeToggle />
-            <RegisterDialog />
-            <SalespersonSelect
-              value={salespersonUserId}
-              onChange={(userId) => {
-                setSalespersonUserId(userId);
-                form.setValue("salespersonUserId", userId);
-                if (userId === null) {
-                  localStorage.removeItem("ezpos.pos.salespersonUserId");
-                } else {
-                  localStorage.setItem("ezpos.pos.salespersonUserId", String(userId));
-                }
-              }}
-            />
-            <PosHotkeyManager />
-            <CfdManageDialog />
+            <div className="flex items-center gap-2">
+              <NotificationBell revision={notificationRevision} />
+              <SyncStatusIndicator />
+            </div>
+            <div className="hidden h-5 w-px bg-border sm:block" />
+            <div className="flex items-center gap-2">
+              <RegisterDialog />
+              <SalespersonSelect
+                value={salespersonUserId}
+                onChange={(userId) => {
+                  setSalespersonUserId(userId);
+                  form.setValue("salespersonUserId", userId);
+                  if (userId === null) {
+                    localStorage.removeItem("ezpos.pos.salespersonUserId");
+                  } else {
+                    localStorage.setItem("ezpos.pos.salespersonUserId", String(userId));
+                  }
+                }}
+              />
+              <CfdManageDialog />
+            </div>
+            <div className="hidden h-5 w-px bg-border sm:block" />
+            <div className="flex items-center gap-2">
+              <PosHotkeyManager />
+              <LanguageToggle />
+              <ThemeToggle />
+            </div>
           </div>
         </div>
         <section className="flex h-[60dvh] min-h-[420px] shrink-0 flex-col overflow-hidden rounded-xl border bg-background shadow-sm lg:h-full lg:min-h-0 lg:shrink">
