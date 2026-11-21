@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import api from "@/api/axios.js";
+import { queryClient } from "@/lib/queryClient";
+import { productKeys } from "../hooks/useProducts.js";
 
 interface BomComponent {
   id?: number;
@@ -195,6 +197,11 @@ export function ProductionPage() {
         title: `Production run completed — component cost ৳${cost.toFixed(2)}`,
         type: "success",
       });
+      // The run moved real stock (components consumed, finished goods
+      // created) but went through raw axios — the products table and POS
+      // grid read the cached catalog (staleTime 30s, no window refetch),
+      // so without this they keep showing pre-run quantities.
+      await queryClient.invalidateQueries({ queryKey: productKeys.all });
       await loadBom(bom.parentVariantId);
     } catch (error) {
       toast.add({ title: extractError(error, "Unable to run production."), type: "error" });
