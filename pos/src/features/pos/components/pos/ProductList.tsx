@@ -34,13 +34,6 @@ import {
 import { toast } from "@/components/ui/toast";
 import { checkAllowance } from "@/features/pos/offline/allocations.js";
 import { readVariantBatches } from "@/features/pos/offline/catalog.js";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { LookupMatch } from "@/features/barcodes/barcode.api";
 import {
   parseEmbeddedBarcode,
@@ -447,49 +440,54 @@ export function ProductList({
         className="shrink-0 px-4 pt-2 sm:px-5"
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="mb-2 flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium text-muted-foreground">
             Products
           </h2>
-          <div className="flex items-center gap-2">
-            <Select
-              value={selectedCategory}
-              onValueChange={(value) => {
-                if (value) setSelectedCategory(value);
-              }}
-            >
-              <SelectTrigger
-                className="h-8 w-[min(48vw,12rem)] bg-background text-xs sm:w-48"
-                aria-label="Filter products by category"
+          <span
+            className="whitespace-nowrap text-xs text-muted-foreground"
+            aria-live="polite"
+          >
+            {filteredProducts.length}
+          </span>
+        </div>
+        {/* Commercial pattern: category chips, one tap — the dropdown needed
+            two taps and hid the category overview. Same filter state. */}
+        <div
+          className="mb-3 flex gap-1.5 overflow-x-auto pb-1"
+          role="group"
+          aria-label="Filter products by category"
+        >
+          <button
+            type="button"
+            onClick={() => setSelectedCategory("all")}
+            aria-pressed={selectedCategory === "all"}
+            className={`whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              selectedCategory === "all"
+                ? "border-primary bg-primary text-primary-foreground"
+                : "bg-background text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            All categories
+          </button>
+          {activeCategories.map((category) => {
+            const active = selectedCategory === String(category.value);
+            return (
+              <button
+                key={category.value}
+                type="button"
+                onClick={() => setSelectedCategory(String(category.value))}
+                aria-pressed={active}
+                className={`whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                  active
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "bg-background text-muted-foreground hover:bg-muted"
+                }`}
               >
-                <SelectValue placeholder="All categories">
-                  {selectedCategory === "all"
-                    ? "All categories"
-                    : activeCategories.find(
-                        (category) =>
-                          category.value === Number(selectedCategory),
-                      )?.label}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All categories</SelectItem>
-                {activeCategories.map((category) => (
-                  <SelectItem
-                    key={category.value}
-                    value={String(category.value)}
-                  >
-                    {category.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span
-              className="whitespace-nowrap text-xs text-muted-foreground"
-              aria-live="polite"
-            >
-              {filteredProducts.length}
-            </span>
-          </div>
+                {category.label}
+              </button>
+            );
+          })}
         </div>
         {filteredProducts.length === 0 ? (
           <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
@@ -502,7 +500,7 @@ export function ProductList({
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
             {filteredProducts.map((product) => {
               const defaultVariant = product.variants.find(
                 (variant) => variant.isDefault,

@@ -1,5 +1,5 @@
 import { HoldCartItems } from "@/features/pos/types/cart.types";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,6 +24,12 @@ export function HoldDropdownMenu() {
   const resetCart = useCartStore((state) => state.resetCart);
   const cart = useCartStore((state) => state.cart);
   const { holdCart } = useHoldCartStore();
+  // Commercial "open tickets" pattern: the cashier sees how many held sales
+  // are waiting without opening the menu.
+  const holdCount = useHoldCartStore((state) => state.holdCartItems.length);
+  useEffect(() => {
+    void useHoldCartStore.getState().refreshHolds();
+  }, []);
 
   // Phase 3 hotkeys: F2 hold (same guard as the menu item), F3 retrieve.
   useHotkeyAction("hold-sale", () => {
@@ -40,7 +46,17 @@ export function HoldDropdownMenu() {
         <DropdownMenuTrigger
           render={
             <Button type="button" className="w-full justify-between">
-              Hold
+              <span className="flex items-center gap-1.5">
+                Hold
+                {holdCount > 0 && (
+                  <span
+                    className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground"
+                    aria-label={`${holdCount} held sales`}
+                  >
+                    {holdCount}
+                  </span>
+                )}
+              </span>
               <Kbd keys={["F2"]} className="opacity-70" />
             </Button>
           }
