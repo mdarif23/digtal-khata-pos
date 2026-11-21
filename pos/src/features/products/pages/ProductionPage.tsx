@@ -60,14 +60,23 @@ export function ProductionPage() {
 
   const loadCatalog = useCallback(async () => {
     try {
-      const res = await api.get<{ success: boolean; data: unknown[] }>("/products");
-      const products = (res.data.data ?? []) as {
+      // GET /products responds with a BARE ARRAY (no { success, data }
+      // envelope) — reading res.data.data here used to yield undefined and
+      // an always-empty variant list. Normalize both shapes defensively;
+      // the POS loader works because it never assumed the envelope.
+      const res = await api.get<unknown>("/products");
+      const body = res.data;
+      const products = (
+        Array.isArray(body)
+          ? body
+          : ((body as { data?: unknown[] })?.data ?? [])
+      ) as {
         name: string;
         variants: { id: number; sku: string | null }[];
       }[];
       setOptions(
         products.flatMap((product) =>
-          product.variants
+          (product.variants ?? [])
             .filter((v) => v.id !== undefined)
             .map((v) => ({
               id: v.id!,
@@ -75,7 +84,11 @@ export function ProductionPage() {
             })),
         ),
       );
-    } catch {
+    } catch (error) {
+      toast.add({
+        title: extractError(error, "Unable to load products."),
+        type: "error",
+      });
       setOptions([]);
     }
     try {
