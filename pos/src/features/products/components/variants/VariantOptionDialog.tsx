@@ -46,31 +46,40 @@ export function VariantOptionDialog({
   });
 
   useEffect(() => {
-    const nextValue = option ? [option.value] : [];
+    // Reset when the dialog OPENS (or the edited option changes) — not on
+    // every parent re-render, which used to wipe chips mid-typing.
+    if (!open) return;
     form.reset({
-      variantOptionName: nextValue,
+      variantOptionName: option ? [option.value] : [],
       variantTypeId: activeVariant.typeId,
     });
     setOptionInput(option?.value ?? "");
-  }, [activeVariant, option, form]);
+    setInputError(null);
+  }, [open, option, activeVariant.typeId, form]);
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen);
     if (!nextOpen) {
       form.reset();
       setOptionInput(option?.value ?? "");
+      setInputError(null);
     }
   }
 
   async function onSubmit(data: VariantOptionSchemaType) {
     const isEditing = Boolean(option);
+    const values = data.variantOptionName ?? [];
+    if (values.length === 0) {
+      setInputError("Please add at least one variant option");
+      return;
+    }
     await createEntityPromiseToast({
       data,
       apiCall: isEditing
-        ? () => updateVariantOption(option!.optionId, data.variantOptionName[0])
+        ? () => updateVariantOption(option!.optionId, values[0]!)
         : createVariantOption,
       entityName: "Variant Option",
-      displayName: data.variantOptionName.join(", "),
+      displayName: values.join(", "),
     });
     form.reset();
     setOptionInput("");
@@ -82,19 +91,40 @@ export function VariantOptionDialog({
   const errors = form.formState.errors.variantOptionName;
 
   const handleAddOption = () => {
-    if (!optionInput.trim()) {
+    const pending = optionInput.trim();
+    if (pending === "") {
       setInputError("Option name cannot be empty");
       return;
     }
+    if (option) {
+      // Edit mode: the typed text replaces the single option's value.
+      form.setValue("variantOptionName", [pending], { shouldValidate: true });
+      setOptionInput("");
+      return;
+    }
+    const current = form.getValues("variantOptionName") ?? [];
+    if (
+      current.some((existing) => existing.toLowerCase() === pending.toLowerCase())
+    ) {
+      setInputError("That option is already in the list");
+      return;
+    }
+    // APPEND — the whole point: several options accumulate, one submit
+    // creates them all (the API accepts the array).
     setInputError(null);
-    form.setValue("variantOptionName", [optionInput.trim()], {
+    form.setValue("variantOptionName", [...current, pending], {
       shouldValidate: true,
     });
     setOptionInput("");
   };
 
-  const handleRemoveOption = () => {
-    form.setValue("variantOptionName", [], { shouldValidate: true });
+  const handleRemoveOption = (index: number) => {
+    const current = form.getValues("variantOptionName") ?? [];
+    form.setValue(
+      "variantOptionName",
+      current.filter((_, i) => i !== index),
+      { shouldValidate: true },
+    );
   };
 
   return (
@@ -134,7 +164,8 @@ export function VariantOptionDialog({
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => handleRemoveOption()}
+                    onClick={() => handleRemoveOption(index)}
+                    aria-label={`Remove ${value}`}
                   >
                     <Trash2 className="size-4 text-destructive" />
                   </Button>
@@ -174,8 +205,28 @@ export function VariantOptionDialog({
             <DialogClose render={<Button variant="outline">Cancel</Button>} />
             <Button
               disabled={isSubmitting}
-              form={option ? `edit-option-${option.optionId}` : "option-form"}
-              type="submit"
+              type="button"
+              onClick={() => {
+                // Flush the input BEFORE validation — Save must include what
+                // the user typed even when they never pressed Enter.
+                const pending = optionInput.trim();
+                if (pending !== "") {
+                  const current = form.getValues("variantOptionName") ?? [];
+                  const next = option
+                    ? [pending]
+                    : current.some(
+                          (existing) =>
+                            existing.toLowerCase() === pending.toLowerCase(),
+                        )
+                      ? current
+                      : [...current, pending];
+                  form.setValue("variantOptionName", next, {
+                    shouldValidate: true,
+                  });
+                  setOptionInput("");
+                }
+                form.handleSubmit(onSubmit)();
+              }}
             >
               {isSubmitting ? (
                 <>
