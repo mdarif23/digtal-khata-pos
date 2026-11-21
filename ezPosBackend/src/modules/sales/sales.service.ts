@@ -527,14 +527,24 @@ export async function consumeStockFifo(
   //    other batches (D9) — the message names the batch so the cashier can
   //    re-pick.
   if (remaining > 0 && !opts.allowShortfall) {
+    // Name-aware failure: "variant 31" forces the cashier to guess which
+    // product the error is about — resolve the product name + SKU instead.
+    const [info] = await tx
+      .select({ name: products.name, sku: productVariants.sku })
+      .from(productVariants)
+      .innerJoin(products, eq(products.id, productVariants.productId))
+      .where(eq(productVariants.id, variantId));
+    const label = info
+      ? `${info.name}${info.sku ? ` (${info.sku})` : ""}`
+      : `variant #${variantId}`;
     if (manualBatchId) {
       const batchNumber = batches[0]?.batchNumber ?? `#${manualBatchId}`;
       throw new ConflictError(
-        `Batch ${batchNumber} has ${quantity - remaining} of the ${quantity} unit(s) requested for variant ${variantId}.`,
+        `Batch ${batchNumber} has ${quantity - remaining} of the ${quantity} unit(s) requested for ${label}.`,
       );
     }
     throw new ConflictError(
-      `Insufficient stock for variant ${variantId}: short by ${remaining}`,
+      `Insufficient stock for ${label}: short by ${remaining}`,
     );
   }
 

@@ -14,6 +14,8 @@ interface BomComponent {
   componentSku: string | null;
   quantity: number;
   wastePercent: number;
+  /** bom_components has no FK — the variant behind this row was deleted. */
+  missing?: boolean;
 }
 
 interface BomResponse {
@@ -72,16 +74,29 @@ export function ProductionPage() {
           : ((body as { data?: unknown[] })?.data ?? [])
       ) as {
         name: string;
-        variants: { id: number; sku: string | null }[];
+        variants: {
+          id: number;
+          sku: string | null;
+          options?: { typeName: string; value: string }[] | null;
+        }[];
       }[];
       setOptions(
         products.flatMap((product) =>
           (product.variants ?? [])
             .filter((v) => v.id !== undefined)
-            .map((v) => ({
-              id: v.id!,
-              label: `${product.name}${v.sku ? ` · ${v.sku}` : ""}`,
-            })),
+            .map((v) => {
+              // Variants of one product differ only by their options — a
+              // bare "Product · SKU" label made them indistinguishable.
+              const optionText = (v.options ?? [])
+                .map((option) => option.value)
+                .join(" / ");
+              return {
+                id: v.id!,
+                label: `${product.name}${optionText ? ` (${optionText})` : ""}${
+                  v.sku ? ` · ${v.sku}` : ""
+                }`,
+              };
+            }),
         ),
       );
     } catch (error) {
@@ -115,7 +130,25 @@ export function ProductionPage() {
       const res = await api.get<{ success: boolean; data: BomResponse }>(
         `/variants/${variantId}/bom`,
       );
-      setBom(res.data.data);
+      const data = res.data.data;
+      // Orphan guard: components whose variant was deleted arrive flagged —
+      // strip them with an explanation instead of silently hiding the row
+      // (the old INNER JOIN) or failing the save with a raw variant id.
+      const missingCount = data.components.filter(
+        (component) => component.missing,
+      ).length;
+      if (missingCount > 0) {
+        data.components = data.components.filter(
+          (component) => !component.missing,
+        );
+        toast.add({
+          title: `${missingCount} component${
+            missingCount === 1 ? "" : "s"
+          } referenced a deleted variant and was removed — press "Save BOM" to clean the recipe.`,
+          type: "info",
+        });
+      }
+      setBom(data);
     } catch (error) {
       toast.add({ title: extractError(error, "Unable to load the BOM."), type: "error" });
       setBom(null);
