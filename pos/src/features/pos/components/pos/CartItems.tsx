@@ -651,14 +651,19 @@ function CartItemRow({ item }: { item: CartItem }) {
       if (result.reason === "below-one-package") {
         // "Make this line that unit": the cashier picking Box on a sub-
         // package line means "sell a box" — re-ring THE SAME LINE as 1 of
-        // the picked unit (no second line). The old unit's base amount is
-        // released to stock and the new unit's is reserved; a line discount
-        // / price override belonged to the old unit's line and is cleared.
+        // the picked unit (no second line). A line discount / price
+        // override belonged to the old unit's line and is cleared.
+        // ORDER MATTERS: release THIS line's reservation FIRST — the pool
+        // only holds free stock, not what the line already took (12 in
+        // stock, 1 Pcs reserved: taking 12 before releasing 1 fails even
+        // though the switch frees exactly enough). If the new unit still
+        // doesn't fit, restore the old reservation and leave the line as is.
+        returnVariantStock(variantId, quantity * conversionFactor);
         if (!tryTakeVariantStock(variantId, unit.conversionFactor)) {
+          takeVariantStock(variantId, quantity * conversionFactor);
           showStockError();
           return;
         }
-        returnVariantStock(variantId, quantity * conversionFactor);
         replaceLineUnit(variantId, lineUnit, unit);
         toast.add({
           type: "info",
