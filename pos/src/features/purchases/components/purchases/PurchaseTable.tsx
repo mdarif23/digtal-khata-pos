@@ -33,15 +33,15 @@ export function PurchaseTable({
 }) {
   return (
     <div className="max-w-full overflow-x-auto">
-      <table className="w-full min-w-[790px] text-left text-sm">
+      <table className="w-full min-w-[600px] text-left text-sm">
         <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
           <tr>
-            <th className="px-3 py-3 font-medium">Product</th>
-            <th className="w-28 px-2 py-3 font-medium">Unit</th>
-            <th className="w-24 px-2 py-3 font-medium">Qty</th>
-            <th className="w-28 px-2 py-3 font-medium">Unit cost</th>
-            <th className="w-24 px-2 py-3 font-medium">Discount</th>
-            <th className="w-24 px-2 py-3 font-medium">Tax</th>
+            <th className="px-2 py-2 font-medium">Product</th>
+            <th className="w-24 px-2 py-2 font-medium">Unit</th>
+            <th className="w-20 px-2 py-2 font-medium">Qty</th>
+            <th className="w-24 px-2 py-2 font-medium">Unit cost</th>
+            <th className="w-20 px-2 py-2 font-medium">Discount</th>
+            <th className="w-20 px-2 py-2 font-medium">Tax</th>
             <th className="px-2 py-3 text-right font-medium">Total</th>
             <th className="w-12 px-2 py-3" aria-label="Actions" />
           </tr>
@@ -93,7 +93,7 @@ export function PurchaseTable({
                         Number(event.target.value) || 0,
                       )
                     }
-                    className="h-8 px-2"
+                    className="h-7 px-1.5"
                   />
                   <ConversionHintLine item={item} />
                 </td>
@@ -111,7 +111,7 @@ export function PurchaseTable({
                         Number(event.target.value) || 0,
                       )
                     }
-                    className="h-8 px-2"
+                    className="h-7 px-1.5"
                   />
                 </td>
                 <td className="px-2 py-2">
@@ -128,7 +128,7 @@ export function PurchaseTable({
                         Number(event.target.value) || 0,
                       )
                     }
-                    className="h-8 px-2"
+                    className="h-7 px-1.5"
                   />
                 </td>
                 <td className="px-2 py-2">
@@ -145,10 +145,10 @@ export function PurchaseTable({
                         Number(event.target.value) || 0,
                       )
                     }
-                    className="h-8 px-2"
+                    className="h-7 px-1.5"
                   />
                 </td>
-                <td className="whitespace-nowrap px-2 py-3 text-right font-medium">
+                <td className="whitespace-nowrap px-2 py-2 text-right font-medium">
                   {formatCurrency(lineTotal)}
                 </td>
                 <td className="px-2 py-2">
