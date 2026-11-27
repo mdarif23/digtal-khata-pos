@@ -6,6 +6,7 @@ import {
   customerGroups,
   pricingPromotions,
   promotionBundleComponents,
+  promotionCampaigns,
   promotionCustomerGroups,
   promotionUsage,
 } from "../../db/schema/pricing.js";
@@ -106,6 +107,8 @@ interface PromoRow {
   usageLimit: number | null;
   perCustomerLimit: number | null;
   priority: number;
+  /** Owning campaign (Phase 4) — gates application and breaks priority ties. */
+  campaignId: number | null;
 }
 
 interface EvalItem {
@@ -286,6 +289,53 @@ export async function evaluateSalePromotions(
 
   const nearMisses: PromotionNearMiss[] = [];
 
+  // Campaign gating + tie-break (Phase 4): one query for the campaigns the
+  // rows reference.
+  const campaignsByPromo = new Map<
+    number,
+    {
+      isActive: boolean;
+      startsAt: Date | null;
+      endsAt: Date | null;
+      locationId: number | null;
+      priority: number;
+    }
+  >();
+  const rowCampaignIds = [
+    ...new Set(
+      rows
+        .map((r) => r.campaignId)
+        .filter((id): id is number => typeof id === "number"),
+    ),
+  ];
+  if (rowCampaignIds.length > 0) {
+    const campaignRows = await dbe
+      .select({
+        id: promotionCampaigns.id,
+        isActive: promotionCampaigns.isActive,
+        startsAt: promotionCampaigns.startsAt,
+        endsAt: promotionCampaigns.endsAt,
+        locationId: promotionCampaigns.locationId,
+        priority: promotionCampaigns.priority,
+      })
+      .from(promotionCampaigns)
+      .where(
+        and(
+          eq(promotionCampaigns.businessId, businessId),
+          inArray(promotionCampaigns.id, rowCampaignIds),
+        ),
+      );
+    for (const c of campaignRows) {
+      campaignsByPromo.set(c.id, {
+        isActive: c.isActive,
+        startsAt: c.startsAt,
+        endsAt: c.endsAt,
+        locationId: c.locationId ?? null,
+        priority: c.priority ?? 0,
+      });
+    }
+  }
+
   const eligible = rows
     .map(
       (row): PromoRow => ({
@@ -325,9 +375,25 @@ export async function evaluateSalePromotions(
         usageLimit: row.usageLimit ?? null,
         perCustomerLimit: row.perCustomerLimit ?? null,
         priority: row.priority ?? 0,
+        campaignId: row.campaignId ?? null,
       }),
     )
     .filter((row) => {
+      // Campaign gating (Phase 4): a promotion attached to an inactive,
+      // out-of-window or out-of-location campaign does not apply — the
+      // campaign organizes (and gates) its rules.
+      if (row.campaignId != null) {
+        const campaign = campaignsByPromo.get(row.campaignId);
+        if (
+          !campaign ||
+          !campaign.isActive ||
+          (campaign.startsAt && campaign.startsAt > now) ||
+          (campaign.endsAt && campaign.endsAt < now) ||
+          (campaign.locationId != null && campaign.locationId !== context.locationId)
+        ) {
+          return false; // campaign-dead — not a near miss worth showing
+        }
+      }
       // Server-side window + minimums (min order measured POST-group).
       if (row.startsAt && row.startsAt > now) {
         nearMisses.push({ id: row.id, name: row.name, reason: "Starts later" });
@@ -406,8 +472,16 @@ export async function evaluateSalePromotions(
       }
       return true;
     })
-    // Deterministic, priority-aware application order.
-    .sort((a, b) => b.priority - a.priority || a.id - b.id);
+    // Deterministic, priority-aware application order. Campaign priority
+    // (Phase 4) breaks ties between same-priority promotions; id settles
+    // what is left.
+    .sort(
+      (a, b) =>
+        b.priority - a.priority ||
+        (campaignsByPromo.get(b.campaignId ?? -1)?.priority ?? 0) -
+          (campaignsByPromo.get(a.campaignId ?? -1)?.priority ?? 0) ||
+        a.id - b.id,
+    );
   if (eligible.length === 0) {
     return { ...NONE, nearMisses };
   }

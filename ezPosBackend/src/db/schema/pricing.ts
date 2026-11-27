@@ -343,6 +343,48 @@ export const customerGroupPricing = pgTable(
 // createSale (the coupons engine pattern).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// promotion_campaigns (Bundle & Combo Phase 4, migration 0098): seasonal
+// groupings that GATE their promotions (an inactive/expired/out-of-location
+// campaign suppresses every promotion attached to it) and break priority
+// ties between same-priority promotions. Campaigns organize rules; they
+// never duplicate pricing logic.
+// ---------------------------------------------------------------------------
+
+export const promotionCampaigns = pgTable(
+  "promotion_campaigns",
+  {
+    id: serial().primaryKey().notNull(),
+    businessId: integer("business_id")
+      .notNull()
+      .references(() => businesses.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    description: text(),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    /** Tie-breaker between promotions of equal priority (higher first). */
+    priority: integer("priority").notNull().default(0),
+    /** NULL = every location of the business. */
+    locationId: integer("location_id"),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    check(
+      "campaign_dates_check",
+      sql`${t.startsAt} IS NULL OR ${t.endsAt} IS NULL OR ${t.startsAt} <= ${t.endsAt}`,
+    ),
+    unique("promotion_campaigns_business_name_unique").on(t.businessId, t.name),
+    uniqueIndex("promotion_campaigns_id_business_uq").on(t.id, t.businessId),
+    index("promotion_campaigns_business_idx").on(t.businessId),
+  ],
+);
+
 export const pricingPromotions = pgTable(
   "pricing_promotions",
   {
@@ -397,6 +439,10 @@ export const pricingPromotions = pgTable(
     perCustomerLimit: integer("per_customer_limit"),
     /** Higher priority applies first when several promotions match. */
     priority: integer("priority").notNull().default(0),
+    // ---- Phase 4 (campaigns): plain FK with SET NULL — a composite FK
+    // would also NULL business_id on campaign deletion (see
+    // price_change_proposals.ruleId for the precedent). ----
+    campaignId: integer("campaign_id"),
     isActive: boolean("is_active").default(true).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -440,6 +486,11 @@ export const pricingPromotions = pgTable(
       foreignColumns: [productVariants.id, productVariants.businessId],
       name: "promo_variant_business_fkey",
     }).onDelete("cascade"),
+    foreignKey({
+      columns: [t.campaignId],
+      foreignColumns: [promotionCampaigns.id],
+      name: "pricing_promotions_campaign_fkey",
+    }).onDelete("set null"),
   ],
 );
 

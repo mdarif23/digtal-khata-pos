@@ -7,6 +7,7 @@ import {
   customerGroups,
   pricingPromotions,
   promotionBundleComponents,
+  promotionCampaigns,
   promotionCustomerGroups,
   promotionUsage,
 } from "../../db/schema/pricing.js";
@@ -77,6 +78,24 @@ async function assertGroupsOwnership(businessId: number, groupIds: number[]): Pr
   if (owned.length !== unique.length) {
     throw new NotFoundError("One or more customer groups do not exist in this business.");
   }
+}
+
+async function assertCampaignOwnership(
+  businessId: number,
+  campaignId: number | null | undefined,
+): Promise<void> {
+  if (campaignId == null) return;
+  const [owned] = await db
+    .select({ id: promotionCampaigns.id })
+    .from(promotionCampaigns)
+    .where(
+      and(
+        eq(promotionCampaigns.id, campaignId),
+        eq(promotionCampaigns.businessId, businessId),
+      ),
+    )
+    .limit(1);
+  if (!owned) throw new NotFoundError("Campaign does not exist in this business.");
 }
 
 async function replaceGroupEligibility(
@@ -270,6 +289,7 @@ export async function listPromotions(businessId: number) {
       categoryName: categories.name,
       productName: products.name,
       sku: productVariants.sku,
+      campaignName: promotionCampaigns.name,
     })
     .from(pricingPromotions)
     .leftJoin(
@@ -291,6 +311,13 @@ export async function listPromotions(businessId: number) {
       and(
         eq(productVariants.id, pricingPromotions.variantId),
         eq(productVariants.businessId, pricingPromotions.businessId),
+      ),
+    )
+    .leftJoin(
+      promotionCampaigns,
+      and(
+        eq(promotionCampaigns.id, pricingPromotions.campaignId),
+        eq(promotionCampaigns.businessId, pricingPromotions.businessId),
       ),
     )
     .where(eq(pricingPromotions.businessId, businessId))
@@ -329,7 +356,7 @@ export async function listPromotions(businessId: number) {
     businessId,
     rows.map((r) => r.promotion.id),
   );
-  return rows.map(({ promotion, categoryName, productName, sku }) => {
+  return rows.map(({ promotion, categoryName, productName, sku, campaignName }) => {
     const components = componentsByPromo.get(promotion.id) ?? [];
     return {
       ...promotion,
@@ -340,6 +367,7 @@ export async function listPromotions(businessId: number) {
           ? null
           : Number(promotion.maxDiscountAmount),
       scopeLabel: scopeLabelOf({ ...promotion, categoryName, productName, sku }),
+      campaignName: campaignName ?? null,
       customerGroups: groupsByPromo.get(promotion.id) ?? [],
       components,
       ...(components.length > 0
@@ -409,6 +437,7 @@ export async function createPromotion(
     isActive?: boolean | undefined;
     groupIds?: number[] | undefined;
     components?: ComponentInput[] | undefined;
+    campaignId?: number | null | undefined;
   },
 ) {
   const scope = {
@@ -429,6 +458,7 @@ export async function createPromotion(
   await assertScopeOwnership(businessId, scope);
   const groupIds = payload.groupIds ?? [];
   await assertGroupsOwnership(businessId, groupIds);
+  await assertCampaignOwnership(businessId, payload.campaignId);
   const discountType = isRewardTargetKind
     ? ("fixed" as const)
     : payload.discountType;
@@ -460,6 +490,7 @@ export async function createPromotion(
       usageLimit: (payload.usageLimit as number | null | undefined) ?? null,
       perCustomerLimit: (payload.perCustomerLimit as number | null | undefined) ?? null,
       priority: (payload.priority as number | undefined) ?? 0,
+      campaignId: (payload.campaignId as number | null | undefined) ?? null,
       isActive: payload.isActive ?? true,
     })
     .returning();
@@ -582,6 +613,10 @@ export async function updatePromotion(
         ? (payload.perCustomerLimit as number | null)
         : (existing.perCustomerLimit ?? null),
     priority: (payload.priority as number | undefined) ?? existing.priority ?? 0,
+    campaignId:
+      payload.campaignId !== undefined
+        ? (payload.campaignId as number | null)
+        : (existing.campaignId ?? null),
     isActive: (payload.isActive as boolean | undefined) ?? existing.isActive,
   };
   // Rule-target kinds carry their price in `rule`; normalize the vestigial
@@ -637,6 +672,7 @@ export async function updatePromotion(
       usageLimit: merged.usageLimit,
       perCustomerLimit: merged.perCustomerLimit,
       priority: merged.priority,
+      campaignId: merged.campaignId,
       isActive: merged.isActive,
       updatedAt: new Date(),
     })
@@ -708,9 +744,24 @@ export async function getPromotion(businessId: number, promotionId: number) {
   const groupIds = await loadGroupEligibility(businessId, promotionId);
   const components = await loadComponents(businessId, [promotionId]);
   const componentList = components.get(promotionId) ?? [];
+  let campaignName: string | null = null;
+  if (row.promotion.campaignId != null) {
+    const [campaign] = await db
+      .select({ name: promotionCampaigns.name })
+      .from(promotionCampaigns)
+      .where(
+        and(
+          eq(promotionCampaigns.id, row.promotion.campaignId),
+          eq(promotionCampaigns.businessId, businessId),
+        ),
+      )
+      .limit(1);
+    campaignName = campaign?.name ?? null;
+  }
   return {
     ...row.promotion,
     customerGroups: groupIds.map((id) => ({ id })),
+    campaignName,
     components: componentList,
     ...(componentList.length > 0
       ? { componentTotal: componentTotalOf(componentList) }
@@ -746,11 +797,66 @@ export async function listActiveBundlePromotions(
 
   const now = new Date();
   const dhaka = dhakaNow(now);
+  // Campaign gating (Phase 4): bundles in inactive/expired/out-of-location
+  // campaigns are not advertised.
+  const bundleCampaignIds = [
+    ...new Set(
+      rows
+        .map((r) => r.campaignId)
+        .filter((id): id is number => typeof id === "number"),
+    ),
+  ];
+  const campaignsById = new Map<
+    number,
+    {
+      isActive: boolean;
+      startsAt: Date | null;
+      endsAt: Date | null;
+      locationId: number | null;
+    }
+  >();
+  if (bundleCampaignIds.length > 0) {
+    const campaignRows = await db
+      .select({
+        id: promotionCampaigns.id,
+        isActive: promotionCampaigns.isActive,
+        startsAt: promotionCampaigns.startsAt,
+        endsAt: promotionCampaigns.endsAt,
+        locationId: promotionCampaigns.locationId,
+      })
+      .from(promotionCampaigns)
+      .where(
+        and(
+          eq(promotionCampaigns.businessId, businessId),
+          inArray(promotionCampaigns.id, bundleCampaignIds),
+        ),
+      );
+    for (const c of campaignRows) {
+      campaignsById.set(c.id, {
+        isActive: c.isActive,
+        startsAt: c.startsAt,
+        endsAt: c.endsAt,
+        locationId: c.locationId ?? null,
+      });
+    }
+  }
   const candidateIds: number[] = [];
   for (const row of rows) {
     if (row.startsAt && row.startsAt > now) continue;
     if (row.endsAt && row.endsAt < now) continue;
     if (row.locationId != null && row.locationId !== locationId) continue;
+    if (row.campaignId != null) {
+      const campaign = campaignsById.get(row.campaignId);
+      if (
+        !campaign ||
+        !campaign.isActive ||
+        (campaign.startsAt && campaign.startsAt > now) ||
+        (campaign.endsAt && campaign.endsAt < now) ||
+        (campaign.locationId != null && campaign.locationId !== locationId)
+      ) {
+        continue;
+      }
+    }
     if (
       row.daysOfWeek != null &&
       Array.isArray(row.daysOfWeek) &&

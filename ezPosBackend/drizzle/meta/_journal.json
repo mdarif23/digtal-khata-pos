@@ -685,6 +685,13 @@
       "when": 1795996800000,
       "tag": "0097_promotion_spend_get_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1796083200000,
+      "tag": "0098_promotion_campaigns",
+      "breakpoints": true
     }
   ]
 }

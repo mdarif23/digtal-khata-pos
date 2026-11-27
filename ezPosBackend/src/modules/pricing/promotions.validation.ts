@@ -250,6 +250,8 @@ export const promotionCreateSchema = z
     perCustomerLimit: z.number().int().min(1).nullable().optional(),
     priority: z.number().int().min(0).max(1000).optional(),
     isActive: z.boolean().optional(),
+    /** Phase 4 campaigns: attach the promotion to a business campaign. */
+    campaignId: z.coerce.number().int().positive().nullable().optional(),
     /** Group eligibility: absent/empty = every customer (incl. walk-ins). */
     groupIds: z.array(z.coerce.number().int().positive()).max(100).optional(),
     /** Bundle components (bundle kind only): the exact package contents. */
@@ -306,6 +308,8 @@ export const promotionUpdateSchema = z
     perCustomerLimit: z.number().int().min(1).nullable().optional(),
     priority: z.number().int().min(0).max(1000).optional(),
     isActive: z.boolean().optional(),
+    /** Phase 4 campaigns: present (even null) = set/clear the campaign. */
+    campaignId: z.coerce.number().int().positive().nullable().optional(),
     /** Present (even empty) = replace the eligibility list. */
     groupIds: z.array(z.coerce.number().int().positive()).max(100).optional(),
     /** Present (bundle kind) = replace the component list wholesale. */

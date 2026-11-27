@@ -153,6 +153,30 @@ export interface PromotionComponent {
   sellingPrice: number;
 }
 
+/** A promotional campaign (Bundle & Combo Phase 4): gates its promotions
+ * and breaks priority ties between same-priority promotions. */
+export interface Campaign {
+  id: number;
+  name: string;
+  description: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  priority: number;
+  locationId: number | null;
+  isActive: boolean;
+  promotionCount: number;
+}
+
+export interface CampaignInput {
+  name: string;
+  description?: string | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  priority?: number;
+  locationId?: number | null;
+  isActive?: boolean;
+}
+
 export interface Promotion {
   id: number;
   name: string;
@@ -180,6 +204,9 @@ export interface Promotion {
   usageLimit: number | null;
   perCustomerLimit: number | null;
   priority: number;
+  /** Phase 4: the campaign this promotion belongs to (null = standalone). */
+  campaignId: number | null;
+  campaignName?: string | null;
   scopeLabel: string;
   customerGroups: { id: number; name: string }[];
   /** Bundle components (bundle kind; empty for other kinds). */
@@ -213,6 +240,8 @@ export interface PromotionInput {
   usageLimit?: number | null;
   perCustomerLimit?: number | null;
   priority?: number;
+  /** Phase 4: attach the promotion to a campaign (null = standalone). */
+  campaignId?: number | null;
   /** Bundle kind only: the exact package contents. */
   components?: { variantId: number; quantity: number }[];
 }

@@ -223,6 +223,7 @@ export const navigation: NavItem[] = [
       { title: "Pricing Rules", url: "/pricing/rules", permission: "pricing.view" },
       { title: "Customer Groups", url: "/pricing/customer-groups", permission: "pricing.view" },
       { title: "Promotions", url: "/pricing/promotions", permission: "promotions.view" },
+      { title: "Campaigns", url: "/pricing/campaigns", permission: "promotions.view" },
       { title: "Price History", url: "/pricing/history", permission: "pricing.history.view" },
       { title: "Proposals", url: "/pricing/proposals", permission: "pricing.history.view" },
       { title: "Bulk Update", url: "/pricing/bulk", permission: "pricing.bulk_update" },

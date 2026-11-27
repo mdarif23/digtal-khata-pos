@@ -82,6 +82,9 @@ const CustomerGroupsPage = lazy(() =>
 const PromotionsPage = lazy(() =>
   import("@/features/pricing/pages/PromotionsPage").then((m2) => ({ default: m2.PromotionsPage })),
 );
+const CampaignsPage = lazy(() =>
+  import("@/features/pricing/pages/CampaignsPage").then((m2) => ({ default: m2.CampaignsPage })),
+);
 const PriceHistoryPage = lazy(() =>
   import("@/features/pricing/pages/PriceHistoryPage").then((m2) => ({ default: m2.PriceHistoryPage })),
 );
@@ -743,6 +746,14 @@ const routes = [
         element: (
           <RequirePermission permission="promotions.view">
             <PromotionsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "/pricing/campaigns",
+        element: (
+          <RequirePermission permission="promotions.view">
+            <CampaignsPage />
           </RequirePermission>
         ),
       },

@@ -41,6 +41,7 @@ import {
 } from "../bundleForm";
 import { useProductsQuery } from "@/features/products/hooks/useProducts";
 import {
+  useCampaigns,
   useCreatePromotion,
   useDeletePromotion,
   usePromotions,
@@ -59,6 +60,8 @@ export function PromotionsPage() {
   const products = useProductsQuery().data ?? [];
   const canManage = hasPermission("promotions.manage");
   const promotionsQuery = usePromotions();
+  const campaignsQuery = useCampaigns();
+  const campaigns = campaignsQuery.data ?? [];
   const createPromotion = useCreatePromotion();
   const updatePromotion = useUpdatePromotion();
   const deletePromotion = useDeletePromotion();
@@ -110,6 +113,7 @@ export function PromotionsPage() {
   const [usageLimit, setUsageLimit] = useState("");
   const [perCustomerLimit, setPerCustomerLimit] = useState("");
   const [priority, setPriority] = useState("0");
+  const [campaignId, setCampaignId] = useState("");
   const [isActive, setIsActive] = useState(true);
 
   async function openCreate() {
@@ -210,6 +214,7 @@ export function PromotionsPage() {
       promo.perCustomerLimit != null ? String(promo.perCustomerLimit) : "",
     );
     setPriority(String(promo.priority ?? 0));
+    setCampaignId(promo.campaignId != null ? String(promo.campaignId) : "");
     setDialogOpen(true);
   }
 
@@ -248,6 +253,7 @@ export function PromotionsPage() {
     setUsageLimit("");
     setPerCustomerLimit("");
     setPriority("0");
+    setCampaignId("");
   }
 
   async function save() {
@@ -410,6 +416,7 @@ export function PromotionsPage() {
       usageLimit: usageLimit === "" ? null : Number(usageLimit),
       perCustomerLimit: perCustomerLimit === "" ? null : Number(perCustomerLimit),
       priority: Number(priority) || 0,
+      campaignId: campaignId === "" ? null : Number(campaignId),
       isActive,
     };
     try {
@@ -508,7 +515,14 @@ export function PromotionsPage() {
                   ) : (
                     rows.map((promo) => (
                       <TableRow key={promo.id}>
-                        <TableCell className="font-medium">{promo.name}</TableCell>
+                        <TableCell className="font-medium">
+                          {promo.name}
+                          {promo.campaignName && (
+                            <Badge variant="outline" className="ml-1.5 font-normal">
+                              {promo.campaignName}
+                            </Badge>
+                          )}
+                        </TableCell>
                         <TableCell className="text-muted-foreground">{promo.scopeLabel}</TableCell>
                         <TableCell className="text-right font-mono tabular-nums">
                           {promo.promoKind === "bundle" ? (
@@ -1054,6 +1068,25 @@ export function PromotionsPage() {
                 </div>
               </div>
             ) : null}
+            <div className="grid gap-1.5">
+              <span className="text-sm font-medium">Campaign</span>
+              <select
+                className="rounded-md border bg-background p-2 text-sm"
+                value={campaignId}
+                onChange={(e) => setCampaignId(e.target.value)}
+              >
+                <option value="">No campaign (standalone)</option>
+                {campaigns.map((c) => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.name}
+                    {c.isActive ? "" : " (inactive)"}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-muted-foreground">
+                An inactive or expired campaign suppresses this promotion.
+              </span>
+            </div>
             <div className="grid gap-1.5 rounded-md border border-dashed p-2">
               <span className="text-xs font-medium text-muted-foreground">
                 Flash window (Asia/Dhaka time)

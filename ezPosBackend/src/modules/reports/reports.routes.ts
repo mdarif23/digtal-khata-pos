@@ -248,3 +248,10 @@ router.get(
   requireFeature("advancedReports"),
   reportsController.getPromotionPerformance,
 );
+router.get(
+  "/api/reports/pricing/campaign-performance",
+  ...read,
+  requirePermission("promotions.view"),
+  requireFeature("advancedReports"),
+  reportsController.getCampaignPerformance,
+);

@@ -833,6 +833,158 @@ describe("bundle promotions (phase 1)", { skip: !runIntegration }, () => {
     await deactivateAllPromotions();
   });
 
+  // --- Campaigns (Phase 4) -------------------------------------------------------
+
+  it("campaigns: CRUD, ownership, and attached-promotion counts", async () => {
+    await deactivateAllPromotions();
+    const created = await api(owner, "POST", "/api/campaigns", {
+      name: `Eid ${stamp}`,
+      description: "seasonal",
+      priority: 10,
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const campaignId = payload<{ data: { id: number } }>(created).data.id;
+
+    // Duplicate name per business is rejected (unique constraint → 500).
+    const dup = await api(owner, "POST", "/api/campaigns", { name: `Eid ${stamp}` });
+    assert.equal(dup.status, 500);
+
+    // Attach a promotion to the campaign; foreign campaigns are rejected.
+    const promo = await createBundle({ campaignId, name: `Eid Pack ${stamp}` });
+    const foreign = await api(owner, "POST", "/api/promotions", bundleInput({ campaignId: 999999999 }));
+    assert.equal(foreign.status, 404);
+
+    const listed = payload<{ data: { id: number; promotionCount: number; priority: number }[] }>(
+      await api(owner, "GET", "/api/campaigns"),
+    ).data;
+    const row = listed.find((c) => c.id === campaignId)!;
+    assert.ok(row, "campaign listed");
+    assert.equal(row.promotionCount, 1);
+    assert.equal(row.priority, 10);
+
+    const got = payload<{ data: { campaignId: number | null; campaignName: string | null } }>(
+      await api(owner, "GET", `/api/promotions/${promo}`),
+    ).data;
+    assert.equal(got.campaignId, campaignId);
+    assert.equal(got.campaignName, `Eid ${stamp}`);
+
+    await deactivateAllPromotions();
+  });
+
+  it("campaigns gate their promotions: inactive/expired campaign suppresses", async () => {
+    await deactivateAllPromotions();
+    const campaign = await api(owner, "POST", "/api/campaigns", {
+      name: `Gating ${stamp}`,
+      priority: 0,
+      isActive: true,
+    });
+    const campaignId = payload<{ data: { id: number } }>(campaign).data.id;
+    const promo = await createBundle({ campaignId });
+
+    const live = await quote(withCart());
+    assert.equal(live.promotionsTotal, 65);
+    assert.equal(live.finalTotal, 95);
+
+    // Deactivate the campaign → its promotion stops applying entirely.
+    await api(owner, "PATCH", `/api/campaigns/${campaignId}`, { isActive: false });
+    const gated = await quote(withCart());
+    assert.equal(gated.promotionsTotal, 0);
+    assert.equal(gated.nearMisses.length, 0);
+
+    // An expired campaign gates the same way.
+    await api(owner, "PATCH", `/api/campaigns/${campaignId}`, {
+      isActive: true,
+      endsAt: "2020-01-01",
+    });
+    const expired = await quote(withCart());
+    assert.equal(expired.promotionsTotal, 0);
+
+    // Deleting the campaign releases the promotion (campaign_id NULL).
+    await api(owner, "DELETE", `/api/campaigns/${campaignId}`);
+    const got = payload<{ data: { campaignId: number | null } }>(
+      await api(owner, "GET", `/api/promotions/${promo}`),
+    ).data;
+    assert.equal(got.campaignId, null);
+    await deactivateAllPromotions();
+  });
+
+  it("campaign priority breaks ties between same-priority promotions", async () => {
+    await deactivateAllPromotions();
+    const strong = await api(owner, "POST", "/api/campaigns", { name: `Strong ${stamp}`, priority: 100 });
+    const weak = await api(owner, "POST", "/api/campaigns", { name: `Weak ${stamp}`, priority: 1 });
+    const strongId = payload<{ data: { id: number } }>(strong).data.id;
+    const weakId = payload<{ data: { id: number } }>(weak).data.id;
+    await createPromotionRaw({
+      name: `Tie A ${stamp}`,
+      discountType: "fixed",
+      discountValue: 10,
+      promoKind: "discount",
+      priority: 0,
+      campaignId: strongId,
+    });
+    await createPromotionRaw({
+      name: `Tie B ${stamp}`,
+      discountType: "fixed",
+      discountValue: 10,
+      promoKind: "discount",
+      priority: 0,
+      campaignId: weakId,
+    });
+    const q = await quote([{ variantId: variantA, quantity: 1, unitPrice: 100, discount: null }]);
+    // Both apply; the strong campaign's promotion leads the applied list.
+    assert.equal(q.promotionsTotal, 20);
+    assert.equal(q.applied.length, 2);
+    assert.equal(q.applied[0]!.name, `Tie A ${stamp}`);
+    await deactivateAllPromotions();
+  });
+
+  it("active-bundles feed hides bundles in dead campaigns", async () => {
+    await deactivateAllPromotions();
+    const dead = await api(owner, "POST", "/api/campaigns", { name: `Dead ${stamp}`, isActive: false });
+    const deadId = payload<{ data: { id: number } }>(dead).data.id;
+    await createBundle({ name: `Campaigned ${stamp}`, campaignId: deadId });
+    const res = await api(owner, "GET", "/api/promotions/active-bundles");
+    assert.equal(payload<{ data: unknown[] }>(res).data.length, 0);
+    await deactivateAllPromotions();
+  });
+
+  it("campaign performance report rolls discounts up by campaign", async () => {
+    await deactivateAllPromotions();
+    const campaign = await api(owner, "POST", "/api/campaigns", { name: `Report ${stamp}` });
+    const campaignId = payload<{ data: { id: number } }>(campaign).data.id;
+    const id = await createPromotionRaw({
+      name: `Report Deal ${stamp}`,
+      discountType: "fixed",
+      discountValue: 20,
+      promoKind: "discount",
+      campaignId,
+    });
+    const sale = await api(owner, "POST", "/api/sales", {
+      saleDate: new Date().toISOString(),
+      customerId: null,
+      payments: [{ method: "cash", amount: 80, tendered: 80 }],
+      discount: null,
+      vatPercent: 0,
+      items: [{ variantId: variantA, quantity: 1, unitPrice: 100, discount: null }],
+    });
+    assert.equal(sale.status, 201, JSON.stringify(sale.body));
+    const saleId = payload<{ data: { sale: { id: number } } }>(sale).data.sale.id;
+
+    const report = await api(owner, "GET", "/api/reports/pricing/campaign-performance");
+    assert.equal(report.status, 200, JSON.stringify(report.body));
+    const rows = payload<{
+      data: { rows: { campaignId: number | null; campaignName: string; salesCount: number; totalDiscount: number }[] };
+    }>(report).data.rows;
+    const row = rows.find((r) => r.campaignId === campaignId)!;
+    assert.ok(row, "campaign row present");
+    assert.equal(row.campaignName, `Report ${stamp}`);
+    assert.equal(row.salesCount, 1);
+    assert.equal(row.totalDiscount, 20);
+
+    await api(owner, "POST", `/api/sales/${saleId}/cancel`, { reason: "campaign report cleanup" });
+    await deactivateAllPromotions();
+  });
+
   // --- Tenancy ----------------------------------------------------------------
 
   it("bundle promotions are isolated per tenant", async () => {
