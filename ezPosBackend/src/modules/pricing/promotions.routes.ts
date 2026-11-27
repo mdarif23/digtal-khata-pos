@@ -20,6 +20,15 @@ router.get(
   requirePermission("promotions.view"),
   promotionsController.listPromotions,
 );
+// POS-facing active bundles (Bundle & Combo Phase 2) — MUST precede
+// /api/promotions/:id. Gated pos.view (cashiers never hold promotions.view;
+// promotions are store configuration that applies by itself).
+router.get(
+  "/api/promotions/active-bundles",
+  ...read,
+  requirePermission("pos.view"),
+  promotionsController.listActiveBundlePromotions,
+);
 router.get(
   "/api/promotions/:id",
   ...read,

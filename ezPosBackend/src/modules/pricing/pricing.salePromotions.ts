@@ -115,7 +115,7 @@ interface EvalItem {
 }
 
 /** Asia/Dhaka wall-clock (fixed UTC+6, no DST) for flash windows. */
-function dhakaNow(now: Date): { dayOfWeek: number; hhmm: string } {
+export function dhakaNow(now: Date): { dayOfWeek: number; hhmm: string } {
   const shifted = new Date(now.getTime() + 6 * 3_600_000);
   const dayOfWeek = shifted.getUTCDay();
   const hh = String(shifted.getUTCHours()).padStart(2, "0");

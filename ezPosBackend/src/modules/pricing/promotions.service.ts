@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { categories } from "../../db/schema/categories.js";
 import { products } from "../../db/schema/products.js";
@@ -8,6 +8,7 @@ import {
   pricingPromotions,
   promotionBundleComponents,
   promotionCustomerGroups,
+  promotionUsage,
 } from "../../db/schema/pricing.js";
 import {
   BadRequestError,
@@ -18,6 +19,7 @@ import { getBusinessTimezone } from "../../services/ledger.js";
 import { businessLocalToUtcWall } from "../../utils/money.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 import { promotionStrictSchema } from "./promotions.validation.js";
+import { dhakaNow } from "./pricing.salePromotions.js";
 
 /**
  * Auto-applied promotions CRUD (Phase 5, approved design §13.6). Promotions
@@ -710,6 +712,108 @@ export async function getPromotion(businessId: number, promotionId: number) {
       ? { componentTotal: componentTotalOf(componentList) }
       : {}),
   };
+}
+
+/**
+ * POS-facing active bundles (Bundle & Combo Phase 2): the bundle-kind
+ * promotions that could apply RIGHT NOW, with their components so the POS
+ * can offer one-tap "add bundle" and complete-the-bundle actions. Gated
+ * pos.view (promotions are store configuration — cashiers never hold
+ * promotions.view). Mirrors the engine's window/location/usage filters
+ * (flash windows evaluated in Asia/Dhaka) so a card never advertises a
+ * bundle that cannot apply; cart-dependent conditions (minimums, group
+ * restrictions, stacking consent) stay the engine's job at quote time.
+ */
+export async function listActiveBundlePromotions(
+  businessId: number,
+  locationId: number | null,
+) {
+  const rows = await db
+    .select()
+    .from(pricingPromotions)
+    .where(
+      and(
+        eq(pricingPromotions.businessId, businessId),
+        eq(pricingPromotions.isActive, true),
+        eq(pricingPromotions.promoKind, "bundle"),
+      ),
+    );
+  if (rows.length === 0) return [];
+
+  const now = new Date();
+  const dhaka = dhakaNow(now);
+  const candidateIds: number[] = [];
+  for (const row of rows) {
+    if (row.startsAt && row.startsAt > now) continue;
+    if (row.endsAt && row.endsAt < now) continue;
+    if (row.locationId != null && row.locationId !== locationId) continue;
+    if (
+      row.daysOfWeek != null &&
+      Array.isArray(row.daysOfWeek) &&
+      row.daysOfWeek.length > 0 &&
+      !row.daysOfWeek.includes(dhaka.dayOfWeek)
+    ) {
+      continue;
+    }
+    if (row.startTime != null && row.endTime != null) {
+      const inWindow =
+        row.startTime <= row.endTime
+          ? dhaka.hhmm >= row.startTime && dhaka.hhmm <= row.endTime
+          : dhaka.hhmm >= row.startTime || dhaka.hhmm <= row.endTime; // overnight
+      if (!inWindow) continue;
+    }
+    candidateIds.push(row.id);
+  }
+  if (candidateIds.length === 0) return [];
+
+  // Fully redeemed bundles are not advertised (per-customer limits are
+  // cart/customer-dependent — the engine governs those at quote time).
+  const usageRows = await db
+    .select({
+      promotionId: promotionUsage.promotionId,
+      total: sql<string>`COUNT(*)`,
+    })
+    .from(promotionUsage)
+    .where(
+      and(
+        eq(promotionUsage.businessId, businessId),
+        inArray(promotionUsage.promotionId, candidateIds),
+      ),
+    )
+    .groupBy(promotionUsage.promotionId);
+  const usageTotals = new Map<number, number>();
+  for (const row of usageRows) usageTotals.set(row.promotionId, Number(row.total));
+
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const liveIds = candidateIds.filter((id) => {
+    const limit = byId.get(id)?.usageLimit;
+    return limit == null || (usageTotals.get(id) ?? 0) < limit;
+  });
+  if (liveIds.length === 0) return [];
+
+  const componentsByPromo = await loadComponents(businessId, liveIds);
+  const out: {
+    id: number;
+    name: string;
+    rule: Record<string, unknown> | null;
+    endsAt: Date | null;
+    components: PromotionComponent[];
+    normalTotal: number;
+  }[] = [];
+  for (const id of liveIds) {
+    const row = byId.get(id)!;
+    const components = componentsByPromo.get(id) ?? [];
+    if (components.length === 0) continue; // malformed config — never advertise
+    out.push({
+      id: row.id,
+      name: row.name,
+      rule: (row.rule ?? null) as Record<string, unknown> | null,
+      endsAt: row.endsAt,
+      components,
+      normalTotal: componentTotalOf(components),
+    });
+  }
+  return out;
 }
 
 export type { PromotionRow };

@@ -320,7 +320,9 @@ describe("bundle promotions (phase 1)", { skip: !runIntegration }, () => {
     }>(await api(owner, "GET", `/api/promotions/${id}`)).data;
     assert.equal(got.components.length, 2);
     assert.deepEqual(
-      got.components.map((c) => [c.variantId, c.quantity]).sort((x, y) => x[0] - y[0]),
+      got.components
+        .map((c) => [c.variantId, c.quantity])
+        .sort((x, y) => (x[0] ?? 0) - (y[0] ?? 0)),
       [
         [variantA, 1],
         [variantB, 2],
@@ -601,6 +603,72 @@ describe("bundle promotions (phase 1)", { skip: !runIntegration }, () => {
     );
     assert.equal(Number(restockB[0]!.quantity), Number(beforeB) - 1);
     await setActive(id, false);
+  });
+
+  // --- POS active-bundles feed (Phase 2) ---------------------------------------
+
+  it("active-bundles: lists live bundles with components; hides guarded ones", async () => {
+    await deactivateAllPromotions();
+    // Burn the limited bundle's single usage while it is the ONLY active
+    // promotion, so the burn sale totals exactly the bundle price.
+    const limited = await createBundle({ name: `Spent Pack ${stamp}`, usageLimit: 1 });
+    const burnSale = await api(owner, "POST", "/api/sales", {
+      saleDate: new Date().toISOString(),
+      customerId: null,
+      payments: [{ method: "cash", amount: 95, tendered: 95 }],
+      discount: null,
+      vatPercent: 0,
+      items: withCart(),
+    });
+    assert.equal(burnSale.status, 201, JSON.stringify(burnSale.body));
+    // Still active — but fully redeemed, so the feed must hide it.
+    const live = await createBundle({ name: `Live Pack ${stamp}` });
+    const expired = await createBundle({ name: `Expired Pack ${stamp}`, endsAt: "2020-01-01" });
+    const scoped = await createBundle({ name: `Scoped Pack ${stamp}`, locationId: locationId + 5000 });
+
+    const res = await api(owner, "GET", `/api/promotions/active-bundles?locationId=${locationId}`);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const bundles = payload<{
+      data: {
+        id: number;
+        name: string;
+        rule: Record<string, unknown> | null;
+        components: { variantId: number; quantity: number; sellingPrice: number }[];
+        normalTotal: number;
+      }[];
+    }>(res).data;
+    const ids = bundles.map((b) => b.id);
+    assert.ok(ids.includes(live), "live bundle must be advertised");
+    assert.ok(!ids.includes(expired), "expired bundle must be hidden");
+    assert.ok(!ids.includes(scoped), "other-location bundle must be hidden");
+    assert.ok(!ids.includes(limited), "fully redeemed bundle must be hidden");
+
+    const liveBundle = bundles.find((b) => b.id === live)!;
+    assert.equal(liveBundle.components.length, 2);
+    assert.equal(liveBundle.normalTotal, 160);
+    assert.equal(liveBundle.rule?.bundlePrice, 95);
+
+    await deactivateAllPromotions();
+    await api(owner, "POST", `/api/sales/${payload<{ data: { sale: { id: number } } }>(burnSale).data.sale.id}/cancel`, {
+      reason: "cleanup burn sale",
+    });
+  });
+
+  it("active-bundles: skips flash-window mismatches and malformed bundles", async () => {
+    await deactivateAllPromotions();
+    // A flash window far outside the current Asia/Dhaka day/time.
+    const currentDow = new Date(Date.now() + 6 * 3_600_000).getUTCDay();
+    const wrongDay = (currentDow + 1) % 7;
+    const wrongDayBundle = await createBundle({ name: `Wrong Day ${stamp}`, daysOfWeek: [wrongDay] });
+    const noComponents = await createBundle();
+    await dbQuery("DELETE FROM promotion_bundle_components WHERE promotion_id = $1", [noComponents]);
+
+    const res = await api(owner, "GET", "/api/promotions/active-bundles");
+    const ids = payload<{ data: { id: number }[] }>(res).data.map((b) => b.id);
+    assert.ok(!ids.includes(wrongDayBundle), "wrong-day flash bundle must be hidden");
+    assert.ok(!ids.includes(noComponents), "componentless bundle must never be advertised");
+
+    await deactivateAllPromotions();
   });
 
   // --- Tenancy ----------------------------------------------------------------
