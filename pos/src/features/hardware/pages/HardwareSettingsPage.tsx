@@ -5,12 +5,32 @@ import { toast } from "@/components/ui/toast";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { HardwareSettings } from "@/features/pos/components/receipt/HardwareSettings";
 import { TerminalCard } from "../components/TerminalCard";
 import { TerminalPairDialog } from "../components/TerminalPairDialog";
 import { LocalSyncStatus } from "../components/LocalSyncStatus";
+import { createTerminalApi } from "../terminals.api";
 import { useTerminals } from "../hooks/useTerminals";
-import api from "../../../api/axios.js";
+import { useSessionStore } from "../../../auth/sessionStore.js";
+import api, {
+  API_BASE_URL,
+  bindThisTerminal,
+  getBoundTerminalId,
+} from "../../../api/axios.js";
+
+/** The bridge appends /api/... itself — setup commands need the bare origin. */
+const backendOrigin = API_BASE_URL.replace(/\/api\/?$/, "");
+
+/** The zip built by the bridge's `npm run dist:zip`, served by the backend. */
+const bridgeZipUrl = `${backendOrigin}/downloads/ezpos-bridge-win64.zip`;
 
 /**
  * Hardware settings (Phase 3): the local receipt-printer controls (USB /
@@ -23,7 +43,32 @@ import api from "../../../api/axios.js";
 export function HardwareSettingsPage() {
   const terminals = useTerminals();
   const [pairOpen, setPairOpen] = useState(false);
+  /** When set, the pair dialog mints a code FOR this existing terminal. */
+  const [pairTarget, setPairTarget] = useState<{ id: number; name: string } | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addCreating, setAddCreating] = useState(false);
+  const activeLocationName = useSessionStore((s) => s.activeLocationName);
   const [requireTerminal, setRequireTerminal] = useState<boolean | null>(null);
+
+  // This PC's terminal binding ("this browser IS terminal X") — distinct
+  // from pairing (the bridge's secret) and from the drawer preference.
+  const boundId = getBoundTerminalId();
+  const boundTerminal =
+    boundId !== null
+      ? (terminals.data ?? []).find((t) => t.id === boundId)
+      : undefined;
+  let thisPcLine: string;
+  if (boundId === null) {
+    thisPcLine =
+      "Not bound to a terminal. After a terminal is paired below, click “Bind this computer” on it so offline sales can sync from this PC.";
+  } else if (terminals.isLoading) {
+    thisPcLine = `Bound to terminal #${boundId}.`;
+  } else if (boundTerminal) {
+    thisPcLine = `Bound to “${boundTerminal.name}” — offline sales from this PC sync under this terminal.`;
+  } else {
+    thisPcLine = `Bound to terminal #${boundId}, which is not in this location’s list.`;
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -131,7 +176,25 @@ export function HardwareSettingsPage() {
             Receipt printers and cash drawers for the active location.
           </p>
         </div>
-        <Button onClick={() => setPairOpen(true)}>Pair a terminal</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setAddName(activeLocationName ?? "Counter 1");
+              setAddOpen(true);
+            }}
+          >
+            Add terminal
+          </Button>
+          <Button
+            onClick={() => {
+              setPairTarget(null);
+              setPairOpen(true);
+            }}
+          >
+            Connect cash drawer hardware
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
@@ -263,22 +326,77 @@ export function HardwareSettingsPage() {
 
       <HardwareSettings />
 
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
+        <div className="space-y-1">
+          <h3 className="font-medium">This computer</h3>
+          <p className="text-sm text-muted-foreground">{thisPcLine}</p>
+        </div>
+        {boundId !== null ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => bindThisTerminal(null)}
+          >
+            Unbind
+          </Button>
+        ) : null}
+      </div>
+
       <div className="space-y-3">
         {terminals.isLoading ? (
           <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground/80">
             <Spinner className="size-4" /> Loading terminals…
           </div>
         ) : (terminals.data?.length ?? 0) === 0 ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground/80">
-            <p className="text-sm">
-              No POS terminals at this location yet. Install the ezPos
-              hardware bridge on the Windows machine and pair it with a
-              one-time code.
+          <div className="space-y-3 rounded-xl border border-dashed border-border p-6">
+            <div>
+              <h3 className="font-medium">Set up a POS terminal</h3>
+              <p className="text-sm text-muted-foreground">
+                <strong>No drawer hardware?</strong> Just click{" "}
+                <strong>Add terminal</strong> above, name this PC, and bind it
+                when the POS asks — that is all offline selling needs. The
+                steps below are only for an auto-opening cash drawer:
+              </p>
+            </div>
+            <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
+              <li>
+                <a href={bridgeZipUrl} className="underline" download>
+                  Download the bridge zip
+                </a>{" "}
+                and unzip it on the machine — Windows 10/11, nothing else to
+                install.
+              </li>
+              <li>
+                Click “Connect cash drawer hardware” above and generate a
+                one-time code.
+              </li>
+              <li>
+                In the unzipped folder on the machine, run the copied{" "}
+                <code className="font-mono text-xs">pair.cmd …</code>{" "}
+                command — the code is already in it.
+              </li>
+              <li>
+                Keep <code className="font-mono text-xs">run.cmd</code>{" "}
+                running on the machine — it polls the backend for authorized
+                drawer commands.
+              </li>
+            </ol>
+            <p className="text-xs text-muted-foreground/80">
+              SETUP.txt inside the zip covers printers and service install.
+              After pairing, click “Bind this computer” on the terminal so
+              this PC’s offline sales sync.
             </p>
           </div>
         ) : (
           (terminals.data ?? []).map((terminal) => (
-            <TerminalCard key={terminal.id} terminal={terminal} />
+            <TerminalCard
+              key={terminal.id}
+              terminal={terminal}
+              onConnectDrawer={(target) => {
+                setPairTarget({ id: target.id, name: target.name });
+                setPairOpen(true);
+              }}
+            />
           ))
         )}
       </div>
@@ -291,11 +409,62 @@ export function HardwareSettingsPage() {
 
       <TerminalPairDialog
         open={pairOpen}
+        terminal={pairTarget}
         onOpenChange={(open) => {
           setPairOpen(open);
           if (!open) void terminals.refetch();
         }}
       />
+
+      {/* Hardware-less terminal creation: one click for offline selling. */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add terminal</DialogTitle>
+            <DialogDescription>
+              Registers a PC for offline selling and sale attribution — no
+              hardware needed. Bind this PC to it when the POS asks. A cash
+              drawer can be connected later from the terminal's card.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="add-terminal-name">Terminal name</Label>
+            <Input
+              id="add-terminal-name"
+              value={addName}
+              maxLength={100}
+              onChange={(event) => setAddName(event.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              disabled={addCreating || addName.trim() === ""}
+              onClick={async () => {
+                setAddCreating(true);
+                try {
+                  await createTerminalApi(addName.trim());
+                  toast.add({
+                    title: `Terminal “${addName.trim()}” added. Reload the POS on that PC and bind it.`,
+                    type: "success",
+                  });
+                  setAddOpen(false);
+                  void terminals.refetch();
+                } catch {
+                  toast.add({
+                    title: "Unable to add the terminal.",
+                    type: "error",
+                    priority: "high",
+                  });
+                } finally {
+                  setAddCreating(false);
+                }
+              }}
+            >
+              {addCreating ? "Adding…" : "Add terminal"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

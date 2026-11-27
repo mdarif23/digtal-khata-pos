@@ -192,7 +192,7 @@ export function SupplierClaimDetailPage() {
               label="Source warranty"
               value={
                 <Link
-                  to="/warranty/supplier-warranties"
+                  to="/warranty/supplier"
                   className="text-xs text-primary hover:underline"
                 >
                   #{claim.supplierWarrantyId}

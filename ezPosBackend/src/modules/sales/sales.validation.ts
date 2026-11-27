@@ -66,6 +66,8 @@ export async function validateVariants(
       minSellingPrice: productVariants.minSellingPrice,
       soldByWeight: productVariants.soldByWeight,
       trackingType: products.trackingType,
+      // B3-008: sellability travels with the PRODUCT status.
+      productStatus: products.status,
     })
     .from(productVariants)
     .innerJoin(products, eq(productVariants.productId, products.id))
@@ -81,6 +83,19 @@ export async function validateVariants(
     const missingIds = uniqueVariantIds.filter((id) => !foundIds.has(id));
     throw new NotFoundError(
       `These variants do not exist: ${missingIds.join(", ")}`,
+    );
+  }
+  // B3-008: draft/inactive products must never sell — the catalog used to
+  // list them (the list endpoint serves every status) and nothing here
+  // re-checked. Backend-authoritative, so direct API calls are covered too.
+  const unsellable = existingVariants.filter(
+    (v) => v.productStatus === "draft" || v.productStatus === "inactive",
+  );
+  if (unsellable.length > 0) {
+    throw new BadRequestError(
+      `These products are not sellable in their current state: ${unsellable
+        .map((v) => `variant ${v.id} (${v.productStatus})`)
+        .join(", ")}`,
     );
   }
   return { variantIds, existingVariants };

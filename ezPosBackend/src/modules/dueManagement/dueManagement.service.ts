@@ -16,7 +16,7 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { roundMoney } from "../../utils/roundMoney.js";
-import { recordDueCollectionInTx } from "../cashRegisters/cashRegisters.service.js";
+import { recordDueCollectionInTx, recordPurchasePaymentCashOutInTx } from "../cashRegisters/cashRegisters.service.js";
 import { postDueCollectionLedgerEntry } from "../sales/sales.ledger.js";
 import { postPurchasePaymentLedgerEntry } from "../purchases/purchases.ledger.js";
 import {
@@ -116,7 +116,10 @@ export async function getDueManagementSummary(
         SELECT
           COALESCE(SUM(GREATEST(balance, 0)), 0)::float8 AS total_outstanding,
           COALESCE(SUM(GREATEST(overdue, 0)), 0)::float8 AS total_overdue,
-          COUNT(*) FILTER (WHERE balance > 0)::int AS parties_with_due
+          -- D3-005: walk-in sales (customer_id NULL) are not "a party with
+          -- due" — the NULL group inflated the count. (Totals keep walk-in
+          -- outstanding: the money is real, the "party" label is not.)
+          COUNT(*) FILTER (WHERE balance > 0 AND customer_id IS NOT NULL)::int AS parties_with_due
         FROM customer_balance
       `),
       db.execute(sql`
@@ -149,7 +152,8 @@ export async function getDueManagementSummary(
         SELECT
           COALESCE(SUM(GREATEST(balance, 0)), 0)::float8 AS total_outstanding,
           COALESCE(SUM(GREATEST(overdue, 0)), 0)::float8 AS total_overdue,
-          COUNT(*) FILTER (WHERE balance > 0)::int AS parties_with_due
+          -- D3-005: walk-in purchases (supplier_id NULL) are not a supplier.
+          COUNT(*) FILTER (WHERE balance > 0 AND supplier_id IS NOT NULL)::int AS parties_with_due
         FROM supplier_balance
       `),
       db.execute(sql`
@@ -677,6 +681,8 @@ export async function recordSupplierPayment(
         supplierId: purchases.supplierId,
         totalAmount: purchases.totalAmount,
         paidAmount: purchases.paidAmount,
+        // D3-003: the payment's drawer-attribution target.
+        locationId: purchases.locationId,
         purchaseOrderNumber: purchases.purchaseOrderNumber,
       })
       .from(purchases)
@@ -718,28 +724,23 @@ export async function recordSupplierPayment(
     });
 
     let inserted: { id: number } | undefined;
-    try {
-      [inserted] = await tx
-        .insert(purchasePayments)
-        .values({
-          businessId,
-          purchaseId,
-          amount: roundMoney(amount),
-          method,
-          notes: payload.notes?.trim() || null,
-          paymentDate: payload.paymentDate
-            ? new Date(`${payload.paymentDate}T00:00:00`)
-            : new Date(),
-        })
-        .returning({ id: purchasePayments.id });
-    } catch (err) {
-      if ((err as { code?: string }).code === "23505") {
-        throw new ConflictError(
-          "A payment with these details already exists.",
-        );
-      }
-      throw err;
-    }
+    // D3-006: the old 23505 catch implied duplicate protection that does
+    // not exist — purchase_payments has no unique constraint, so the branch
+    // was dead and the message lied. Real duplicate prevention would need
+    // an idempotency key (product decision); until then the error is honest.
+    [inserted] = await tx
+      .insert(purchasePayments)
+      .values({
+        businessId,
+        purchaseId,
+        amount: roundMoney(amount),
+        method,
+        notes: payload.notes?.trim() || null,
+        paymentDate: payload.paymentDate
+          ? new Date(`${payload.paymentDate}T00:00:00`)
+          : new Date(),
+      })
+      .returning({ id: purchasePayments.id });
 
     const nextStatus = calculatePaymentStatus(
       paymentMath.updatedPaidAmount,
@@ -770,6 +771,20 @@ export async function recordSupplierPayment(
         locationId: null,
         actorUserId,
       });
+      // D3-003: cash moves the paying user's open drawer at the purchase's
+      // location (best-effort — no open session → GL-only, same trade-off
+      // as the void cash-out).
+      if (actorUserId != null) {
+        await recordPurchasePaymentCashOutInTx(tx, {
+          businessId,
+          userId: actorUserId,
+          amount: roundMoney(amount),
+          paymentId: inserted.id,
+          purchaseId,
+          locationId: purchase.locationId ?? null,
+          method,
+        });
+      }
     }
 
     return {

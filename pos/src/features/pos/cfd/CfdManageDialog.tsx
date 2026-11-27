@@ -3,6 +3,7 @@ import { Monitor } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { hasPermission } from "@/auth/sessionStore";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +26,7 @@ export function CfdManageDialog() {
   const [open, setOpen] = useState(false);
   const [displays, setDisplays] = useState<CfdDisplayRow[]>([]);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const canRevoke = hasPermission("settings.edit");
 
   // P3 Phase 4 (N1-08): multi-display targets — localStorage
   // `ezpos.cfd.pushDisplayIds` (array), migrated transparently from the old
@@ -162,7 +164,9 @@ export function CfdManageDialog() {
                     >
                       {display.status}
                     </Badge>
-                    {display.status === "active" ? (
+                    {display.status === "active" && canRevoke ? (
+                      // N3-002: the BE revokes only with settings.edit —
+                      // the button used to render for everyone and 403'd.
                       <Button
                         variant="ghost"
                         size="sm"

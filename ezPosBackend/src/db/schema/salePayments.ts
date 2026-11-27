@@ -44,11 +44,13 @@ export const salePayments = pgTable(
   (t) => [
     index("sale_payments_business_id_idx").on(t.businessId),
     check("sale_payments_amount_positive", sql`${t.amount} > 0`),
-    // Aligned with migration 0035 (live DB): ledger-internal methods plus
-    // sslcommerz for storefront/online order gateway capture (stage 5).
+    // Aligned with migrations 0035 + 0090 (live DB): ledger-internal methods
+    // plus sslcommerz for storefront/online order gateway capture (stage 5)
+    // and woocommerce for captures ingested from Woo order webhooks
+    // (confirmWooPaidOrder — money already taken in Woo before sync).
     check(
       "sale_payments_method_valid",
-      sql`${t.paymentMethod} in ('cash','bangla_qr','card','store_credit','loyalty_points','gift_card','sslcommerz')`,
+      sql`${t.paymentMethod} in ('cash','bangla_qr','card','store_credit','loyalty_points','gift_card','sslcommerz','woocommerce')`,
     ),
     foreignKey({
       columns: [t.saleId, t.businessId],

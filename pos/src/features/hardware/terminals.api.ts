@@ -21,7 +21,9 @@ export interface TerminalSummary {
 
 export interface PairingCodeIssue {
   code: string;
-  expiresAt: string;
+  expiresAt: Date;
+  /** Set when the code targets a pre-created terminal (attach mode). */
+  terminalId?: number;
 }
 
 export interface HardwareCommand {
@@ -74,9 +76,26 @@ export async function deleteTerminalApi(terminalId: number): Promise<void> {
   await api.delete(`/terminals/${terminalId}`);
 }
 
-export async function mintPairingCodeApi(): Promise<PairingCodeIssue> {
+export async function mintPairingCodeApi(
+  terminalId?: number,
+): Promise<PairingCodeIssue> {
   const res = await api.post<{ success: boolean; data: PairingCodeIssue }>(
-    "/terminals/pairing-code",
+    terminalId !== undefined
+      ? `/terminals/${terminalId}/pairing-code`
+      : "/terminals/pairing-code",
+  );
+  return res.data.data;
+}
+
+/**
+ * Registers a terminal by name — the hardware-less path for offline
+ * selling (1-PC shops, printer-only counters). The bridge attaches later
+ * through a per-terminal pairing code when drawer hardware exists.
+ */
+export async function createTerminalApi(name: string): Promise<TerminalSummary> {
+  const res = await api.post<{ success: boolean; data: TerminalSummary }>(
+    "/terminals",
+    { name },
   );
   return res.data.data;
 }

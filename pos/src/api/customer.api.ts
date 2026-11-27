@@ -38,6 +38,24 @@ export const updateCustomerApi = async (
   return normalizeCustomer(data);
 };
 
+// E1-012: communication consent toggles (customers.edit; audited) — the
+// endpoint existed with zero FE callers, so marketing consent could never
+// be recorded from the app.
+export interface CustomerConsentInput {
+  marketingOptIn?: boolean;
+  transactionalOptOut?: boolean;
+}
+export const patchCustomerConsentApi = async (
+  id: number,
+  consent: CustomerConsentInput,
+) => {
+  const { data } = await axios.patch<CustomerApiRecord>(
+    `/customers/${id}/consent`,
+    consent,
+  );
+  return normalizeCustomer(data);
+};
+
 export const getCustomerDueSummaryApi = async () => {
   const { data } = await axios.get<CustomerDue[]>("/due_by_customers");
   return data;

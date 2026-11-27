@@ -90,7 +90,21 @@ function domainAllowed(
   }
   const origin = (req.headers.origin ?? req.headers.referer ?? "") as string;
   if (!origin) return false;
-  return ctx.allowedDomains.some((domain) => origin.includes(domain));
+  // Q3-002: match the HOSTNAME exactly (suffix on dot boundaries) — the old
+  // substring check let `https://shop.example.com.evil.io` (or a referer
+  // query string) impersonate an allowed domain.
+  let hostname: string | null = null;
+  try {
+    hostname = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!hostname) return false;
+  return ctx.allowedDomains.some((domain) => {
+    const allowed = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    if (!allowed) return false;
+    return hostname === allowed || hostname.endsWith(`.${allowed}`);
+  });
 }
 
 export function authenticateStorefrontKey(

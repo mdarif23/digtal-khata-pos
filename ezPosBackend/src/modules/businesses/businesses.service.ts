@@ -22,6 +22,7 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { computeSubscriptionState, type SubscriptionState } from "../../utils/subscription.js";
+import { recordAuditInTx } from "../../services/audit.js";
 import { createRoleWithPermissionsInTx, ensureDefaultRolesInTx } from "../roles/roles.service.js";
 import { recordEvent } from "../subscriptions/subscription.service.js";
 import { DEFAULT_ROLE_PERMISSIONS } from "../../rbac/permissions.js";
@@ -392,9 +393,9 @@ export async function updateBusinessForMembership(
     })
     .where(eq(businesses.id, businessId));
 
-  if (input.mode !== undefined) {
-    await changeBusinessMode(businessId, input.mode);
-  }
+  // WB-13: the operating model is only switchable through the dedicated,
+  // transactional PATCH /mode route — the profile PUT no longer carries a
+  // parallel write path.
 
   return getBusinessForMembership(userId, businessId);
 }
@@ -412,7 +413,7 @@ export async function changeBusinessModeForMembership(
   mode: BusinessDetail["mode"],
 ): Promise<BusinessDetail> {
   await getBusinessForMembership(userId, businessId);
-  await changeBusinessMode(businessId, mode);
+  await changeBusinessMode(businessId, mode, userId);
   return getBusinessForMembership(userId, businessId);
 }
 
@@ -716,57 +717,98 @@ export async function deleteBusinessForMembership(
 /**
  * Operating-model change (Phase 9). Rules:
  * - Downgrading to physical_only is blocked while integrations are
- *   connected (they must be disconnected first).
- * - Moving to online_only/omnichannel without any location auto-creates a
- *   default "Online Store" location — online inventory must live somewhere.
+ *   connected OR a hosted storefront is live (WB-08 — a silent dark site is
+ *   the online-only counterpart of the integration 409).
+ * - Moving to online_only/omnichannel without any ACTIVE location
+ *   auto-creates a default "Online Store" location — online inventory must
+ *   live somewhere (WB-07: an archived-only location is not a stock source).
+ * - Serialized: two concurrent switches must not double-provision (WB-06) —
+ *   the business row is locked FOR UPDATE inside the transaction and the
+ *   location check re-reads under that lock.
  */
 async function changeBusinessMode(
   businessId: number,
   mode: "physical_only" | "online_only" | "omnichannel",
+  actorUserId: number | null,
 ): Promise<void> {
-  const [current] = await db
-    .select({ mode: businesses.mode })
-    .from(businesses)
-    .where(eq(businesses.id, businessId));
-  if (!current || current.mode === mode) return;
+  await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ mode: businesses.mode })
+      .from(businesses)
+      .where(eq(businesses.id, businessId))
+      .for("update");
+    if (!current || current.mode === mode) return;
 
-  if (mode === "physical_only") {
-    const [connected] = await db
-      .select({ id: integrations.id })
-      .from(integrations)
-      .where(
-        and(
-          eq(integrations.businessId, businessId),
-          sql`${integrations.status} <> 'disconnected'`,
-        ),
-      )
-      .limit(1);
-    if (connected) {
-      throw new ConflictError(
-        "Disconnect all storefront integrations before switching to physical-only.",
-      );
+    if (mode === "physical_only") {
+      const [connected] = await tx
+        .select({ id: integrations.id })
+        .from(integrations)
+        .where(
+          and(
+            eq(integrations.businessId, businessId),
+            sql`${integrations.status} <> 'disconnected'`,
+          ),
+        )
+        .limit(1);
+      if (connected) {
+        throw new ConflictError(
+          "Disconnect all storefront integrations before switching to physical-only.",
+        );
+      }
+      const [liveStorefront] = await tx
+        .select({ id: storefronts.id })
+        .from(storefronts)
+        .where(
+          and(
+            eq(storefronts.businessId, businessId),
+            isNull(storefronts.archivedAt),
+          ),
+        )
+        .limit(1);
+      if (liveStorefront) {
+        throw new ConflictError(
+          "Archive the hosted storefront before switching to physical-only.",
+        );
+      }
     }
-  }
 
-  await db
-    .update(businesses)
-    .set({ mode, updatedAt: new Date() })
-    .where(eq(businesses.id, businessId));
+    await tx
+      .update(businesses)
+      .set({ mode, updatedAt: new Date() })
+      .where(eq(businesses.id, businessId));
 
-  if (mode !== "physical_only") {
-    const [anyLocation] = await db
-      .select({ id: locations.id })
-      .from(locations)
-      .where(eq(locations.businessId, businessId))
-      .limit(1);
-    if (!anyLocation) {
-      await db.insert(locations).values({
-        businessId,
-        name: "Online Store",
-        isDefault: true,
-        // Online-only: a fulfillment source, not a retail storefront.
-        locationType: mode === "online_only" ? "warehouse" : "store",
-      });
+    if (mode !== "physical_only") {
+      const [anyLocation] = await tx
+        .select({ id: locations.id })
+        .from(locations)
+        .where(
+          and(
+            eq(locations.businessId, businessId),
+            eq(locations.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!anyLocation) {
+        await tx.insert(locations).values({
+          businessId,
+          name: "Online Store",
+          isDefault: true,
+          // Online-only: a fulfillment source, not a retail storefront.
+          locationType: mode === "online_only" ? "warehouse" : "store",
+        });
+      }
     }
-  }
+
+    // K3-003: the mode gates every surface in the product (sales,
+    // registers, offline, storefronts) and is deliberately reachable
+    // WITHOUT requireFullAccess — it must leave an audit trail.
+    await recordAuditInTx(tx, {
+      businessId,
+      actorUserId,
+      action: "business.mode_changed",
+      entityType: "business",
+      entityId: businessId,
+      metadata: { from: current.mode, to: mode },
+    });
+  });
 }

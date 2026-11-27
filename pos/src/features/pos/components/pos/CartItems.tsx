@@ -580,8 +580,9 @@ function CartItemRow({ item }: { item: CartItem }) {
   const removeCartItem = useCartStore((s) => s.removeCartItem);
   const addCustomCartQuantity = useCartStore((s) => s.addCustomCartQuantity);
   const switchLineUnit = useCartStore((s) => s.switchLineUnit);
+  const replaceLineUnit = useCartStore((s) => s.replaceLineUnit);
   const addDiscount = useCartStore((s) => s.addDiscount);
-  const { addSerialItem } = useCartStore();
+  const addSerialItem = useCartStore((s) => s.addSerialItem);
   const catalogProducts = useProductsQuery().data ?? [];
 
   const variant = item.variants[0];
@@ -623,7 +624,7 @@ function CartItemRow({ item }: { item: CartItem }) {
   const isBatchLine = item.trackingType === "batch";
   const [isSerialOpen, setIsSerialOpen] = useState(false);
   const [isBatchOpen, setIsBatchOpen] = useState(false);
-  const { setLineBatch } = useCartStore();
+  const setLineBatch = useCartStore((s) => s.setLineBatch);
   const showStockError = () =>
     toast.add({
       type: "error",
@@ -647,18 +648,37 @@ function CartItemRow({ item }: { item: CartItem }) {
   const handleSwitchUnit = (unit: SellUnitOption) => {
     const result = switchLineUnit(variantId, lineUnit, unit);
     if (!result.ok) {
+      if (result.reason === "below-one-package") {
+        // "Make this line that unit": the cashier picking Box on a sub-
+        // package line means "sell a box" — re-ring THE SAME LINE as 1 of
+        // the picked unit (no second line). A line discount / price
+        // override belonged to the old unit's line and is cleared.
+        // ORDER MATTERS: release THIS line's reservation FIRST — the pool
+        // only holds free stock, not what the line already took (12 in
+        // stock, 1 Pcs reserved: taking 12 before releasing 1 fails even
+        // though the switch frees exactly enough). If the new unit still
+        // doesn't fit, restore the old reservation and leave the line as is.
+        returnVariantStock(variantId, quantity * conversionFactor);
+        if (!tryTakeVariantStock(variantId, unit.conversionFactor)) {
+          takeVariantStock(variantId, quantity * conversionFactor);
+          showStockError();
+          return;
+        }
+        replaceLineUnit(variantId, lineUnit, unit);
+        toast.add({
+          type: "info",
+          description: t("pos:unitSwitchReset", {
+            defaultValue: "Switched to {{unit}} — quantity reset to 1.",
+            unit: unit.unitName,
+          }),
+        });
+        return;
+      }
       toast.add({
         type: "error",
-        description:
-          result.reason === "below-one-package"
-            ? t("pos:belowOnePackage", {
-                defaultValue:
-                  "That is less than 1 {{unit}} — line left unchanged.",
-                unit: unit.unitName,
-              })
-            : t("pos:unitSwitchFailed", {
-                defaultValue: "Could not switch the unit.",
-              }),
+        description: t("pos:unitSwitchFailed", {
+          defaultValue: "Could not switch the unit.",
+        }),
       });
       return;
     }
@@ -670,13 +690,15 @@ function CartItemRow({ item }: { item: CartItem }) {
 
   return (
     <Card className="overflow-hidden shadow-none">
-      <CardContent className="p-3 sm:p-4">
-        <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
-          <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-muted/40 sm:h-20 sm:w-20">
+      {/* Compact density: the POS must show 5+ lines on a laptop — controls
+          share ONE toolbar row instead of stacking three always-open blocks. */}
+      <CardContent className="p-2 sm:p-3">
+        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-muted/40">
             <ProductImage src={item.imageUrl ?? null} alt={item.name} />
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="truncate font-medium">{item.name}</span>
             <span className="text-sm text-muted-foreground">
               {unitPrice.toFixed(2)} × {quantity}
@@ -693,25 +715,27 @@ function CartItemRow({ item }: { item: CartItem }) {
               )}
             </span>
 
-            {(isUomLine || hasPackagingUnits) && !isSerial && (
-              <UnitSwitcher
-                units={units}
-                currentUomConversionId={lineUnit}
-                currentLabel={chipLabel}
-                onSwitch={handleSwitchUnit}
+            <div className="flex flex-wrap items-center gap-1">
+              {(isUomLine || hasPackagingUnits) && !isSerial && (
+                <UnitSwitcher
+                  units={units}
+                  currentUomConversionId={lineUnit}
+                  currentLabel={chipLabel}
+                  onSwitch={handleSwitchUnit}
+                />
+              )}
+
+              <CartItemDiscount
+                variantId={variantId}
+                discount={item.discount}
+                lineBase={line.base}
+                lineTotal={line.total}
+                hasDiscount={line.discountAmount > 0}
+                addDiscount={addDiscount}
               />
-            )}
 
-            <CartItemDiscount
-              variantId={variantId}
-              discount={item.discount}
-              lineBase={line.base}
-              lineTotal={line.total}
-              hasDiscount={line.discountAmount > 0}
-              addDiscount={addDiscount}
-            />
-
-            <PriceOverrideDialog item={item} variantId={variantId} lineUnit={lineUnit} />
+              <PriceOverrideDialog item={item} variantId={variantId} lineUnit={lineUnit} />
+            </div>
           </div>
 
           {isSerial ? (
@@ -920,31 +944,34 @@ export function CartCalculation({
   const [quoteOpen, setQuoteOpen] = useState(false);
   const { hasPermission } = usePermissions();
   const { t } = useTranslation();
+  const quoteShown = hasPermission("quotations.create");
   // Phase 3 hotkey: F4 opens the discount dialog.
   useHotkeyAction("discount", () => setDiscountSignal((n) => n + 1));
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <CartTextModal totals={totals} />
-      <div className="grid grid-cols-6 gap-1 py-2">
-        <div className="col-span-2">
+      {/* One action line always: 4 buttons share the row (3 when quotation
+          permission is absent) instead of wrapping to a second row. */}
+      <div className="grid grid-cols-12 gap-1 py-1">
+        <div className={quoteShown ? "col-span-3" : "col-span-4"}>
           <ClearCartDialog />
         </div>
-        <div className="col-span-2">
+        <div className={quoteShown ? "col-span-3" : "col-span-4"}>
           <HoldDropdownMenu />
         </div>
-        <div className="col-span-2">
+        <div className={quoteShown ? "col-span-3" : "col-span-4"}>
           {/* discount is applied on the amount after item discounts */}
           <DiscountModal form={form} subTotal={totals.itemsTotal} openSignal={discountSignal} />
         </div>
-        {hasPermission("quotations.create") && (
-          <div className="col-span-2">
+        {quoteShown && (
+          <div className="col-span-3">
             {/* E1-002: capture the cart as a quotation draft */}
             <SaveQuotationDialog open={quoteOpen} onOpenChange={setQuoteOpen} totals={totals} />
             <Button
               type="button"
               variant="outline"
-              className="h-10 w-full"
+              className="h-8 w-full text-xs"
               disabled={cart.length === 0}
               onClick={() => setQuoteOpen(true)}
             >
@@ -952,14 +979,15 @@ export function CartCalculation({
             </Button>
           </div>
         )}
-        {/* full-width row: a 1/6 cell clipped the placeholder text */}
-        <div className="col-span-6">
+        {/* Full-width rows (12/12): the coupon placeholder and the charge
+            button must span the whole footer. */}
+        <div className="col-span-12">
           <CouponInput form={form} />
         </div>
-        <div className="col-span-6">
+        <div className="col-span-12">
           <ChargesEditor form={form} />
         </div>
-        <div className="col-span-6">
+        <div className="col-span-12">
           {/* payment charges the authoritative quote total — it already
               includes the coupon discount and the inclusive/exclusive tax
               split; deriving it from afterDiscount + vat double-counts */}
@@ -990,7 +1018,7 @@ function CartTextModal({
 
   return (
     <>
-      <div className="flex justify-between border-b pb-2 text-sm text-muted-foreground">
+      <div className="flex justify-between border-b pb-1 text-sm text-muted-foreground">
         <span>
           {totalItemsCount === 1
             ? t("pos:lineItemOne", { defaultValue: "1 line item" })
@@ -1004,24 +1032,24 @@ function CartTextModal({
           {t("pos:qtyLabel", { defaultValue: "Qty:" })} {totalQuantityCount}
         </span>
       </div>
-      <div className="flex justify-between py-1.5 text-sm">
+      <div className="flex justify-between py-1 text-sm">
         <span>{t("common:subtotal", { defaultValue: "Subtotal" })}</span>
         <span>{tk(totals.itemsBase)}</span>
       </div>
       {totals.itemDiscount > 0 && (
-        <div className="flex justify-between py-1.5 text-sm text-success">
+        <div className="flex justify-between py-1 text-sm text-success">
           <span>{t("pos:itemDiscounts", { defaultValue: "Item discounts" })}</span>
           <span>-{tk(totals.itemDiscount)}</span>
         </div>
       )}
       {totals.cartDiscountAmount > 0 && (
-        <div className="flex justify-between py-1.5 text-sm text-success">
+        <div className="flex justify-between py-1 text-sm text-success">
           <span>{t("common:discount", { defaultValue: "Discount" })}</span>
           <span>-{tk(totals.cartDiscountAmount)}</span>
         </div>
       )}
       {"group" in totals && totals.group && totals.group.discountAmount > 0 && (
-        <div className="flex justify-between py-1.5 text-sm text-success">
+        <div className="flex justify-between py-1 text-sm text-success">
           <span>
             {t("pos:groupPricing", {
               defaultValue: "{{name}} pricing",
@@ -1077,7 +1105,7 @@ function CartTextModal({
         </div>
       )}
       {totals.vat > 0 && (
-        <div className="flex justify-between py-1.5 text-sm">
+        <div className="flex justify-between py-1 text-sm">
           <span>
             {"usesTaxRules" in totals && totals.usesTaxRules
               ? t("pos:vatProductRules", {
@@ -1095,15 +1123,15 @@ function CartTextModal({
       {(totals.charges ?? []).map((charge, i) => (
         <div
           key={`${charge.label}-${i}`}
-          className="flex justify-between py-1.5 text-sm"
+          className="flex justify-between py-1 text-sm"
         >
           <span className="truncate pr-2">{charge.label}</span>
           <span className="tabular-nums">{tk(Number(charge.amount) || 0)}</span>
         </div>
       ))}
-      <div className="flex items-center justify-between border-t pt-2 font-semibold">
+      <div className="flex items-center justify-between border-t pt-1 font-semibold">
         <span>{t("pos:totalDue", { defaultValue: "Total due" })}</span>
-        <span className="text-lg tracking-tight tabular-nums">
+        <span className="text-base tracking-tight tabular-nums">
           {tk(totals.finalTotal)}
         </span>
       </div>
@@ -1308,7 +1336,7 @@ export function CartItemDiscount({
   };
 
   return (
-    <div className="flex items-center space-x-2">
+    <div className="flex items-center gap-1">
       <Input
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -1319,7 +1347,7 @@ export function CartItemDiscount({
             commit(value, type);
           }
         }}
-        className="h-8 w-20"
+        className="h-7 w-16 text-xs"
         type="number"
         min={0}
         placeholder={
@@ -1342,7 +1370,7 @@ export function CartItemDiscount({
         })}
       />
       {hasDiscount && (
-        <span className="text-sm font-medium text-green-600">
+        <span className="text-xs font-medium text-green-600">
           = {tk(lineTotal)}
         </span>
       )}

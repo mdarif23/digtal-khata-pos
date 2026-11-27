@@ -56,6 +56,7 @@ export type ChartAccount = typeof chartOfAccounts.$inferSelect;
 export const FINANCE_SOURCE_TYPES = [
   "sale",
   "sale_refund",
+  "sale_void_landed_cost",
   "sale_due_collection",
   "gift_card_issue",
   "gift_card_reload",

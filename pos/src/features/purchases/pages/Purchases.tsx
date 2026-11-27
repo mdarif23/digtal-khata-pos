@@ -502,7 +502,7 @@ export function PurchasesOrder() {
 
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(420px,0.9fr)]">
           <section className="overflow-hidden rounded-xl border bg-background shadow-sm">
-            <div className="border-b p-4 md:p-5">
+            <div className="border-b p-3 md:p-4">
               <div className="flex items-center gap-2">
                 <div className="rounded-lg bg-primary/10 p-2 text-primary">
                   <Package className="size-5" />
@@ -514,7 +514,7 @@ export function PurchasesOrder() {
                   </p>
                 </div>
               </div>
-              <div className="relative mt-4">
+              <div className="relative mt-3">
                 <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={searchProducts}
@@ -533,7 +533,7 @@ export function PurchasesOrder() {
               </div>
               <BarcodeScanFeedback state={scanner.state} className="mt-2" />
             </div>
-            <div className="max-h-[calc(100vh-18rem)] min-h-72 overflow-y-auto p-4 md:p-5">
+            <div className="max-h-[calc(100vh-18rem)] min-h-72 overflow-y-auto p-3 md:p-4">
               {productError && (
                 <p
                   role="alert"
@@ -543,7 +543,7 @@ export function PurchasesOrder() {
                 </p>
               )}
               {productsLoading && products.length === 0 ? (
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 lg:grid-cols-4">
                   {Array.from({ length: 6 }, (_, index) => (
                     <div
                       key={index}
@@ -552,7 +552,7 @@ export function PurchasesOrder() {
                   ))}
                 </div>
               ) : filteredProducts.length ? (
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 lg:grid-cols-4">
                   {filteredProducts.map((product) => {
                     const defaultVariant = getDefaultVariant(product);
                     if (!defaultVariant) return null;
@@ -588,7 +588,7 @@ export function PurchasesOrder() {
           </section>
 
           <section className="overflow-hidden rounded-xl border bg-background shadow-sm">
-            <div className="flex items-center justify-between border-b p-4 md:p-5">
+            <div className="flex items-center justify-between border-b p-3 md:p-4">
               <div className="flex items-center gap-2">
                 <div className="rounded-lg bg-primary/10 p-2 text-primary">
                   <ShoppingCart className="size-5" />
@@ -613,8 +613,8 @@ export function PurchasesOrder() {
               )}
             </div>
 
-            <div className="space-y-5 p-4 md:p-5">
-              <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-3 p-3 md:p-4">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <label className="space-y-1.5 text-sm font-medium">
                   <span className="flex items-center gap-2">
                     <CalendarDays className="size-4 text-muted-foreground" />

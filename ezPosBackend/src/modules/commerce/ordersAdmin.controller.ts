@@ -242,7 +242,10 @@ export async function startProcessing(req: Request, res: Response) {
 }
 
 const cancelSchema = z.object({
-  reason: z.string().max(500).optional(),
+  // WP-001: the FE sends `{ reason: null }` when no reason was typed —
+  // `.optional()` alone rejects null (zod 4 strips nothing, null fails the
+  // check) and the whole action 400s.
+  reason: z.string().max(500).nullish(),
 });
 
 export async function cancelOrder(req: Request, res: Response) {
@@ -632,7 +635,10 @@ export async function getAssignableStaff(req: Request, res: Response) {
 // ---------------------------------------------------------------------------
 
 const deliveryFailedSchema = z.object({
-  note: z.string().max(500).optional(),
+  // WP-001: the POS "Mark delivery failed" button posts `{ note: null }`
+  // when no note was typed — accept null (the service already normalizes it
+  // to a NULL column) or this action 400s on every click.
+  note: z.string().max(500).nullish(),
 });
 
 /** POST /:orderId/delivery-failed — marks the active shipment failed. */

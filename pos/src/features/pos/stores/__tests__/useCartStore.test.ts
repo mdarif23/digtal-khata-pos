@@ -384,6 +384,26 @@ describe("UOM cart lines", () => {
     expect(refused).toEqual({ ok: false, reason: "below-one-package" });
   });
 
+  it("replaceLineUnit re-rings the SAME line as 1 of the picked unit", () => {
+    const p = product(1, [variant(11)]);
+    useCartStore.getState().addToCart(p); // 1 Pcs (base unit)
+
+    // 1 Pcs → Box: the chip's "make this line that unit" semantics —
+    // same line, quantity 1, box price. Never a second line.
+    useCartStore.getState().replaceLineUnit(11, null, boxUnit);
+    const cart = useCartStore.getState().cart;
+    expect(cart).toHaveLength(1);
+    expect(lineUnitId(cart[0])).toBe(9001);
+    expect(cart[0]!.quantity).toBe(1);
+    expect(cart[0]!.unitPrice).toBe(boxUnit.salePrice);
+
+    // A line-scoped discount belongs to the old unit's line — cleared.
+    useCartStore.getState().addDiscount(11, 50, "fixed");
+    expect(useCartStore.getState().cart[0]!.discount).not.toBeNull();
+    useCartStore.getState().replaceLineUnit(11, 9001, boxUnit);
+    expect(useCartStore.getState().cart[0]!.discount).toBeNull();
+  });
+
   it("includes the packaging unit in the hold payload and restores it", async () => {
     const p = product(1, [variant(11)]);
     useCartStore.getState().addToCart(p, boxUnit);
@@ -405,5 +425,32 @@ describe("UOM cart lines", () => {
     // The conversion row is unknown to the local catalog → base-unit line
     // carrying the entered quantity (resume never breaks).
     expect(lines[0]!.quantity).toBe(2);
+  });
+
+  describe("setLineBatch (P3 Phase 2 F.1 — R3-005 pins the transitions)", () => {
+    const line = (variantId: number) => ({ ...product(variantId, [variant(variantId)]) });
+
+    it("attaches a batch to the matching line only", () => {
+      useCartStore.setState({ cart: [line(11), line(12)] });
+      useCartStore
+        .getState()
+        .setLineBatch(11, { id: 71, batchNumber: "B-71" } as never);
+      const [first, second] = useCartStore.getState().cart;
+      expect(first?.batchId).toBe(71);
+      expect(first?.batchNumber).toBe("B-71");
+      expect(second?.batchId ?? null).toBeNull();
+    });
+
+    it("replaces an existing selection and clears to null", () => {
+      useCartStore.setState({ cart: [line(11)] });
+      const store = useCartStore.getState();
+      store.setLineBatch(11, { id: 71, batchNumber: "B-71" } as never);
+      store.setLineBatch(11, { id: 72, batchNumber: "B-72" } as never);
+      expect(useCartStore.getState().cart[0]?.batchId).toBe(72);
+      store.setLineBatch(11, null);
+      const cleared = useCartStore.getState().cart[0];
+      expect(cleared?.batchId ?? null).toBeNull();
+      expect(cleared?.batchNumber ?? null).toBeNull();
+    });
   });
 });

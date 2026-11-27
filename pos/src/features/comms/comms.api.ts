@@ -61,6 +61,37 @@ export async function putProviderApi(input: {
   await api.put("/comms/providers", input);
 }
 
+/** E3-analysis fix: id-based provider edit (identity fields immutable;
+ * config explicit-null clears, absent = unchanged). */
+export async function updateProviderApi(
+  id: number,
+  input: {
+    displayName?: string | null;
+    config?: Record<string, unknown> | null;
+    isDefault?: boolean;
+    isActive?: boolean;
+  },
+): Promise<void> {
+  await api.put(`/comms/providers/${id}`, input);
+}
+
+export async function deleteProviderApi(id: number): Promise<void> {
+  await api.delete(`/comms/providers/${id}`);
+}
+
+/** Removes a template override — rendering falls back to the built-in. */
+export async function deleteTemplateApi(id: number): Promise<void> {
+  await api.delete(`/comms/templates/${id}`);
+}
+
+/** Rotation invalidates the previous secret immediately. */
+export async function rotateWebhookSecretApi(): Promise<string> {
+  const res = await api.post<{ success: boolean; data: { secret: string } }>(
+    "/comms/webhook-secret/rotate",
+  );
+  return res.data.data.secret;
+}
+
 export async function listTemplatesApi(): Promise<CommTemplate[]> {
   const res = await api.get<{ success: boolean; data: CommTemplate[] }>(
     "/comms/templates",

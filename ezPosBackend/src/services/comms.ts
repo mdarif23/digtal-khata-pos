@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt, lte, ne, sql } from "drizzle-orm";
 import { db } from "../db/schema/index.js";
 import {
   commMessages,
@@ -160,10 +160,17 @@ async function deliverViaGenericHttp(
   let payload: string | undefined;
   if (method === "POST" || method === "PUT") {
     const bodyTemplate = String(config.body ?? "");
+    // O3-005: substitutions are JSON-encoded, not quote-escaped — a
+    // customer name with a newline/backslash used to rewrite the gateway
+    // payload (field injection into loosely-parsed gateways). JSON.stringify
+    // of the STRING value yields an exact, safely-quoted literal; the
+    // wrapping quotes are trimmed so `{{body}}` composes inside templates.
+    const jsonValue = (value: string) =>
+      JSON.stringify(value).slice(1, -1);
     payload = bodyTemplate
       ? bodyTemplate
-          .replace(/\{\{recipient\}\}/g, recipient)
-          .replace(/\{\{body\}\}/g, body.replace(/"/g, '\\"'))
+          .replace(/\{\{recipient\}\}/g, jsonValue(recipient))
+          .replace(/\{\{body\}\}/g, jsonValue(body))
       : JSON.stringify({ recipient, body });
   }
   const res = await fetch(url, {
@@ -447,8 +454,14 @@ export async function upsertProvider(
       ],
       set: {
         ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
-        ...(input.config !== undefined && input.config !== null
-          ? { configEncrypted: encryptConfig(input.config) }
+        // I3-005-family fix: an EXPLICIT null clears the stored config
+        // (absent = leave unchanged) — previously config could never be
+        // reset, so a wrong URL/key was permanent.
+        ...(input.config !== undefined
+          ? {
+              configEncrypted:
+                input.config === null ? null : encryptConfig(input.config),
+            }
           : {}),
         ...(input.isDefault !== undefined ? { isDefault: input.isDefault } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
@@ -458,6 +471,194 @@ export async function upsertProvider(
     .returning({ id: commProviders.id });
   if (!row) throw new Error("Provider upsert returned no row.");
   return row;
+}
+
+/**
+ * Id-based provider edit (comms.manage): identity fields (channel,
+ * providerKey) are immutable; config explicit-null clears. Audited —
+ * metadata NEVER contains config values (they are secrets).
+ */
+export async function updateProviderById(
+  businessId: number,
+  providerId: number,
+  actorUserId: number | null,
+  input: {
+    displayName?: string | null | undefined;
+    config?: Record<string, unknown> | null | undefined;
+    isDefault?: boolean | undefined;
+    isActive?: boolean | undefined;
+  },
+) {
+  const [existing] = await db
+    .select()
+    .from(commProviders)
+    .where(
+      and(
+        eq(commProviders.businessId, businessId),
+        eq(commProviders.id, providerId),
+      ),
+    )
+    .limit(1);
+  if (!existing) throw new NotFoundError("Provider not found.");
+  if (input.isDefault) {
+    await db
+      .update(commProviders)
+      .set({ isDefault: false, updatedAt: new Date() })
+      .where(
+        and(
+          eq(commProviders.businessId, businessId),
+          eq(commProviders.channel, existing.channel),
+          eq(commProviders.isDefault, true),
+          ne(commProviders.id, providerId),
+        ),
+      );
+  }
+  const [updated] = await db
+    .update(commProviders)
+    .set({
+      ...(input.displayName !== undefined
+        ? { displayName: input.displayName ?? null }
+        : {}),
+      ...(input.config !== undefined
+        ? {
+            configEncrypted:
+              input.config === null ? null : encryptConfig(input.config),
+          }
+        : {}),
+      ...(input.isDefault !== undefined ? { isDefault: input.isDefault } : {}),
+      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(commProviders.businessId, businessId),
+        eq(commProviders.id, providerId),
+      ),
+    )
+    .returning({ id: commProviders.id });
+  if (!updated) throw new NotFoundError("Provider not found.");
+  recordAudit({
+    businessId,
+    actorUserId,
+    action: "comms.provider_updated",
+    entityType: "comm_provider",
+    entityId: providerId,
+    metadata: {
+      channel: existing.channel,
+      providerKey: existing.providerKey,
+      configChanged: input.config !== undefined,
+      configCleared: input.config === null,
+      isDefault: input.isDefault,
+      isActive: input.isActive,
+    },
+  });
+  return updated;
+}
+
+/** Id-based provider removal (comms.manage). Audited. */
+export async function deleteProviderById(
+  businessId: number,
+  providerId: number,
+  actorUserId: number | null,
+) {
+  const [existing] = await db
+    .select({
+      channel: commProviders.channel,
+      providerKey: commProviders.providerKey,
+    })
+    .from(commProviders)
+    .where(
+      and(
+        eq(commProviders.businessId, businessId),
+        eq(commProviders.id, providerId),
+      ),
+    )
+    .limit(1);
+  if (!existing) throw new NotFoundError("Provider not found.");
+  await db
+    .delete(commProviders)
+    .where(
+      and(
+        eq(commProviders.businessId, businessId),
+        eq(commProviders.id, providerId),
+      ),
+    );
+  recordAudit({
+    businessId,
+    actorUserId,
+    action: "comms.provider_deleted",
+    entityType: "comm_provider",
+    entityId: providerId,
+    metadata: existing,
+  });
+}
+
+/**
+ * Removes a template OVERRIDE — renderTemplate falls back to the built-in
+ * default. Built-in templates have no row and 404 here. Audited.
+ */
+export async function deleteTemplateById(
+  businessId: number,
+  templateId: number,
+  actorUserId: number | null,
+) {
+  const [existing] = await db
+    .select({
+      templateKey: commTemplates.templateKey,
+      channel: commTemplates.channel,
+    })
+    .from(commTemplates)
+    .where(
+      and(
+        eq(commTemplates.businessId, businessId),
+        eq(commTemplates.id, templateId),
+      ),
+    )
+    .limit(1);
+  if (!existing) throw new NotFoundError("Template not found.");
+  await db
+    .delete(commTemplates)
+    .where(
+      and(
+        eq(commTemplates.businessId, businessId),
+        eq(commTemplates.id, templateId),
+      ),
+    );
+  recordAudit({
+    businessId,
+    actorUserId,
+    action: "comms.template_deleted",
+    entityType: "comm_template",
+    entityId: templateId,
+    metadata: existing,
+  });
+}
+
+/**
+ * Rotates the inbound webhook signing secret: the old secret stops working
+ * immediately (providers must be pointed at the new one). Audited.
+ */
+export async function rotateWebhookSecret(
+  businessId: number,
+  actorUserId: number | null,
+): Promise<string> {
+  const secret = randomBytes(24).toString("hex");
+  await db
+    .insert(commSettings)
+    .values({ businessId, webhookSecret: secret })
+    .onConflictDoUpdate({
+      target: commSettings.businessId,
+      set: { webhookSecret: secret, updatedAt: new Date() },
+    });
+  recordAudit({
+    businessId,
+    actorUserId,
+    action: "comms.webhook_secret_rotated",
+    entityType: "comm_settings",
+    entityId: businessId,
+    metadata: {},
+  });
+  return secret;
 }
 
 async function defaultProviderFor(
@@ -510,6 +711,12 @@ async function consentAndCapCheck(
   businessId: number,
   input: SendInput,
 ): Promise<string | null> {
+  // O3-002: consent is recorded on the CUSTOMER. A marketing send with no
+  // customerId has no consent basis to check — the pre-fix behavior checked
+  // nothing and pushed unbounded unsolicited marketing. Fail closed.
+  if (input.messageClass === "marketing" && !input.customerId) {
+    return "marketing_consent_unverifiable";
+  }
   if (input.customerId) {
     const [customer] = await db
       .select({
@@ -587,10 +794,27 @@ export async function queueAndSend(input: SendInput): Promise<SendOutcome> {
 
   try {
     const provider = await defaultProviderFor(input.businessId, input.channel);
-    const providerKey = provider?.providerKey ?? "console";
+    const providerKey = provider?.providerKey ?? null;
     const config = provider?.config ?? null;
+    // N3-001: "no usable provider" is a FAILED delivery, not a fake
+    // "sent" — but an EXPLICITLY configured console provider (dev /
+    // observability) is a legitimate delivery and stays "sent".
+    if (providerKey === null) {
+      await db
+        .update(commMessages)
+        .set({
+          status: "failed",
+          providerKey: "none",
+          error:
+            "No delivery provider is configured for this channel — the message was not sent.",
+        })
+        .where(eq(commMessages.id, row.id));
+      return { status: "failed", reason: "no_provider_configured", messageId: row.id };
+    }
     let result: DeliveryResult;
-    if (providerKey === "whatsapp_cloud" && config) {
+    if (providerKey === "console") {
+      result = await deliverViaConsole(input.recipient, body, input.channel);
+    } else if (providerKey === "whatsapp_cloud" && config) {
       result = await deliverViaWhatsappCloud(config, input.recipient, body);
     } else if (providerKey === "generic_http" && config) {
       result = await deliverViaGenericHttp(config, input.recipient, body);
@@ -602,7 +826,17 @@ export async function queueAndSend(input: SendInput): Promise<SendOutcome> {
         body,
       );
     } else {
-      result = await deliverViaConsole(input.recipient, body, input.channel);
+      // A provider row exists but is unusable (no config / channel
+      // mismatch) — failed, never a silent console fallback.
+      await db
+        .update(commMessages)
+        .set({
+          status: "failed",
+          providerKey,
+          error: `Provider "${providerKey}" has no usable configuration for this channel.`,
+        })
+        .where(eq(commMessages.id, row.id));
+      return { status: "failed", reason: "provider_not_configured", messageId: row.id };
     }
     await db
       .update(commMessages)
@@ -625,6 +859,100 @@ export async function queueAndSend(input: SendInput): Promise<SendOutcome> {
       .where(eq(commMessages.id, row.id));
     return { status: "failed", reason: "delivery_failed", messageId: row.id };
   }
+}
+
+/**
+ * N3-001: failed deliveries used to be dead permanently (retryCount was
+ * incremented but nothing ever consumed it). One provider-failure retry
+ * window: rows that failed with a REAL provider (never the console
+ * fallback, which cannot succeed on retry) older than 5 minutes, capped
+ * per sweep, ordered oldest-first.
+ */
+const COMMS_RETRY_MAX_ATTEMPTS = 5;
+const COMMS_RETRY_MIN_AGE_MS = 5 * 60_000;
+const COMMS_RETRY_BATCH = 100;
+
+export async function runCommsRetrySweep(): Promise<{
+  retried: number;
+  sent: number;
+  stillFailed: number;
+}> {
+  const rows = await db
+    .select()
+    .from(commMessages)
+    .where(
+      and(
+        eq(commMessages.status, "failed"),
+        lt(commMessages.retryCount, COMMS_RETRY_MAX_ATTEMPTS),
+        // Retry only rows that failed with a REAL provider — rows stamped
+        // 'none' (nothing configured) or 'console' (dev delivery) can never
+        // succeed on retry.
+        sql`(${commMessages.providerKey} IS NOT NULL AND ${commMessages.providerKey} NOT IN ('none', 'console'))`,
+        lte(
+          commMessages.createdAt,
+          new Date(Date.now() - COMMS_RETRY_MIN_AGE_MS),
+        ),
+      ),
+    )
+    .orderBy(asc(commMessages.id))
+    .limit(COMMS_RETRY_BATCH);
+  let sent = 0;
+  let stillFailed = 0;
+  for (const row of rows) {
+    if (row.status !== "failed") continue;
+    // Re-deliver exactly what failed: the stored body is already rendered,
+    // consent was checked at queue time, and the idempotency of the outcome
+    // is the provider's message id.
+    try {
+      const provider = await defaultProviderFor(row.businessId, row.channel);
+      const providerKey = provider?.providerKey ?? null;
+      const config = provider?.config ?? null;
+      let result: DeliveryResult;
+      if (providerKey === "whatsapp_cloud" && config) {
+        result = await deliverViaWhatsappCloud(config, row.recipient, row.body);
+      } else if (providerKey === "generic_http" && config) {
+        result = await deliverViaGenericHttp(config, row.recipient, row.body);
+      } else if (providerKey === "resend" && row.channel === "email" && config) {
+        result = await deliverViaResend(config, row.recipient, row.body, row.body);
+      } else {
+        // Provider vanished/misconfigured since the failure — stays failed.
+        await db
+          .update(commMessages)
+          .set({
+            error:
+              providerKey === null
+                ? "No delivery provider is configured for this channel — the message was not sent."
+                : `Provider "${providerKey}" has no usable configuration for this channel.`,
+            retryCount: sql`${commMessages.retryCount} + 1`,
+          })
+          .where(eq(commMessages.id, row.id));
+        stillFailed += 1;
+        continue;
+      }
+      await db
+        .update(commMessages)
+        .set({
+          status: "sent",
+          providerKey,
+          providerMessageId: result.providerMessageId,
+          sentAt: new Date(),
+          error: null,
+        })
+        .where(eq(commMessages.id, row.id));
+      sent += 1;
+    } catch (err) {
+      await db
+        .update(commMessages)
+        .set({
+          status: "failed",
+          error: err instanceof Error ? err.message.slice(0, 500) : "Delivery failed.",
+          retryCount: sql`${commMessages.retryCount} + 1`,
+        })
+        .where(eq(commMessages.id, row.id));
+      stillFailed += 1;
+    }
+  }
+  return { retried: rows.length, sent, stillFailed };
 }
 
 /** Manual send (comms.manage): receipts, reminders, custom notifications. */
@@ -739,6 +1067,10 @@ export async function runDueReminderSweep(): Promise<{ sent: number }> {
           eq(sales.status, "completed"),
         ),
       )
+      // N3-003: the unordered cap always returned the same oldest PKs —
+      // businesses with >200 due sales reminded only one frozen cohort.
+      // Largest dues first; the next sweep reaches the rest.
+      .orderBy(desc(sales.dueAmount))
       .limit(200);
     for (const sale of dueSales) {
       if (sale.customerId === null) continue;

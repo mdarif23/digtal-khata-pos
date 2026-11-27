@@ -7,11 +7,20 @@ import {
   requireBusinessContext,
 } from "../../middleware/business.js";
 import { requirePermission } from "../../middleware/permissions.js";
+import {
+  commsSendRateLimit,
+  ipRateLimit,
+} from "../../middleware/rateLimit.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { BadRequestError } from "../../utils/handleError.js";
 import {
   applyDeliveryWebhook,
+  deleteProviderById,
+  deleteTemplateById,
   ensureWebhookSecret,
+  getCommSettings,
+  rotateWebhookSecret,
+  updateProviderById,
   getCommSettingsWithDefaults,
   listMessages,
   listProviders,
@@ -77,6 +86,81 @@ router.put("/api/comms/providers", ...manage, async (req: Request, res: Response
     return res.status(200).json({ success: true, data });
   } catch (err: unknown) {
     return sendSafeError(res, err, "Unable to save the provider.");
+  }
+});
+
+// ---- provider edit/delete by id (comms.manage; audited) ----
+const providerUpdateSchema = z.object({
+  displayName: z.string().trim().max(80).nullable().optional(),
+  // Explicit null CLEARS the stored config; absent = unchanged.
+  config: z.record(z.string(), z.unknown()).nullable().optional(),
+  isDefault: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
+
+router.put("/api/comms/providers/:providerId", ...manage, async (req: Request, res: Response) => {
+  try {
+    const providerId = Number(req.params.providerId);
+    if (!Number.isInteger(providerId) || providerId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid provider ID." });
+    }
+    const parsed = providerUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid provider update.",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const data = await updateProviderById(
+      getBusinessId(req),
+      providerId,
+      req.user?.id ?? null,
+      parsed.data,
+    );
+    return res.status(200).json({ success: true, data });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to update the provider.");
+  }
+});
+
+router.delete("/api/comms/providers/:providerId", ...manage, async (req: Request, res: Response) => {
+  try {
+    const providerId = Number(req.params.providerId);
+    if (!Number.isInteger(providerId) || providerId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid provider ID." });
+    }
+    await deleteProviderById(
+      getBusinessId(req),
+      providerId,
+      req.user?.id ?? null,
+    );
+    return res.status(200).json({ success: true });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to delete the provider.");
+  }
+});
+
+router.delete("/api/comms/templates/:templateId", ...manage, async (req: Request, res: Response) => {
+  try {
+    const templateId = Number(req.params.templateId);
+    if (!Number.isInteger(templateId) || templateId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid template ID." });
+    }
+    await deleteTemplateById(
+      getBusinessId(req),
+      templateId,
+      req.user?.id ?? null,
+    );
+    return res.status(200).json({ success: true });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to reset the template.");
   }
 });
 
@@ -167,50 +251,70 @@ router.get("/api/comms/messages", ...manage, async (req: Request, res: Response)
 });
 
 // ---- manual send ----
-const sendSchema = z.object({
-  channel: channelSchema,
-  customerId: z.number().int().positive().nullable().optional(),
-  recipient: z.string().trim().min(3).max(255),
-  templateKey: templateKeySchema,
-  messageClass: z.enum(["transactional", "marketing"]),
-  entityType: z.string().max(40).nullable().optional(),
-  entityId: z.number().int().positive().nullable().optional(),
-  variables: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
-  reason: z.string().trim().max(300).optional(),
-});
-
-router.post("/api/comms/send", ...manage, async (req: Request, res: Response) => {
-  try {
-    const parsed = sendSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid send request.",
-        errors: parsed.error.flatten(),
+const sendSchema = z
+  .object({
+    channel: channelSchema,
+    customerId: z.number().int().positive().nullable().optional(),
+    recipient: z.string().trim().min(3).max(255),
+    templateKey: templateKeySchema,
+    messageClass: z.enum(["transactional", "marketing"]),
+    entityType: z.string().max(40).nullable().optional(),
+    entityId: z.number().int().positive().nullable().optional(),
+    variables: z
+      .record(z.string(), z.union([z.string(), z.number()]))
+      .optional(),
+    reason: z.string().trim().max(300).optional(),
+  })
+  // O3-002: consent lives on the customer — marketing without one has no
+  // consent basis and is rejected at the door (the service fail-closes too).
+  .superRefine((data, ctx) => {
+    if (data.messageClass === "marketing" && !data.customerId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["customerId"],
+        message:
+          "Marketing messages require a customer (consent is recorded per customer).",
       });
     }
-    const input: SendInput & { reason?: string } = {
-      businessId: getBusinessId(req),
-      channel: parsed.data.channel,
-      customerId: parsed.data.customerId ?? null,
-      recipient: parsed.data.recipient,
-      templateKey: parsed.data.templateKey,
-      messageClass: parsed.data.messageClass,
-      entityType: parsed.data.entityType ?? null,
-      entityId: parsed.data.entityId ?? null,
-      variables: parsed.data.variables ?? {},
-      ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
-    };
-    const outcome = await sendManualMessage(
-      getBusinessId(req),
-      req.user!.id,
-      input,
-    );
-    return res.status(200).json({ success: true, data: outcome });
-  } catch (err: unknown) {
-    return sendSafeError(res, err, "Unable to send the message.");
-  }
-});
+  });
+
+router.post(
+  "/api/comms/send",
+  ...manage,
+  commsSendRateLimit,
+  async (req: Request, res: Response) => {
+    try {
+      const parsed = sendSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid send request.",
+          errors: parsed.error.flatten(),
+        });
+      }
+      const input: SendInput & { reason?: string } = {
+        businessId: getBusinessId(req),
+        channel: parsed.data.channel,
+        customerId: parsed.data.customerId ?? null,
+        recipient: parsed.data.recipient,
+        templateKey: parsed.data.templateKey,
+        messageClass: parsed.data.messageClass,
+        entityType: parsed.data.entityType ?? null,
+        entityId: parsed.data.entityId ?? null,
+        variables: parsed.data.variables ?? {},
+        ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
+      };
+      const outcome = await sendManualMessage(
+        getBusinessId(req),
+        req.user!.id,
+        input,
+      );
+      return res.status(200).json({ success: true, data: outcome });
+    } catch (err: unknown) {
+      return sendSafeError(res, err, "Unable to send the message.");
+    }
+  },
+);
 
 // Webhook signing secret — shown to managers so they can configure the
 // provider's outbound webhook. Regenerating invalidates the old one.
@@ -223,23 +327,48 @@ router.post("/api/comms/webhook-secret", ...manage, async (req: Request, res: Re
   }
 });
 
+// Rotation: the old secret stops working immediately (a leaked secret can
+// be retired — the reveal endpoint alone could never do that). Audited.
+router.post("/api/comms/webhook-secret/rotate", ...manage, async (req: Request, res: Response) => {
+  try {
+    const secret = await rotateWebhookSecret(
+      getBusinessId(req),
+      req.user?.id ?? null,
+    );
+    return res.status(200).json({ success: true, data: { secret } });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to rotate the webhook secret.");
+  }
+});
+
 // ---- delivery webhook (provider -> ezPos) ----
 // The webhook verifies an HMAC over the EXACT request bytes — captured by
 // the global express.json verify hook (see app.ts) before parsing.
 router.post(
   "/api/comms/webhook/:businessId",
+  // O3-004: unauthenticated + writes-then-verifies used to make this a
+  // public DB-write amplifier — read-only secret lookup now, uniform 401
+  // for never-configured business ids, and an IP limiter.
+  ipRateLimit,
   async (req: Request, res: Response) => {
     try {
       const businessId = Number(req.params.businessId);
       if (!Number.isInteger(businessId) || businessId <= 0) {
-        throw new BadRequestError("Invalid business ID.");
+        // Uniform 401 — never reveal whether the business id exists.
+        return res
+          .status(401)
+          .json({ success: false, message: "Invalid webhook signature." });
       }
       const rawBody =
         (req as Request & { __rawBody?: string }).__rawBody ??
         (typeof req.body === "string" ? req.body : JSON.stringify(req.body ?? {}));
-      const secretRow = await ensureWebhookSecret(businessId);
+      // O3-004: SELECT only — the old ensureWebhookSecret upsert created a
+      // settings row for ANY never-configured business id before auth.
+      const settings = await getCommSettings(businessId);
+      const secretRow = settings?.webhookSecret ?? null;
       const signature = req.headers["x-ezpos-signature"];
       if (
+        secretRow === null ||
         !verifyWebhookSignature(
           secretRow,
           rawBody,

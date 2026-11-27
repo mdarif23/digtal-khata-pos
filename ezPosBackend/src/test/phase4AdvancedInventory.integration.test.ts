@@ -417,6 +417,21 @@ describe("phase4 advanced inventory", { skip: !runIntegration }, () => {
     assert.equal(Number(compositeStockAfter[0].quantity), before + 1);
   });
 
+  it("names the PRODUCT when a production run lacks component stock", async () => {
+    // User report: the run failure toast said "Insufficient stock for
+    // variant 31" — a raw variant id nobody can read. The failure must name
+    // the product (+ SKU) instead. The composite's BOM is A×2 + B×1, so a
+    // run of 500,000 would need 1,000,000 A units — far beyond stock.
+    const run = await api(owner, "POST", `/api/variants/${composite}/production-runs`, {
+      locationId: locationA,
+      quantity: 500_000,
+    });
+    assert.equal(run.status, 409, JSON.stringify(run.body));
+    const message = payload<{ message: string }>(run).message;
+    assert.match(message, /P4 Cola/, "error must name the product, not the id");
+    assert.doesNotMatch(message, /variant \d+/, "no raw variant ids in the message");
+  });
+
   // -----------------------------------------------------------------
   // Weight selling
   // -----------------------------------------------------------------

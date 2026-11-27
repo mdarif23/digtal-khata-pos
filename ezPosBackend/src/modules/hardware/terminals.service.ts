@@ -272,6 +272,66 @@ export async function deleteTerminal(
 export interface PairingCodeIssue {
   code: string;
   expiresAt: Date;
+  /** Set when the code targets a pre-created terminal (attach mode). */
+  terminalId?: number;
+}
+
+/**
+ * Registers a terminal by name — no hardware, no bridge. This is the
+ * offline-selling path: a business that records sales offline needs a
+ * terminal record for attribution, but receipt printing (browser/OS) and a
+ * hand-opened drawer never needed the bridge. The bridge attaches later via
+ * a per-terminal pairing code when drawer hardware actually exists.
+ */
+export async function createTerminal(
+  businessId: number,
+  locationId: number,
+  rawName: string,
+  userId: number | null,
+): Promise<TerminalView> {
+  const baseName = rawName.trim().slice(0, 100);
+  if (baseName === "") {
+    throw new BadRequestError("A terminal name is required.");
+  }
+  // Location-scoped name uniqueness: suffix until free (same convention as
+  // the pairing-created terminal).
+  let name = baseName;
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    const [clash] = await db
+      .select({ id: posTerminals.id })
+      .from(posTerminals)
+      .where(
+        and(eq(posTerminals.locationId, locationId), eq(posTerminals.name, name)),
+      );
+    if (!clash) break;
+    name = `${baseName} (${attempt + 1})`.slice(0, 100);
+  }
+  const [row] = await db
+    .insert(posTerminals)
+    .values({
+      businessId,
+      locationId,
+      name,
+      createdBy: userId,
+      // secretHash/pairedAt stay null — unpaired until a bridge attaches.
+    })
+    .returning();
+  if (!row) {
+    throw new Error("Terminal insert returned no row.");
+  }
+  recordAudit({
+    businessId,
+    actorUserId: userId,
+    action: "pos_terminal.created",
+    entityType: "pos_terminal",
+    entityId: row.id,
+    metadata: { name, via: "direct_create", hardwareless: true },
+  });
+  publishRealtime(businessId, locationId, {
+    kind: "terminal.changed",
+    locationId,
+  });
+  return toView(row);
 }
 
 /** A pos_terminal.manage holder mints a one-time code for their location. */
@@ -279,17 +339,40 @@ export async function mintPairingCode(
   businessId: number,
   locationId: number,
   userId: number,
+  terminalId?: number,
 ): Promise<PairingCodeIssue> {
+  if (terminalId !== undefined) {
+    // Attach mode: the code targets a pre-created terminal. It must belong
+    // to this business + location — a code can never reach across either.
+    const [terminal] = await db
+      .select({ id: posTerminals.id })
+      .from(posTerminals)
+      .where(
+        and(
+          eq(posTerminals.id, terminalId),
+          eq(posTerminals.businessId, businessId),
+          eq(posTerminals.locationId, locationId),
+        ),
+      );
+    if (!terminal) {
+      throw new NotFoundError("Terminal not found at this location.");
+    }
+  }
   const code = generatePairingCode();
   const expiresAt = new Date(Date.now() + PAIRING_CODE_TTL_MS);
   await db.insert(terminalPairingCodes).values({
     businessId,
     locationId,
+    ...(terminalId !== undefined ? { terminalId } : {}),
     codeHash: hashTerminalSecret(code),
     createdBy: userId,
     expiresAt,
   });
-  return { code, expiresAt };
+  return {
+    code,
+    expiresAt,
+    ...(terminalId !== undefined ? { terminalId } : {}),
+  };
 }
 
 export interface PairingResult {
@@ -323,6 +406,7 @@ export async function pairTerminal(
         id: terminalPairingCodes.id,
         businessId: terminalPairingCodes.businessId,
         locationId: terminalPairingCodes.locationId,
+        terminalId: terminalPairingCodes.terminalId,
         createdBy: terminalPairingCodes.createdBy,
         expiresAt: terminalPairingCodes.expiresAt,
         usedAt: terminalPairingCodes.usedAt,
@@ -351,6 +435,41 @@ export async function pairTerminal(
       throw new ConflictError(
         "This pairing code has already been used. Mint a new one.",
       );
+    }
+
+    // Attach mode (migration 0094): the code was minted FOR a pre-created
+    // terminal — the bridge binds to it instead of creating a duplicate.
+    // Re-pairing an already-paired terminal is allowed (a lost bridge
+    // reinstalls): the new secret replaces the old immediately.
+    if (codeRow.terminalId !== null) {
+      const [attached] = await tx
+        .update(posTerminals)
+        .set({
+          secretHash: hashTerminalSecret(secret),
+          pairedAt: new Date(),
+          deviceInfo: deviceInfo ?? null,
+          status: "active",
+        })
+        .where(
+          and(
+            eq(posTerminals.id, codeRow.terminalId),
+            eq(posTerminals.businessId, codeRow.businessId),
+            eq(posTerminals.locationId, codeRow.locationId),
+          ),
+        )
+        .returning({ id: posTerminals.id, name: posTerminals.name });
+      if (!attached) {
+        throw new NotFoundError(
+          "The terminal this code targets no longer exists at this location.",
+        );
+      }
+      return {
+        businessId: codeRow.businessId,
+        locationId: codeRow.locationId,
+        terminal: attached,
+        attachedToExisting: true,
+        createdBy: codeRow.createdBy,
+      };
     }
 
     const businessId = codeRow.businessId;
@@ -393,15 +512,23 @@ export async function pairTerminal(
       businessId,
       locationId: codeRow.locationId,
       terminal,
+      attachedToExisting: false,
+      createdBy: codeRow.createdBy,
     };
   });
   recordAudit({
     businessId: result.businessId,
-    actorUserId: null,
+    actorUserId: result.createdBy ?? null,
     action: "pos_terminal.paired",
     entityType: "pos_terminal",
     entityId: result.terminal.id,
-    metadata: { name: result.terminal.name, via: "pairing_code" },
+    metadata: {
+      name: result.terminal.name,
+      via: "pairing_code",
+      ...(result.attachedToExisting
+        ? { attachedToExisting: true, rePaired: true }
+        : {}),
+    },
   });
   publishRealtime(result.businessId, result.locationId, {
     kind: "terminal.changed",

@@ -145,6 +145,14 @@ export const registerSessions = pgTable(
     openedAt: timestamp("opened_at", { withTimezone: true }).defaultNow(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     /**
+     * G2-001 (migration 0091): start of the CURRENT shift window. A reopen
+     * reuses the session row, so expected cash must only count transactions
+     * created after this moment — the prior shift's movements are already
+     * baked into the counted sheet that became the new opening cash. NULL
+     * for sessions never reopened (legacy behavior preserved).
+     */
+    reopenedAt: timestamp("reopened_at", { withTimezone: true }),
+    /**
      * Terminal attribution (multi-terminal Phase 1): the PC whose drawer is
      * being counted. Nullable — sessions opened before terminal binding (or
      * from an unbound PC) have none.

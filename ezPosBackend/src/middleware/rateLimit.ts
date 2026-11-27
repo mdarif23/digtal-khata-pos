@@ -126,3 +126,34 @@ export const backupDownloadRateLimit = rateLimit({
       : ipKeyGenerator(req.ip ?? "anonymous"),
   message: jsonMessage("Too many backup downloads — try again later."),
 });
+
+/**
+ * Manual comms sends: keyed by USER. Every send costs provider money and
+ * (O3-002) a runaway loop could push unbounded paid messages — the cap is
+ * far above any legitimate manual workflow; scheduled sweeps don't use
+ * this route.
+ */
+export const commsSendRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    req.user?.id !== undefined
+      ? String(req.user.id)
+      : ipKeyGenerator(req.ip ?? "anonymous"),
+  message: jsonMessage("Too many messages sent — try again in a few minutes."),
+});
+
+/**
+ * Generic unauthenticated webhook ingress (O3-004): keyed by IP — providers
+ * deliver from a handful of hosts, so this only stops floods.
+ */
+export const ipRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(req.ip ?? "anonymous"),
+  message: jsonMessage("Too many requests — try again later."),
+});

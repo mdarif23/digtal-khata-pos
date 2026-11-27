@@ -7,6 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -19,6 +27,7 @@ import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
 import {
   addCashMovementApi,
   closeRegisterApi,
+  createRegisterApi,
   getCurrentSessionApi,
   getRegistersApi,
   getSessionApi,
@@ -74,6 +83,29 @@ export function RegisterPage() {
   const [movementAmount, setMovementAmount] = useState("");
   const [movementNote, setMovementNote] = useState("");
   const [countedCash, setCountedCash] = useState("");
+
+  // Register creation (the BE contract existed but nothing in the FE
+  // called it — a fresh business hit a permanent dead-end empty state).
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newRegisterName, setNewRegisterName] = useState("");
+  const createMutation = useMutation({
+    mutationFn: () => createRegisterApi(newRegisterName.trim()),
+    onSuccess: (created) => {
+      toast.add({
+        title: `Register “${created.name}” created.`,
+        type: "success",
+      });
+      setNewRegisterName("");
+      setCreateOpen(false);
+      invalidate();
+    },
+    onError: (error) =>
+      toast.add({
+        title: extractError(error, "Unable to create the register."),
+        type: "error",
+        priority: "high",
+      }),
+  });
 
   const currentSession = session.data ?? null;
   const sessionDetail = useQuery({
@@ -259,8 +291,8 @@ export function RegisterPage() {
             </Select>
             {(registers.data?.length ?? 0) === 0 ? (
               <p className="text-xs text-muted-foreground">
-                No registers yet — a manager can create one (Registers are
-                unique per location).
+                No registers yet — create one below (registers are unique per
+                location).
               </p>
             ) : null}
           </div>
@@ -290,6 +322,13 @@ export function RegisterPage() {
             }}
           >
             {openMutation.isPending ? "Opening…" : "Open register"}
+          </PermissionButton>
+          <PermissionButton
+            permission="cash_register.manage"
+            variant="outline"
+            onClick={() => setCreateOpen(true)}
+          >
+            + Add register
           </PermissionButton>
         </div>
       ) : (
@@ -502,6 +541,36 @@ export function RegisterPage() {
           </div>
         </>
       )}
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add register</DialogTitle>
+            <DialogDescription>
+              Registers are unique per location — the new register is created
+              at your active location.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="new-register-name">Register name</Label>
+            <Input
+              id="new-register-name"
+              value={newRegisterName}
+              placeholder="e.g. Front counter"
+              maxLength={100}
+              onChange={(event) => setNewRegisterName(event.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              disabled={createMutation.isPending || newRegisterName.trim() === ""}
+              onClick={() => createMutation.mutate()}
+            >
+              {createMutation.isPending ? "Creating…" : "Create register"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

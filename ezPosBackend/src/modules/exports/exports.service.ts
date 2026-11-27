@@ -1,5 +1,7 @@
-import { and, asc, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
+import { getBusinessTimezone } from "../../services/ledger.js";
+import { businessLocalToUtcWall } from "../../utils/money.js";
 import { customers } from "../../db/schema/customers.js";
 import { suppliers } from "../../db/schema/suppliers.js";
 import { sales } from "../../db/schema/sales.js";
@@ -137,10 +139,22 @@ export async function exportSales(
   range: { from: string; to: string },
   locationId: number | undefined,
 ): Promise<CsvFile> {
+  // I3-1: match the reports exactly — window on created_at (timestamptz)
+  // with business-timezone bounds and only completed/refunded sales; the
+  // old naive purchase_date window with no status filter let voided sales
+  // re-enter the financial export and disagree with the on-screen report.
+  const tz = await getBusinessTimezone(db, businessId);
   const conditions: SQL[] = [
     eq(sales.businessId, businessId),
-    gte(sales.saleDate, sql`${`${range.from} 00:00:00`}::timestamp`),
-    lte(sales.saleDate, sql`${`${range.to} 23:59:59.999`}::timestamp`),
+    inArray(sales.status, ["completed", "refunded"]),
+    gte(
+      sales.createdAt,
+      sql`${businessLocalToUtcWall(range.from, "00:00:00", tz)}::timestamp`,
+    ),
+    lte(
+      sales.createdAt,
+      sql`${businessLocalToUtcWall(range.to, "23:59:59.999", tz)}::timestamp`,
+    ),
   ];
   if (locationId) {
     conditions.push(eq(sales.locationId, locationId));
@@ -190,15 +204,28 @@ export async function exportSalesLines(
   businessId: number,
   range: { from: string; to: string },
   locationId: number | undefined,
+  includeCost: boolean,
 ): Promise<CsvFile> {
+  // I3-1: same created_at + status conventions as exportSales (see above).
+  const tz = await getBusinessTimezone(db, businessId);
   const conditions: SQL[] = [
     eq(saleItems.businessId, businessId),
-    gte(sales.saleDate, sql`${`${range.from} 00:00:00`}::timestamp`),
-    lte(sales.saleDate, sql`${`${range.to} 23:59:59.999`}::timestamp`),
+    inArray(sales.status, ["completed", "refunded"]),
+    gte(
+      sales.createdAt,
+      sql`${businessLocalToUtcWall(range.from, "00:00:00", tz)}::timestamp`,
+    ),
+    lte(
+      sales.createdAt,
+      sql`${businessLocalToUtcWall(range.to, "23:59:59.999", tz)}::timestamp`,
+    ),
   ];
   if (locationId) {
     conditions.push(eq(sales.locationId, locationId));
   }
+  // L3-001: the cost column only ever leaves the server for callers with
+  // products.view_cost — the header is dropped entirely without it so the
+  // CSV shape differs rather than shipping a column of blanks.
   const rows = await db
     .select({
       saleId: sales.id,
@@ -208,7 +235,7 @@ export async function exportSalesLines(
       quantity: saleItems.quantity,
       sellingPrice: saleItems.sellingPrice,
       lineTotal: saleItems.lineTotal,
-      costAtSale: saleItems.costAtSale,
+      ...(includeCost ? { costAtSale: saleItems.costAtSale } : {}),
     })
     .from(saleItems)
     .innerJoin(sales, eq(sales.id, saleItems.saleId))
@@ -225,7 +252,7 @@ export async function exportSalesLines(
       "quantity",
       "selling_price",
       "line_total",
-      "cost_at_sale",
+      ...(includeCost ? ["cost_at_sale"] : []),
     ],
     rows.map((r) => [
       r.saleId,
@@ -235,7 +262,13 @@ export async function exportSalesLines(
       r.quantity === null ? "" : Number(r.quantity),
       r.sellingPrice === null ? "" : Number(r.sellingPrice),
       r.lineTotal === null ? "" : Number(r.lineTotal),
-      r.costAtSale === null ? "" : Number(r.costAtSale),
+      ...(includeCost
+        ? [
+            "costAtSale" in r && r.costAtSale !== null && r.costAtSale !== undefined
+              ? Number(r.costAtSale)
+              : "",
+          ]
+        : []),
     ]),
   );
 }

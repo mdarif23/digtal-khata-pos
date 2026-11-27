@@ -131,10 +131,14 @@ router.get(
   async (req: Request, res: Response) => {
     try {
       const range = requireDateRange(req.query as Record<string, unknown>);
+      // L3-001: cost_at_sale is a cost column — only callers holding
+      // products.view_cost may receive it (same rule as the inventory
+      // export and the sold_products JSON sanitize).
       const file = await exportSalesLines(
         getBusinessId(req),
         range,
         await resolveOptionalLocationParam(req),
+        callerHasPermission(req, "products.view_cost"),
       );
       sendCsv(res, file);
     } catch (err: unknown) {

@@ -201,7 +201,7 @@ describe("unified orders integration", { skip: !runIntegration }, () => {
   }
 
   async function connectWc(ctx: Ctx): Promise<number> {
-    await api(ctx, "PUT", `/api/businesses/${ctx.businessId}`, {
+    await api(ctx, "PATCH", `/api/businesses/${ctx.businessId}/mode`, {
       mode: "omnichannel",
     });
     const connect = await api(

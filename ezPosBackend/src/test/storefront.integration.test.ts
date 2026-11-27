@@ -136,7 +136,7 @@ describe("storefront api integration", { skip: !runIntegration }, () => {
   }
 
   async function setMode(ctx: Ctx, mode: string): Promise<void> {
-    const res = await api(ctx, "PUT", `/api/businesses/${ctx.businessId}`, {
+    const res = await api(ctx, "PATCH", `/api/businesses/${ctx.businessId}/mode`, {
       mode,
     });
     assert.equal(res.status, 200);

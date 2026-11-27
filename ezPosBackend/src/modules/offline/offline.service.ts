@@ -7,6 +7,12 @@ import { products } from "../../db/schema/products.js";
 import { productVariants } from "../../db/schema/productVariants.js";
 import { customers } from "../../db/schema/customers.js";
 import { sales } from "../../db/schema/sales.js";
+import { businessMemberships } from "../../db/schema/businessMemberships.js";
+import { roles } from "../../db/schema/roles.js";
+import { userRoles } from "../../db/schema/userRoles.js";
+import { rolePermissions } from "../../db/schema/rolePermissions.js";
+import { permissions } from "../../db/schema/permissions.js";
+import { WILDCARD_PERMISSION } from "../../rbac/permissions.js";
 import {
   registerSessions,
   registerTransactions,
@@ -20,11 +26,13 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { recordAudit } from "../../services/audit.js";
+import { isApprovalRequired } from "../../services/managerApproval.js";
 import {
   createSalePayloadSchema,
   type CreateSalePayload,
 } from "../sales/schemas/sales.schema.js";
 import * as salesService from "../sales/sales.service.js";
+import { resolveUomContext } from "../uom/uom.service.js";
 import * as cashRegistersService from "../cashRegisters/cashRegisters.service.js";
 import { roundMoney } from "../../utils/roundMoney.js";
 
@@ -255,13 +263,43 @@ interface OfflineContext {
   userId: number;
   /** True when the syncing user holds the wildcard (owner) permission. */
   callerIsOwner: boolean;
+  /**
+   * K3-001: effective permission set for the syncing user, snapshotted ONCE
+   * per sync batch. Every op is permission-gated against it — the sync
+   * route deliberately has no per-route requirePermission (ops are
+   * heterogeneous), so the gates live here.
+   */
+  permissions?: Set<string>;
+}
+
+/** K3-001: op-level permission check against the batch snapshot (fail closed). */
+function holdsPermission(ctx: OfflineContext, permission: string): boolean {
+  const granted = ctx.permissions;
+  if (!granted) return false;
+  return granted.has(WILDCARD_PERMISSION) || granted.has(permission);
+}
+
+/** Uniform K3-001 rejection for a permission-gated offline op. */
+function permissionDenied(opId: string, permission: string): OfflineOpResult {
+  return {
+    opId,
+    status: "failed",
+    error: `Offline replay requires the ${permission} permission.`,
+  };
 }
 
 export async function applyOfflineOps(
-  ctx: OfflineContext,
+  rawCtx: OfflineContext,
   ops: OfflineOp[],
 ): Promise<OfflineOpResult[]> {
   const results: OfflineOpResult[] = [];
+  const ctx: OfflineContext = {
+    ...rawCtx,
+    permissions: await loadEffectivePermissions(
+      rawCtx.businessId,
+      rawCtx.userId,
+    ).catch(() => new Set<string>()),
+  };
   for (const op of ops) {
     try {
       switch (op.type) {
@@ -324,14 +362,41 @@ async function createConflict(
   return row!.id;
 }
 
+/**
+ * U1: a sale line's quantity in BASE units. Cart quantities are ENTERED
+ * packaging units ("2 Box"); the allocation ledger and stock both speak
+ * base — consuming entered units let a pack-selling terminal oversell its
+ * allowance ~factor×. History replay uses requireActive:false so a
+ * deactivated packaging unit still converts honestly.
+ */
+async function offlineLineBaseQty(
+  ctx: OfflineContext,
+  item: { variantId: number; quantity: number; uomConversionId?: number | null | undefined },
+  eligibility: Map<number, { productId: number }>,
+): Promise<number> {
+  if (item.uomConversionId == null) return item.quantity;
+  const line = eligibility.get(item.variantId);
+  if (!line) return item.quantity;
+  const uom = await resolveUomContext(
+    db,
+    ctx.businessId,
+    line.productId,
+    item.variantId,
+    item.uomConversionId,
+    { requireActive: false },
+  );
+  return roundMoney(item.quantity * uom.factor);
+}
+
 /** Per-variant offline eligibility for a sale's lines. */
 async function lineEligibility(
   businessId: number,
   variantIds: number[],
-): Promise<Map<number, { policy: string; trackingType: string }>> {
+): Promise<Map<number, { policy: string; trackingType: string; productId: number }>> {
   const rows = await db
     .select({
       variantId: productVariants.id,
+      productId: productVariants.productId,
       policy: products.offlinePolicy,
       trackingType: products.trackingType,
     })
@@ -343,9 +408,50 @@ async function lineEligibility(
   return new Map(
     rows.map((r) => [
       r.variantId,
-      { policy: r.policy, trackingType: r.trackingType ?? "none" },
+      { policy: r.policy, trackingType: r.trackingType ?? "none", productId: r.productId },
     ]),
   );
+}
+
+/**
+ * A3-006: effective permission set for a syncing user, derived the same way
+ * requireBusinessContext does (owner → wildcard; otherwise the union of the
+ * membership role and every user_roles assignment). Read fresh per op batch
+ * so revocations apply at sync time.
+ */
+async function loadEffectivePermissions(
+  businessId: number,
+  userId: number,
+): Promise<Set<string>> {
+  const [membership] = await db
+    .select({ roleId: businessMemberships.roleId, roleSlug: roles.slug })
+    .from(businessMemberships)
+    .innerJoin(roles, eq(roles.id, businessMemberships.roleId))
+    .where(
+      and(
+        eq(businessMemberships.userId, userId),
+        eq(businessMemberships.businessId, businessId),
+        eq(businessMemberships.status, "active"),
+      ),
+    );
+  if (!membership) return new Set();
+  if (membership.roleSlug === "owner") {
+    return new Set([WILDCARD_PERMISSION]);
+  }
+  const assignments = await db
+    .select({ roleId: userRoles.roleId })
+    .from(userRoles)
+    .where(and(eq(userRoles.userId, userId), eq(userRoles.businessId, businessId)));
+  const roleIds = [
+    ...new Set(assignments.map((a) => a.roleId).concat(membership.roleId)),
+  ];
+  if (roleIds.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ key: permissions.key })
+    .from(rolePermissions)
+    .innerJoin(permissions, eq(permissions.id, rolePermissions.permissionId))
+    .where(inArray(rolePermissions.roleId, roleIds));
+  return new Set(rows.map((row) => row.key));
 }
 
 async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
@@ -359,6 +465,32 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
     throw new BadRequestError(`Invalid sale payload: ${JSON.stringify(parsed.error.flatten())}`);
   }
   const sale = parsed.data;
+
+  // A3-006/K3-001: the online path gates sale creation AND discounts /
+  // price overrides on permissions — replay must not become a bypass.
+  // Checked against the batch permission snapshot (role changes take
+  // effect on the NEXT batch, same freshness contract as the session).
+  if (!holdsPermission(ctx, "pos.create_sale")) {
+    return permissionDenied(op.opId, "pos.create_sale");
+  }
+  const hasDiscount =
+    (sale.discount?.value ?? 0) > 0 ||
+    sale.items.some((item) => (item.discount?.value ?? 0) > 0);
+  const hasOverride = sale.items.some((item) => item.priceOverride != null);
+  if (hasDiscount && !holdsPermission(ctx, "pos.apply_discount")) {
+    return {
+      opId: op.opId,
+      status: "failed",
+      error: "You do not have permission to apply discounts.",
+    };
+  }
+  if (hasOverride && !holdsPermission(ctx, "pricing.price_override")) {
+    return {
+      opId: op.opId,
+      status: "failed",
+      error: "You do not have permission to override prices.",
+    };
+  }
 
   const eligibility = await lineEligibility(
     ctx.businessId,
@@ -436,10 +568,16 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
   }
 
   // Negative stock (oversell while offline) — the stock truth changed
-  // against the sale's assumption: flag for review.
+  // against the sale's assumption: flag for review. U1: cart quantities are
+  // ENTERED packaging units while stock/allocations speak BASE — convert
+  // each line through the same UOM context the online engine uses.
   const soldVariants = new Map<number, number>();
   for (const item of sale.items) {
-    soldVariants.set(item.variantId, (soldVariants.get(item.variantId) ?? 0) + item.quantity);
+    const baseQty = await offlineLineBaseQty(ctx, item, eligibility);
+    soldVariants.set(
+      item.variantId,
+      (soldVariants.get(item.variantId) ?? 0) + baseQty,
+    );
   }
   for (const [variantId, qty] of soldVariants) {
     const [stockRow] = await db
@@ -458,22 +596,23 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
         op.opId,
         op.type,
         "negative_stock_open_mode",
-        `Offline sale left variant ${variantId} at ${stockRow.quantity} units at this location (sold ${qty}).`,
+        `Offline sale left variant ${variantId} at ${stockRow.quantity} base units at this location (sold ${qty}).`,
         { variantId, quantityAfter: Number(stockRow.quantity) },
       );
     }
   }
 
-  // Consume allocations and flag overages.
+  // Consume allocations and flag overages (BASE units — see U1 above).
   for (const item of sale.items) {
     const line = eligibility.get(item.variantId)!;
     if (line.policy !== "allocated") continue;
+    const baseQty = await offlineLineBaseQty(ctx, item, eligibility);
     const updated = await pool.query(
       `UPDATE offline_allocations
        SET consumed_qty = consumed_qty + $1, updated_at = now()
        WHERE terminal_id = $2 AND variant_id = $3 AND status = 'active'
        RETURNING allocated_qty, consumed_qty`,
-      [item.quantity, ctx.terminalId, item.variantId],
+      [baseQty, ctx.terminalId, item.variantId],
     );
     const row = updated.rows[0];
     if (row && Number(row.consumed_qty) > Number(row.allocated_qty)) {
@@ -482,7 +621,7 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
         op.opId,
         op.type,
         "allocation_exceeded",
-        `Terminal sold ${row.consumed_qty} of variant ${item.variantId} offline against an allowance of ${row.allocated_qty}.`,
+        `Terminal sold ${row.consumed_qty} of variant ${item.variantId} offline against an allowance of ${row.allocated_qty} (base units).`,
         { variantId: item.variantId, allocated: row.allocated_qty, consumed: row.consumed_qty },
       );
       return {
@@ -505,6 +644,10 @@ async function applySaleOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineO
 }
 
 async function applyCustomerOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
+  // K3-001: creation is customers.create online; replay must hold it too.
+  if (!holdsPermission(ctx, "customers.create")) {
+    return permissionDenied(op.opId, "customers.create");
+  }
   const payload = op.payload as {
     clientUuid?: string;
     name?: string;
@@ -543,6 +686,11 @@ async function applyCustomerOp(ctx: OfflineContext, op: OfflineOp): Promise<Offl
 }
 
 async function applyDrawerOpenOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
+  // K3-001/J3-001: opening a drawer is cash_register.open online — the DB
+  // exclude constraint was the only guard, and the replay wrote no audit.
+  if (!holdsPermission(ctx, "cash_register.open")) {
+    return permissionDenied(op.opId, "cash_register.open");
+  }
   const payload = op.payload as {
     clientSessionId?: string;
     registerId?: number;
@@ -572,6 +720,45 @@ async function applyDrawerOpenOp(ctx: OfflineContext, op: OfflineOp): Promise<Of
   if (!register) throw new NotFoundError("Register not found at this location.");
   const openingCash = roundMoney(Number(payload.openingCash ?? 0));
   if (openingCash < 0) throw new BadRequestError("Opening cash cannot be negative.");
+  // Offline/online reconciliation: the register may already have an OPEN
+  // session that was opened online after this op was recorded (or by an
+  // earlier replay path). The "one open session per register" guard makes a
+  // second insert impossible, and previously the raw query error leaked to
+  // the sync dialog, sticking every queued op behind it. The online session
+  // is the system of record — adopt it instead of failing the op forever.
+  // Same-user only: operating someone else's drawer would break the
+  // session-ownership rule the movement ops enforce.
+  const [openSession] = await db
+    .select({ id: registerSessions.id, userId: registerSessions.userId })
+    .from(registerSessions)
+    .where(
+      and(
+        eq(registerSessions.businessId, ctx.businessId),
+        eq(registerSessions.registerId, payload.registerId!),
+        eq(registerSessions.status, "open"),
+      ),
+    )
+    .limit(1);
+  if (openSession) {
+    if (openSession.userId !== ctx.userId && !ctx.callerIsOwner) {
+      throw new ConflictError(
+        "This register (or user) already has an open session on the server.",
+      );
+    }
+    recordAudit({
+      businessId: ctx.businessId,
+      actorUserId: ctx.userId,
+      action: "register.opened",
+      entityType: "register_session",
+      entityId: openSession.id,
+      metadata: {
+        registerId: payload.registerId,
+        adoptedSessionId: openSession.id,
+        offlineReplay: true,
+      },
+    });
+    return { opId: op.opId, status: "applied", sessionId: openSession.id };
+  }
   try {
     const [session] = await db
       .insert(registerSessions)
@@ -586,10 +773,26 @@ async function applyDrawerOpenOp(ctx: OfflineContext, op: OfflineOp): Promise<Of
       })
       .returning({ id: registerSessions.id });
     if (!session) throw new Error("Session insert returned no row.");
+    // K3-001: the online open audits (register.opened) — the replay must
+    // leave the same trail.
+    recordAudit({
+      businessId: ctx.businessId,
+      actorUserId: ctx.userId,
+      action: "register.opened",
+      entityType: "register_session",
+      entityId: session.id,
+      metadata: {
+        registerId: payload.registerId,
+        openingCash,
+        offlineReplay: true,
+      },
+    });
     return { opId: op.opId, status: "applied", sessionId: session.id };
   } catch (err) {
-    if ((err as { code?: string }).code === "23P01") {
-      // exclude constraint: register or user already has an open session.
+    const pgCode = (err as { code?: string }).code;
+    if (pgCode === "23P01" || pgCode === "23505") {
+      // Exclude/unique guard: register or user already has an open session
+      // (raced between the adoption lookup and this insert).
       throw new ConflictError(
         "This register (or user) already has an open session on the server.",
       );
@@ -619,6 +822,13 @@ async function findSessionByClientId(
 }
 
 async function applyDrawerMovementOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
+  // K3-001/J3-001: movements are cash_movement.create online, session-scoped
+  // to their owner, and (G1-01) subject to the manager-approval policy —
+  // the replay path skipped ALL three: any terminal-bound full-access user
+  // could move cash out of any drawer at the location with zero checks.
+  if (!holdsPermission(ctx, "cash_movement.create")) {
+    return permissionDenied(op.opId, "cash_movement.create");
+  }
   const payload = op.payload as {
     clientSessionId?: string;
     clientOpId?: string;
@@ -641,11 +851,31 @@ async function applyDrawerMovementOp(ctx: OfflineContext, op: OfflineOp): Promis
   if (session.status !== "open") {
     throw new ConflictError("This drawer session is already closed.");
   }
+  // Same ownership rule as assertSessionMayBeOperated online: the session
+  // owner — or the owner account — may operate it.
+  if (session.userId !== ctx.userId && !ctx.callerIsOwner) {
+    return {
+      opId: op.opId,
+      status: "failed",
+      error: "You can only operate your own register sessions.",
+    };
+  }
   const amount = roundMoney(Number(payload.amount ?? 0));
   if (!(amount > 0)) throw new BadRequestError("Amount must be greater than zero.");
   const MANUAL_TYPES = ["cash_in", "cash_out", "safe_deposit", "safe_withdrawal", "adjustment_in", "adjustment_out"] as const;
   if (!(MANUAL_TYPES as readonly string[]).includes(payload.type)) {
     throw new BadRequestError(`Unsupported offline movement type: ${payload.type}`);
+  }
+  // G1-01 policy, fail-closed: the offline UI never collects an approval
+  // token, so when the business mandates approval for cash movements the
+  // replay CANNOT satisfy it — the op fails (never silently applied).
+  if (await isApprovalRequired(ctx.businessId, "cash_movement")) {
+    return {
+      opId: op.opId,
+      status: "failed",
+      error:
+        "This business requires manager approval for cash movements — record this movement while online.",
+    };
   }
   await db.insert(registerTransactions).values({
     businessId: ctx.businessId,
@@ -657,10 +887,30 @@ async function applyDrawerMovementOp(ctx: OfflineContext, op: OfflineOp): Promis
     clientOpId: payload.clientOpId,
     note: payload.note ?? null,
   });
+  // K3-001: same audit trail as the online movement (cash.movement).
+  recordAudit({
+    businessId: ctx.businessId,
+    actorUserId: ctx.userId,
+    action: "cash.movement",
+    entityType: "register_session",
+    entityId: session.id,
+    metadata: {
+      movementType: payload.type,
+      amount,
+      isDrop: payload.type === "safe_deposit",
+      note: payload.note ?? null,
+      offlineReplay: true,
+    },
+  });
   return { opId: op.opId, status: "applied", sessionId: session.id };
 }
 
 async function applyDrawerCloseOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
+  // K3-001: closing is cash_register.close online; closeSession (shared
+  // with the online path) enforces ownership + approval + its own audit.
+  if (!holdsPermission(ctx, "cash_register.close")) {
+    return permissionDenied(op.opId, "cash_register.close");
+  }
   const payload = op.payload as {
     clientSessionId?: string;
     countedCash?: number;
@@ -689,6 +939,12 @@ async function applyDrawerCloseOp(ctx: OfflineContext, op: OfflineOp): Promise<O
 }
 
 async function applyReturnOp(ctx: OfflineContext, op: OfflineOp): Promise<OfflineOpResult> {
+  // K3-001: refunds are sales.return online (with a manager-approval
+  // policy and the offline cap as the only brakes here) — the replay must
+  // at least hold the permission.
+  if (!holdsPermission(ctx, "sales.return")) {
+    return permissionDenied(op.opId, "sales.return");
+  }
   const payload = op.payload as {
     originalSaleId?: number;
     reason?: string;

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import axios from "../../../api/axios.js";
+import axios, { getBoundTerminalId } from "../../../api/axios.js";
 import { refreshStockAfterTransaction } from "../stores/useSalesStore.js";
 import {
   appendSyncLog,
@@ -62,6 +62,9 @@ interface OfflineState {
 
 let backoffMs = 5_000;
 let backoffTimer: ReturnType<typeof setTimeout> | null = null;
+// WP-015: startWatchers is reachable from every loadSession (bootstrap,
+// 401 recovery, permission refresh) — one loop per page load, ever.
+let watchersStarted = false;
 
 function isNetworkError(err: unknown): boolean {
   return (
@@ -139,6 +142,18 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
           ? `Offline sale recorded — ৳${entry.summary.total.toFixed(2)}, ${entry.summary.itemCount} item(s)`
           : `Offline ${input.kind} recorded`,
     });
+    // Terminal binding gates SYNC (allocations are terminal-scoped) — a
+    // device that records offline while unbound can never replay until it
+    // binds. Warn at record time so the cashier knows BEFORE reopening.
+    if (getBoundTerminalId() === null) {
+      await appendSyncLog({
+        at: new Date().toISOString(),
+        kind: "conflict",
+        clientSaleId,
+        detail:
+          "This device has no bound terminal — sync requires one. Bind this computer in Settings → Hardware when back online.",
+      });
+    }
     await get().refresh();
     return clientSaleId;
   },
@@ -207,6 +222,7 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
           if (conflictId !== undefined) entry.conflictId = conflictId;
           entry.attempts += 1;
           entry.lastError = null;
+          entry.errorCode = undefined;
           await putOutboxEntry(entry);
           await appendSyncLog({
             at: new Date().toISOString(),
@@ -236,6 +252,16 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
           // stock conflict, offline-eligible validation) — a real conflict,
           // never retried. Requires manual review by the cashier/manager.
           entry.status = "failed";
+          // A3-001: persist the machine code (retryFailed skips entries the
+          // SURFACE_NOT_ACTIVE gate rejected — matching the English message
+          // breaks as soon as a gate uses a custom wording).
+          const errorCode = (
+            err as { response?: { data?: { code?: string } } }
+          )?.response?.data?.code;
+          entry.errorCode =
+            typeof errorCode === "string" && errorCode.length > 0
+              ? errorCode
+              : undefined;
           entry.lastError =
             (err as { response?: { data?: { message?: string } } })?.response?.data
               ?.message ?? "The sale was rejected by the server.";
@@ -269,7 +295,18 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
     // re-queues them as pending AFTER the cashier has had the chance to
     // adjust (e.g. re-pricing) — the payload is replayed as-is with the
     // SAME idempotency key, so nothing can duplicate.
-    const entries = (await listOutbox()).filter((e) => e.status === "failed");
+    // WP-014 (refined per A3-001): mode-blocked entries (the business
+    // switched to a model whose surface gate 403s this op) are skipped —
+    // they can never succeed in this mode; re-queueing them loops forever.
+    // Matched on the SURFACE_NOT_ACTIVE code; R3-002: legacy entries that
+    // failed before the errorCode field existed still carry only the
+    // English message — skip those too for this transition release.
+    const entries = (await listOutbox()).filter(
+      (e) =>
+        e.status === "failed" &&
+        e.errorCode !== "SURFACE_NOT_ACTIVE" &&
+        !e.lastError?.includes("not active for the current operating model"),
+    );
     for (const entry of entries) {
       entry.status = "pending";
       entry.lastError = "Manually re-queued after review.";
@@ -280,6 +317,11 @@ export const useOfflineStore = create<OfflineState>()((set, get) => ({
   },
 
   startWatchers: () => {
+    // WP-015: single-instance guard — every call added fresh listeners and
+    // another backoff timer chain (stacked per mode switch / permission
+    // change, since loadSession re-runs this). One loop per page load.
+    if (watchersStarted) return;
+    watchersStarted = true;
     // Reconnect + periodic retry with backoff. The engine never overlaps.
     const refreshGrants = async () => {
       // Phase 3: keep this terminal's offline allowances fresh WHILE online

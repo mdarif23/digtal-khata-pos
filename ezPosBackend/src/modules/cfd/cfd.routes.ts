@@ -139,9 +139,12 @@ router.get("/api/cfd/stream", async (req: Request, res: Response) => {
 
 const pushSchema = z
   .object({
-    // Legacy single-target field (still accepted for compatibility);
-    // displayIds fans the same payload out to several displays (1-20).
-    displayId: z.number().int().positive(),
+    // N2-001: the FE sends ONLY displayIds (fan-out, 1-20) — this field was
+    // required while the comment claimed legacy compatibility, so every FE
+    // push 400'd and the .catch(() => undefined) on the POS side swallowed
+    // it: the display froze on its pairing snapshot forever. Both are
+    // optional now; at least ONE target must be provided.
+    displayId: z.number().int().positive().optional(),
     displayIds: z.array(z.number().int().positive()).max(20).optional(),
     status: z.enum(["idle", "cart", "paid"]),
     items: z
@@ -163,7 +166,16 @@ const pushSchema = z
     // P3 Phase 1 (F1): named sale-level charges (subset of grandTotal).
     chargesTotal: z.number().nonnegative().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((data, ctx) => {
+    if (!data.displayId && !(data.displayIds && data.displayIds.length > 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["displayIds"],
+        message: "Provide displayIds (or a legacy displayId) to push to.",
+      });
+    }
+  });
 
 /** The POS pushes the live cart — the display never computes anything. */
 router.post("/api/cfd/push", ...read, async (req: Request, res: Response) => {
@@ -212,9 +224,13 @@ router.post("/api/cfd/push", ...read, async (req: Request, res: Response) => {
     // P3 Phase 4 (N1-08): fan out — every target is ownership-checked
     // inside pushPayload (a foreign displayId is a 404, never a leak), so a
     // mixed list can never push to another business's display.
+    // superRefine guarantees at least one target; the explicit fallbacks
+    // keep the types honest.
     const targetIds = parsed.data.displayIds?.length
       ? parsed.data.displayIds
-      : [parsed.data.displayId];
+      : parsed.data.displayId
+        ? [parsed.data.displayId]
+        : [];
     const results = [];
     for (const displayId of targetIds) {
       try {

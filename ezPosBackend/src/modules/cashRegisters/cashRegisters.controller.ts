@@ -8,6 +8,7 @@ import { callerHasPermission } from "../../middleware/permissions.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { WILDCARD_PERMISSION } from "../../rbac/permissions.js";
 import { getRegisterSessionReport } from "./cashRegisters.service.js";
+import { listAccessibleLocationIds } from "../locations/locations.service.js";
 import {
   addCashMovement,
   closeSession,
@@ -25,6 +26,7 @@ import {
 } from "./cashRegisters.service.js";
 import { z } from "zod";
 import { dateRangeSchema } from "../reports/reports.validation.js";
+import { getDateBounds } from "../reports/reports.service.js";
 
 function actor(req: Request): {
   userId: number;
@@ -203,12 +205,18 @@ export async function getSessionHandler(req: Request, res: Response) {
         .json({ success: false, message: "Invalid session ID." });
     }
     const { userId, callerIsOwner } = actor(req);
+    const hasSettingsView = callerHasPermission(req, "settings.view");
+    // L3-003: settings.view holders may only read sessions at their
+    // assigned locations (counted cash is money data).
     const data = await getSessionDetail(
       getBusinessId(req),
       userId,
       callerIsOwner,
-      callerHasPermission(req, "settings.view"),
+      hasSettingsView,
       sessionId,
+      callerIsOwner
+        ? null
+        : await listAccessibleLocationIds(getBusinessId(req), userId, false),
     );
     return res.status(200).json({ success: true, data });
   } catch (err: unknown) {
@@ -432,10 +440,14 @@ export async function getRegisterSessionReportHandler(
         errors: parsed.error.flatten(),
       });
     }
+    // I3-2: honor the shared period vocabulary (60d/90d/365d etc.) via the
+    // same business-timezone bounds every other report uses — the handler
+    // used to silently collapse any period-only query to TODAY.
+    const bounds = await getDateBounds(getBusinessId(req), parsed.data);
     const data = await getRegisterSessionReport(
       getBusinessId(req),
-      parsed.data.startDate ?? new Date().toISOString().slice(0, 10),
-      parsed.data.endDate ?? new Date().toISOString().slice(0, 10),
+      bounds.startDateOnly,
+      bounds.endDateOnly,
     );
     return res.status(200).json({ success: true, data });
   } catch (err: unknown) {

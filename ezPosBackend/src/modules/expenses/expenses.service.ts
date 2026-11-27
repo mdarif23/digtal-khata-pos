@@ -1,6 +1,7 @@
 import { expenseCategories } from "../../db/schema/expenseCategories.js";
 import { chartOfAccounts } from "../../db/schema/chartOfAccounts.js";
 import { expensePayments } from "../../db/schema/expensePayments.js";
+import { businesses } from "../../db/schema/businesses.js";
 import { expenses } from "../../db/schema/expenses.js";
 import { journalEntryLines } from "../../db/schema/journalEntries.js";
 import { locations } from "../../db/schema/locations.js";
@@ -347,6 +348,18 @@ async function insertRegisterCashOut(
     note: string | null;
   },
 ): Promise<void> {
+  // F3-003: expense settlement explicitly binds a drawer session — that
+  // binding is refused for online_only businesses (registers are not an
+  // active surface there; the GL entry still records the money).
+  const [businessMode] = await tx
+    .select({ mode: businesses.mode })
+    .from(businesses)
+    .where(eq(businesses.id, opts.businessId));
+  if (businessMode?.mode === "online_only") {
+    throw new ConflictError(
+      "Cash registers are not active for an online-only business. Switch the operating model in Settings → Business Operations.",
+    );
+  }
   const [session] = await tx
     .select({
       id: registerSessions.id,
@@ -617,6 +630,30 @@ export async function updateExpense(
             .filter((line) => line.description === "Initial settlement")
             .reduce((sum, line) => sum + Number(line.credit), 0),
         );
+        // F2-001: the repost needs the ORIGINAL initial payment's
+        // method/session so the cash credit line is reproduced — passing
+        // null skipped the cash leg and the entry went out unbalanced,
+        // rolling the whole edit back. The creation-time payment row is
+        // the first expense_payments row (settlements post later).
+        const initialPaymentInfo =
+          initialPaid > 0.005
+            ? (
+                await tx
+                  .select({
+                    method: expensePayments.paymentMethod,
+                    registerSessionId: expensePayments.registerSessionId,
+                  })
+                  .from(expensePayments)
+                  .where(
+                    and(
+                      eq(expensePayments.expenseId, id),
+                      eq(expensePayments.businessId, businessId),
+                    ),
+                  )
+                  .orderBy(asc(expensePayments.id))
+                  .limit(1)
+              )[0]
+            : undefined;
         await reverseExpenseLedgerEntry(tx, {
           businessId,
           expenseId: id,
@@ -633,7 +670,12 @@ export async function updateExpense(
             locationId: existing.locationId,
             title: data.title,
           },
-          initialPayment: null,
+          initialPayment: initialPaymentInfo
+            ? {
+                method: initialPaymentInfo.method,
+                registerSessionId: initialPaymentInfo.registerSessionId,
+              }
+            : null,
           actorUserId: updatedBy,
         });
       }
@@ -663,6 +705,30 @@ export async function voidExpense(
   deletedBy: number,
   reason: string | undefined,
 ) {
+  // F3-002: a SETTLED expense cannot be voided — its settlement payments
+  // posted their own DR-2010/CR-cash journal entries and cash_out drawer
+  // rows which the void does not reverse, leaving 2010 with a debit
+  // balance and the drawer permanently short. Same contract as sale void
+  // (refunds exist → use returns): settle-reverse first.
+  const [paidRow] = await db
+    .select({ paidAmount: expenses.paidAmount })
+    .from(expenses)
+    .where(
+      and(
+        eq(expenses.id, id),
+        eq(expenses.businessId, businessId),
+        isNull(expenses.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!paidRow) {
+    throw new NotFoundError("Expense not found");
+  }
+  if (Number(paidRow.paidAmount) > 0.005) {
+    throw new ConflictError(
+      `This expense has ${Number(paidRow.paidAmount).toFixed(2)} settled — void its payments first (or void them from the settlement list) before voiding the expense.`,
+    );
+  }
   const [voided] = await db
     .update(expenses)
     .set({

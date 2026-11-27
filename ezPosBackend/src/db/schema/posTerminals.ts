@@ -109,6 +109,12 @@ export const terminalPairingCodes = pgTable(
       .references(() => businesses.id),
     locationId: integer("location_id").notNull(),
     codeHash: varchar("code_hash", { length: 64 }).notNull(),
+    // Migration 0094: when set, the code attaches the bridge to this exact
+    // (hardware-less, pre-created) terminal instead of creating a new one.
+    // Null = legacy behavior: the pairing exchange creates the terminal.
+    terminalId: integer("terminal_id").references(() => posTerminals.id, {
+      onDelete: "cascade",
+    }),
     createdBy: integer("created_by")
       .references(() => users.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

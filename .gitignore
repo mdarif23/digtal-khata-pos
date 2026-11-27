@@ -29,3 +29,6 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Bridge distribution zips (build artifacts served by the backend)
+ezPosBackend/public/downloads/*.zip

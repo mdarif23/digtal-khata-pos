@@ -149,18 +149,27 @@ export function planHasFeature(
 /**
  * Throws FEATURE_NOT_IN_PLAN when the business's plan does not include the
  * capability. Route-level equivalent: requireFeature() in
- * middleware/entitlements.ts.
+ * middleware/entitlements.ts. WP-012: names the plans that DO include the
+ * feature so the FE can show an upgrade path, matching requireFeature().
  */
-export function assertFeature(
+export async function assertFeature(
   entitlements: Entitlements,
   feature: PlanFeatureKey,
-): void {
-  if (!planHasFeature(entitlements, feature)) {
-    throw new ForbiddenError(
-      "This feature is not part of your current plan. Upgrade to unlock it.",
-      "FEATURE_NOT_IN_PLAN",
-    );
-  }
+): Promise<void> {
+  if (planHasFeature(entitlements, feature)) return;
+  const rows = await db
+    .select({ name: subscriptionPlans.name, features: subscriptionPlans.features })
+    .from(subscriptionPlans)
+    .where(eq(subscriptionPlans.isActive, true));
+  const upgradePlans = rows
+    .filter((row) => row.features?.[feature] === true)
+    .map((row) => row.name);
+  const suffix =
+    upgradePlans.length > 0 ? ` Available on: ${upgradePlans.join(", ")}.` : "";
+  throw new ForbiddenError(
+    `This feature is not part of your current plan. Upgrade to unlock it.${suffix}`,
+    "FEATURE_NOT_IN_PLAN",
+  );
 }
 
 function assertWithinLimit(

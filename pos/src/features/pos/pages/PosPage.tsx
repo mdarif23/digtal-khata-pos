@@ -40,6 +40,10 @@ import { createEntityPromiseToast } from "@/lib/toast-utils.js";
 import { useCustomerStore } from "@/store/useCustomerStore.js";
 import type { SaleReceiptData } from "../types/receipt.types.js";
 import { SaleSuccessDialog } from "../components/receipt/SaleSuccessDialog.js";
+import {
+  OfflineSaleRecordedDialog,
+  type OfflineSaleRecord,
+} from "../components/receipt/OfflineSaleRecordedDialog.js";
 import { LocationBadge } from "@/components/common/LocationBadge";
 import { RegisterDialog } from "@/features/cashRegisters/components/RegisterDialog";
 import { SyncStatusIndicator } from "@/features/pos/components/pos/SyncStatus.js";
@@ -50,14 +54,25 @@ import { useOfflineStore } from "@/features/pos/offline/offlineStore.js";
 import { useRealtimeStore } from "@/features/pos/offline/realtime.js";
 import axios from "../../../api/axios.js";
 import { TerminalBindingDialog } from "@/features/pos/components/pos/TerminalBindingDialog.js";
+import { buildOfflineReceipt } from "../offlineReceipt.js";
 
 function Pos() {
   const { t } = useTranslation();
-  const { cart, resetCart } = useCartStore();
-  const { setShowCustomerInfo } = useCustomerStore();
-  const { createSale } = useSalesStore();
+  // P3-002: selectors — the whole POS page must not subscribe to every
+  // cart mutation (actions are stable references in zustand).
+  const cart = useCartStore((s) => s.cart);
+  const resetCart = useCartStore((s) => s.resetCart);
+  const setShowCustomerInfo = useCustomerStore((s) => s.setShowCustomerInfo);
+  const createSale = useSalesStore((s) => s.createSale);
   const [lastReceipt, setLastReceipt] = useState<SaleReceiptData | null>(null);
   const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false);
+  // Offline twin of the success dialog: the cashier gets the same
+  // sale-is-done confirmation for outbox-recorded sales.
+  const [lastOfflineRecord, setLastOfflineRecord] =
+    useState<OfflineSaleRecord | null>(null);
+  const [lastOfflineReceipt, setLastOfflineReceipt] =
+    useState<SaleReceiptData | null>(null);
+  const [isOfflineDialogOpen, setIsOfflineDialogOpen] = useState(false);
 
   // Real-time register updates (Module 11): server-pushed signals bump
   // revision counters; the affected stores refresh through their normal
@@ -125,7 +140,10 @@ function Pos() {
   });
   const { printReceipt } = usePrintReceipt();
   useHotkeyAction("print-receipt", () => {
-    if (lastReceipt) void printReceipt(lastReceipt);
+    // F7 reprints the last receipt — online (server receipt) or the last
+    // offline slip while its dialog is around.
+    const receipt = lastReceipt ?? lastOfflineReceipt;
+    if (receipt) void printReceipt(receipt);
   });
 
   // ---- Customer-facing display push (Phase 3) ----------------------------
@@ -228,22 +246,49 @@ function Pos() {
         (sum, payment) => sum + Number(payment.amount ?? 0),
         0,
       );
-      await useOfflineStore.getState().recordOfflineSale({
-        payload,
-        summary: {
-          total,
-          itemCount: payload.items.length,
-          customerName: null,
-        },
+      const clientSaleId = await useOfflineStore
+        .getState()
+        .recordOfflineSale({
+          payload,
+          summary: {
+            total,
+            itemCount: payload.items.length,
+            customerName: null,
+          },
+        });
+      // Same confirmation UX as the online receipt dialog — honest about
+      // the offline state (no invoice number yet, cash/due only). The
+      // printable slip is built from the SAME local totals the cashier
+      // confirmed (the server quote is unavailable offline).
+      const paid = payload.payments
+        .filter((payment) => payment.method === "cash")
+        .reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
+      const offlineCustomer = useCustomerStore.getState().showCustomerInfo;
+      const offlineReceipt = buildOfflineReceipt({
+        cart,
+        totals,
+        payments: payload.payments,
+        clientSaleId,
+        customer:
+          offlineCustomer && offlineCustomer.id > 0
+            ? {
+                id: offlineCustomer.id,
+                name: offlineCustomer.name,
+                phone: offlineCustomer.phone ?? null,
+                address: offlineCustomer.address ?? null,
+              }
+            : null,
       });
-      toast.add({
-        type: "info",
-        description: t("pos:offlineRecorded", {
-          defaultValue:
-            "No connection — the sale is recorded offline and will sync automatically (duplicates are impossible).",
-        }),
-        priority: "high",
+      setLastOfflineRecord({
+        reference: clientSaleId,
+        total,
+        paid,
+        due: Math.max(total - paid, 0),
+        itemCount: payload.items.length,
+        customerName: null,
       });
+      setLastOfflineReceipt(offlineReceipt);
+      setIsOfflineDialogOpen(true);
       // Clear checkout inputs and modal
       resetCart();
       setIsPaymentDialogOpen(false);
@@ -359,26 +404,36 @@ function Pos() {
       <div className="mx-auto flex min-h-[calc(100dvh-1.5rem)] max-w-[1800px] flex-col gap-3 sm:min-h-[calc(100dvh-2rem)] lg:grid lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1.55fr)_minmax(380px,0.9fr)] lg:gap-4">
         <div className="col-span-full flex flex-wrap items-center justify-between gap-2">
           <LocationBadge />
+          {/* Commercial toolbar pattern: same controls, grouped into scannable
+              clusters (status · work · preferences) with hairline dividers. */}
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <NotificationBell revision={notificationRevision} />
-            <SyncStatusIndicator />
-            <LanguageToggle />
-            <ThemeToggle />
-            <RegisterDialog />
-            <SalespersonSelect
-              value={salespersonUserId}
-              onChange={(userId) => {
-                setSalespersonUserId(userId);
-                form.setValue("salespersonUserId", userId);
-                if (userId === null) {
-                  localStorage.removeItem("ezpos.pos.salespersonUserId");
-                } else {
-                  localStorage.setItem("ezpos.pos.salespersonUserId", String(userId));
-                }
-              }}
-            />
-            <PosHotkeyManager />
-            <CfdManageDialog />
+            <div className="flex items-center gap-2">
+              <NotificationBell revision={notificationRevision} />
+              <SyncStatusIndicator />
+            </div>
+            <div className="hidden h-5 w-px bg-border sm:block" />
+            <div className="flex items-center gap-2">
+              <RegisterDialog />
+              <SalespersonSelect
+                value={salespersonUserId}
+                onChange={(userId) => {
+                  setSalespersonUserId(userId);
+                  form.setValue("salespersonUserId", userId);
+                  if (userId === null) {
+                    localStorage.removeItem("ezpos.pos.salespersonUserId");
+                  } else {
+                    localStorage.setItem("ezpos.pos.salespersonUserId", String(userId));
+                  }
+                }}
+              />
+              <CfdManageDialog />
+            </div>
+            <div className="hidden h-5 w-px bg-border sm:block" />
+            <div className="flex items-center gap-2">
+              <PosHotkeyManager />
+              <LanguageToggle />
+              <ThemeToggle />
+            </div>
           </div>
         </div>
         <section className="flex h-[60dvh] min-h-[420px] shrink-0 flex-col overflow-hidden rounded-xl border bg-background shadow-sm lg:h-full lg:min-h-0 lg:shrink">
@@ -396,7 +451,7 @@ function Pos() {
           className="flex min-h-[620px] flex-col lg:min-h-0"
         >
           <Card className="flex min-h-0 flex-1 flex-col overflow-hidden shadow-sm">
-            <CardHeader className="shrink-0 border-b bg-muted/20 p-4">
+            <CardHeader className="shrink-0 border-b bg-muted/20 p-3">
               <CartHeader form={form} cartItemCount={cart.length} />
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
@@ -427,6 +482,19 @@ function Pos() {
         onNewSale={() => {
           setLastReceipt(null);
           setIsSuccessDialogOpen(false);
+        }}
+      />
+
+      {/* Offline twin: outbox-recorded sales get the same confirmation UX */}
+      <OfflineSaleRecordedDialog
+        record={lastOfflineRecord}
+        receipt={lastOfflineReceipt}
+        open={isOfflineDialogOpen}
+        onOpenChange={setIsOfflineDialogOpen}
+        onNewSale={() => {
+          setLastOfflineRecord(null);
+          setLastOfflineReceipt(null);
+          setIsOfflineDialogOpen(false);
         }}
       />
     </main>

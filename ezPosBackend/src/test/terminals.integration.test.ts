@@ -283,6 +283,94 @@ describe("pos terminals integration", { skip: !runIntegration }, () => {
     assert.equal(bogus.status, 400);
   });
 
+  it("creates a hardware-less terminal directly (POST /api/terminals)", async () => {
+    const created = await api(owner, "POST", "/api/terminals", {
+      name: `Counter PC ${stamp}`,
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const terminal = payload<{
+      data: { id: number; name: string; paired: boolean; status: string };
+    }>(created).data;
+    assert.equal(terminal.paired, false);
+    assert.equal(terminal.status, "active");
+    assert.equal(terminal.name, `Counter PC ${stamp}`);
+
+    // Duplicate name at the same location is suffixed, not rejected.
+    const again = await api(owner, "POST", "/api/terminals", {
+      name: `Counter PC ${stamp}`,
+    });
+    assert.equal(again.status, 201);
+    assert.equal(
+      payload<{ data: { name: string } }>(again).data.name,
+      `Counter PC ${stamp} (2)`,
+    );
+
+    // Blank names refused.
+    const blank = await api(owner, "POST", "/api/terminals", { name: "   " });
+    assert.equal(blank.status, 400);
+  });
+
+  it("a per-terminal pairing code attaches the bridge to the existing terminal", async () => {
+    const created = await api(owner, "POST", "/api/terminals", {
+      name: `Drawer PC ${stamp}`,
+    });
+    assert.equal(created.status, 201);
+    const terminalId = payload<{ data: { id: number } }>(created).data.id;
+
+    const codeRes = await api(
+      owner,
+      "POST",
+      `/api/terminals/${terminalId}/pairing-code`,
+    );
+    assert.equal(codeRes.status, 201);
+    const issued = payload<{ data: { code: string; terminalId: number } }>(
+      codeRes,
+    ).data;
+    assert.equal(issued.terminalId, terminalId);
+
+    // Another business minting for the same id cannot reach across.
+    const foreign = await api(
+      other,
+      "POST",
+      `/api/terminals/${terminalId}/pairing-code`,
+    );
+    assert.equal(foreign.status, 404);
+
+    // The bridge redeems the code: ATTACH to the existing terminal —
+    // same id, same name, no new row.
+    const pair = await fetch(`${baseUrl}/api/bridge/pair`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: issued.code,
+        deviceName: "ignored-on-attach",
+        deviceInfo: { os: "Windows" },
+      }),
+    });
+    assert.equal(pair.status, 201);
+    const pairedBody = JSON.parse(await pair.text()) as {
+      data: { terminalId: number; terminalName: string; secret: string };
+    };
+    assert.equal(pairedBody.data.terminalId, terminalId);
+    assert.equal(pairedBody.data.terminalName, `Drawer PC ${stamp}`);
+
+    // The attached secret authenticates as that terminal.
+    const self = await fetch(`${baseUrl}/api/bridge/terminal`, {
+      headers: bridgeHeaders({
+        terminalId,
+        secret: pairedBody.data.secret,
+      }),
+    });
+    assert.equal(self.status, 200);
+
+    const list = await api(owner, "GET", "/api/terminals");
+    const mine = payload<{ data: { id: number; paired: boolean }[] }>(
+      list,
+    ).data.find((t) => t.id === terminalId);
+    assert.ok(mine);
+    assert.equal(mine.paired, true);
+  });
+
   it("terminal authentication is required and secrets are validated", async () => {
     const noAuth = await fetch(`${baseUrl}/api/bridge/terminal`);
     assert.equal(noAuth.status, 401);

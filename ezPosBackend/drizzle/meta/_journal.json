@@ -622,6 +622,48 @@
       "when": 1794849307774,
       "tag": "0088_online_order_assignment",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1794849308774,
+      "tag": "0089_exports_entitlement_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1794930000000,
+      "tag": "0090_woocommerce_payment_method",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1795016000000,
+      "tag": "0091_register_session_reopened_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1795101000000,
+      "tag": "0092_quotation_converting_claim",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1795188000000,
+      "tag": "0093_walkin_purchase_returns",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1795274000000,
+      "tag": "0094_terminal_pairing_codes_terminal_id",
+      "breakpoints": true
     }
   ]
 }

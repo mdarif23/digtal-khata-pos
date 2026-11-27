@@ -800,17 +800,16 @@ const PurchaseOrderRow = memo(function PurchaseOrderRow({
               Landed cost
             </Button>
           )}
-          {purchase.receivingStatus !== "ordered" &&
-            purchase.supplierId !== null && (
-              <Button
-                nativeButton={false}
-                size="sm"
-                variant="outline"
-                render={<Link to={`/purchase-return/${purchase.id}`} />}
-              >
-                <ArrowUpRight /> Return
-              </Button>
-            )}
+          {purchase.receivingStatus !== "ordered" && (
+            <Button
+              nativeButton={false}
+              size="sm"
+              variant="outline"
+              render={<Link to={`/purchase-return/${purchase.id}`} />}
+            >
+              <ArrowUpRight /> Return
+            </Button>
+          )}
         </div>
       </td>
     </tr>

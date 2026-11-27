@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "../db/schema/index.js";
 import { receiptShareTokens } from "../db/schema/receiptShare.js";
+import { sales } from "../db/schema/sales.js";
 import { getSaleReceipt } from "../modules/sales/sales.service.js";
 import { BadRequestError, NotFoundError } from "../utils/handleError.js";
 
@@ -121,6 +122,19 @@ export async function getPublicReceiptByToken(token: string) {
     .limit(1);
   if (!link) throw new NotFoundError("Receipt link not found.");
   if (link.revokedAt !== null || link.expiresAt.getTime() < Date.now()) {
+    throw new NotFoundError("This receipt link has expired or was revoked.");
+  }
+  // Q3-001: a voided sale's receipt must never be publicly readable —
+  // void revokes the tokens, and this guard closes the window for a fetch
+  // that raced the void (or a pre-12c legacy token).
+  const [saleStatus] = await db
+    .select({ status: sales.status })
+    .from(sales)
+    .where(
+      and(eq(sales.id, link.saleId), eq(sales.businessId, link.businessId)),
+    )
+    .limit(1);
+  if (!saleStatus || saleStatus.status !== "completed") {
     throw new NotFoundError("This receipt link has expired or was revoked.");
   }
   const receipt = await getSaleReceipt(link.businessId, link.saleId);

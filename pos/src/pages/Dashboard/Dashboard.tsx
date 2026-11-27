@@ -82,6 +82,8 @@ export default function DashboardComponent() {
   const [channelMix, setChannelMix] = useState<ChannelPerformanceRow[] | null>(
     null,
   );
+  // Out-of-order guard for the channel-mix effect (WP-007).
+  const channelMixRequestId = useRef(0);
   const selectedPeriod =
     periodOptions.find((option) => option.value === range) ?? periodOptions[0];
   const periodLabel = selectedPeriod.label;
@@ -144,30 +146,30 @@ export default function DashboardComponent() {
     };
   }, [loadDashboard]);
 
-  // Channel mix follows the same period when the report API supports it
-  // (today/yesterday/7d/30d); longer dashboard windows fall back to the
-  // report default (this month). Failures stay silent — this card is an
-  // addition, never a blocker for the dashboard itself.
+  // Channel mix follows the same period and location filter as the rest of
+  // the dashboard — the report API now shares every dashboard window
+  // (WP-006/007: the 60d/90d/365d ranges used to silently fall back to
+  // this_month, and the location filter was listed in deps but never sent,
+  // so the card contradicted the selected filters). Failures stay silent —
+  // this card is an addition, never a blocker for the dashboard itself.
   useEffect(() => {
     if (!canViewChannelMix) {
       setChannelMix(null);
       return;
     }
-    const sharedPeriods: DashboardPeriod[] = [
-      "today",
-      "yesterday",
-      "7d",
-      "30d",
-    ];
-    const filters: Partial<ReportFilters> = sharedPeriods.includes(range)
-      ? { period: range as ReportFilters["period"] }
-      : {};
+    const requestId = ++channelMixRequestId.current;
+    const filters: Partial<ReportFilters> = {
+      period: range as ReportFilters["period"],
+      ...(locationId !== null ? { locationId } : {}),
+    };
     void (async () => {
       try {
         const { data } = await reportsApi.getChannelPerformance(filters);
+        // Out-of-order guard: only the newest request renders.
+        if (requestId !== channelMixRequestId.current) return;
         setChannelMix(data.data);
       } catch {
-        setChannelMix(null);
+        if (requestId === channelMixRequestId.current) setChannelMix(null);
       }
     })();
   }, [canViewChannelMix, range, locationId]);

@@ -116,6 +116,19 @@ export interface CartStore {
     fromUomConversionId: number | null | undefined,
     unit: SellUnitRef,
   ) => SwitchUnitResult;
+  /**
+   * Re-rings a line IN PLACE as 1 of the picked unit — the unit chip's
+   * "make this line that unit" semantics for sub-package lines (a 1-Pc
+   * line cannot convert to Box; the cashier picking Box means "sell a
+   * box"). Line-scoped discount / price override are cleared (they
+   * belonged to the old unit's line). The caller releases/reserves
+   * catalog stock around it. Never merges or creates lines.
+   */
+  replaceLineUnit: (
+    variantId: number,
+    fromUomConversionId: number | null | undefined,
+    unit: SellUnitRef,
+  ) => void;
   resetCart: (options?: { restoreStock?: boolean }) => void;
   addHoldItemsToCart: (holdItems: CartType[]) => void;
   addDiscount: (

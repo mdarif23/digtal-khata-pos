@@ -322,6 +322,31 @@ export async function createContactImportSession(input: {
   };
 }
 
+/**
+ * K3-004: session-scoped routes must know WHICH entity a session belongs
+ * to before they can pick the right permission (view vs edit) — the entity
+ * is only in the session row, never in the URL.
+ */
+export async function getContactSessionEntity(
+  businessId: number,
+  sessionId: number,
+): Promise<ContactEntity> {
+  const [session] = await db
+    .select({ entityType: productImportSessions.entityType })
+    .from(productImportSessions)
+    .where(
+      and(
+        eq(productImportSessions.id, sessionId),
+        eq(productImportSessions.businessId, businessId),
+      ),
+    )
+    .limit(1);
+  if (!session) {
+    throw new NotFoundError("Import session not found.");
+  }
+  return session.entityType as ContactEntity;
+}
+
 export async function getContactSessionDetail(
   businessId: number,
   sessionId: number,

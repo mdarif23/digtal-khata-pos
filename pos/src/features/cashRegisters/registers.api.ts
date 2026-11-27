@@ -102,6 +102,16 @@ export async function getRegistersApi(): Promise<RegisterSummary[]> {
   return res.data.data;
 }
 
+/** Creates a register at the active location (cash_register.manage; the
+ * BE contract is a 1–100 char name, unique per location). */
+export async function createRegisterApi(name: string): Promise<RegisterSummary> {
+  const res = await api.post<{ success: boolean; data: RegisterSummary }>(
+    "/registers",
+    { name },
+  );
+  return res.data.data;
+}
+
 export async function getCurrentSessionApi(): Promise<RegisterSession | null> {
   const res = await api.get<{ success: boolean; data: RegisterSession | null }>(
     "/sessions/current",

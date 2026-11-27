@@ -24,15 +24,12 @@ type ReturnablePurchase = {
   locationId: number | null;
 };
 
-/** Returns need an eligible supplier and a recorded receiving location. */
+/** Returns need a recorded receiving location. Walk-in (supplier-less)
+ * purchases are returnable too — the supplier credit note is what needs a
+ * supplier, and the service skips that insert for them (migration 0093). */
 export function assertReturnablePurchase<T extends ReturnablePurchase>(
   purchase: T,
-): asserts purchase is T & { supplierId: number; locationId: number } {
-  if (purchase.supplierId === null) {
-    throw new BadRequestError(
-      "A supplier must be assigned to process a purchase return.",
-    );
-  }
+): asserts purchase is T & { supplierId: number | null; locationId: number } {
   // Returns deduct stock where the purchase was received.
   if (purchase.locationId === null) {
     throw new BadRequestError(

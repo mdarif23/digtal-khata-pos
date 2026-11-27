@@ -62,10 +62,16 @@ router.delete(
   ...manage,
   terminalsController.deleteTerminalHandler,
 );
+router.post("/api/terminals", ...manage, terminalsController.postCreateTerminal);
 router.post(
   "/api/terminals/pairing-code",
   ...manage,
   terminalsController.postPairingCode,
+);
+router.post(
+  "/api/terminals/:terminalId/pairing-code",
+  ...manage,
+  terminalsController.postTerminalPairingCode,
 );
 router.post(
   "/api/terminals/:terminalId/rotate-secret",

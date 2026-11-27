@@ -19,8 +19,8 @@ function refinePromotionShape(
     variantId: number | null;
     discountType: "percentage" | "fixed";
     discountValue: number;
-    startsAt: Date | null;
-    endsAt: Date | null;
+    startsAt: Date | string | null;
+    endsAt: Date | string | null;
   },
   ctx: z.RefinementCtx,
 ): void {
@@ -51,6 +51,63 @@ function refinePromotionShape(
 }
 
 const timestampField = z.coerce.date().nullable();
+// I3-6: date-only 'YYYY-MM-DD' boundaries arrive as STRINGS and are
+// interpreted on the business calendar by the service (00:00:00 for starts,
+// 23:59:59.999 for ends). Full ISO timestamps keep working unchanged.
+const dateOnlyPattern = /^d{4}-d{2}-d{2}$/;
+const dateBoundField = z
+  .union([z.string().regex(dateOnlyPattern), z.coerce.date()])
+  .nullable();
+
+/**
+ * H3-1: the engine silently SKIPS promotions whose rule doesn't match the
+ * kind's contract — a merchant could ship an "active" buy_x_get_y that
+ * never discounts anything. Each kind's rule is validated at write time.
+ */
+function refineRuleForKind(
+  value: { promoKind?: string | undefined; rule?: Record<string, unknown> | null | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  const kind = value.promoKind;
+  if (!kind || kind === "discount") return;
+  const rule = (value.rule ?? {}) as Record<string, unknown>;
+  const num = (key: string): number | null =>
+    typeof rule[key] === "number" && Number.isFinite(rule[key])
+      ? (rule[key] as number)
+      : null;
+  const issue = (path: string, message: string) =>
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  if (kind === "bogo") {
+    if ((num("buyQty") ?? 1) < 1 || (num("getQty") ?? 1) < 1) {
+      issue("rule", "BOGO needs buy and free quantities of at least 1.");
+    }
+  } else if (kind === "buy_x_get_y") {
+    const buyTarget = num("buyVariantId") ?? num("buyProductId");
+    const getTarget = num("getVariantId") ?? num("getProductId");
+    if (buyTarget == null) {
+      issue("rule", "Buy X get Y needs a product or variant to buy.");
+    }
+    if (getTarget == null) {
+      issue("rule", "Buy X get Y needs a product or variant to give free.");
+    }
+    if ((num("buyQty") ?? 0) < 1 || (num("getQty") ?? 0) < 1) {
+      issue("rule", "Buy X get Y needs buy and free quantities of at least 1.");
+    }
+  } else if (kind === "mix_match") {
+    const percent = num("discountPercent") ?? 0;
+    if ((num("comboSize") ?? 0) < 2) {
+      issue("rule", "Mix & match needs a combo size of at least 2 units.");
+    }
+    if (percent <= 0 || percent > 100) {
+      issue("rule", "Mix & match discount must be between 1% and 100%.");
+    }
+  } else if (kind === "quantity_tier") {
+    const tiers = Array.isArray(rule.tiers) ? rule.tiers : [];
+    if (tiers.length === 0) {
+      issue("rule", "Quantity tier promotions need at least one tier.");
+    }
+  }
+}
 
 /** Full, strict promotion object (validated AFTER merging with the row). */
 export const promotionStrictSchema = z
@@ -82,7 +139,8 @@ export const promotionStrictSchema = z
     priority: z.number().int().min(0).max(1000).optional(),
     isActive: z.boolean(),
   })
-  .superRefine(refinePromotionShape);
+  .superRefine(refinePromotionShape)
+  .superRefine(refineRuleForKind);
 
 export const promotionCreateSchema = z
   .object({
@@ -90,8 +148,8 @@ export const promotionCreateSchema = z
     ...scopeFields,
     discountType: z.enum(["percentage", "fixed"]),
     discountValue: z.number().min(0),
-    startsAt: timestampField.optional(),
-    endsAt: timestampField.optional(),
+    startsAt: dateBoundField.optional(),
+    endsAt: dateBoundField.optional(),
     minQuantity: z.number().int().min(1).nullable().optional(),
     minOrderValue: z.number().min(0).optional(),
     maxDiscountAmount: z.number().min(0).nullable().optional(),
@@ -125,7 +183,8 @@ export const promotionCreateSchema = z
       },
       ctx,
     ),
-  );
+  )
+  .superRefine((value, ctx) => refineRuleForKind(value, ctx));
 
 export type PromotionCreate = z.infer<typeof promotionCreateSchema>;
 
@@ -135,8 +194,8 @@ export const promotionUpdateSchema = z
     ...scopeFields,
     discountType: z.enum(["percentage", "fixed"]).optional(),
     discountValue: z.number().min(0).optional(),
-    startsAt: timestampField.optional(),
-    endsAt: timestampField.optional(),
+    startsAt: dateBoundField.optional(),
+    endsAt: dateBoundField.optional(),
     minQuantity: z.number().int().min(1).nullable().optional(),
     minOrderValue: z.number().min(0).optional(),
     maxDiscountAmount: z.number().min(0).nullable().optional(),

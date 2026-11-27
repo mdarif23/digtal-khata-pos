@@ -65,6 +65,7 @@ import { getCustomerOutstandingInTx } from "../customers/customers.service.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
 import { recordOrderEventInTx } from "../commerce/orderTimeline.service.js";
 import { salePaymentIntents } from "../../db/schema/salePaymentIntents.js";
+import { receiptShareTokens } from "../../db/schema/receiptShare.js";
 import { resolveIntentProvider } from "../../services/payments/saleProviders.js";
 import {
   foldVariantOptionRows,
@@ -95,7 +96,12 @@ import {
 import { redeemGiftCardInTx } from "../../services/giftCards.js";
 import { giftCardTransactions } from "../../db/schema/giftCards.js";
 import { journalEntries } from "../../db/schema/journalEntries.js";
-import { reverseEntry } from "../../services/ledger.js";
+import { reverseEntry, postJournalEntry } from "../../services/ledger.js";
+import {
+  landedCostAdjustments,
+  landedCostAllocations,
+  landedCosts,
+} from "../../db/schema/landedCosts.js";
 import { couponRedemptions, coupons } from "../../db/schema/coupons.js";
 import {
   evaluateCouponInTx,
@@ -521,14 +527,24 @@ export async function consumeStockFifo(
   //    other batches (D9) — the message names the batch so the cashier can
   //    re-pick.
   if (remaining > 0 && !opts.allowShortfall) {
+    // Name-aware failure: "variant 31" forces the cashier to guess which
+    // product the error is about — resolve the product name + SKU instead.
+    const [info] = await tx
+      .select({ name: products.name, sku: productVariants.sku })
+      .from(productVariants)
+      .innerJoin(products, eq(products.id, productVariants.productId))
+      .where(eq(productVariants.id, variantId));
+    const label = info
+      ? `${info.name}${info.sku ? ` (${info.sku})` : ""}`
+      : `variant #${variantId}`;
     if (manualBatchId) {
       const batchNumber = batches[0]?.batchNumber ?? `#${manualBatchId}`;
       throw new ConflictError(
-        `Batch ${batchNumber} has ${quantity - remaining} of the ${quantity} unit(s) requested for variant ${variantId}.`,
+        `Batch ${batchNumber} has ${quantity - remaining} of the ${quantity} unit(s) requested for ${label}.`,
       );
     }
     throw new ConflictError(
-      `Insufficient stock for variant ${variantId}: short by ${remaining}`,
+      `Insufficient stock for ${label}: short by ${remaining}`,
     );
   }
 
@@ -2382,17 +2398,25 @@ async function applySaleRefund(
     // remaining-quantity guard apply. Serial lines stay effectively whole —
     // the partial-serial selection below demands exactly one serial per
     // returned unit.
-    if (!Number.isFinite(requested) || requested <= 0) {
+    if (!Number.isFinite(requested) || requested < 0) {
       throw new BadRequestError(
         `Invalid return quantity for sale item ${item.id}.`,
       );
     }
+    // E3-010: 0 = explicitly SKIP this line — the FE's partial multi-line
+    // selection sends one atomic refunds_all request with a quantity for
+    // EVERY refundable line (chosen qty, or 0 to leave it). Absent entries
+    // still default to the full remaining.
+    if (requested === 0) continue;
     if (requested > remaining + 1e-9) {
       throw new ConflictError(
         `Cannot return ${requested} of sale item ${item.id}; only ${Math.max(remaining, 0)} unit(s) remain returnable.`,
       );
     }
     requestedByItem.set(item.id, requested);
+  }
+  if (requestedByItem.size === 0) {
+    throw new BadRequestError("Select at least one line to return.");
   }
 
   // Effective money is pro-rated by the returned share of each line, so a
@@ -4406,6 +4430,9 @@ export async function cancelSale(
         finalTotal: sales.finalTotal,
         dueAmount: sales.dueAmount,
         paymentStatus: sales.paymentStatus,
+        // D2-001: landed-cost documents posted after this sale expensed its
+        // units' landed share — the void must reverse exactly those.
+        createdAt: sales.createdAt,
       })
       .from(sales)
       .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
@@ -4452,7 +4479,10 @@ export async function cancelSale(
       .where(and(eq(saleItems.saleId, saleId), eq(saleItems.businessId, businessId)))
       .for("update");
     const variantRestores = new Map<number, number>();
-    const lotRestores: { batchId: number; quantity: number }[] = [];
+    // D3-002: track the owning variant per restored lot — the movement rows
+    // used to stamp every restore with the FIRST sale item's variantId,
+    // pairing batchIds with variants that never belonged together.
+    const lotRestores: { batchId: number; quantity: number; variantId: number }[] = [];
     let fallbackQuantity = 0;
     for (const item of items) {
       variantRestores.set(
@@ -4471,7 +4501,7 @@ export async function cancelSale(
       for (const row of consumptionRows) {
         if (unallocated <= 0) break;
         const take = Math.min(Number(row.quantity), unallocated);
-        lotRestores.push({ batchId: row.batchId, quantity: take });
+        lotRestores.push({ batchId: row.batchId, quantity: take, variantId: item.variantId });
         unallocated = roundMoney(unallocated - take);
       }
       fallbackQuantity = roundMoney(fallbackQuantity + unallocated);
@@ -4505,13 +4535,17 @@ export async function cancelSale(
         .returning({ id: inventoryBatches.id });
       fallbackBatchId = voidBatch?.id ?? null;
     }
-    const restoredBatches: { batchId: number; quantity: number }[] = [];
+    const restoredBatches: { batchId: number; quantity: number; variantId: number }[] = [];
     for (const lot of lotRestores) {
       const batch = existingBatches.find((b) => b.id === lot.batchId);
       if (!batch) {
         // Missing batch rows land in the VOID batch (movement still truthful).
         if (fallbackBatchId !== null) {
-          restoredBatches.push({ batchId: fallbackBatchId, quantity: lot.quantity });
+          restoredBatches.push({
+            batchId: fallbackBatchId,
+            quantity: lot.quantity,
+            variantId: lot.variantId,
+          });
         }
         continue;
       }
@@ -4544,8 +4578,7 @@ export async function cancelSale(
     for (const restored of restoredBatches) {
       await tx.insert(inventoryMovements).values({
         businessId,
-        variantId:
-          items.find((i) => i.variantId !== undefined)!.variantId,
+        variantId: restored.variantId,
         locationId,
         batchId: restored.batchId,
         movementType: "return",
@@ -4751,6 +4784,25 @@ export async function cancelSale(
       })
       .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)));
 
+    // 11b. E3-005: pending payment intents die with the sale — a gateway
+    // verify racing the void is refused by saleIntents (E3-003), and any
+    // intent still pending is cancelled here so it can never capture on a
+    // cancelled invoice.
+    await tx
+      .update(salePaymentIntents)
+      .set({
+        status: "cancelled",
+        lastError: `Sale voided: ${reason}`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(salePaymentIntents.saleId, saleId),
+          eq(salePaymentIntents.businessId, businessId),
+          eq(salePaymentIntents.status, "pending"),
+        ),
+      );
+
     // 12. Finance journal: exact mirrored reversal via the tested primitive
     //     (original marked reversed; duplicates blocked). No silent deletion.
     const [saleEntry] = await tx
@@ -4772,6 +4824,157 @@ export async function cancelSale(
         reason: `Sale ${sale.invoiceNumber} voided: ${reason}`,
         actorUserId,
       });
+    }
+
+    // 12b. F2-002: due collections posted AFTER the sale (due-management
+    // receipts / intent captures) are their own journal entries keyed on
+    // the payment row — the sale-entry reversal does not touch them. Void
+    // must reverse each one or GL cash stays overstated and 1040 goes
+    // negative for an invoice that no longer exists.
+    const salePaymentRows = await tx
+      .select({ id: salePayments.id })
+      .from(salePayments)
+      .where(
+        and(
+          eq(salePayments.saleId, saleId),
+          eq(salePayments.businessId, businessId),
+        ),
+      );
+    for (const payment of salePaymentRows) {
+      const [collectionEntry] = await tx
+        .select({ id: journalEntries.id })
+        .from(journalEntries)
+        .where(
+          and(
+            eq(journalEntries.businessId, businessId),
+            eq(journalEntries.sourceType, "sale_due_collection"),
+            eq(journalEntries.sourceId, payment.id),
+            eq(journalEntries.status, "posted"),
+          ),
+        )
+        .limit(1);
+      if (collectionEntry) {
+        await reverseEntry(tx, {
+          businessId,
+          entryId: collectionEntry.id,
+          reason: `Due collection reversed: sale ${sale.invoiceNumber} voided`,
+          actorUserId,
+        });
+      }
+    }
+
+    // 12c. Q3-001: receipt-share links die with the sale — a live public
+    // token would otherwise keep serving the cancelled invoice's receipt
+    // (totals, customer name/phone/address) until its TTL expired. The
+    // public fetch also refuses non-completed sales (defense in depth).
+    await tx
+      .update(receiptShareTokens)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(receiptShareTokens.businessId, businessId),
+          eq(receiptShareTokens.saleId, saleId),
+          isNull(receiptShareTokens.revokedAt),
+        ),
+      );
+
+    // 12d. D2-001: landed-cost share of the RESTORED units. A landed-cost
+    // document posted AFTER this sale expensed the then-sold units' share
+    // ("Landed cost on already-sold units", DR 5010). Voiding returns those
+    // units to batches whose per-unit value already includes the share —
+    // the next sale would expense it AGAIN while the original debit never
+    // reversed (GL: 1050 rises with no offset, COGS double-counted). Every
+    // document posted after the sale, per restored batch, has a persisted
+    // per-unit allocation row — move that share back to inventory
+    // (DR 1050 / CR 5010) and record it as landedCostAdjustments.
+    // (landedCostAdjustments.createdBy is NOT NULL — the adjustment only
+    // happens for user-driven voids.)
+    if (
+      sale.createdAt &&
+      restoredBatches.length > 0 &&
+      actorUserId != null
+    ) {
+      const restoredBatchIds = [
+        ...new Set(restoredBatches.map((r) => r.batchId)),
+      ];
+      const postSaleRows = await tx
+        .select({
+          landedCostId: landedCostAllocations.landedCostId,
+          inventoryBatchId: landedCostAllocations.inventoryBatchId,
+          allocatedPerUnit: landedCostAllocations.allocatedPerUnit,
+        })
+        .from(landedCostAllocations)
+        .innerJoin(
+          landedCosts,
+          eq(landedCosts.id, landedCostAllocations.landedCostId),
+        )
+        .where(
+          and(
+            eq(landedCostAllocations.businessId, businessId),
+            inArray(landedCostAllocations.inventoryBatchId, restoredBatchIds),
+            gt(landedCosts.postedAt, sale.createdAt),
+            // Only posted (or later adjusted) documents carry expensed share.
+            inArray(landedCosts.status, ["posted", "adjusted"]),
+          ),
+        );
+      const reversalByDoc = new Map<number, number>();
+      for (const row of postSaleRows) {
+        const lot = restoredBatches.find(
+          (r) => r.batchId === row.inventoryBatchId,
+        );
+        if (!lot) continue;
+        const share = roundMoney(Number(row.allocatedPerUnit) * lot.quantity);
+        if (share <= 0.005) continue;
+        reversalByDoc.set(
+          row.landedCostId,
+          roundMoney((reversalByDoc.get(row.landedCostId) ?? 0) + share),
+        );
+      }
+      let totalReversal = 0;
+      for (const [docId, amount] of reversalByDoc) {
+        if (amount <= 0.005) continue;
+        totalReversal = roundMoney(totalReversal + amount);
+        await tx.insert(landedCostAdjustments).values({
+          businessId,
+          landedCostId: docId,
+          adjustmentType: "reversal",
+          previousAllocatedAmount: 0,
+          newAllocatedAmount: 0,
+          // The document's total allocation does not change — the SPLIT
+          // does: expensed COGS moves back to inventory.
+          adjustmentAmount: 0,
+          inventoryAmount: amount,
+          cogsAmount: -amount,
+          reason: `Sale ${sale.invoiceNumber} voided — ${amount.toFixed(2)} of landed cost moved from expensed COGS back to inventory (restored units)`,
+          referenceType: "sale_void",
+          referenceId: saleId,
+          createdBy: actorUserId,
+        });
+      }
+      if (totalReversal > 0.005) {
+        await postJournalEntry(tx, {
+          businessId,
+          memo: `Landed-cost share of voided sale ${sale.invoiceNumber} returned to inventory`,
+          sourceType: "sale_void_landed_cost",
+          sourceId: saleId,
+          cashFlowCategory: "operating",
+          lines: [
+            {
+              accountCode: "1050",
+              debit: totalReversal,
+              locationId,
+              description: "Landed cost returned to inventory (sale void)",
+            },
+            {
+              accountCode: "5010",
+              credit: totalReversal,
+              locationId,
+              description: "Landed cost COGS reversal (sale void)",
+            },
+          ],
+          actorUserId,
+        });
+      }
     }
 
     await recordAuditInTx(tx, {

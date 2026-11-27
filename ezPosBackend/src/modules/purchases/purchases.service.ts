@@ -13,7 +13,7 @@ import { supplierLedger } from "../../db/schema/supplierLedger.js";
 import { purchaseReturnItems } from "../../db/schema/purchaseReturnItems.js";
 import { purchases } from "../../db/schema/purchases.js";
 import { landedCosts } from "../../db/schema/landedCosts.js";
-import { and, asc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { roundMoney } from "../../utils/roundMoney.js";
 import {
   postPurchasePaymentLedgerEntry,
@@ -75,6 +75,7 @@ import {
   incrementStockForReceive,
   recordStockMovement,
 } from "../inventory/index.js";
+import { recordPurchasePaymentCashOutInTx } from "../cashRegisters/cashRegisters.service.js";
 import {
   formatPurchaseOrderNumber,
   nextDocumentNumber,
@@ -342,6 +343,11 @@ function withLandedCostStatus<
 }
 
 export async function getPurchasesSummary(businessId: number) {
+  // D3-007: this legacy endpoint served FOUR unbounded full-table loads
+  // per request. The receive flow only works from the recent end anyway —
+  // cap each bucket to the most recent 500 (the paginated /purchases/list
+  // remains the complete view).
+  const bucketCap = 500;
   const [
     orderedPurchase,
     allPurchases,
@@ -354,22 +360,31 @@ export async function getPurchasesSummary(businessId: number) {
           eq(purchases.status, "ordered"),
           eq(purchases.businessId, businessId),
         ),
-      ),
-    purchasesWithLandedCostQuery().where(eq(purchases.businessId, businessId)),
+      )
+      .orderBy(desc(purchases.id))
+      .limit(bucketCap),
+    purchasesWithLandedCostQuery()
+      .where(eq(purchases.businessId, businessId))
+      .orderBy(desc(purchases.id))
+      .limit(bucketCap),
     purchasesWithLandedCostQuery()
       .where(
         and(
           inArray(purchases.paymentStatus, ["partial", "unpaid"]),
           eq(purchases.businessId, businessId),
         ),
-      ),
+      )
+      .orderBy(desc(purchases.id))
+      .limit(bucketCap),
     purchasesWithLandedCostQuery()
       .where(
         and(
           inArray(purchases.paymentStatus, ["paid"]),
           eq(purchases.businessId, businessId),
         ),
-      ),
+      )
+      .orderBy(desc(purchases.id))
+      .limit(bucketCap),
   ]);
   return {
     orderedPurchase: orderedPurchase.map(withLandedCostStatus),
@@ -606,16 +621,14 @@ export async function getPurchaseDetail(businessId: number, purchaseId: number) 
     supplierCreditBalance = Math.max(0, Number(ledgerAgg?.credits ?? 0));
   }
 
-  const canReturn = purchase.supplierId !== null && receivingLocationId !== null;
+  // Walk-in (supplier-less) purchases are returnable too (migration 0093) —
+  // only the supplier credit note is supplier-dependent.
+  const canReturn = receivingLocationId !== null;
   const returnContext = {
     locationId: receivingLocationId,
     locationName: receivingLocation?.name ?? null,
     canReturn,
-    reason: canReturn
-      ? null
-      : purchase.supplierId === null
-        ? ("no_supplier" as const)
-        : ("not_received" as const),
+    reason: canReturn ? null : ("not_received" as const),
     items: items.map((item) => ({
       purchaseItemId: item.id,
       orderedQuantity: Number(item.quantity),
@@ -1059,6 +1072,20 @@ export async function createReceivePurchase(
         locationId,
         actorUserId: actorUserId ?? null,
       });
+      // D3-003: a cash payment at receive moves the paying user's drawer —
+      // the GL credited cash but the drawer ledger never saw it, so the
+      // expected balance and Z-report overstated cash vs 1020.
+      if (actorUserId != null) {
+        await recordPurchasePaymentCashOutInTx(tx, {
+          businessId,
+          userId: actorUserId,
+          amount: newPaymentAmount,
+          paymentId: purchasePaymentId,
+          purchaseId,
+          locationId,
+          method: paymentMethod,
+        });
+      }
     }
 
     // =========================================================

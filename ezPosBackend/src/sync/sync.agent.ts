@@ -553,10 +553,13 @@ interface SaleOpPayload {
     idempotencyKey: string;
     items: {
       variantId: number;
+      /** U3: ENTERED units for UOM lines (the cloud converts once); base
+       * for identity lines. */
       quantity: number;
       unitPrice: number;
       discount: { type: "fixed"; value: number } | null;
       serialNumbers?: string[];
+      uomConversionId?: number | null;
     }[];
   };
 }
@@ -580,6 +583,12 @@ async function buildSaleOpPayload(
       quantity: saleItems.quantity,
       sellingPrice: saleItems.sellingPrice,
       discount: saleItems.discount,
+      // U3: the entered snapshot lets the cloud replay the line in the
+      // operator's packaging unit instead of re-pricing an identity line at
+      // the CURRENT list price (LAN and cloud ledgers used to diverge).
+      uomConversionId: saleItems.uomConversionId,
+      enteredQuantity: saleItems.enteredQuantity,
+      enteredUnitPrice: saleItems.enteredUnitPrice,
     })
     .from(saleItems)
     .where(and(eq(saleItems.businessId, businessId), eq(saleItems.saleId, saleId)));
@@ -674,14 +683,24 @@ async function buildSaleOpPayload(
       idempotencyKey: sale.idempotencyKey ?? `lan-${saleId}`,
       items: items.map((item) => {
         const serials = serialsByItem.get(item.id);
+        // U3: UOM lines replay in the operator's packaging unit (entered
+        // quantity + per-entered-unit price) so the cloud re-derives the
+        // SAME base figures; identity lines stay as stored base rows.
+        const isUomLine = item.uomConversionId != null;
+        const enteredQty = Number(item.enteredQuantity ?? item.quantity);
         return {
           variantId: item.variantId,
-          quantity: item.quantity,
-          unitPrice: Number(item.sellingPrice),
+          quantity: isUomLine
+            ? enteredQty
+            : item.quantity,
+          unitPrice: isUomLine
+            ? roundMoney(Number(item.enteredUnitPrice ?? item.sellingPrice))
+            : Number(item.sellingPrice),
           discount:
             Number(item.discount ?? 0) > 0
               ? { type: "fixed" as const, value: roundMoney(Number(item.discount)) }
               : null,
+          ...(isUomLine ? { uomConversionId: item.uomConversionId! } : {}),
           ...(serials && serials.length > 0 ? { serialNumbers: serials } : {}),
         };
       }),

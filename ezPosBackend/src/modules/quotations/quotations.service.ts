@@ -317,10 +317,14 @@ export interface ConvertQuotationInput {
 }
 
 /**
- * Converts an accepted (or sent) quotation into a sale — SINGLE-SHOT:
- * the quotation row is locked FOR UPDATE and guarded on status inside the
- * same transaction that creates the sale. Sale pricing is re-run by the
- * standard backend-authoritative engine on the quoted lines.
+ * Converts an accepted (or sent) quotation into a sale. E3-004: the quote
+ * is CLAIMED first (status → 'converting' under the row lock, migration
+ * 0092) so two concurrent converts can never both create a real sale —
+ * the old order (validate → create sale → conditional claim) let the
+ * loser commit a sale it then failed to link. A crashed claim (older than
+ * 5 minutes, no sale id) is reclaimable; a createSale failure reverts the
+ * claim to the previous status. Sale pricing is re-run by the standard
+ * backend-authoritative engine on the quoted lines.
  */
 export async function convertQuotation(
   businessId: number,
@@ -338,12 +342,39 @@ export async function convertQuotation(
       )
       .for("update");
     if (!existing) throw new NotFoundError("Quotation not found.");
-    if (existing.status !== "accepted" && existing.status !== "sent") {
+    if (existing.status === "converting") {
+      const stale =
+        existing.convertedClaimedAt !== null &&
+        Date.now() - existing.convertedClaimedAt.getTime() > 5 * 60_000;
+      if (!stale) {
+        throw new ConflictError(
+          "A conversion of this quotation is already in progress.",
+        );
+      }
+      // Crashed attempt — reclaim below.
+    } else if (existing.status !== "accepted" && existing.status !== "sent") {
       throw new ConflictError(
         `Only accepted (or sent) quotations can be converted — this one is ${existing.status}.`,
       );
     }
-    return existing;
+    const prevStatus = existing.status === "converting" ? "accepted" : existing.status;
+    // THE CLAIM — atomic under the row lock: a racing convert now sees
+    // 'converting' with a fresh claim and gets a clean 409 BEFORE it can
+    // create any sale.
+    const [claimed] = await tx
+      .update(quotations)
+      .set({ status: "converting", convertedClaimedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(quotations.id, quotationId),
+          eq(quotations.businessId, businessId),
+        ),
+      )
+      .returning({ id: quotations.id, quoteNumber: quotations.quoteNumber });
+    if (!claimed) {
+      throw new ConflictError("The quotation could not be claimed for conversion.");
+    }
+    return { ...existing, prevStatus, claimed };
   });
 
   const items = await db
@@ -356,36 +387,56 @@ export async function convertQuotation(
       ),
     );
   if (items.length === 0) {
+    await revertQuotationClaim(businessId, quotationId, quotation.prevStatus);
     throw new ConflictError("The quotation has no lines to convert.");
   }
 
-  // The sale engine runs ITS OWN transaction — the quotation status flip
-  // happens AFTER the sale commits, guarded again by status + row lock, so
-  // a crash between the two leaves the quotation convertible (no lost
-  // sale), and two racing conversions cannot both pass the guard.
-  const sale = await createSale(
-    businessId,
-    locationId,
-    cashierUserId,
-    {
-      customerId: quotation.customerId,
-      saleDate: new Date(),
-      items: items.map((item) => ({
-        variantId: item.variantId,
-        quantity: Number(item.quantity),
-        unitPrice: Number(item.unitPrice),
-        // The quoted per-line discount carries through: the sale total must
-        // match the offered quotation total (same VAT percent). The cart
-        // item discount shape is {type, value}.
-        ...(Number(item.discount) > 0
-          ? { discount: { type: "fixed" as const, value: Number(item.discount) } }
-          : { discount: null }),
-      })),
-      payments: input.payments as never,
-      vatPercent: Number(quotation.vatPercent),
-      discount: null,
-    } as never,
-  );
+  // The sale engine runs ITS OWN transaction. A failure reverts the claim
+  // so the quote stays convertible; a crash leaves a stale 'converting'
+  // claim that the 5-minute rule reclaims.
+  let sale: Awaited<ReturnType<typeof createSale>>;
+  try {
+    sale = await createSale(
+      businessId,
+      locationId,
+      cashierUserId,
+      {
+        customerId: quotation.customerId,
+        saleDate: new Date(),
+        items: items.map((item) => ({
+          variantId: item.variantId,
+          quantity: Number(item.quantity),
+          unitPrice: Number(item.unitPrice),
+          // The quoted per-line discount carries through: the sale total must
+          // match the offered quotation total (same VAT percent). The cart
+          // item discount shape is {type, value}.
+          ...(Number(item.discount) > 0
+            ? { discount: { type: "fixed" as const, value: Number(item.discount) } }
+            : { discount: null }),
+        })),
+        payments: input.payments as never,
+        vatPercent: Number(quotation.vatPercent),
+        discount: null,
+      } as never,
+    );
+  } catch (err) {
+    await revertQuotationClaim(businessId, quotationId, quotation.prevStatus);
+    throw err;
+  }
+
+  // E3-008: the quoted total and the backend-recomputed total must agree.
+  // A cart saved with named charges (quotations persist items+VAT only) or
+  // per-variant tax rules that re-resolve at sale time used to either
+  // convert to a SMALLER sale (charges silently dropped) or fail
+  // validatePayments outright — refuse honestly instead.
+  const quotedTotal = Number(quotation.grandTotal ?? 0);
+  const saleTotal = Number(sale.sale.finalTotal ?? 0);
+  if (Math.abs(saleTotal - quotedTotal) > 0.01) {
+    await revertQuotationClaim(businessId, quotationId, quotation.prevStatus);
+    throw new ConflictError(
+      `The quotation total (${quotedTotal.toFixed(2)}) no longer matches current pricing (${saleTotal.toFixed(2)}) — charges or tax rules changed. Re-quote from the cart.`,
+    );
+  }
 
   const [claimed] = await db
     .update(quotations)
@@ -393,13 +444,14 @@ export async function convertQuotation(
       status: "converted",
       convertedSaleId: sale.sale.id,
       convertedAt: new Date(),
+      convertedClaimedAt: null,
       updatedAt: new Date(),
     })
     .where(
       and(
         eq(quotations.id, quotationId),
         eq(quotations.businessId, businessId),
-        inArray(quotations.status, ["accepted", "sent"]),
+        eq(quotations.status, "converting"),
       ),
     )
     .returning({ id: quotations.id, quoteNumber: quotations.quoteNumber });
@@ -426,6 +478,28 @@ export async function convertQuotation(
     saleId: sale.sale.id,
   });
   return { saleId: sale.sale.id, quoteNumber: claimed.quoteNumber };
+}
+
+/** E3-004: release an in-flight claim back to its previous status. */
+async function revertQuotationClaim(
+  businessId: number,
+  quotationId: number,
+  prevStatus: "draft" | "sent" | "accepted",
+): Promise<void> {
+  await db
+    .update(quotations)
+    .set({
+      status: prevStatus,
+      convertedClaimedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(quotations.id, quotationId),
+        eq(quotations.businessId, businessId),
+        eq(quotations.status, "converting"),
+      ),
+    );
 }
 
 export async function listQuotations(

@@ -19,7 +19,10 @@ export const roleKeys = {
   all: ["roles"] as const,
   list: () => ["roles", getActiveBusinessId(), "list"] as const,
   users: (roleId: number) => ["roles", getActiveBusinessId(), roleId, "users"] as const,
-  permissionCatalog: () => ["permissions-catalog"] as const,
+  // R3-001: the catalog is served under the caller's business context —
+  // scope it like list/users.
+  permissionCatalog: () =>
+    ["permissions-catalog", getActiveBusinessId()] as const,
 };
 
 export function useRolesListQuery(options: { softFail?: boolean } = {}) {

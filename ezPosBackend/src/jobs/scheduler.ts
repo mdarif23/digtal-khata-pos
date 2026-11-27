@@ -11,7 +11,7 @@ import { runAssetDepreciationSweeps } from "../modules/finance/finance.tools.ser
 import { runLoyaltyExpirySweep } from "../services/loyalty.js";
 import { runStoreCreditExpirySweep } from "../services/storeCredit.js";
 import { runQuotationExpirySweep } from "../modules/quotations/quotations.service.js";
-import { runDueReminderSweep } from "../services/comms.js";
+import { runCommsRetrySweep, runDueReminderSweep } from "../services/comms.js";
 
 /**
  * In-process scheduler: sweeps subscription lifecycle jobs on a fixed
@@ -44,6 +44,7 @@ export function startScheduler(): void {
       runStoreCreditExpirySweep(null),
       runQuotationExpirySweep(),
       runDueReminderSweep(),
+      runCommsRetrySweep(),
     ])
       .then(([sub, commerce, integrations, deliveries, expenses, backups, warranty]) => {
         const total =

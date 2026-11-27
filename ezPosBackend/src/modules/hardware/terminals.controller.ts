@@ -5,6 +5,7 @@ import { callerHasPermission } from "../../middleware/permissions.js";
 import { sendSafeError } from "../../utils/safeError.js";
 import { BadRequestError } from "../../utils/handleError.js";
 import {
+  createTerminal,
   deleteTerminal,
   getTerminal,
   listTerminalCommands,
@@ -104,6 +105,44 @@ export async function postPairingCode(req: Request, res: Response) {
       getBusinessId(req),
       getLocationId(req),
       req.user?.id ?? 0,
+    );
+    return res.status(201).json({ success: true, data: issued });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to mint a pairing code.");
+  }
+}
+
+/**
+ * Registers a terminal by name — the hardware-less path for offline
+ * selling (1-PC shops, printer-only counters). The bridge attaches later
+ * through a per-terminal pairing code when drawer hardware exists.
+ */
+export async function postCreateTerminal(req: Request, res: Response) {
+  try {
+    const rawName = typeof req.body?.name === "string" ? req.body.name : "";
+    if (rawName.trim() === "") {
+      throw new BadRequestError("A terminal name is required.");
+    }
+    const terminal = await createTerminal(
+      getBusinessId(req),
+      getLocationId(req),
+      rawName,
+      req.user?.id ?? null,
+    );
+    return res.status(201).json({ success: true, data: terminal });
+  } catch (err: unknown) {
+    return sendSafeError(res, err, "Unable to create the terminal.");
+  }
+}
+
+/** Mints a one-time code that attaches the bridge to an EXISTING terminal. */
+export async function postTerminalPairingCode(req: Request, res: Response) {
+  try {
+    const issued = await mintPairingCode(
+      getBusinessId(req),
+      getLocationId(req),
+      req.user?.id ?? 0,
+      terminalIdParam(req),
     );
     return res.status(201).json({ success: true, data: issued });
   } catch (err: unknown) {

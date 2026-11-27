@@ -31,7 +31,7 @@ export function PurchaseCostSummary({
 }) {
   return (
     <TooltipProvider>
-      <div className="space-y-2 border-t pt-3 text-sm">
+      <div className="space-y-1 border-t pt-2 text-sm">
         <div className="flex justify-between text-muted-foreground">
           <span>Items subtotal</span>
           <span>{formatCurrency(itemsSubtotal)}</span>
@@ -79,7 +79,7 @@ export function PurchaseCostSummary({
             via landed cost
           </span>
         </div>
-        <div className="flex justify-between border-t pt-3 text-lg font-semibold">
+        <div className="flex items-center justify-between border-t pt-2 text-base font-semibold">
           <span>Purchase grand total</span>
           <span>{formatCurrency(grandTotal)}</span>
         </div>

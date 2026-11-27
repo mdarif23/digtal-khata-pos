@@ -442,6 +442,64 @@ describe("offline terminals (Phase 3)", { skip: !runIntegration, concurrency: 1 
     assert.equal(Number(closed.rows[0].difference), 0); // 500 + 200 = 700
   });
 
+  it("offline drawer.open adopts an online-open session instead of failing forever", async () => {
+    // Real-world breakage this encodes: ops recorded offline (before the
+    // terminal was even paired), then the register was opened ONLINE while
+    // back online — the "one open session per register" guard made the
+    // replay insert fail with a raw duplicate-key error, and every queued
+    // op behind it stuck as Review-required. The replay must adopt the
+    // online session (same user) instead.
+    await dbClient.query(
+      `UPDATE register_sessions SET status = 'closed'
+       WHERE register_id = $1 AND status = 'open'`,
+      [registerA],
+    );
+    const ctxUser = (
+      await dbClient.query(
+        `SELECT user_id FROM register_sessions WHERE terminal_id = $1 AND user_id IS NOT NULL LIMIT 1`,
+        [terminalA],
+      )
+    ).rows[0].user_id;
+    const onlineSessionId = (
+      await dbClient.query(
+        `INSERT INTO register_sessions (business_id, register_id, user_id, opening_cash, status)
+         VALUES ($1, $2, $3, 1000, 'open') RETURNING id`,
+        [businessId, registerA, ctxUser],
+      )
+    ).rows[0].id;
+
+    const op = {
+      opId: `off-dopen-adopt-${Date.now()}`,
+      type: "drawer.open",
+      payload: {
+        clientSessionId: `a1b2c3d4-0000-4000-8000-${String(Date.now()).slice(-12).padStart(12, "0")}`,
+        registerId: registerA,
+        openingCash: 1000,
+      },
+    };
+    const first = await syncOps(terminalA, [op]);
+    assert.equal(first.results[0].status, "applied", JSON.stringify(first.results));
+    assert.equal(first.results[0].sessionId, onlineSessionId);
+
+    // Adoption is stable: the client_session_id is not persisted for an
+    // adopted session, so a retry re-adopts the same session — still one
+    // open session, never a second row.
+    const replay = await syncOps(terminalA, [op]);
+    assert.equal(replay.results[0].status, "applied");
+    assert.equal(replay.results[0].sessionId, onlineSessionId);
+    const openCount = await dbClient.query(
+      `SELECT count(*)::int AS n FROM register_sessions
+       WHERE register_id = $1 AND status = 'open'`,
+      [registerA],
+    );
+    assert.equal(openCount.rows[0].n, 1);
+
+    // Restore: leave no open session for the conflict-review test below.
+    await dbClient.query(`UPDATE register_sessions SET status = 'closed' WHERE id = $1`, [
+      onlineSessionId,
+    ]);
+  });
+
   it("conflict review: manager lists and resolves", async () => {
     const list = await api("GET", "/api/offline/conflicts");
     assert.equal(list.status, 200);

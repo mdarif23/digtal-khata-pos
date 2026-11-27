@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import { publishRealtime } from "../realtime/realtime.service.js";
 import { notifyRegisterDiscrepancy } from "../../services/notifications.js";
 import { recordAuditInTx, recordAudit } from "../../services/audit.js";
@@ -7,6 +7,7 @@ import {
   isApprovalRequired,
 } from "../../services/managerApproval.js";
 import { db } from "../../db/schema/index.js";
+import { businesses } from "../../db/schema/businesses.js";
 import { registerSessions } from "../../db/schema/registers.js";
 import { registerTransactions } from "../../db/schema/registers.js";
 import { registers } from "../../db/schema/registers.js";
@@ -115,13 +116,24 @@ async function computeExpectedCash(
   tx: Tx,
   sessionId: number,
   openingCash: number,
+  /** G2-001: only transactions inside the CURRENT shift window count —
+   * a reopen reuses the session row, and the prior shift's movements are
+   * already baked into the counted sheet that became the new opening. */
+  shiftStartedAt: Date | null = null,
 ): Promise<number> {
   const [row] = await tx
     .select({
       delta: sql<string>`COALESCE(SUM(${CASH_MOVEMENT_DELTA}), 0)`,
     })
     .from(registerTransactions)
-    .where(eq(registerTransactions.sessionId, sessionId));
+    .where(
+      and(
+        eq(registerTransactions.sessionId, sessionId),
+        shiftStartedAt
+          ? gt(registerTransactions.createdAt, shiftStartedAt)
+          : undefined,
+      ),
+    );
   return roundMoney(openingCash + Number(row?.delta ?? 0));
 }
 
@@ -183,6 +195,7 @@ const sessionSelect = {
   notes: registerSessions.notes,
   openedAt: registerSessions.openedAt,
   closedAt: registerSessions.closedAt,
+  reopenedAt: registerSessions.reopenedAt,
 };
 
 function sessionBaseQuery() {
@@ -500,7 +513,12 @@ export async function getCurrentSession(
     )
     .limit(1);
   if (!row) return null;
-  const expected = await computeExpectedCash(db, row.id, Number(row.openingCash));
+  const expected = await computeExpectedCash(
+    db,
+    row.id,
+    Number(row.openingCash),
+    row.reopenedAt,
+  );
   return toSummary(row, expected);
 }
 
@@ -612,7 +630,12 @@ export async function addCashMovement(
       },
     });
 
-    const expected = await computeExpectedCash(tx, sessionId, Number(session.openingCash));
+    const expected = await computeExpectedCash(
+      tx,
+      sessionId,
+      Number(session.openingCash),
+      session.reopenedAt,
+    );
     return {
       id: session.id,
       registerId: session.registerId,
@@ -658,6 +681,12 @@ export async function getSessionDetail(
   callerIsOwner: boolean,
   hasSettingsView: boolean,
   sessionId: number,
+  /**
+   * L3-003: location scope for settings.view holders — a manager may only
+   * inspect sessions at locations they are ASSIGNED to (counted cash is
+   * money data). Owners (wildcard) keep the business-wide view.
+   */
+  accessibleLocationIds: number[] | null = null,
 ): Promise<SessionSummary & { transactions: RegisterTransactionView[] }> {
   const [row] = await sessionBaseQuery()
     .where(
@@ -671,7 +700,7 @@ export async function getSessionDetail(
     throw new NotFoundError("Session not found.");
   }
   // Cashiers may only inspect their own sessions; settings.view holders
-  // and owners may inspect any session at the business.
+  // and owners may inspect sessions within their location scope.
   const sessionUserIdRow = await db
     .select({ userId: registerSessions.userId })
     .from(registerSessions)
@@ -679,6 +708,16 @@ export async function getSessionDetail(
   const ownerId = sessionUserIdRow[0]?.userId;
   if (ownerId !== undefined && ownerId !== callerUserId && !callerIsOwner && !hasSettingsView) {
     throw new ForbiddenError("You can only view your own register sessions.");
+  }
+  if (
+    !callerIsOwner &&
+    hasSettingsView &&
+    accessibleLocationIds !== null &&
+    (row.locationId === 0 || !accessibleLocationIds.includes(row.locationId))
+  ) {
+    throw new ForbiddenError(
+      "This register session belongs to a location you are not assigned to.",
+    );
   }
   const transactions = await db
     .select({
@@ -717,7 +756,7 @@ export async function getSessionDetail(
 
   const expected =
     row.status === "open"
-      ? await computeExpectedCash(db, row.id, Number(row.openingCash))
+      ? await computeExpectedCash(db, row.id, Number(row.openingCash), row.reopenedAt)
       : Number(row.expectedCash ?? 0);
 
   return {
@@ -772,6 +811,7 @@ export async function closeSession(
       tx,
       sessionId,
       Number(session.openingCash),
+      session.reopenedAt,
     );
     const counted = roundMoney(countedCash);
     const difference = roundMoney(counted - expected);
@@ -890,6 +930,7 @@ export async function reconcileSession(
       tx,
       sessionId,
       Number(session.openingCash),
+      session.reopenedAt,
     );
     const counted = roundMoney(countedCash);
     const difference = roundMoney(counted - expected);
@@ -1055,6 +1096,11 @@ export async function reopenSession(
         countedCash: null,
         difference: null,
         closedAt: null,
+        // G2-001: start a NEW shift window — expected cash from now on
+        // counts only transactions created after this instant. Without it
+        // the same session row re-sums every prior-shift movement on top
+        // of the new opening (guaranteed false variance at the next close).
+        reopenedAt: new Date(),
       })
       .where(eq(registerSessions.id, sessionId));
 
@@ -1499,6 +1545,17 @@ async function findOpenSessionForAttribution(
   locationId: number,
   terminalId: number | null = null,
 ): Promise<{ id: number } | null> {
+  // F3-003: registers are a physical-surface feature — an online_only
+  // business keeps no drawers. Every drawer auto-attribution (due
+  // collections, gift-card issue/reload cash-in, expense settlements,
+  // supplier payments) funnels through here, so this single no-op freezes
+  // ALL of them instead of a stale pre-existing session quietly absorbing
+  // new cash rows. The GL entry still records the money.
+  const [business] = await tx
+    .select({ mode: businesses.mode })
+    .from(businesses)
+    .where(eq(businesses.id, businessId));
+  if (business?.mode === "online_only") return null;
   if (terminalId !== null) {
     const [terminalSession] = await tx
       .select({
@@ -1716,4 +1773,45 @@ export async function getRegisterSessionReport(
   );
 
   return { rows: reportRows, totals };
+}
+
+/**
+ * D3-003: cash SUPPLIER payments move the drawer like expenses do. The
+ * paying user's OPEN session at the payment's location is attributed
+ * (best-effort: no open drawer → GL-only, no movement — same documented
+ * trade-off as the void cash-out). Non-cash methods never touch a drawer.
+ */
+export async function recordPurchasePaymentCashOutInTx(
+  tx: Tx,
+  params: {
+    businessId: number;
+    userId: number;
+    amount: number;
+    paymentId: number;
+    purchaseId: number;
+    locationId: number | null;
+    method: string;
+  },
+): Promise<void> {
+  if (params.method !== "cash" || params.amount <= 0) return;
+  if (params.locationId == null) return;
+  // Same attribution rules (and F3-003 online_only no-op) as every other
+  // drawer auto-attribution.
+  const session = await findOpenSessionForAttribution(
+    tx,
+    params.businessId,
+    params.userId,
+    params.locationId,
+  );
+  if (!session) return;
+  await tx.insert(registerTransactions).values({
+    businessId: params.businessId,
+    sessionId: session.id,
+    userId: params.userId,
+    type: "cash_out",
+    amount: roundMoney(params.amount),
+    referenceType: "purchase_payment",
+    referenceId: params.paymentId,
+    note: `Supplier payment (purchase #${params.purchaseId})`,
+  });
 }

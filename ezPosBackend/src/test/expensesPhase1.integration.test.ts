@@ -550,10 +550,31 @@ describe("expenses phase 1 integration", { skip: !runIntegration }, () => {
       owner,
       "POST",
       "/api/expenses",
-      expensePayload({ title: "To be voided", amount: 123 }),
+      expensePayload({ title: "To be voided", amount: 123, record_as: "unpaid" }),
       locationA,
     );
     const id = String((created.body as Record<string, unknown>).id);
+
+    // F3-002: a SETTLED expense cannot be voided — its settlement JEs and
+    // drawer rows are not reversed by a void. Settle-reverse first.
+    // (Created BEFORE the beforeTotal snapshot so the report delta below
+    // stays exactly -1.)
+    const settled = await api(
+      owner,
+      "POST",
+      "/api/expenses",
+      expensePayload({ title: "Settled void attempt", amount: 50 }),
+      locationA,
+    );
+    const settledId = String((settled.body as Record<string, unknown>).id);
+    const blocked = await api(
+      owner,
+      "DELETE",
+      `/api/expenses/${settledId}`,
+      { reason: "Should be refused" },
+      locationA,
+    );
+    assert.equal(blocked.status, 409);
 
     const before = await api(
       owner,

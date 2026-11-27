@@ -243,7 +243,7 @@ describe("woocommerce integration", { skip: !runIntegration }, () => {
 
   it("connects a store after validating credentials and stores them encrypted", async () => {
     const owner = await createOwnerCtx("WC Connect Co");
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, {
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, {
       mode: "omnichannel",
     });
 
@@ -302,7 +302,7 @@ describe("woocommerce integration", { skip: !runIntegration }, () => {
 
   it("product sync pushes unmapped products and records mappings", async () => {
     const owner = await createOwnerCtx("WC Sync Co");
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, {
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, {
       mode: "omnichannel",
     });
     const variantId = await seedVariant(owner.businessId, 6);
@@ -348,7 +348,7 @@ describe("woocommerce integration", { skip: !runIntegration }, () => {
 
   it("processes signed order webhooks: create, duplicate, confirm, cancel", async () => {
     const owner = await createOwnerCtx("WC Webhook Co");
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, {
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, {
       mode: "omnichannel",
     });
     const variantId = await seedVariant(owner.businessId, 10);
@@ -496,7 +496,7 @@ describe("woocommerce integration", { skip: !runIntegration }, () => {
 
   it("cancelled pending webhooks release the reservation", async () => {
     const owner = await createOwnerCtx("WC Cancel Co");
-    await api(owner, "PUT", `/api/businesses/${owner.businessId}`, {
+    await api(owner, "PATCH", `/api/businesses/${owner.businessId}/mode`, {
       mode: "omnichannel",
     });
     const variantId = await seedVariant(owner.businessId, 5);
@@ -580,7 +580,7 @@ describe("woocommerce integration", { skip: !runIntegration }, () => {
   it("isolates portal access to the owning business", async () => {
     const ownerA = await createOwnerCtx("WC Iso A");
     const ownerB = await createOwnerCtx("WC Iso B");
-    await api(ownerA, "PUT", `/api/businesses/${ownerA.businessId}`, {
+    await api(ownerA, "PATCH", `/api/businesses/${ownerA.businessId}/mode`, {
       mode: "omnichannel",
     });
     const connect = await api(

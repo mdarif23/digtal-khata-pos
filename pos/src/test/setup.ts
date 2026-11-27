@@ -49,3 +49,38 @@ if (typeof globalThis.localStorage === "undefined") {
   }
 }
 
+// R3-004: checkout tests leave a cartPersistence debounce alive past
+// teardown; its `indexedDB.open(...)` used to reject with
+// "indexedDB is not defined" as an unhandled rejection after the run.
+// Provide a benign never-completing stub when jsdom has no IndexedDB —
+// pending writes simply never fire (tests that need real IndexedDB
+// behavior already inject their own fake).
+if (typeof globalThis.indexedDB === "undefined") {
+  const stubRequest = {
+    onupgradeneeded: null,
+    onsuccess: null,
+    onerror: null,
+    result: null,
+    error: null,
+    readyState: "done",
+    transaction: null,
+  };
+  const stubFactory = {
+    open: () => stubRequest,
+    cmp: () => 0,
+    deleteDatabase: () => stubRequest,
+    databases: () => Promise.resolve([]),
+  };
+  Object.defineProperty(globalThis, "indexedDB", {
+    value: stubFactory,
+    configurable: true,
+    writable: true,
+  });
+  if (typeof window !== "undefined" && typeof window.indexedDB === "undefined") {
+    Object.defineProperty(window, "indexedDB", {
+      value: stubFactory,
+      configurable: true,
+    });
+  }
+}
+

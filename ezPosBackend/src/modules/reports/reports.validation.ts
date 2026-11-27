@@ -3,12 +3,18 @@ import { z } from "zod";
 export const dateRangeSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
+  // WP-006: 60d/90d/365d mirror the dashboard's shared windows so the
+  // channel-mix card (and any report surface) can match the dashboard's
+  // selected range instead of silently falling back to this_month.
   period: z
     .enum([
       "today",
       "yesterday",
       "7d",
       "30d",
+      "60d",
+      "90d",
+      "365d",
       "this_month",
       "last_month",
       "this_year",

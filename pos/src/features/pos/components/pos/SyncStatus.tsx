@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog.js";
 import { useOfflineStore } from "../../offline/offlineStore.js";
-import api from "../../../../api/axios.js";
+import api, { bindThisTerminal } from "../../../../api/axios.js";
 
 /**
  * Register-side offline status (Module 10): an offline pill when the
@@ -74,9 +74,45 @@ function SyncHistoryDialog({
   const lastSyncAt = useOfflineStore((s) => s.lastSyncAt);
   const [tick, setTick] = useState(0);
 
+  // TERMINAL_NOT_BOUND remediation: offer the binding right where the stuck
+  // sales are, instead of sending the cashier to Settings. The list is the
+  // same one the boot-time binding dialog uses (location-scoped, active
+  // only); "unavailable" covers the no-permission case the boot dialog has.
+  const needsBinding = history.some(
+    (entry) =>
+      entry.status === "failed" &&
+      (entry.errorCode === "TERMINAL_NOT_BOUND" ||
+        entry.lastError?.includes("bound terminal")),
+  );
+  const [bindingOptions, setBindingOptions] = useState<
+    { id: number; name: string }[] | "unavailable" | null
+  >(null);
+
   useEffect(() => {
     if (open) void refresh();
   }, [open, refresh, tick]);
+
+  useEffect(() => {
+    if (!open || !needsBinding) return;
+    let cancelled = false;
+    void api
+      .get<{
+        success: boolean;
+        data: { id: number; name: string; status: string }[];
+      }>("/terminals")
+      .then((res) => {
+        if (!cancelled)
+          setBindingOptions(
+            (res.data.data ?? []).filter((t) => t.status === "active"),
+          );
+      })
+      .catch(() => {
+        if (!cancelled) setBindingOptions("unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, needsBinding]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -111,6 +147,52 @@ function SyncHistoryDialog({
             Re-queue reviewed ({failedCount})
           </Button>
         </div>
+
+        {needsBinding ? (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
+            <p className="text-sm font-medium text-amber-900">
+              {failedCount} sale(s) need this computer bound to a terminal
+            </p>
+            <p className="mt-1 text-xs text-amber-800">
+              Offline sales sync per terminal. If this PC is one of the
+              counters below, bind it, then press “Re-queue reviewed”.
+            </p>
+            {bindingOptions === null ? (
+              <p className="mt-2 text-xs text-amber-800">
+                Loading terminals…
+              </p>
+            ) : bindingOptions === "unavailable" ? (
+              <p className="mt-2 text-xs text-amber-800">
+                Terminal list unavailable — open{" "}
+                <a href="/settings/hardware" className="underline">
+                  Settings → Hardware
+                </a>{" "}
+                to bind this computer.
+              </p>
+            ) : bindingOptions.length === 0 ? (
+              <p className="mt-2 text-xs text-amber-800">
+                No active terminals at this location yet — pair one in{" "}
+                <a href="/settings/hardware" className="underline">
+                  Settings → Hardware
+                </a>
+                .
+              </p>
+            ) : (
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {bindingOptions.map((terminal) => (
+                  <Button
+                    key={terminal.id}
+                    size="sm"
+                    variant="outline"
+                    onClick={() => bindThisTerminal(terminal.id)}
+                  >
+                    This is “{terminal.name}”
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
 
         <div className="space-y-1">
           {history.length === 0 && (

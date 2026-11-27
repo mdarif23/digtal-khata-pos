@@ -13,6 +13,8 @@ import {
   NotFoundError,
 } from "../../utils/handleError.js";
 import { recordAudit } from "../../services/audit.js";
+import { getBusinessTimezone } from "../../services/ledger.js";
+import { businessLocalToUtcWall } from "../../utils/money.js";
 import { promotionStrictSchema } from "./promotions.validation.js";
 
 /**
@@ -201,6 +203,29 @@ export async function listPromotions(businessId: number) {
   }));
 }
 
+/**
+ * I3-6: a date-only 'YYYY-MM-DD' boundary is interpreted on the BUSINESS
+ * calendar (starts → 00:00:00, ends → 23:59:59.999) instead of being pinned
+ * to the browser's local midnight. Full ISO timestamps pass through.
+ */
+async function resolveDateBound(
+  businessId: number,
+  value: Date | string | null | undefined,
+  boundary: "start" | "end",
+): Promise<Date | null | undefined> {
+  if (value == null || value instanceof Date) return value;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(value);
+  const tz = await getBusinessTimezone(db, businessId);
+  const wall = businessLocalToUtcWall(
+    value,
+    boundary === "start" ? "00:00:00" : "23:59:59.999",
+    tz,
+  );
+  // The session is UTC-pinned (see businessLocalToUtcWall) — the wall
+  // string is exactly the UTC instant of the business-local boundary.
+  return new Date(`${wall.replace(" ", "T")}Z`);
+}
+
 export async function createPromotion(
   businessId: number,
   actorUserId: number | null,
@@ -211,8 +236,8 @@ export async function createPromotion(
     variantId?: number | null | undefined;
     discountType: "percentage" | "fixed";
     discountValue: number;
-    startsAt?: Date | null | undefined;
-    endsAt?: Date | null | undefined;
+    startsAt?: Date | string | null | undefined;
+    endsAt?: Date | string | null | undefined;
     minQuantity?: number | null | undefined;
     minOrderValue?: number | undefined;
     maxDiscountAmount?: number | null | undefined;
@@ -247,8 +272,8 @@ export async function createPromotion(
       ...scope,
       discountType: payload.discountType,
       discountValue: payload.discountValue,
-      startsAt: payload.startsAt ?? null,
-      endsAt: payload.endsAt ?? null,
+      startsAt: (await resolveDateBound(businessId, payload.startsAt, "start")) ?? null,
+      endsAt: (await resolveDateBound(businessId, payload.endsAt, "end")) ?? null,
       minQuantity: payload.minQuantity ?? null,
       minOrderValue: payload.minOrderValue ?? 0,
       maxDiscountAmount: payload.maxDiscountAmount ?? null,
@@ -307,8 +332,14 @@ export async function updatePromotion(
       payload.discountValue !== undefined
         ? (payload.discountValue as number)
         : Number(existing.discountValue),
-    startsAt: payload.startsAt !== undefined ? (payload.startsAt as Date | null) : existing.startsAt,
-    endsAt: payload.endsAt !== undefined ? (payload.endsAt as Date | null) : existing.endsAt,
+    startsAt:
+      payload.startsAt !== undefined
+        ? ((await resolveDateBound(businessId, payload.startsAt as Date | string | null, "start")) ?? null)
+        : existing.startsAt,
+    endsAt:
+      payload.endsAt !== undefined
+        ? ((await resolveDateBound(businessId, payload.endsAt as Date | string | null, "end")) ?? null)
+        : existing.endsAt,
     minQuantity:
       payload.minQuantity !== undefined
         ? (payload.minQuantity as number | null)
@@ -332,26 +363,41 @@ export async function updatePromotion(
       (payload.promoKind as string | undefined) ??
       (existing.promoKind as string | undefined) ??
       "discount",
+    // H3-2: these seven fields must use the `!== undefined` merge (like
+    // categoryId/startsAt above) — the `??` chain treated an explicit null
+    // (the FE edit dialog sends null/[] for cleared fields) as "not
+    // provided" and resurrected the old value, so switching promoKind away
+    // from bogo kept the stale rule and flash windows could never be
+    // cleared.
     rule:
-      (payload.rule as Record<string, unknown> | null | undefined) ??
-      (existing.rule as Record<string, unknown> | null | undefined) ??
-      null,
+      payload.rule !== undefined
+        ? (payload.rule as Record<string, unknown> | null)
+        : ((existing.rule as Record<string, unknown> | null | undefined) ??
+          null),
     daysOfWeek:
-      (payload.daysOfWeek as number[] | null | undefined) ??
-      (existing.daysOfWeek as number[] | null | undefined) ??
-      null,
+      payload.daysOfWeek !== undefined
+        ? (payload.daysOfWeek as number[] | null)
+        : ((existing.daysOfWeek as number[] | null | undefined) ?? null),
     startTime:
-      (payload.startTime as string | null | undefined) ?? existing.startTime ?? null,
+      payload.startTime !== undefined
+        ? (payload.startTime as string | null)
+        : (existing.startTime ?? null),
     endTime:
-      (payload.endTime as string | null | undefined) ?? existing.endTime ?? null,
+      payload.endTime !== undefined
+        ? (payload.endTime as string | null)
+        : (existing.endTime ?? null),
     locationId:
-      (payload.locationId as number | null | undefined) ?? existing.locationId ?? null,
+      payload.locationId !== undefined
+        ? (payload.locationId as number | null)
+        : (existing.locationId ?? null),
     usageLimit:
-      (payload.usageLimit as number | null | undefined) ?? existing.usageLimit ?? null,
+      payload.usageLimit !== undefined
+        ? (payload.usageLimit as number | null)
+        : (existing.usageLimit ?? null),
     perCustomerLimit:
-      (payload.perCustomerLimit as number | null | undefined) ??
-      existing.perCustomerLimit ??
-      null,
+      payload.perCustomerLimit !== undefined
+        ? (payload.perCustomerLimit as number | null)
+        : (existing.perCustomerLimit ?? null),
     priority: (payload.priority as number | undefined) ?? existing.priority ?? 0,
     isActive: (payload.isActive as boolean | undefined) ?? existing.isActive,
   };

@@ -12,6 +12,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { patchCustomerConsentApi } from "@/api/customer.api";
 import { Label } from "@/components/ui/label";
 import { Pencil, Plus, Save } from "lucide-react";
 import { createEntityPromiseToast } from "@/lib/toast-utils";
@@ -68,6 +70,13 @@ export function CustomerDialog({
       editCustomer?.creditLimit != null ? String(editCustomer.creditLimit) : "",
   });
   const [formError, setFormError] = useState("");
+  // E1-012: consent toggles (edit only — new customers default to opt-out).
+  const [marketingOptIn, setMarketingOptIn] = useState(
+    editCustomer?.marketingOptIn ?? false,
+  );
+  const [transactionalOptOut, setTransactionalOptOut] = useState(
+    editCustomer?.transactionalOptOut ?? false,
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const addCustomer = useCustomerStore((state) => state.addCustomer);
   const updateCustomer = useCustomerStore((state) => state.updateCustomer);
@@ -89,6 +98,8 @@ export function CustomerDialog({
             }
           : initialForm,
       );
+      setMarketingOptIn(editCustomer?.marketingOptIn ?? false);
+      setTransactionalOptOut(editCustomer?.transactionalOptOut ?? false);
     }
   }
 
@@ -126,6 +137,23 @@ export function CustomerDialog({
         entityName: isEdit ? "Customer updated" : "Customer",
         displayName: result.data.name,
       });
+      // E1-012: persist consent changes (edit only) — the endpoint existed
+      // but nothing in the app could reach it.
+      if (
+        isEdit &&
+        (marketingOptIn !== (editCustomer.marketingOptIn ?? false) ||
+          transactionalOptOut !== (editCustomer.transactionalOptOut ?? false))
+      ) {
+        await patchCustomerConsentApi(editCustomer.id, {
+          ...(marketingOptIn !== (editCustomer.marketingOptIn ?? false)
+            ? { marketingOptIn }
+            : {}),
+          ...(transactionalOptOut !==
+          (editCustomer.transactionalOptOut ?? false)
+            ? { transactionalOptOut }
+            : {}),
+        });
+      }
       setFormData(initialForm);
       setOpen(false);
     } catch (error: unknown) {
@@ -235,6 +263,32 @@ export function CustomerDialog({
                 unlimited; 0 blocks due sales entirely.
               </p>
             </div>
+            {isEdit ? (
+              // E1-012: consent is recorded on the customer — the comms
+              // engine enforces it, but there was no way to SET it from the
+              // app (E1-012).
+              <div className="grid gap-2 rounded-md border border-dashed p-2">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Communication consent
+                </span>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>Marketing opt-in (offers &amp; promotions)</span>
+                  <Switch
+                    checked={marketingOptIn}
+                    onCheckedChange={setMarketingOptIn}
+                    aria-label="Marketing opt-in"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>Transactional opt-out (receipts &amp; due reminders)</span>
+                  <Switch
+                    checked={transactionalOptOut}
+                    onCheckedChange={setTransactionalOptOut}
+                    aria-label="Transactional opt-out"
+                  />
+                </label>
+              </div>
+            ) : null}
             {formError ? (
               <p role="alert" className="text-sm text-destructive">
                 {formError}

@@ -34,6 +34,13 @@ export interface BomComponent {
   componentSku: string | null;
   quantity: number;
   wastePercent: number;
+  /**
+   * bom_components has NO FK to product_variants — deleting a variant leaves
+   * an orphaned row behind. missing=true means the referenced variant no
+   * longer exists: the editor surfaces it, Save cleans it, and runs refuse
+   * to under-consume silently.
+   */
+  missing: boolean;
 }
 
 export interface BomDefinition {
@@ -54,13 +61,17 @@ export async function getBom(
       wastePercent: bomComponents.wastePercent,
       componentName: products.name,
       componentSku: productVariants.sku,
+      // LEFT JOINs + missing flag: orphaned rows (variant deleted) must be
+      // VISIBLE, not silently dropped — the old INNER JOINs made the editor
+      // hide them while runs/sales under-consumed the recipe.
+      componentNameMissing: sql<boolean>`${products.name} IS NULL`,
     })
     .from(bomComponents)
-    .innerJoin(
+    .leftJoin(
       productVariants,
       eq(productVariants.id, bomComponents.componentVariantId),
     )
-    .innerJoin(products, eq(products.id, productVariants.productId))
+    .leftJoin(products, eq(products.id, productVariants.productId))
     .where(
       and(
         eq(bomComponents.businessId, businessId),
@@ -73,10 +84,11 @@ export async function getBom(
     components: rows.map((row) => ({
       id: row.id,
       componentVariantId: row.componentVariantId,
-      componentName: row.componentName,
+      componentName: row.componentName ?? `Deleted variant #${row.componentVariantId}`,
       componentSku: row.componentSku,
       quantity: Number(row.quantity),
       wastePercent: Number(row.wastePercent),
+      missing: row.componentNameMissing === true,
     })),
   };
 }
@@ -119,6 +131,9 @@ export async function getBomsForVariants(
       componentSku: null,
       quantity: Number(row.quantity),
       wastePercent: Number(row.wastePercent),
+      // INNER JOIN: orphans are dropped here (sale-time pre-pass keeps the
+      // old behavior — the editor + runs surface them explicitly).
+      missing: false,
     });
     byParent.set(row.parentVariantId, list);
   }
@@ -184,7 +199,9 @@ export async function setBom(
   const existingIds = new Set(existing.map((row) => row.id));
   for (const id of componentIds) {
     if (!existingIds.has(id)) {
-      throw new BadRequestError(`Component variant ${id} was not found.`);
+      throw new BadRequestError(
+        `Component variant ${id} no longer exists — remove it from the recipe and save again.`,
+      );
     }
   }
 
@@ -305,7 +322,14 @@ export async function flattenBom(
 ): Promise<{ componentVariantId: number; quantity: number }[]> {
   const bom = await getBom(businessId, parentVariantId);
   if (bom.components.length === 0) {
-    throw new NotFoundError(`Variant ${parentVariantId} has no BOM.`);
+    throw new NotFoundError("This variant has no BOM to assemble.");
+  }
+  if (bom.components.some((component) => component.missing)) {
+    // Orphaned rows (component variant deleted) would otherwise make the run
+    // consume only the surviving components — silently wrong stock.
+    throw new ConflictError(
+      "This recipe references deleted variants — open Production & BOM and save the recipe again.",
+    );
   }
   const out = new Map<number, number>();
   const queue: { variantId: number; qty: number; depth: number }[] = [
