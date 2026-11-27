@@ -396,6 +396,7 @@ export async function createPromotion(
       | "mix_match"
       | "quantity_tier"
       | "bundle"
+      | "spend_get"
       | undefined;
     rule?: Record<string, unknown> | null | undefined;
     daysOfWeek?: number[] | null | undefined;
@@ -416,6 +417,10 @@ export async function createPromotion(
     variantId: payload.variantId ?? null,
   };
   const isBundle = (payload.promoKind as string | undefined) === "bundle";
+  // Rule-target kinds carry their pricing in `rule`; the generic discount
+  // columns are vestigial for them and normalized out of the payload.
+  const isRewardTargetKind =
+    isBundle || (payload.promoKind as string | undefined) === "spend_get";
   if (payload.components !== undefined && !isBundle) {
     throw new BadRequestError(
       "Bundle components only apply to 'bundle' promotions.",
@@ -424,12 +429,10 @@ export async function createPromotion(
   await assertScopeOwnership(businessId, scope);
   const groupIds = payload.groupIds ?? [];
   await assertGroupsOwnership(businessId, groupIds);
-  // Bundles carry their price in `rule`; the generic discount columns are
-  // vestigial for the kind, so they are normalized out of the payload.
-  const discountType = isBundle
+  const discountType = isRewardTargetKind
     ? ("fixed" as const)
     : payload.discountType;
-  const discountValue = isBundle ? 0 : payload.discountValue;
+  const discountValue = isRewardTargetKind ? 0 : payload.discountValue;
   if (isBundle) {
     await assertComponentsOwnership(businessId, payload.components ?? []);
   }
@@ -581,10 +584,11 @@ export async function updatePromotion(
     priority: (payload.priority as number | undefined) ?? existing.priority ?? 0,
     isActive: (payload.isActive as boolean | undefined) ?? existing.isActive,
   };
-  // Bundles carry their price in `rule`; normalize the vestigial discount
-  // columns after the merge so switching kinds cannot leave stale data.
+  // Rule-target kinds carry their price in `rule`; normalize the vestigial
+  // discount columns after the merge so switching kinds cannot leave stale
+  // data.
   const mergedIsBundle = merged.promoKind === "bundle";
-  if (mergedIsBundle) {
+  if (mergedIsBundle || merged.promoKind === "spend_get") {
     merged.discountType = "fixed";
     merged.discountValue = 0;
   }

@@ -141,7 +141,8 @@ export type PromoKind =
   | "buy_x_get_y"
   | "mix_match"
   | "quantity_tier"
-  | "bundle";
+  | "bundle"
+  | "spend_get";
 
 /** A fixed bundle's component (Bundle & Combo Phase 1). */
 export interface PromotionComponent {

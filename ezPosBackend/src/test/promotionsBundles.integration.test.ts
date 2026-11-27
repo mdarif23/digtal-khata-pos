@@ -461,6 +461,168 @@ describe("bundle promotions (phase 1)", { skip: !runIntegration }, () => {
     await setActive(id, false);
   });
 
+  // --- Reward enhancements (Phase 3) --------------------------------------------
+
+  async function createPromotionRaw(input: Record<string, unknown>): Promise<number> {
+    const res = await api(owner, "POST", "/api/promotions", input);
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    return payload<{ data: { id: number } }>(res).data.id;
+  }
+
+  it("reward validation: price modes are exclusive and spend_get has a strict contract", async () => {
+    await deactivateAllPromotions();
+    const productIdA = (
+      await dbQuery("SELECT product_id FROM product_variants WHERE id = $1", [variantA])
+    )[0]!.product_id as number;
+    const rejections: Record<string, unknown>[] = [
+      // spend_get contract
+      { name: `S1 ${stamp}`, discountType: "fixed", discountValue: 0, promoKind: "spend_get", rule: { getVariantId: variantB, getQty: 1 } },
+      { name: `S2 ${stamp}`, discountType: "fixed", discountValue: 0, promoKind: "spend_get", rule: { spendAmount: 100 } },
+      { name: `S3 ${stamp}`, discountType: "fixed", discountValue: 0, promoKind: "spend_get", rule: { spendAmount: 100, getVariantId: variantB, getQty: 0 } },
+      { name: `S4 ${stamp}`, discountType: "fixed", discountValue: 0, promoKind: "spend_get", variantId: variantA, rule: { spendAmount: 100, getVariantId: variantB, getQty: 1 } },
+      { name: `S5 ${stamp}`, discountType: "fixed", discountValue: 0, promoKind: "spend_get", rule: { spendAmount: 100, getVariantId: variantB, getQty: 1, getDiscountPercent: 50, getPrice: 10 } },
+      { name: `S6 ${stamp}`, discountType: "fixed", discountValue: 0, promoKind: "spend_get", rule: { spendAmount: 100, getVariantId: variantB, getQty: 1, getDiscountPercent: 150 } },
+      { name: `S7 ${stamp}`, discountType: "fixed", discountValue: 0, promoKind: "spend_get", rule: { spendAmount: 100, getVariantId: variantB, getQty: 1, getPrice: -5 } },
+      // buy_x_get_y reward price modes
+      { name: `B1 ${stamp}`, discountType: "fixed", discountValue: 0, promoKind: "buy_x_get_y", rule: { buyProductId: productIdA, buyQty: 1, getVariantId: variantB, getQty: 1, getDiscountPercent: 50, getPrice: 10 } },
+      { name: `B2 ${stamp}`, discountType: "fixed", discountValue: 0, promoKind: "buy_x_get_y", rule: { buyProductId: productIdA, buyQty: 1, getVariantId: variantB, getQty: 1, getPrice: -1 } },
+    ];
+    for (const body of rejections) {
+      const res = await api(owner, "POST", "/api/promotions", body);
+      assert.equal(res.status, 400, `should reject: ${JSON.stringify(body)}`);
+    }
+  });
+
+  it("buy_x_get_y fixed-price reward: get Y at ৳10", async () => {
+    await deactivateAllPromotions();
+    const productIdA = (
+      await dbQuery("SELECT product_id FROM product_variants WHERE id = $1", [variantA])
+    )[0]!.product_id as number;
+    const id = await createPromotionRaw({
+      name: `BXGY Price ${stamp}`,
+      discountType: "fixed",
+      discountValue: 0,
+      promoKind: "buy_x_get_y",
+      rule: { buyProductId: productIdA, buyQty: 2, getVariantId: variantB, getQty: 1, getPrice: 10 },
+      isActive: true,
+    });
+    // Buy 2 A (200), get 1 B (30) at ৳10 → 20 off → 210.
+    const q = await quote([
+      { variantId: variantA, quantity: 2, unitPrice: 100, discount: null },
+      { variantId: variantB, quantity: 1, unitPrice: 30, discount: null },
+    ]);
+    assert.equal(q.promotionsTotal, 20);
+    assert.equal(q.finalTotal, 210);
+    // A reward price at or above the unit price discounts nothing.
+    await patchBundle(id, { rule: { buyProductId: productIdA, buyQty: 2, getVariantId: variantB, getQty: 1, getPrice: 30 } });
+    const q2 = await quote([
+      { variantId: variantA, quantity: 2, unitPrice: 100, discount: null },
+      { variantId: variantB, quantity: 1, unitPrice: 30, discount: null },
+    ]);
+    assert.equal(q2.promotionsTotal, 0);
+    await setActive(id, false);
+  });
+
+  it("spend_get: free reward, near-miss, repetitions, percent and price modes", async () => {
+    await deactivateAllPromotions();
+    const id = await createPromotionRaw({
+      name: `Spend Get ${stamp}`,
+      discountType: "fixed",
+      discountValue: 0,
+      promoKind: "spend_get",
+      rule: { spendAmount: 150, getVariantId: variantB, getQty: 1 },
+      isActive: true,
+    });
+    // 130 < 150 → near-miss naming the shortfall.
+    const short = await quote([
+      { variantId: variantA, quantity: 1, unitPrice: 100, discount: null },
+      { variantId: variantB, quantity: 1, unitPrice: 30, discount: null },
+    ]);
+    assert.equal(short.promotionsTotal, 0);
+    const miss = short.nearMisses.find((m) => m.id === id);
+    assert.ok(miss);
+    assert.match(miss.reason, /Spend ৳20 more/);
+    // 260 ≥ 150 → one free pen (30 off).
+    const q = await quote([
+      { variantId: variantA, quantity: 2, unitPrice: 100, discount: null },
+      { variantId: variantB, quantity: 2, unitPrice: 30, discount: null },
+    ]);
+    assert.equal(q.promotionsTotal, 30);
+    assert.equal(q.finalTotal, 230);
+    // 320 → earned 3 cycles → 3 free pens (90 off); cap at 1 → 30.
+    await patchBundle(id, { rule: { spendAmount: 100, getVariantId: variantB, getQty: 1 } });
+    const uncapped = await quote([
+      { variantId: variantA, quantity: 2, unitPrice: 100, discount: null },
+      { variantId: variantB, quantity: 4, unitPrice: 30, discount: null },
+    ]);
+    assert.equal(uncapped.promotionsTotal, 90);
+    await patchBundle(id, { rule: { spendAmount: 100, getVariantId: variantB, getQty: 1, maxApplications: 1 } });
+    const capped = await quote([
+      { variantId: variantA, quantity: 2, unitPrice: 100, discount: null },
+      { variantId: variantB, quantity: 4, unitPrice: 30, discount: null },
+    ]);
+    assert.equal(capped.promotionsTotal, 30);
+    assert.equal(capped.finalTotal, 290);
+    // Percent reward: 50% off two reward units = 30 off.
+    await patchBundle(id, { rule: { spendAmount: 100, getVariantId: variantB, getQty: 2, getDiscountPercent: 50 } });
+    const percent = await quote([
+      { variantId: variantA, quantity: 1, unitPrice: 100, discount: null },
+      { variantId: variantB, quantity: 2, unitPrice: 30, discount: null },
+    ]);
+    assert.equal(percent.promotionsTotal, 30);
+    assert.equal(percent.finalTotal, 130);
+    // Fixed-price reward: one reward pen at ৳10 = 20 off.
+    await patchBundle(id, { rule: { spendAmount: 100, getVariantId: variantB, getQty: 1, getPrice: 10 } });
+    const priced = await quote([
+      { variantId: variantA, quantity: 1, unitPrice: 100, discount: null },
+      { variantId: variantB, quantity: 1, unitPrice: 30, discount: null },
+    ]);
+    assert.equal(priced.promotionsTotal, 20);
+    assert.equal(priced.finalTotal, 110);
+    await setActive(id, false);
+  });
+
+  it("spend_get checkout: attribution, usage counter, and reward COGS", async () => {
+    await deactivateAllPromotions();
+    const id = await createPromotionRaw({
+      name: `Spend Checkout ${stamp}`,
+      discountType: "fixed",
+      discountValue: 0,
+      promoKind: "spend_get",
+      rule: { spendAmount: 150, getVariantId: variantB, getQty: 1, getDiscountPercent: 50 },
+      isActive: true,
+    });
+    const sale = await api(owner, "POST", "/api/sales", {
+      saleDate: new Date().toISOString(),
+      customerId: null,
+      payments: [{ method: "cash", amount: 145, tendered: 145 }],
+      discount: null,
+      vatPercent: 0,
+      items: withCart(), // 160 post-group → one reward pen at 50% = 15 off → 145
+    });
+    assert.equal(sale.status, 201, JSON.stringify(sale.body));
+    const saleData = payload<{ data: { sale: { id: number; finalTotal: number } } }>(sale).data.sale;
+    assert.equal(saleData.finalTotal, 145);
+    const items = await dbQuery(
+      `SELECT variant_id, price_adjustments FROM sale_items WHERE sale_id = $1 ORDER BY variant_id`,
+      [saleData.id],
+    );
+    const bRow = items.find((r) => r.variant_id === variantB)!;
+    const bAdj = bRow.price_adjustments.filter((a: { kind: string }) => a.kind === "promotion");
+    assert.equal(bAdj.length, 1);
+    assert.equal(bAdj[0]!.refId, id);
+    assert.equal(bAdj[0]!.name, `Spend Checkout ${stamp}`);
+    // 50% of the cheapest pen unit = 15.
+    assert.equal(bAdj[0]!.amount, 15);
+    const usage = await dbQuery(
+      `SELECT count(*)::int AS n FROM promotion_usage WHERE business_id = $1 AND sale_id = $2 AND promotion_id = $3`,
+      [owner.businessId, saleData.id, id],
+    );
+    assert.equal(usage[0]!.n, 1);
+    await api(owner, "POST", `/api/sales/${saleData.id}/cancel`, { reason: "spend_get test cleanup" });
+    await setActive(id, false);
+  });
+
   it("bundle stacks only with consent: coupon suppresses by default", async () => {
     await deactivateAllPromotions();
     const coupon = await api(owner, "POST", "/api/coupons", {

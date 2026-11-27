@@ -79,7 +79,8 @@ type PromoKind =
   | "buy_x_get_y"
   | "mix_match"
   | "quantity_tier"
-  | "bundle";
+  | "bundle"
+  | "spend_get";
 
 interface PromoRow {
   id: number;
@@ -311,6 +312,7 @@ export async function evaluateSalePromotions(
             "mix_match",
             "quantity_tier",
             "bundle",
+            "spend_get",
           ].includes(row.promoKind)
             ? row.promoKind
             : "discount"
@@ -475,6 +477,47 @@ export async function evaluateSalePromotions(
     return roundMoney(Math.max(0, amount));
   };
 
+  /**
+   * Reward units at a percent or a fixed price (Bundle & Combo Phase 3):
+   * walk the target lines cheapest-unit-first, take up to `freeUnits` whole
+   * units, and record each taken unit's discount — its unit price at 100%
+   * (free), unit price × percent, or unit price − reward price, floored at
+   * 0 (a reward price at or above the unit price discounts nothing). Shared
+   * by buy_x_get_y and spend_get so both kinds reward identically.
+   */
+  const takeRewardUnits = (
+    targetVariantId: number | null,
+    targetProductId: number | null,
+    freeUnits: number,
+    reward: { percent: number; price: number | null },
+  ): Map<number, number> => {
+    const amountsByLine = new Map<number, number>();
+    const lines = items
+      .map((item, idx) => ({ item, idx }))
+      .filter(({ item }) => {
+        if (targetVariantId != null) return item.variantId === targetVariantId;
+        const scope = scopeById.get(item.variantId);
+        return targetProductId != null && scope?.productId === targetProductId;
+      })
+      .sort((a, b) => a.item.unitPrice - b.item.unitPrice);
+    let remaining = freeUnits;
+    for (const { item, idx } of lines) {
+      if (remaining <= 0) break;
+      const take = Math.min(Math.floor(item.quantity), remaining);
+      remaining -= take;
+      const perUnit =
+        reward.price != null
+          ? Math.max(0, item.unitPrice - reward.price)
+          : item.unitPrice * (reward.percent / 100);
+      if (perUnit <= 0) continue;
+      amountsByLine.set(
+        idx,
+        roundMoney((amountsByLine.get(idx) ?? 0) + perUnit * take),
+      );
+    }
+    return amountsByLine;
+  };
+
   /** Whether a cart line matches the row's scope (variant > product > category > cart). */
   const lineMatches = (row: PromoRow, item: EvalItem): boolean => {
     if (
@@ -614,10 +657,16 @@ export async function evaluateSalePromotions(
     if (row.promoKind === "buy_x_get_y") {
       const buyQty = parseRuleNumber(row.rule, "buyQty") ?? 1;
       const getQty = parseRuleNumber(row.rule, "getQty") ?? 1;
+      // Reward pricing (Phase 3): fixed price (getPrice) wins over the
+      // legacy percent; absent both = free (getPercent 100).
       const getPercent =
         typeof row.rule?.getDiscountPercent === "number"
           ? Math.min(100, Math.max(0, row.rule.getDiscountPercent))
           : 100;
+      const getPrice =
+        typeof row.rule?.getPrice === "number"
+          ? Math.max(0, row.rule.getPrice)
+          : null;
       const buyVariantId = parseRuleNumber(row.rule, "buyVariantId");
       const buyProductId = parseRuleNumber(row.rule, "buyProductId");
       const getVariantId = parseRuleNumber(row.rule, "getVariantId");
@@ -636,7 +685,7 @@ export async function evaluateSalePromotions(
             : scope?.productId === buyProductId;
         })
         .reduce((sum, item) => sum + item.quantity, 0);
-      const repetitions = Math.floor(buyUnits / buyQty);
+      const repetitions = Math.floor(buyUnits / buyQty + 1e-9);
       if (repetitions <= 0) {
         nearMisses.push({
           id: row.id,
@@ -646,28 +695,12 @@ export async function evaluateSalePromotions(
         continue;
       }
       const freeUnits = repetitions * getQty;
-      const getLines = items
-        .map((item, idx) => ({ item, idx }))
-        .filter(({ item }) => {
-          const scope = scopeById.get(item.variantId);
-          return getVariantId != null
-            ? item.variantId === getVariantId
-            : scope?.productId === getProductId;
-        })
-        .sort((a, b) => a.item.unitPrice - b.item.unitPrice);
-      const amountsByLine = new Map<number, number>();
-      let remaining = freeUnits;
-      for (const { item, idx } of getLines) {
-        if (remaining <= 0) break;
-        const take = Math.min(Math.floor(item.quantity), remaining);
-        amountsByLine.set(
-          idx,
-          roundMoney(
-            (amountsByLine.get(idx) ?? 0) + item.unitPrice * take * (getPercent / 100),
-          ),
-        );
-        remaining -= take;
-      }
+      const amountsByLine = takeRewardUnits(
+        getVariantId,
+        getProductId,
+        freeUnits,
+        { percent: getPercent, price: getPrice },
+      );
       applyLineScoped(row, amountsByLine);
       continue;
     }
@@ -833,6 +866,48 @@ export async function evaluateSalePromotions(
       const allocs = allocateProRata(covered.map(([, v]) => v), discountTotal);
       const amountsByLine = new Map<number, number>();
       covered.forEach(([idx], i) => amountsByLine.set(idx, allocs[i]!));
+      applyLineScoped(row, amountsByLine);
+      continue;
+    }
+
+    if (row.promoKind === "spend_get") {
+      // Spend-qualified reward (Bundle & Combo Phase 3, master prompt §3F):
+      // "buy products worth ৳X, get a selected product free / at a percent /
+      // at a fixed price." Qualification is the post-group cart total; each
+      // full spendAmount earns one reward cycle, capped by maxApplications.
+      const spendAmount = parseRuleNumber(row.rule, "spendAmount");
+      const getQty = parseRuleNumber(row.rule, "getQty") ?? 1;
+      const getVariantId = parseRuleNumber(row.rule, "getVariantId");
+      const getProductId = parseRuleNumber(row.rule, "getProductId");
+      if (spendAmount == null || (getVariantId == null && getProductId == null)) {
+        continue; // malformed rule — skip silently (configuration error)
+      }
+      const percent =
+        typeof row.rule?.getDiscountPercent === "number"
+          ? Math.min(100, Math.max(0, row.rule.getDiscountPercent))
+          : 100;
+      const getPrice =
+        typeof row.rule?.getPrice === "number"
+          ? Math.max(0, row.rule.getPrice)
+          : null;
+      const earned = Math.floor(postGroupCartTotal / spendAmount + 1e-9);
+      const maxApplications = parseRuleNumber(row.rule, "maxApplications");
+      const repetitions =
+        maxApplications != null ? Math.min(earned, maxApplications) : earned;
+      if (repetitions < 1) {
+        nearMisses.push({
+          id: row.id,
+          name: row.name,
+          reason: `Spend ৳${formatMissingQty(roundMoney(spendAmount - postGroupCartTotal))} more for ${row.name}`,
+        });
+        continue;
+      }
+      const amountsByLine = takeRewardUnits(
+        getVariantId,
+        getProductId,
+        repetitions * getQty,
+        { percent, price: getPrice },
+      );
       applyLineScoped(row, amountsByLine);
       continue;
     }

@@ -678,6 +678,13 @@
       "when": 1795910400000,
       "tag": "0096_promotion_bundle_kind_check",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1795996800000,
+      "tag": "0097_promotion_spend_get_kind",
+      "breakpoints": true
     }
   ]
 }
