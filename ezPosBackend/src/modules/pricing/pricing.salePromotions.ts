@@ -5,6 +5,7 @@ import { productVariants } from "../../db/schema/productVariants.js";
 import {
   customerGroups,
   pricingPromotions,
+  promotionBundleComponents,
   promotionCustomerGroups,
   promotionUsage,
 } from "../../db/schema/pricing.js";
@@ -72,7 +73,13 @@ const NONE: SalePromotionResult = {
   nearMisses: [],
 };
 
-type PromoKind = "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier";
+type PromoKind =
+  | "discount"
+  | "bogo"
+  | "buy_x_get_y"
+  | "mix_match"
+  | "quantity_tier"
+  | "bundle";
 
 interface PromoRow {
   id: number;
@@ -135,6 +142,12 @@ function lineTotalOf(item: EvalItem): number {
         ? item.discount.value
         : 0;
   return roundMoney(Math.max(0, base - roundMoney(Math.min(Math.max(raw, 0), base))));
+}
+
+/** Near-miss quantity text: integers plain, weight quantities 2dp. */
+function formatMissingQty(qty: number): string {
+  if (Math.abs(qty - Math.round(qty)) < 1e-9) return String(Math.round(qty));
+  return String(roundMoney(qty));
 }
 
 /**
@@ -291,9 +304,14 @@ export async function evaluateSalePromotions(
         canStackWithGroupDiscount: row.canStackWithGroupDiscount,
         canStackWithCoupons: row.canStackWithCoupons,
         promoKind: (
-          ["discount", "bogo", "buy_x_get_y", "mix_match", "quantity_tier"].includes(
-            row.promoKind,
-          )
+          [
+            "discount",
+            "bogo",
+            "buy_x_get_y",
+            "mix_match",
+            "quantity_tier",
+            "bundle",
+          ].includes(row.promoKind)
             ? row.promoKind
             : "discount"
         ) as PromoKind,
@@ -390,6 +408,56 @@ export async function evaluateSalePromotions(
     .sort((a, b) => b.priority - a.priority || a.id - b.id);
   if (eligible.length === 0) {
     return { ...NONE, nearMisses };
+  }
+
+  // Bundle components (Bundle & Combo Phase 1): one query for bundle-kind
+  // rows only, with a human label per component for near-miss guidance.
+  const bundleComponentMap = new Map<
+    number,
+    { variantId: number; quantity: number; label: string }[]
+  >();
+  const bundleRowIds = eligible
+    .filter((r) => r.promoKind === "bundle")
+    .map((r) => r.id);
+  if (bundleRowIds.length > 0) {
+    const componentRows = await dbe
+      .select({
+        promotionId: promotionBundleComponents.promotionId,
+        variantId: promotionBundleComponents.variantId,
+        quantity: promotionBundleComponents.quantity,
+        productName: products.name,
+        sku: productVariants.sku,
+      })
+      .from(promotionBundleComponents)
+      .innerJoin(
+        productVariants,
+        and(
+          eq(productVariants.id, promotionBundleComponents.variantId),
+          eq(productVariants.businessId, promotionBundleComponents.businessId),
+        ),
+      )
+      .innerJoin(
+        products,
+        and(
+          eq(products.id, productVariants.productId),
+          eq(products.businessId, productVariants.businessId),
+        ),
+      )
+      .where(
+        and(
+          eq(promotionBundleComponents.businessId, businessId),
+          inArray(promotionBundleComponents.promotionId, bundleRowIds),
+        ),
+      );
+    for (const c of componentRows) {
+      const list = bundleComponentMap.get(c.promotionId) ?? [];
+      list.push({
+        variantId: c.variantId,
+        quantity: Number(c.quantity),
+        label: c.productName ?? c.sku ?? `Variant ${c.variantId}`,
+      });
+      bundleComponentMap.set(c.promotionId, list);
+    }
   }
 
   const computeAmount = (
@@ -673,6 +741,98 @@ export async function evaluateSalePromotions(
           roundMoney(postGroupTotals[idx]! * (tier.discountPercent / 100)),
         );
       });
+      applyLineScoped(row, amountsByLine);
+      continue;
+    }
+
+    if (row.promoKind === "bundle") {
+      // Fixed bundle (Bundle & Combo Phase 1): an explicit component
+      // multiset at a special package price (or % off the covered total).
+      // Components are ordinary cart lines — the bundle only prices them;
+      // stock/batches/serials flow through the normal sale paths.
+      const components = bundleComponentMap.get(row.id) ?? [];
+      if (components.length === 0) continue; // malformed config — skip silently
+      // How many complete bundles does the cart form? The first listed
+      // short component names the near-miss (documented formation order).
+      let reps = Number.POSITIVE_INFINITY;
+      let missingLabel: string | null = null;
+      let missingQty = 0;
+      for (const component of components) {
+        const available = items.reduce(
+          (sum, item) =>
+            item.variantId === component.variantId && lineMatches(row, item)
+              ? sum + item.quantity
+              : sum,
+          0,
+        );
+        reps = Math.min(reps, Math.floor(available / component.quantity + 1e-9));
+        if (available + 1e-9 < component.quantity && missingLabel == null) {
+          missingLabel = component.label;
+          missingQty = component.quantity - available;
+        }
+      }
+      const maxApplications = parseRuleNumber(row.rule, "maxApplications");
+      if (maxApplications != null) reps = Math.min(reps, maxApplications);
+      if (!Number.isFinite(reps) || reps < 1) {
+        nearMisses.push({
+          id: row.id,
+          name: row.name,
+          reason: missingLabel
+            ? `Add ${formatMissingQty(missingQty)} more ${missingLabel} to complete ${row.name}`
+            : `Cart does not meet the ${row.name} bundle yet`,
+        });
+        continue;
+      }
+      // Cover the bundle units cheapest-effective-unit-first per component
+      // and price them on POST-GROUP per-unit values — same base discipline
+      // as the other kinds, so quote == checkout.
+      const coveredValueByLine = new Map<number, number>();
+      let bundleValue = 0;
+      for (const component of components) {
+        let remaining = component.quantity * reps;
+        const lines = items
+          .map((item, idx) => ({ item, idx }))
+          .filter(
+            ({ item }) =>
+              item.variantId === component.variantId && lineMatches(row, item),
+          )
+          .map(({ item, idx }) => ({
+            idx,
+            effUnit:
+              item.quantity > 0 ? postGroupTotals[idx]! / item.quantity : 0,
+            quantity: item.quantity,
+          }))
+          .sort((a, b) => a.effUnit - b.effUnit);
+        for (const line of lines) {
+          if (remaining <= 1e-9) break;
+          const take = Math.min(line.quantity, remaining);
+          remaining -= take;
+          const value = roundMoney(line.effUnit * take);
+          coveredValueByLine.set(
+            line.idx,
+            roundMoney((coveredValueByLine.get(line.idx) ?? 0) + value),
+          );
+          bundleValue = roundMoney(bundleValue + value);
+        }
+      }
+      const bundlePrice = parseRuleNumber(row.rule, "bundlePrice");
+      const bundlePercent =
+        typeof row.rule?.discountPercent === "number"
+          ? Math.min(100, Math.max(0, row.rule.discountPercent))
+          : null;
+      const discountTotal =
+        bundlePrice != null
+          ? roundMoney(bundleValue - roundMoney(bundlePrice * reps))
+          : bundlePercent != null && bundlePercent > 0
+            ? roundMoney(bundleValue * (bundlePercent / 100))
+            : 0;
+      if (discountTotal <= 0) continue; // bundle not beneficial — nothing to give
+      // Allocate across the COVERED lines only (pro-rata by covered value;
+      // the last covered line absorbs the rounding remainder).
+      const covered = [...coveredValueByLine.entries()].sort((a, b) => a[0] - b[0]);
+      const allocs = allocateProRata(covered.map(([, v]) => v), discountTotal);
+      const amountsByLine = new Map<number, number>();
+      covered.forEach(([idx], i) => amountsByLine.set(idx, allocs[i]!));
       applyLineScoped(row, amountsByLine);
       continue;
     }

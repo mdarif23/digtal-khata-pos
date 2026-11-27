@@ -135,6 +135,23 @@ export interface MatrixVariant {
 // Phase 5-8: promotions, customer groups, bulk, proposals, reports
 // ---------------------------------------------------------------------------
 
+export type PromoKind =
+  | "discount"
+  | "bogo"
+  | "buy_x_get_y"
+  | "mix_match"
+  | "quantity_tier"
+  | "bundle";
+
+/** A fixed bundle's component (Bundle & Combo Phase 1). */
+export interface PromotionComponent {
+  variantId: number;
+  quantity: number;
+  sku: string | null;
+  productName: string | null;
+  sellingPrice: number;
+}
+
 export interface Promotion {
   id: number;
   name: string;
@@ -153,8 +170,8 @@ export interface Promotion {
   isActive: boolean;
   // Phase 3 (Feature 8) engine config — the edit form must round-trip
   // these exactly; the backend merges defined PATCH values over the row.
-  promoKind: "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier";
-  /** Kind-specific rule payload: {buyQty,getQty} | {comboSize,discountPercent} | {tiers:[…]}. */
+  promoKind: PromoKind;
+  /** Kind-specific rule payload: {buyQty,getQty} | {comboSize,discountPercent} | {tiers:[…]} | {bundlePrice} | {discountPercent,maxApplications}. */
   rule: Record<string, unknown> | null;
   daysOfWeek: number[] | null;
   startTime: string | null;
@@ -164,6 +181,10 @@ export interface Promotion {
   priority: number;
   scopeLabel: string;
   customerGroups: { id: number; name: string }[];
+  /** Bundle components (bundle kind; empty for other kinds). */
+  components: PromotionComponent[];
+  /** Normal component total at current selling prices (bundle kind). */
+  componentTotal?: number;
 }
 
 export interface PromotionInput {
@@ -182,6 +203,17 @@ export interface PromotionInput {
   canStackWithCoupons?: boolean;
   isActive?: boolean;
   groupIds?: number[];
+  // Phase 3 (Feature 8) + Bundle & Combo Phase 1 engine config.
+  promoKind?: PromoKind;
+  rule?: Record<string, unknown> | null;
+  daysOfWeek?: number[] | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  usageLimit?: number | null;
+  perCustomerLimit?: number | null;
+  priority?: number;
+  /** Bundle kind only: the exact package contents. */
+  components?: { variantId: number; quantity: number }[];
 }
 
 export interface CustomerGroup {

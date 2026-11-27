@@ -33,6 +33,12 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/components/ui/toast";
 import axios from "@/api/axios";
 import { extractApiError } from "../components/RuleDialog";
+import {
+  buildBundleRule,
+  bundleComponentPayload,
+  bundleNormalTotalOf,
+  validateBundleForm,
+} from "../bundleForm";
 import { useProductsQuery } from "@/features/products/hooks/useProducts";
 import {
   useCreatePromotion,
@@ -74,7 +80,7 @@ export function PromotionsPage() {
   const [stackCoupons, setStackCoupons] = useState(false);
   // ---- Phase 3 (Feature 8) ----
   const [promoKind, setPromoKind] = useState<
-    "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier"
+    "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier" | "bundle"
   >("discount");
   const [ruleBuyQty, setRuleBuyQty] = useState("1");
   const [ruleGetQty, setRuleGetQty] = useState("1");
@@ -86,6 +92,14 @@ export function PromotionsPage() {
   const [ruleDiscountPercent, setRuleDiscountPercent] = useState("20");
   const [ruleTierMinQty, setRuleTierMinQty] = useState("3");
   const [ruleTierPercent, setRuleTierPercent] = useState("10");
+  // ---- Bundle & Combo Phase 1: fixed bundles ----
+  const [bundleComponents, setBundleComponents] = useState<
+    { variantId: string; quantity: string }[]
+  >([]);
+  const [bundlePriceMode, setBundlePriceMode] = useState<"price" | "percent">("price");
+  const [bundlePriceValue, setBundlePriceValue] = useState("");
+  const [bundlePercentValue, setBundlePercentValue] = useState("10");
+  const [bundleMaxApps, setBundleMaxApps] = useState("");
   const [flashDays, setFlashDays] = useState<number[]>([]);
   const [flashStart, setFlashStart] = useState("");
   const [flashEnd, setFlashEnd] = useState("");
@@ -144,6 +158,32 @@ export function PromotionsPage() {
       : undefined;
     setRuleTierMinQty(String(tier?.minQty ?? 3));
     setRuleTierPercent(String(tier?.discountPercent ?? 10));
+    if (promo.promoKind === "bundle") {
+      setBundleComponents(
+        promo.components.map((c) => ({
+          variantId: String(c.variantId),
+          quantity: String(c.quantity),
+        })),
+      );
+      if (rule.bundlePrice != null) {
+        setBundlePriceMode("price");
+        setBundlePriceValue(String(rule.bundlePrice));
+        setBundlePercentValue("10");
+      } else {
+        setBundlePriceMode("percent");
+        setBundlePriceValue("");
+        setBundlePercentValue(String(rule.discountPercent ?? 10));
+      }
+      setBundleMaxApps(
+        rule.maxApplications != null ? String(rule.maxApplications) : "",
+      );
+    } else {
+      setBundleComponents([]);
+      setBundlePriceMode("price");
+      setBundlePriceValue("");
+      setBundlePercentValue("10");
+      setBundleMaxApps("");
+    }
     setFlashDays(promo.daysOfWeek ?? []);
     setFlashStart(promo.startTime ?? "");
     setFlashEnd(promo.endTime ?? "");
@@ -176,6 +216,11 @@ export function PromotionsPage() {
     setRuleDiscountPercent("20");
     setRuleTierMinQty("3");
     setRuleTierPercent("10");
+    setBundleComponents([]);
+    setBundlePriceMode("price");
+    setBundlePriceValue("");
+    setBundlePercentValue("10");
+    setBundleMaxApps("");
     setFlashDays([]);
     setFlashStart("");
     setFlashEnd("");
@@ -185,7 +230,8 @@ export function PromotionsPage() {
   }
 
   async function save() {
-    if (!name.trim() || discountValue === "") {
+    const isBundle = promoKind === "bundle";
+    if (!name.trim() || (!isBundle && discountValue === "")) {
       toast.add({
         type: "error",
         description: "Name and discount value are required.",
@@ -207,18 +253,36 @@ export function PromotionsPage() {
       });
       return;
     }
+    // Bundle & Combo Phase 1: the same refuse-at-the-door discipline for
+    // bundles — components and price mode are validated before the POST.
+    const bundlePayloadComponents = bundleComponentPayload(bundleComponents);
+    if (isBundle) {
+      const bundleError = validateBundleForm(
+        bundleComponents,
+        bundlePriceMode,
+        bundlePriceValue,
+        bundlePercentValue,
+      );
+      if (bundleError) {
+        toast.add({ type: "error", description: bundleError, priority: "high" });
+        return;
+      }
+    }
     const scopeIdNum = scopeId === "" ? null : Number(scopeId);
-    if (scope !== "whole" && (scopeIdNum == null || !Number.isInteger(scopeIdNum) || scopeIdNum <= 0)) {
+    if (!isBundle && scope !== "whole" && (scopeIdNum == null || !Number.isInteger(scopeIdNum) || scopeIdNum <= 0)) {
       toast.add({ type: "error", description: "Pick a valid scope target.", priority: "high" });
       return;
     }
     const payload = {
       name: name.trim(),
-      categoryId: scope === "category" ? scopeIdNum : null,
-      productId: scope === "product" ? scopeIdNum : null,
-      variantId: scope === "variant" ? scopeIdNum : null,
-      discountType,
-      discountValue: Number(discountValue),
+      // The component list IS a bundle's scope — scope fields stay empty.
+      categoryId: !isBundle && scope === "category" ? scopeIdNum : null,
+      productId: !isBundle && scope === "product" ? scopeIdNum : null,
+      variantId: !isBundle && scope === "variant" ? scopeIdNum : null,
+      // The generic discount columns are vestigial for bundles; the price
+      // lives in `rule` (backend normalizes them too).
+      discountType: isBundle ? ("fixed" as const) : discountType,
+      discountValue: isBundle ? 0 : Number(discountValue),
       // I3-6: date-only boundaries are interpreted on the BUSINESS calendar
       // by the backend — a browser-local midnight excluded late-evening
       // sales for staff in a different timezone than the business.
@@ -231,7 +295,9 @@ export function PromotionsPage() {
       canStackWithCoupons: stackCoupons,
       promoKind,
       rule:
-        promoKind === "bogo"
+        isBundle
+          ? buildBundleRule(bundlePriceMode, bundlePriceValue, bundlePercentValue, bundleMaxApps)
+          : promoKind === "bogo"
           ? { buyQty: Number(ruleBuyQty) || 1, getQty: Number(ruleGetQty) || 1 }
           : promoKind === "buy_x_get_y"
             ? {
@@ -259,6 +325,7 @@ export function PromotionsPage() {
                   ],
                 }
               : null,
+      ...(isBundle ? { components: bundlePayloadComponents } : {}),
       daysOfWeek: flashDays.length > 0 ? flashDays : null,
       startTime: flashStart === "" ? null : flashStart,
       endTime: flashEnd === "" ? null : flashEnd,
@@ -301,6 +368,19 @@ export function PromotionsPage() {
   }
 
   const rows = promotionsQuery.data ?? [];
+
+  // Bundle editor inputs: every catalog variant with a display label and a
+  // price, so the savings preview can be computed client-side (display only —
+  // the engine prices from live cart lines at sale time).
+  const variantOptions = products.flatMap((product) =>
+    (product.variants ?? []).map((v) => ({
+      id: v.id,
+      label: `${product.name}${v.sku ? ` — ${v.sku}` : ""} (${formatCurrency(Number(v.sellingPrice))})`,
+      price: Number(v.sellingPrice),
+    })),
+  );
+  const variantPriceById = new Map(variantOptions.map((v) => [v.id, v.price]));
+  const bundleNormalTotal = bundleNormalTotalOf(bundleComponents, variantPriceById);
 
   return (
     <PageContainer width="wide">
@@ -351,7 +431,17 @@ export function PromotionsPage() {
                         <TableCell className="font-medium">{promo.name}</TableCell>
                         <TableCell className="text-muted-foreground">{promo.scopeLabel}</TableCell>
                         <TableCell className="text-right font-mono tabular-nums">
-                          {promo.discountType === "percentage"
+                          {promo.promoKind === "bundle" ? (
+                            <>
+                              {typeof promo.rule?.bundlePrice === "number"
+                                ? `Bundle ${formatCurrency(promo.rule.bundlePrice)}`
+                                : `${promo.rule?.discountPercent ?? 0}% off`}
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                {promo.components.length} item
+                                {promo.components.length === 1 ? "" : "s"}
+                              </span>
+                            </>
+                          ) : promo.discountType === "percentage"
                             ? `${promo.discountValue}%`
                             : formatCurrency(promo.discountValue)}
                           {promo.maxDiscountAmount != null && (
@@ -429,62 +519,68 @@ export function PromotionsPage() {
               <Label htmlFor="promo-name">Name</Label>
               <Input id="promo-name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="promo-scope">Scope</Label>
-                <select
-                  id="promo-scope"
-                  className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-                  value={scope}
-                  onChange={(e) => {
-                    setScope(e.target.value as typeof scope);
-                    setScopeId("");
-                  }}
-                >
-                  <option value="whole">Whole business</option>
-                  <option value="category">Category</option>
-                  <option value="product">Product</option>
-                  <option value="variant">Variant</option>
-                </select>
-              </div>
-              {scope !== "whole" && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="promo-scope-id">{scope} id</Label>
-                  <Input
-                    id="promo-scope-id"
-                    type="number"
-                    min="1"
-                    value={scopeId}
-                    onChange={(e) => setScopeId(e.target.value)}
-                  />
+            {/* Scope + generic discount do not apply to bundles — the
+                component list IS the scope and the price lives in the rule. */}
+            {promoKind !== "bundle" && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="promo-scope">Scope</Label>
+                    <select
+                      id="promo-scope"
+                      className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                      value={scope}
+                      onChange={(e) => {
+                        setScope(e.target.value as typeof scope);
+                        setScopeId("");
+                      }}
+                    >
+                      <option value="whole">Whole business</option>
+                      <option value="category">Category</option>
+                      <option value="product">Product</option>
+                      <option value="variant">Variant</option>
+                    </select>
+                  </div>
+                  {scope !== "whole" && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="promo-scope-id">{scope} id</Label>
+                      <Input
+                        id="promo-scope-id"
+                        type="number"
+                        min="1"
+                        value={scopeId}
+                        onChange={(e) => setScopeId(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="promo-type">Discount type</Label>
-                <select
-                  id="promo-type"
-                  className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-                  value={discountType}
-                  onChange={(e) => setDiscountType(e.target.value as typeof discountType)}
-                >
-                  <option value="percentage">Percentage</option>
-                  <option value="fixed">Fixed amount</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="promo-value">Value {discountType === "percentage" ? "(%)" : "(৳)"}</Label>
-                <Input
-                  id="promo-value"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={discountValue}
-                  onChange={(e) => setDiscountValue(e.target.value)}
-                />
-              </div>
-            </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="promo-type">Discount type</Label>
+                    <select
+                      id="promo-type"
+                      className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                      value={discountType}
+                      onChange={(e) => setDiscountType(e.target.value as typeof discountType)}
+                    >
+                      <option value="percentage">Percentage</option>
+                      <option value="fixed">Fixed amount</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="promo-value">Value {discountType === "percentage" ? "(%)" : "(৳)"}</Label>
+                    <Input
+                      id="promo-value"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={discountValue}
+                      onChange={(e) => setDiscountValue(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="promo-start">Starts at</Label>
@@ -535,7 +631,8 @@ export function PromotionsPage() {
                       | "bogo"
                       | "buy_x_get_y"
                       | "mix_match"
-                      | "quantity_tier",
+                      | "quantity_tier"
+                      | "bundle",
                   )
                 }
               >
@@ -544,6 +641,7 @@ export function PromotionsPage() {
                 <option value="buy_x_get_y">Buy X get Y free (across items)</option>
                 <option value="mix_match">Mix &amp; match (N units, % off)</option>
                 <option value="quantity_tier">Quantity tier discount</option>
+                <option value="bundle">Fixed bundle (specific items, special price)</option>
               </select>
             </div>
             {promoKind === "bogo" ? (
@@ -629,6 +727,143 @@ export function PromotionsPage() {
                 <div className="grid gap-1">
                   <span className="text-xs text-muted-foreground">Discount %</span>
                   <Input type="number" min={1} max={100} value={ruleTierPercent} onChange={(e) => setRuleTierPercent(e.target.value)} />
+                </div>
+              </div>
+            ) : null}
+            {promoKind === "bundle" ? (
+              <div className="grid gap-2 rounded-md border border-dashed p-2">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Bundle components — the customer buys exactly these; stock,
+                  batches and serials follow each item as usual
+                </span>
+                {bundleComponents.map((comp, idx) => (
+                  <div key={idx} className="grid grid-cols-[1fr_5.5rem_auto] items-center gap-2">
+                    <select
+                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                      value={comp.variantId}
+                      onChange={(e) =>
+                        setBundleComponents(
+                          bundleComponents.map((c, i) =>
+                            i === idx ? { ...c, variantId: e.target.value } : c,
+                          ),
+                        )
+                      }
+                    >
+                      <option value="">Select product…</option>
+                      {variantOptions.map((v) => (
+                        <option key={v.id} value={String(v.id)}>
+                          {v.label}
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      aria-label="Quantity"
+                      value={comp.quantity}
+                      onChange={(e) =>
+                        setBundleComponents(
+                          bundleComponents.map((c, i) =>
+                            i === idx ? { ...c, quantity: e.target.value } : c,
+                          ),
+                        )
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setBundleComponents(bundleComponents.filter((_, i) => i !== idx))
+                      }
+                    >
+                      ✕
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="justify-self-start"
+                  onClick={() =>
+                    setBundleComponents([...bundleComponents, { variantId: "", quantity: "1" }])
+                  }
+                >
+                  Add component
+                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">Pricing</span>
+                    <select
+                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                      value={bundlePriceMode}
+                      onChange={(e) =>
+                        setBundlePriceMode(e.target.value as typeof bundlePriceMode)
+                      }
+                    >
+                      <option value="price">Special package price (৳)</option>
+                      <option value="percent">Percent off the components</option>
+                    </select>
+                  </div>
+                  {bundlePriceMode === "price" ? (
+                    <div className="grid gap-1">
+                      <span className="text-xs text-muted-foreground">Bundle price (৳)</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={bundlePriceValue}
+                        onChange={(e) => setBundlePriceValue(e.target.value)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="grid gap-1">
+                      <span className="text-xs text-muted-foreground">Discount %</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={bundlePercentValue}
+                        onChange={(e) => setBundlePercentValue(e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">Max bundles per cart</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      placeholder="∞"
+                      value={bundleMaxApps}
+                      onChange={(e) => setBundleMaxApps(e.target.value)}
+                    />
+                  </div>
+                  {bundleNormalTotal > 0 && (
+                    <div className="self-end pb-2 text-xs text-muted-foreground">
+                      Normal total {formatCurrency(bundleNormalTotal)}
+                      {bundlePriceMode === "price" && Number(bundlePriceValue) > 0 && (
+                        <>
+                          {" "}· Bundle {formatCurrency(Number(bundlePriceValue))} · Save{" "}
+                          {formatCurrency(
+                            Math.max(0, bundleNormalTotal - Number(bundlePriceValue)),
+                          )}
+                        </>
+                      )}
+                      {bundlePriceMode === "percent" && Number(bundlePercentValue) > 0 && (
+                        <>
+                          {" "}· After{" "}
+                          {formatCurrency(
+                            bundleNormalTotal *
+                              (1 - Math.min(100, Number(bundlePercentValue)) / 100),
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : null}

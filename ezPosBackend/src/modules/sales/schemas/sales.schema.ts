@@ -172,7 +172,10 @@ export const saleRefundRequestSchema = z.object({
     .array(
       z.object({
         saleItemId: z.number().int().positive(),
-        quantity: z.number().positive().refine(
+        // 0 = leave the line (E3-010 atomic multi-line selection; the
+        // engine skips zero entries). This used to be .positive(), which
+        // rejected the POS refund UI's deselected lines with a 400.
+        quantity: z.number().min(0).refine(
           (v) => Math.round(v * 1000) === v * 1000,
           "Quantity supports up to 3 decimals.",
         ),

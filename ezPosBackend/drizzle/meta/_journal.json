@@ -664,6 +664,20 @@
       "when": 1795274000000,
       "tag": "0094_terminal_pairing_codes_terminal_id",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1795824000000,
+      "tag": "0095_promotion_bundle_components",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1795910400000,
+      "tag": "0096_promotion_bundle_kind_check",
+      "breakpoints": true
     }
   ]
 }

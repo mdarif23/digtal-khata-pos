@@ -6,6 +6,7 @@ import { productVariants } from "../../db/schema/productVariants.js";
 import {
   customerGroups,
   pricingPromotions,
+  promotionBundleComponents,
   promotionCustomerGroups,
 } from "../../db/schema/pricing.js";
 import {
@@ -15,6 +16,7 @@ import {
 import { recordAudit } from "../../services/audit.js";
 import { getBusinessTimezone } from "../../services/ledger.js";
 import { businessLocalToUtcWall } from "../../utils/money.js";
+import { roundMoney } from "../../utils/roundMoney.js";
 import { promotionStrictSchema } from "./promotions.validation.js";
 
 /**
@@ -93,6 +95,137 @@ async function replaceGroupEligibility(
       groupIds.map((groupId) => ({ businessId, promotionId, groupId })),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Bundle components (Bundle & Combo Phase 1): the component multiset of a
+// `bundle` promotion. Components must belong to the business (composite FK
+// + explicit ownership assert) and cannot repeat within one bundle.
+// ---------------------------------------------------------------------------
+
+interface ComponentInput {
+  variantId: number;
+  quantity: number;
+}
+
+export interface PromotionComponent {
+  variantId: number;
+  quantity: number;
+  sku: string | null;
+  productName: string | null;
+  sellingPrice: number;
+}
+
+async function assertComponentsOwnership(
+  businessId: number,
+  components: ComponentInput[],
+): Promise<void> {
+  if (components.length === 0) {
+    throw new BadRequestError("A bundle needs at least one component.");
+  }
+  const variantIds = [...new Set(components.map((c) => c.variantId))];
+  if (variantIds.length !== components.length) {
+    throw new BadRequestError(
+      "A bundle cannot list the same variant twice — merge its quantities.",
+    );
+  }
+  const owned = await db
+    .select({ id: productVariants.id })
+    .from(productVariants)
+    .where(
+      and(
+        eq(productVariants.businessId, businessId),
+        inArray(productVariants.id, variantIds),
+      ),
+    );
+  if (owned.length !== variantIds.length) {
+    throw new NotFoundError(
+      "One or more bundle components do not exist in this business.",
+    );
+  }
+}
+
+async function replaceComponents(
+  businessId: number,
+  promotionId: number,
+  components: ComponentInput[],
+): Promise<void> {
+  await db
+    .delete(promotionBundleComponents)
+    .where(
+      and(
+        eq(promotionBundleComponents.promotionId, promotionId),
+        eq(promotionBundleComponents.businessId, businessId),
+      ),
+    );
+  if (components.length > 0) {
+    await db.insert(promotionBundleComponents).values(
+      components.map((c) => ({
+        businessId,
+        promotionId,
+        variantId: c.variantId,
+        quantity: c.quantity,
+      })),
+    );
+  }
+}
+
+async function loadComponents(
+  businessId: number,
+  promotionIds: number[],
+): Promise<Map<number, PromotionComponent[]>> {
+  const byPromo = new Map<number, PromotionComponent[]>();
+  if (promotionIds.length === 0) return byPromo;
+  const rows = await db
+    .select({
+      promotionId: promotionBundleComponents.promotionId,
+      variantId: promotionBundleComponents.variantId,
+      quantity: promotionBundleComponents.quantity,
+      sku: productVariants.sku,
+      productName: products.name,
+      sellingPrice: productVariants.sellingPrice,
+    })
+    .from(promotionBundleComponents)
+    .innerJoin(
+      productVariants,
+      and(
+        eq(productVariants.id, promotionBundleComponents.variantId),
+        eq(productVariants.businessId, promotionBundleComponents.businessId),
+      ),
+    )
+    .innerJoin(
+      products,
+      and(
+        eq(products.id, productVariants.productId),
+        eq(products.businessId, productVariants.businessId),
+      ),
+    )
+    .where(
+      and(
+        eq(promotionBundleComponents.businessId, businessId),
+        inArray(promotionBundleComponents.promotionId, promotionIds),
+      ),
+    );
+  for (const row of rows) {
+    const list = byPromo.get(row.promotionId) ?? [];
+    list.push({
+      variantId: row.variantId,
+      quantity: Number(row.quantity),
+      sku: row.sku,
+      productName: row.productName,
+      sellingPrice: Number(row.sellingPrice),
+    });
+    byPromo.set(row.promotionId, list);
+  }
+  return byPromo;
+}
+
+/** Normal total of a component list (display/savings preview; the engine
+ * prices from live cart lines at sale time). */
+function componentTotalOf(components: PromotionComponent[]): number {
+  return roundMoney(
+    components.reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0),
+  );
 }
 
 async function loadGroupEligibility(
@@ -190,17 +323,28 @@ export async function listPromotions(businessId: number) {
     list.push({ id: row.groupId, name: row.groupName });
     groupsByPromo.set(row.promotionId, list);
   }
-  return rows.map(({ promotion, categoryName, productName, sku }) => ({
-    ...promotion,
-    discountValue: Number(promotion.discountValue),
-    minOrderValue: Number(promotion.minOrderValue),
-    maxDiscountAmount:
-      promotion.maxDiscountAmount == null
-        ? null
-        : Number(promotion.maxDiscountAmount),
-    scopeLabel: scopeLabelOf({ ...promotion, categoryName, productName, sku }),
-    customerGroups: groupsByPromo.get(promotion.id) ?? [],
-  }));
+  const componentsByPromo = await loadComponents(
+    businessId,
+    rows.map((r) => r.promotion.id),
+  );
+  return rows.map(({ promotion, categoryName, productName, sku }) => {
+    const components = componentsByPromo.get(promotion.id) ?? [];
+    return {
+      ...promotion,
+      discountValue: Number(promotion.discountValue),
+      minOrderValue: Number(promotion.minOrderValue),
+      maxDiscountAmount:
+        promotion.maxDiscountAmount == null
+          ? null
+          : Number(promotion.maxDiscountAmount),
+      scopeLabel: scopeLabelOf({ ...promotion, categoryName, productName, sku }),
+      customerGroups: groupsByPromo.get(promotion.id) ?? [],
+      components,
+      ...(components.length > 0
+        ? { componentTotal: componentTotalOf(components) }
+        : {}),
+    };
+  });
 }
 
 /**
@@ -243,7 +387,14 @@ export async function createPromotion(
     maxDiscountAmount?: number | null | undefined;
     canStackWithGroupDiscount?: boolean | undefined;
     canStackWithCoupons?: boolean | undefined;
-    promoKind?: "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier" | undefined;
+    promoKind?:
+      | "discount"
+      | "bogo"
+      | "buy_x_get_y"
+      | "mix_match"
+      | "quantity_tier"
+      | "bundle"
+      | undefined;
     rule?: Record<string, unknown> | null | undefined;
     daysOfWeek?: number[] | null | undefined;
     startTime?: string | null | undefined;
@@ -254,6 +405,7 @@ export async function createPromotion(
     priority?: number | undefined;
     isActive?: boolean | undefined;
     groupIds?: number[] | undefined;
+    components?: ComponentInput[] | undefined;
   },
 ) {
   const scope = {
@@ -261,17 +413,32 @@ export async function createPromotion(
     productId: payload.productId ?? null,
     variantId: payload.variantId ?? null,
   };
+  const isBundle = (payload.promoKind as string | undefined) === "bundle";
+  if (payload.components !== undefined && !isBundle) {
+    throw new BadRequestError(
+      "Bundle components only apply to 'bundle' promotions.",
+    );
+  }
   await assertScopeOwnership(businessId, scope);
   const groupIds = payload.groupIds ?? [];
   await assertGroupsOwnership(businessId, groupIds);
+  // Bundles carry their price in `rule`; the generic discount columns are
+  // vestigial for the kind, so they are normalized out of the payload.
+  const discountType = isBundle
+    ? ("fixed" as const)
+    : payload.discountType;
+  const discountValue = isBundle ? 0 : payload.discountValue;
+  if (isBundle) {
+    await assertComponentsOwnership(businessId, payload.components ?? []);
+  }
   const [created] = await db
     .insert(pricingPromotions)
     .values({
       businessId,
       name: payload.name,
       ...scope,
-      discountType: payload.discountType,
-      discountValue: payload.discountValue,
+      discountType,
+      discountValue,
       startsAt: (await resolveDateBound(businessId, payload.startsAt, "start")) ?? null,
       endsAt: (await resolveDateBound(businessId, payload.endsAt, "end")) ?? null,
       minQuantity: payload.minQuantity ?? null,
@@ -293,13 +460,21 @@ export async function createPromotion(
     .returning();
   if (!created) throw new Error("Promotion insert returned no row.");
   await replaceGroupEligibility(businessId, created.id, groupIds);
+  if (isBundle) {
+    await replaceComponents(businessId, created.id, payload.components ?? []);
+  }
   recordAudit({
     businessId,
     actorUserId,
     action: "pricing.promotion.create",
     entityType: "pricing_promotion",
     entityId: created.id,
-    metadata: { name: created.name, discountType: created.discountType, value: created.discountValue },
+    metadata: {
+      name: created.name,
+      discountType: created.discountType,
+      value: created.discountValue,
+      ...(isBundle ? { promoKind: "bundle", components: payload.components ?? [] } : {}),
+    },
   });
   return { ...created, customerGroups: groupIds.map((id) => ({ id })) };
 }
@@ -308,7 +483,10 @@ export async function updatePromotion(
   businessId: number,
   actorUserId: number | null,
   promotionId: number,
-  payload: Record<string, unknown> & { groupIds?: number[] | undefined },
+  payload: Record<string, unknown> & {
+    groupIds?: number[] | undefined;
+    components?: ComponentInput[] | undefined;
+  },
 ) {
   const [existing] = await db
     .select()
@@ -401,6 +579,13 @@ export async function updatePromotion(
     priority: (payload.priority as number | undefined) ?? existing.priority ?? 0,
     isActive: (payload.isActive as boolean | undefined) ?? existing.isActive,
   };
+  // Bundles carry their price in `rule`; normalize the vestigial discount
+  // columns after the merge so switching kinds cannot leave stale data.
+  const mergedIsBundle = merged.promoKind === "bundle";
+  if (mergedIsBundle) {
+    merged.discountType = "fixed";
+    merged.discountValue = 0;
+  }
   const parsed = promotionStrictSchema.safeParse(merged);
   if (!parsed.success) {
     throw new BadRequestError(
@@ -412,6 +597,14 @@ export async function updatePromotion(
   await assertScopeOwnership(businessId, merged);
   if (payload.groupIds !== undefined) {
     await assertGroupsOwnership(businessId, payload.groupIds);
+  }
+  if (payload.components !== undefined && !mergedIsBundle) {
+    throw new BadRequestError(
+      "Bundle components only apply to 'bundle' promotions.",
+    );
+  }
+  if (payload.components !== undefined) {
+    await assertComponentsOwnership(businessId, payload.components);
   }
   const [updated] = await db
     .update(pricingPromotions)
@@ -451,17 +644,36 @@ export async function updatePromotion(
     await replaceGroupEligibility(businessId, promotionId, payload.groupIds);
     customerGroupsOut = payload.groupIds.map((id) => ({ id }));
   }
+  let componentsOut: PromotionComponent[] | undefined;
+  if (payload.components !== undefined) {
+    await replaceComponents(businessId, promotionId, payload.components);
+  } else if (!mergedIsBundle && (existing.promoKind as string | undefined) === "bundle") {
+    // Kind switched away from bundle — the component rows lose their
+    // meaning, so they are dropped instead of lingering.
+    await replaceComponents(businessId, promotionId, []);
+  }
+  if (mergedIsBundle) {
+    const loaded = await loadComponents(businessId, [promotionId]);
+    componentsOut = loaded.get(promotionId) ?? [];
+  }
   recordAudit({
     businessId,
     actorUserId,
     action: "pricing.promotion.update",
     entityType: "pricing_promotion",
     entityId: promotionId,
-    metadata: { name: updated.name, isActive: updated.isActive },
+    metadata: {
+      name: updated.name,
+      isActive: updated.isActive,
+      ...(payload.components !== undefined
+        ? { components: payload.components }
+        : {}),
+    },
   });
   return {
     ...updated,
     ...(customerGroupsOut ? { customerGroups: customerGroupsOut } : {}),
+    ...(componentsOut ? { components: componentsOut } : {}),
   };
 }
 
@@ -488,7 +700,16 @@ export async function getPromotion(businessId: number, promotionId: number) {
     .limit(1);
   if (!row) throw new NotFoundError("Promotion not found.");
   const groupIds = await loadGroupEligibility(businessId, promotionId);
-  return { ...row.promotion, customerGroups: groupIds.map((id) => ({ id })) };
+  const components = await loadComponents(businessId, [promotionId]);
+  const componentList = components.get(promotionId) ?? [];
+  return {
+    ...row.promotion,
+    customerGroups: groupIds.map((id) => ({ id })),
+    components: componentList,
+    ...(componentList.length > 0
+      ? { componentTotal: componentTotalOf(componentList) }
+      : {}),
+  };
 }
 
 export type { PromotionRow };

@@ -65,7 +65,13 @@ const dateBoundField = z
  * never discounts anything. Each kind's rule is validated at write time.
  */
 function refineRuleForKind(
-  value: { promoKind?: string | undefined; rule?: Record<string, unknown> | null | undefined },
+  value: {
+    promoKind?: string | undefined;
+    rule?: Record<string, unknown> | null | undefined;
+    categoryId?: number | null | undefined;
+    productId?: number | null | undefined;
+    variantId?: number | null | undefined;
+  },
   ctx: z.RefinementCtx,
 ): void {
   const kind = value.promoKind;
@@ -77,6 +83,42 @@ function refineRuleForKind(
       : null;
   const issue = (path: string, message: string) =>
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  if (kind === "bundle") {
+    // The component list IS the scope — category/product/variant scope on a
+    // bundle would silently mean nothing, so it is rejected outright.
+    if (
+      value.categoryId != null ||
+      value.productId != null ||
+      value.variantId != null
+    ) {
+      issue(
+        "categoryId",
+        "A bundle's components define its scope — leave category/product/variant empty.",
+      );
+    }
+    const price = num("bundlePrice");
+    const percent = num("discountPercent");
+    if (price == null && percent == null) {
+      issue(
+        "rule",
+        "A bundle needs exactly one of bundlePrice (special package price) or discountPercent.",
+      );
+    }
+    if (price != null && percent != null) {
+      issue(
+        "rule",
+        "Set either bundlePrice or discountPercent for a bundle — not both.",
+      );
+    }
+    if (percent != null && percent > 100) {
+      issue("rule", "Bundle discount percent cannot exceed 100%.");
+    }
+    const maxApps = num("maxApplications");
+    if (maxApps != null && maxApps < 1) {
+      issue("rule", "maxApplications must be at least 1 when provided.");
+    }
+    return;
+  }
   if (kind === "bogo") {
     if ((num("buyQty") ?? 1) < 1 || (num("getQty") ?? 1) < 1) {
       issue("rule", "BOGO needs buy and free quantities of at least 1.");
@@ -127,7 +169,7 @@ export const promotionStrictSchema = z
     canStackWithCoupons: z.boolean(),
     // ---- Phase 3 (Feature 8) ----
     promoKind: z
-      .enum(["discount", "bogo", "buy_x_get_y", "mix_match", "quantity_tier"])
+      .enum(["discount", "bogo", "buy_x_get_y", "mix_match", "quantity_tier", "bundle"])
       .default("discount"),
     rule: z.record(z.string(), z.unknown()).nullable().optional(),
     daysOfWeek: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
@@ -156,7 +198,7 @@ export const promotionCreateSchema = z
     canStackWithGroupDiscount: z.boolean().optional(),
     canStackWithCoupons: z.boolean().optional(),
     promoKind: z
-      .enum(["discount", "bogo", "buy_x_get_y", "mix_match", "quantity_tier"])
+      .enum(["discount", "bogo", "buy_x_get_y", "mix_match", "quantity_tier", "bundle"])
       .optional(),
     rule: z.record(z.string(), z.unknown()).nullable().optional(),
     daysOfWeek: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
@@ -169,6 +211,16 @@ export const promotionCreateSchema = z
     isActive: z.boolean().optional(),
     /** Group eligibility: absent/empty = every customer (incl. walk-ins). */
     groupIds: z.array(z.coerce.number().int().positive()).max(100).optional(),
+    /** Bundle components (bundle kind only): the exact package contents. */
+    components: z
+      .array(
+        z.object({
+          variantId: z.coerce.number().int().positive(),
+          quantity: z.coerce.number().positive().max(1_000_000),
+        }),
+      )
+      .max(100)
+      .optional(),
   })
   .superRefine((value, ctx) =>
     refinePromotionShape(
@@ -202,7 +254,7 @@ export const promotionUpdateSchema = z
     canStackWithGroupDiscount: z.boolean().optional(),
     canStackWithCoupons: z.boolean().optional(),
     promoKind: z
-      .enum(["discount", "bogo", "buy_x_get_y", "mix_match", "quantity_tier"])
+      .enum(["discount", "bogo", "buy_x_get_y", "mix_match", "quantity_tier", "bundle"])
       .optional(),
     rule: z.record(z.string(), z.unknown()).nullable().optional(),
     daysOfWeek: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
@@ -215,6 +267,16 @@ export const promotionUpdateSchema = z
     isActive: z.boolean().optional(),
     /** Present (even empty) = replace the eligibility list. */
     groupIds: z.array(z.coerce.number().int().positive()).max(100).optional(),
+    /** Present (bundle kind) = replace the component list wholesale. */
+    components: z
+      .array(
+        z.object({
+          variantId: z.coerce.number().int().positive(),
+          quantity: z.coerce.number().positive().max(1_000_000),
+        }),
+      )
+      .max(100)
+      .optional(),
   })
   .refine(
     (value) =>

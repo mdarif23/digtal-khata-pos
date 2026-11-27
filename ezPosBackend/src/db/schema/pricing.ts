@@ -474,6 +474,50 @@ export const promotionCustomerGroups = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// promotion_bundle_components — fixed-bundle kind (Bundle & Combo Phase 1,
+// migration 0095): the explicit component multiset of a `bundle` promotion,
+// e.g. 5 notebooks + 3 pens + 2 pencils + 1 eraser. Unlike bom_components,
+// component variants are FK-enforced (no orphans). The bundle's price lives
+// in pricing_promotions.rule ({ bundlePrice } | { discountPercent },
+// optional maxApplications); the parent's scope columns stay NULL — the
+// component list IS the scope. Components are ordinary cart lines, so stock,
+// batches and serials flow through the normal sale paths; the engine only
+// prices them.
+// ---------------------------------------------------------------------------
+
+export const promotionBundleComponents = pgTable(
+  "promotion_bundle_components",
+  {
+    id: serial().primaryKey().notNull(),
+    businessId: integer("business_id")
+      .notNull()
+      .references(() => businesses.id, { onDelete: "cascade" }),
+    promotionId: integer("promotion_id").notNull(),
+    variantId: integer("variant_id").notNull(),
+    quantity: numeric("quantity", { precision: 14, scale: 4, mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    check("pbc_quantity_check", sql`${t.quantity} > 0`),
+    unique("pbc_promotion_variant_uq").on(t.promotionId, t.variantId),
+    uniqueIndex("pbc_id_business_uq").on(t.id, t.businessId),
+    index("pbc_promotion_idx").on(t.promotionId),
+    foreignKey({
+      columns: [t.promotionId, t.businessId],
+      foreignColumns: [pricingPromotions.id, pricingPromotions.businessId],
+      name: "pbc_promotion_business_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [t.variantId, t.businessId],
+      foreignColumns: [productVariants.id, productVariants.businessId],
+      name: "pbc_variant_business_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // price_change_proposals — Mode A (manual approval, the DEFAULT update mode).
 // One sweep run groups its proposals under batchToken; 'stale' marks
 // proposals whose cost/price moved after generation.
