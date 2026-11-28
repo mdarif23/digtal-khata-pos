@@ -4,6 +4,7 @@ import "@/i18n/index.js";
 import { LanguageToggle } from "@/i18n/LanguageToggle.js";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { ProductList } from "@/features/pos/components/pos/ProductList.js";
+import { BundleCards } from "@/features/pos/components/pos/BundleCards.js";
 import { SpeedKeyGrid } from "@/features/pos/speedKeys/SpeedKeyGrid";
 import { CartHeader } from "@/features/pos/components/pos/CartHeader.js";
 import CartItems, {
@@ -436,6 +437,10 @@ function Pos() {
             </div>
           </div>
         </div>
+        {/* Bundle & Combo Phase 2: live fixed bundles with one-tap add.
+            Self-hiding — absent offline, while loading, or with no live
+            bundles — so scanning and the grid keep their rhythm. */}
+        <BundleCards />
         <section className="flex h-[60dvh] min-h-[420px] shrink-0 flex-col overflow-hidden rounded-xl border bg-background shadow-sm lg:h-full lg:min-h-0 lg:shrink">
           {/* Page-scoped wedge capture pauses while checkout/receipt dialogs
               are up — scans must never edit the cart mid-payment. */}

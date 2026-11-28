@@ -456,3 +456,18 @@ export async function getPromotionPerformance(req: Request, res: Response) {
     sendSafeError(res, err, "Unable to load the report.");
   }
 }
+
+export async function getCampaignPerformance(req: Request, res: Response) {
+  try {
+    const params = getValidatedParams(req);
+    const locationId = await resolveReportLocation(req);
+    const data = await reportsService.getCampaignPerformanceReport(
+      getBusinessId(req),
+      params,
+      locationId,
+    );
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    sendSafeError(res, err, "Unable to load the report.");
+  }
+}

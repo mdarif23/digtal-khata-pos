@@ -2415,3 +2415,71 @@ export async function getPromotionPerformanceReport(
     })),
   };
 }
+
+
+/**
+ * Campaign performance (Bundle & Combo Phase 4): the promotion-performance
+ * aggregation rolled up by campaign — distinct sales the campaign touched
+ * and the promotion discounts it drove. Promotions with no campaign (or a
+ * deleted one) group under NULL and surface as "No campaign".
+ */
+export interface CampaignPerformanceRow {
+  campaignId: number | null;
+  campaignName: string;
+  salesCount: number;
+  totalDiscount: number;
+}
+
+export async function getCampaignPerformanceReport(
+  businessId: number,
+  params: DateRangeQuery,
+  locationId?: number,
+): Promise<{ rows: CampaignPerformanceRow[] }> {
+  const { start, end } = await getDateBounds(businessId, params);
+
+  const result = await db.execute(sql`
+    WITH usage AS (
+      SELECT
+        s.id AS sale_id,
+        (a.adj->>'refId')::int AS promotion_id,
+        (a.adj->>'amount')::numeric AS amount
+      FROM sales s
+      INNER JOIN sale_items si ON si.sale_id = s.id AND si.business_id = s.business_id
+      CROSS JOIN LATERAL jsonb_array_elements(si.price_adjustments) a(adj)
+      WHERE s.status IN ('completed', 'refunded')
+        AND s.business_id = ${businessId}
+        AND s.created_at >= ${start}::timestamp
+        AND s.created_at <= ${end}::timestamp${locationFilter("s", locationId)}
+        AND a.adj->>'kind' = 'promotion'
+        AND a.adj->>'refId' IS NOT NULL
+    ),
+    per_campaign AS (
+      SELECT
+        pp.campaign_id AS "campaignId",
+        COUNT(DISTINCT u.sale_id)::int AS "salesCount",
+        COALESCE(SUM(u.amount), 0)::numeric AS total_disc
+      FROM usage u
+      LEFT JOIN pricing_promotions pp
+        ON pp.id = u.promotion_id AND pp.business_id = ${businessId}
+      GROUP BY pp.campaign_id
+    )
+    SELECT
+      pc."campaignId",
+      COALESCE(c.name, 'No campaign') AS "campaignName",
+      pc."salesCount",
+      pc.total_disc AS "totalDiscount"
+    FROM per_campaign pc
+    LEFT JOIN promotion_campaigns c
+      ON c.id = pc."campaignId" AND c.business_id = ${businessId}
+    ORDER BY pc.total_disc DESC
+  `);
+
+  return {
+    rows: (result.rows as Record<string, unknown>[]).map((r) => ({
+      campaignId: r.campaignId == null ? null : Number(r.campaignId),
+      campaignName: String(r.campaignName ?? "No campaign"),
+      salesCount: Number(r.salesCount ?? 0),
+      totalDiscount: Number(r.totalDiscount ?? 0),
+    })),
+  };
+}

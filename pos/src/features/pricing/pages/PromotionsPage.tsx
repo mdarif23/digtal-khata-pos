@@ -33,8 +33,15 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/components/ui/toast";
 import axios from "@/api/axios";
 import { extractApiError } from "../components/RuleDialog";
+import {
+  buildBundleRule,
+  bundleComponentPayload,
+  bundleNormalTotalOf,
+  validateBundleForm,
+} from "../bundleForm";
 import { useProductsQuery } from "@/features/products/hooks/useProducts";
 import {
+  useCampaigns,
   useCreatePromotion,
   useDeletePromotion,
   usePromotions,
@@ -53,6 +60,8 @@ export function PromotionsPage() {
   const products = useProductsQuery().data ?? [];
   const canManage = hasPermission("promotions.manage");
   const promotionsQuery = usePromotions();
+  const campaignsQuery = useCampaigns();
+  const campaigns = campaignsQuery.data ?? [];
   const createPromotion = useCreatePromotion();
   const updatePromotion = useUpdatePromotion();
   const deletePromotion = useDeletePromotion();
@@ -74,7 +83,7 @@ export function PromotionsPage() {
   const [stackCoupons, setStackCoupons] = useState(false);
   // ---- Phase 3 (Feature 8) ----
   const [promoKind, setPromoKind] = useState<
-    "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier"
+    "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier" | "bundle" | "spend_get"
   >("discount");
   const [ruleBuyQty, setRuleBuyQty] = useState("1");
   const [ruleGetQty, setRuleGetQty] = useState("1");
@@ -86,12 +95,25 @@ export function PromotionsPage() {
   const [ruleDiscountPercent, setRuleDiscountPercent] = useState("20");
   const [ruleTierMinQty, setRuleTierMinQty] = useState("3");
   const [ruleTierPercent, setRuleTierPercent] = useState("10");
+  // ---- Bundle & Combo Phase 3: reward pricing + spend-qualified rewards ----
+  const [ruleRewardMode, setRuleRewardMode] = useState<"free" | "percent" | "price">("free");
+  const [ruleRewardPrice, setRuleRewardPrice] = useState("");
+  const [ruleSpendAmount, setRuleSpendAmount] = useState("");
+  // ---- Bundle & Combo Phase 1: fixed bundles ----
+  const [bundleComponents, setBundleComponents] = useState<
+    { variantId: string; quantity: string }[]
+  >([]);
+  const [bundlePriceMode, setBundlePriceMode] = useState<"price" | "percent">("price");
+  const [bundlePriceValue, setBundlePriceValue] = useState("");
+  const [bundlePercentValue, setBundlePercentValue] = useState("10");
+  const [bundleMaxApps, setBundleMaxApps] = useState("");
   const [flashDays, setFlashDays] = useState<number[]>([]);
   const [flashStart, setFlashStart] = useState("");
   const [flashEnd, setFlashEnd] = useState("");
   const [usageLimit, setUsageLimit] = useState("");
   const [perCustomerLimit, setPerCustomerLimit] = useState("");
   const [priority, setPriority] = useState("0");
+  const [campaignId, setCampaignId] = useState("");
   const [isActive, setIsActive] = useState(true);
 
   async function openCreate() {
@@ -144,6 +166,46 @@ export function PromotionsPage() {
       : undefined;
     setRuleTierMinQty(String(tier?.minQty ?? 3));
     setRuleTierPercent(String(tier?.discountPercent ?? 10));
+    // Phase 3 reward pricing round-trip (buy_x_get_y + spend_get).
+    if (rule.getPrice != null) {
+      setRuleRewardMode("price");
+      setRuleRewardPrice(String(rule.getPrice));
+    } else if (rule.getDiscountPercent != null) {
+      setRuleRewardMode("percent");
+      setRuleRewardPrice("");
+    } else {
+      setRuleRewardMode("free");
+      setRuleRewardPrice("");
+    }
+    setRuleSpendAmount(
+      rule.spendAmount != null ? String(rule.spendAmount) : "",
+    );
+    if (promo.promoKind === "bundle") {
+      setBundleComponents(
+        promo.components.map((c) => ({
+          variantId: String(c.variantId),
+          quantity: String(c.quantity),
+        })),
+      );
+      if (rule.bundlePrice != null) {
+        setBundlePriceMode("price");
+        setBundlePriceValue(String(rule.bundlePrice));
+        setBundlePercentValue("10");
+      } else {
+        setBundlePriceMode("percent");
+        setBundlePriceValue("");
+        setBundlePercentValue(String(rule.discountPercent ?? 10));
+      }
+      setBundleMaxApps(
+        rule.maxApplications != null ? String(rule.maxApplications) : "",
+      );
+    } else {
+      setBundleComponents([]);
+      setBundlePriceMode("price");
+      setBundlePriceValue("");
+      setBundlePercentValue("10");
+      setBundleMaxApps("");
+    }
     setFlashDays(promo.daysOfWeek ?? []);
     setFlashStart(promo.startTime ?? "");
     setFlashEnd(promo.endTime ?? "");
@@ -152,6 +214,7 @@ export function PromotionsPage() {
       promo.perCustomerLimit != null ? String(promo.perCustomerLimit) : "",
     );
     setPriority(String(promo.priority ?? 0));
+    setCampaignId(promo.campaignId != null ? String(promo.campaignId) : "");
     setDialogOpen(true);
   }
 
@@ -176,16 +239,28 @@ export function PromotionsPage() {
     setRuleDiscountPercent("20");
     setRuleTierMinQty("3");
     setRuleTierPercent("10");
+    setRuleRewardMode("free");
+    setRuleRewardPrice("");
+    setRuleSpendAmount("");
+    setBundleComponents([]);
+    setBundlePriceMode("price");
+    setBundlePriceValue("");
+    setBundlePercentValue("10");
+    setBundleMaxApps("");
     setFlashDays([]);
     setFlashStart("");
     setFlashEnd("");
     setUsageLimit("");
     setPerCustomerLimit("");
     setPriority("0");
+    setCampaignId("");
   }
 
   async function save() {
-    if (!name.trim() || discountValue === "") {
+    const isBundle = promoKind === "bundle";
+    // Rule-target kinds price themselves in `rule` (backend normalizes too).
+    const isRewardTargetKind = isBundle || promoKind === "spend_get";
+    if (!name.trim() || (!isRewardTargetKind && discountValue === "")) {
       toast.add({
         type: "error",
         description: "Name and discount value are required.",
@@ -207,18 +282,68 @@ export function PromotionsPage() {
       });
       return;
     }
+    if (promoKind === "buy_x_get_y" || promoKind === "spend_get") {
+      const percent = Number(ruleDiscountPercent);
+      if (ruleRewardMode === "percent" && !(percent > 0 && percent <= 100)) {
+        toast.add({
+          type: "error",
+          description: "Reward percent must be between 1 and 100.",
+          priority: "high",
+        });
+        return;
+      }
+      if (ruleRewardMode === "price" && !(Number(ruleRewardPrice) >= 0)) {
+        toast.add({
+          type: "error",
+          description: "Reward price cannot be negative.",
+          priority: "high",
+        });
+        return;
+      }
+    }
+    if (
+      promoKind === "spend_get" &&
+      (!(Number(ruleSpendAmount) > 0) || ruleGetProductId === "")
+    ) {
+      toast.add({
+        type: "error",
+        description:
+          "Spend-and-get needs a minimum spend amount and a reward product.",
+        priority: "high",
+      });
+      return;
+    }
+    // Bundle & Combo Phase 1: the same refuse-at-the-door discipline for
+    // bundles — components and price mode are validated before the POST.
+    const bundlePayloadComponents = bundleComponentPayload(bundleComponents);
+    if (isBundle) {
+      const bundleError = validateBundleForm(
+        bundleComponents,
+        bundlePriceMode,
+        bundlePriceValue,
+        bundlePercentValue,
+      );
+      if (bundleError) {
+        toast.add({ type: "error", description: bundleError, priority: "high" });
+        return;
+      }
+    }
     const scopeIdNum = scopeId === "" ? null : Number(scopeId);
-    if (scope !== "whole" && (scopeIdNum == null || !Number.isInteger(scopeIdNum) || scopeIdNum <= 0)) {
+    if (!isBundle && scope !== "whole" && (scopeIdNum == null || !Number.isInteger(scopeIdNum) || scopeIdNum <= 0)) {
       toast.add({ type: "error", description: "Pick a valid scope target.", priority: "high" });
       return;
     }
     const payload = {
       name: name.trim(),
-      categoryId: scope === "category" ? scopeIdNum : null,
-      productId: scope === "product" ? scopeIdNum : null,
-      variantId: scope === "variant" ? scopeIdNum : null,
-      discountType,
-      discountValue: Number(discountValue),
+      // Rule-target kinds (bundle, spend_get) define everything in their
+      // rule/components — scope fields stay empty.
+      categoryId: !isRewardTargetKind && scope === "category" ? scopeIdNum : null,
+      productId: !isRewardTargetKind && scope === "product" ? scopeIdNum : null,
+      variantId: !isRewardTargetKind && scope === "variant" ? scopeIdNum : null,
+      // The generic discount columns are vestigial for rule-target kinds;
+      // the price lives in `rule` (backend normalizes them too).
+      discountType: isRewardTargetKind ? ("fixed" as const) : discountType,
+      discountValue: isRewardTargetKind ? 0 : Number(discountValue),
       // I3-6: date-only boundaries are interpreted on the BUSINESS calendar
       // by the backend — a browser-local midnight excluded late-evening
       // sales for staff in a different timezone than the business.
@@ -231,7 +356,9 @@ export function PromotionsPage() {
       canStackWithCoupons: stackCoupons,
       promoKind,
       rule:
-        promoKind === "bogo"
+        isBundle
+          ? buildBundleRule(bundlePriceMode, bundlePriceValue, bundlePercentValue, bundleMaxApps)
+          : promoKind === "bogo"
           ? { buyQty: Number(ruleBuyQty) || 1, getQty: Number(ruleGetQty) || 1 }
           : promoKind === "buy_x_get_y"
             ? {
@@ -243,7 +370,30 @@ export function PromotionsPage() {
                 ...(ruleGetProductId !== ""
                   ? { getProductId: Number(ruleGetProductId) }
                   : {}),
+                ...(ruleRewardMode === "percent"
+                  ? { getDiscountPercent: Number(ruleDiscountPercent) }
+                  : {}),
+                ...(ruleRewardMode === "price"
+                  ? { getPrice: Number(ruleRewardPrice) }
+                  : {}),
               }
+            : promoKind === "spend_get"
+              ? {
+                  spendAmount: Number(ruleSpendAmount),
+                  getQty: Number(ruleGetQty) || 1,
+                  ...(ruleGetProductId !== ""
+                    ? { getProductId: Number(ruleGetProductId) }
+                    : {}),
+                  ...(ruleRewardMode === "percent"
+                    ? { getDiscountPercent: Number(ruleDiscountPercent) }
+                    : {}),
+                  ...(ruleRewardMode === "price"
+                    ? { getPrice: Number(ruleRewardPrice) }
+                    : {}),
+                  ...(bundleMaxApps !== "" && Number(bundleMaxApps) > 0
+                    ? { maxApplications: Number(bundleMaxApps) }
+                    : {}),
+                }
             : promoKind === "mix_match"
             ? {
                 comboSize: Number(ruleComboSize) || 2,
@@ -259,12 +409,14 @@ export function PromotionsPage() {
                   ],
                 }
               : null,
+      ...(isBundle ? { components: bundlePayloadComponents } : {}),
       daysOfWeek: flashDays.length > 0 ? flashDays : null,
       startTime: flashStart === "" ? null : flashStart,
       endTime: flashEnd === "" ? null : flashEnd,
       usageLimit: usageLimit === "" ? null : Number(usageLimit),
       perCustomerLimit: perCustomerLimit === "" ? null : Number(perCustomerLimit),
       priority: Number(priority) || 0,
+      campaignId: campaignId === "" ? null : Number(campaignId),
       isActive,
     };
     try {
@@ -301,6 +453,21 @@ export function PromotionsPage() {
   }
 
   const rows = promotionsQuery.data ?? [];
+
+  // Bundle editor inputs: every catalog variant with a display label and a
+  // price, so the savings preview can be computed client-side (display only —
+  // the engine prices from live cart lines at sale time).
+  const variantOptions = products.flatMap((product) =>
+    (product.variants ?? [])
+      .filter((v) => v.id != null)
+      .map((v) => ({
+        id: v.id as number,
+        label: `${product.name}${v.sku ? ` — ${v.sku}` : ""} (${formatCurrency(Number(v.sellingPrice))})`,
+        price: Number(v.sellingPrice),
+      })),
+  );
+  const variantPriceById = new Map(variantOptions.map((v) => [v.id, v.price]));
+  const bundleNormalTotal = bundleNormalTotalOf(bundleComponents, variantPriceById);
 
   return (
     <PageContainer width="wide">
@@ -348,10 +515,37 @@ export function PromotionsPage() {
                   ) : (
                     rows.map((promo) => (
                       <TableRow key={promo.id}>
-                        <TableCell className="font-medium">{promo.name}</TableCell>
+                        <TableCell className="font-medium">
+                          {promo.name}
+                          {promo.campaignName && (
+                            <Badge variant="outline" className="ml-1.5 font-normal">
+                              {promo.campaignName}
+                            </Badge>
+                          )}
+                        </TableCell>
                         <TableCell className="text-muted-foreground">{promo.scopeLabel}</TableCell>
                         <TableCell className="text-right font-mono tabular-nums">
-                          {promo.discountType === "percentage"
+                          {promo.promoKind === "bundle" ? (
+                            <>
+                              {typeof promo.rule?.bundlePrice === "number"
+                                ? `Bundle ${formatCurrency(promo.rule.bundlePrice)}`
+                                : `${promo.rule?.discountPercent ?? 0}% off`}
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                {promo.components.length} item
+                                {promo.components.length === 1 ? "" : "s"}
+                              </span>
+                            </>
+                          ) : promo.promoKind === "spend_get" ? (
+                            <>
+                              Spend {formatCurrency(Number(promo.rule?.spendAmount ?? 0))} →{" "}
+                              {Number(promo.rule?.getQty ?? 1)}{" "}
+                              {promo.rule?.getPrice != null
+                                ? `@ ${formatCurrency(Number(promo.rule.getPrice))}`
+                                : promo.rule?.getDiscountPercent != null
+                                  ? `${promo.rule.getDiscountPercent}% off`
+                                  : "free"}
+                            </>
+                          ) : promo.discountType === "percentage"
                             ? `${promo.discountValue}%`
                             : formatCurrency(promo.discountValue)}
                           {promo.maxDiscountAmount != null && (
@@ -429,62 +623,68 @@ export function PromotionsPage() {
               <Label htmlFor="promo-name">Name</Label>
               <Input id="promo-name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="promo-scope">Scope</Label>
-                <select
-                  id="promo-scope"
-                  className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-                  value={scope}
-                  onChange={(e) => {
-                    setScope(e.target.value as typeof scope);
-                    setScopeId("");
-                  }}
-                >
-                  <option value="whole">Whole business</option>
-                  <option value="category">Category</option>
-                  <option value="product">Product</option>
-                  <option value="variant">Variant</option>
-                </select>
-              </div>
-              {scope !== "whole" && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="promo-scope-id">{scope} id</Label>
-                  <Input
-                    id="promo-scope-id"
-                    type="number"
-                    min="1"
-                    value={scopeId}
-                    onChange={(e) => setScopeId(e.target.value)}
-                  />
+            {/* Scope + generic discount do not apply to bundles — the
+                component list IS the scope and the price lives in the rule. */}
+            {promoKind !== "bundle" && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="promo-scope">Scope</Label>
+                    <select
+                      id="promo-scope"
+                      className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                      value={scope}
+                      onChange={(e) => {
+                        setScope(e.target.value as typeof scope);
+                        setScopeId("");
+                      }}
+                    >
+                      <option value="whole">Whole business</option>
+                      <option value="category">Category</option>
+                      <option value="product">Product</option>
+                      <option value="variant">Variant</option>
+                    </select>
+                  </div>
+                  {scope !== "whole" && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="promo-scope-id">{scope} id</Label>
+                      <Input
+                        id="promo-scope-id"
+                        type="number"
+                        min="1"
+                        value={scopeId}
+                        onChange={(e) => setScopeId(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="promo-type">Discount type</Label>
-                <select
-                  id="promo-type"
-                  className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-                  value={discountType}
-                  onChange={(e) => setDiscountType(e.target.value as typeof discountType)}
-                >
-                  <option value="percentage">Percentage</option>
-                  <option value="fixed">Fixed amount</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="promo-value">Value {discountType === "percentage" ? "(%)" : "(৳)"}</Label>
-                <Input
-                  id="promo-value"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={discountValue}
-                  onChange={(e) => setDiscountValue(e.target.value)}
-                />
-              </div>
-            </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="promo-type">Discount type</Label>
+                    <select
+                      id="promo-type"
+                      className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                      value={discountType}
+                      onChange={(e) => setDiscountType(e.target.value as typeof discountType)}
+                    >
+                      <option value="percentage">Percentage</option>
+                      <option value="fixed">Fixed amount</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="promo-value">Value {discountType === "percentage" ? "(%)" : "(৳)"}</Label>
+                    <Input
+                      id="promo-value"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={discountValue}
+                      onChange={(e) => setDiscountValue(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="promo-start">Starts at</Label>
@@ -535,15 +735,19 @@ export function PromotionsPage() {
                       | "bogo"
                       | "buy_x_get_y"
                       | "mix_match"
-                      | "quantity_tier",
+                      | "quantity_tier"
+                      | "bundle"
+                      | "spend_get",
                   )
                 }
               >
                 <option value="discount">Percentage / fixed discount</option>
                 <option value="bogo">BOGO (buy X get Y free, same item)</option>
-                <option value="buy_x_get_y">Buy X get Y free (across items)</option>
+                <option value="buy_x_get_y">Buy X get Y (across items)</option>
                 <option value="mix_match">Mix &amp; match (N units, % off)</option>
                 <option value="quantity_tier">Quantity tier discount</option>
+                <option value="bundle">Fixed bundle (specific items, special price)</option>
+                <option value="spend_get">Spend ৳X, get Y (free / discounted)</option>
               </select>
             </div>
             {promoKind === "bogo" ? (
@@ -602,9 +806,104 @@ export function PromotionsPage() {
                     <Input type="number" min={1} value={ruleBuyQty} onChange={(e) => setRuleBuyQty(e.target.value)} />
                   </div>
                   <div className="grid gap-1">
-                    <span className="text-xs text-muted-foreground">Get free (qty)</span>
+                    <span className="text-xs text-muted-foreground">Get (qty)</span>
                     <Input type="number" min={1} value={ruleGetQty} onChange={(e) => setRuleGetQty(e.target.value)} />
                   </div>
+                </div>
+                {/* Phase 3: reward pricing — free, percent off, or fixed price. */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">Reward pricing</span>
+                    <select
+                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                      value={ruleRewardMode}
+                      onChange={(e) =>
+                        setRuleRewardMode(e.target.value as typeof ruleRewardMode)
+                      }
+                    >
+                      <option value="free">Free</option>
+                      <option value="percent">Percent off</option>
+                      <option value="price">Fixed price (৳)</option>
+                    </select>
+                  </div>
+                  {ruleRewardMode === "percent" ? (
+                    <div className="grid gap-1">
+                      <span className="text-xs text-muted-foreground">Reward %</span>
+                      <Input type="number" min={1} max={100} value={ruleDiscountPercent} onChange={(e) => setRuleDiscountPercent(e.target.value)} />
+                    </div>
+                  ) : ruleRewardMode === "price" ? (
+                    <div className="grid gap-1">
+                      <span className="text-xs text-muted-foreground">Reward price (৳)</span>
+                      <Input type="number" min={0} step="0.01" value={ruleRewardPrice} onChange={(e) => setRuleRewardPrice(e.target.value)} />
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            {promoKind === "spend_get" ? (
+              <div className="grid gap-2 rounded-md border border-dashed p-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">Spend at least (৳)</span>
+                    <Input type="number" min={0} step="0.01" value={ruleSpendAmount} onChange={(e) => setRuleSpendAmount(e.target.value)} />
+                  </div>
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">Get (qty)</span>
+                    <Input type="number" min={1} value={ruleGetQty} onChange={(e) => setRuleGetQty(e.target.value)} />
+                  </div>
+                </div>
+                <div className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">Reward product</span>
+                  <select
+                    className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                    value={ruleGetProductId}
+                    onChange={(e) => setRuleGetProductId(e.target.value)}
+                  >
+                    <option value="">Select product…</option>
+                    {products.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">Reward pricing</span>
+                    <select
+                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                      value={ruleRewardMode}
+                      onChange={(e) =>
+                        setRuleRewardMode(e.target.value as typeof ruleRewardMode)
+                      }
+                    >
+                      <option value="free">Free</option>
+                      <option value="percent">Percent off</option>
+                      <option value="price">Fixed price (৳)</option>
+                    </select>
+                  </div>
+                  {ruleRewardMode === "percent" ? (
+                    <div className="grid gap-1">
+                      <span className="text-xs text-muted-foreground">Reward %</span>
+                      <Input type="number" min={1} max={100} value={ruleDiscountPercent} onChange={(e) => setRuleDiscountPercent(e.target.value)} />
+                    </div>
+                  ) : ruleRewardMode === "price" ? (
+                    <div className="grid gap-1">
+                      <span className="text-xs text-muted-foreground">Reward price (৳)</span>
+                      <Input type="number" min={0} step="0.01" value={ruleRewardPrice} onChange={(e) => setRuleRewardPrice(e.target.value)} />
+                    </div>
+                  ) : null}
+                </div>
+                <div className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">Max rewards per cart</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder="∞"
+                    className="w-32"
+                    value={bundleMaxApps}
+                    onChange={(e) => setBundleMaxApps(e.target.value)}
+                  />
                 </div>
               </div>
             ) : null}
@@ -632,6 +931,162 @@ export function PromotionsPage() {
                 </div>
               </div>
             ) : null}
+            {promoKind === "bundle" ? (
+              <div className="grid gap-2 rounded-md border border-dashed p-2">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Bundle components — the customer buys exactly these; stock,
+                  batches and serials follow each item as usual
+                </span>
+                {bundleComponents.map((comp, idx) => (
+                  <div key={idx} className="grid grid-cols-[1fr_5.5rem_auto] items-center gap-2">
+                    <select
+                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                      value={comp.variantId}
+                      onChange={(e) =>
+                        setBundleComponents(
+                          bundleComponents.map((c, i) =>
+                            i === idx ? { ...c, variantId: e.target.value } : c,
+                          ),
+                        )
+                      }
+                    >
+                      <option value="">Select product…</option>
+                      {variantOptions.map((v) => (
+                        <option key={v.id} value={String(v.id)}>
+                          {v.label}
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      aria-label="Quantity"
+                      value={comp.quantity}
+                      onChange={(e) =>
+                        setBundleComponents(
+                          bundleComponents.map((c, i) =>
+                            i === idx ? { ...c, quantity: e.target.value } : c,
+                          ),
+                        )
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setBundleComponents(bundleComponents.filter((_, i) => i !== idx))
+                      }
+                    >
+                      ✕
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="justify-self-start"
+                  onClick={() =>
+                    setBundleComponents([...bundleComponents, { variantId: "", quantity: "1" }])
+                  }
+                >
+                  Add component
+                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">Pricing</span>
+                    <select
+                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                      value={bundlePriceMode}
+                      onChange={(e) =>
+                        setBundlePriceMode(e.target.value as typeof bundlePriceMode)
+                      }
+                    >
+                      <option value="price">Special package price (৳)</option>
+                      <option value="percent">Percent off the components</option>
+                    </select>
+                  </div>
+                  {bundlePriceMode === "price" ? (
+                    <div className="grid gap-1">
+                      <span className="text-xs text-muted-foreground">Bundle price (৳)</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={bundlePriceValue}
+                        onChange={(e) => setBundlePriceValue(e.target.value)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="grid gap-1">
+                      <span className="text-xs text-muted-foreground">Discount %</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={bundlePercentValue}
+                        onChange={(e) => setBundlePercentValue(e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">Max bundles per cart</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      placeholder="∞"
+                      value={bundleMaxApps}
+                      onChange={(e) => setBundleMaxApps(e.target.value)}
+                    />
+                  </div>
+                  {bundleNormalTotal > 0 && (
+                    <div className="self-end pb-2 text-xs text-muted-foreground">
+                      Normal total {formatCurrency(bundleNormalTotal)}
+                      {bundlePriceMode === "price" && Number(bundlePriceValue) > 0 && (
+                        <>
+                          {" "}· Bundle {formatCurrency(Number(bundlePriceValue))} · Save{" "}
+                          {formatCurrency(
+                            Math.max(0, bundleNormalTotal - Number(bundlePriceValue)),
+                          )}
+                        </>
+                      )}
+                      {bundlePriceMode === "percent" && Number(bundlePercentValue) > 0 && (
+                        <>
+                          {" "}· After{" "}
+                          {formatCurrency(
+                            bundleNormalTotal *
+                              (1 - Math.min(100, Number(bundlePercentValue)) / 100),
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            <div className="grid gap-1.5">
+              <span className="text-sm font-medium">Campaign</span>
+              <select
+                className="rounded-md border bg-background p-2 text-sm"
+                value={campaignId}
+                onChange={(e) => setCampaignId(e.target.value)}
+              >
+                <option value="">No campaign (standalone)</option>
+                {campaigns.map((c) => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.name}
+                    {c.isActive ? "" : " (inactive)"}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-muted-foreground">
+                An inactive or expired campaign suppresses this promotion.
+              </span>
+            </div>
             <div className="grid gap-1.5 rounded-md border border-dashed p-2">
               <span className="text-xs font-medium text-muted-foreground">
                 Flash window (Asia/Dhaka time)

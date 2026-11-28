@@ -3,6 +3,7 @@ import * as pricingApi from "../pricing.api";
 import type {
   PricingRuleInput,
   PricingSettings,
+  CampaignInput,
   PromotionInput,
 } from "../pricing.types";
 
@@ -90,6 +91,50 @@ export function usePriceHistory(filters: { variantId?: number; page: number; pag
 export const promotionKeys = {
   all: ["promotions"] as const,
 };
+
+// --- Campaigns (Bundle & Combo Phase 4) -------------------------------------
+
+const campaignKeys = {
+  all: [...pricingKeys.all, "campaigns"] as const,
+};
+
+export function useCampaigns() {
+  return useQuery({
+    queryKey: campaignKeys.all,
+    queryFn: pricingApi.listCampaignsApi,
+  });
+}
+
+export function useCreateCampaign() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CampaignInput) => pricingApi.createCampaignApi(payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: campaignKeys.all });
+    },
+  });
+}
+
+export function useUpdateCampaign() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: Partial<CampaignInput> }) =>
+      pricingApi.updateCampaignApi(id, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: campaignKeys.all });
+    },
+  });
+}
+
+export function useDeleteCampaign() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => pricingApi.deleteCampaignApi(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: campaignKeys.all });
+    },
+  });
+}
 
 export function usePromotions() {
   return useQuery({

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/schema/index.js";
 import { categories } from "../../db/schema/categories.js";
 import { products } from "../../db/schema/products.js";
@@ -6,7 +6,10 @@ import { productVariants } from "../../db/schema/productVariants.js";
 import {
   customerGroups,
   pricingPromotions,
+  promotionBundleComponents,
+  promotionCampaigns,
   promotionCustomerGroups,
+  promotionUsage,
 } from "../../db/schema/pricing.js";
 import {
   BadRequestError,
@@ -15,7 +18,9 @@ import {
 import { recordAudit } from "../../services/audit.js";
 import { getBusinessTimezone } from "../../services/ledger.js";
 import { businessLocalToUtcWall } from "../../utils/money.js";
+import { roundMoney } from "../../utils/roundMoney.js";
 import { promotionStrictSchema } from "./promotions.validation.js";
+import { dhakaNow } from "./pricing.salePromotions.js";
 
 /**
  * Auto-applied promotions CRUD (Phase 5, approved design §13.6). Promotions
@@ -75,6 +80,24 @@ async function assertGroupsOwnership(businessId: number, groupIds: number[]): Pr
   }
 }
 
+async function assertCampaignOwnership(
+  businessId: number,
+  campaignId: number | null | undefined,
+): Promise<void> {
+  if (campaignId == null) return;
+  const [owned] = await db
+    .select({ id: promotionCampaigns.id })
+    .from(promotionCampaigns)
+    .where(
+      and(
+        eq(promotionCampaigns.id, campaignId),
+        eq(promotionCampaigns.businessId, businessId),
+      ),
+    )
+    .limit(1);
+  if (!owned) throw new NotFoundError("Campaign does not exist in this business.");
+}
+
 async function replaceGroupEligibility(
   businessId: number,
   promotionId: number,
@@ -93,6 +116,137 @@ async function replaceGroupEligibility(
       groupIds.map((groupId) => ({ businessId, promotionId, groupId })),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Bundle components (Bundle & Combo Phase 1): the component multiset of a
+// `bundle` promotion. Components must belong to the business (composite FK
+// + explicit ownership assert) and cannot repeat within one bundle.
+// ---------------------------------------------------------------------------
+
+interface ComponentInput {
+  variantId: number;
+  quantity: number;
+}
+
+export interface PromotionComponent {
+  variantId: number;
+  quantity: number;
+  sku: string | null;
+  productName: string | null;
+  sellingPrice: number;
+}
+
+async function assertComponentsOwnership(
+  businessId: number,
+  components: ComponentInput[],
+): Promise<void> {
+  if (components.length === 0) {
+    throw new BadRequestError("A bundle needs at least one component.");
+  }
+  const variantIds = [...new Set(components.map((c) => c.variantId))];
+  if (variantIds.length !== components.length) {
+    throw new BadRequestError(
+      "A bundle cannot list the same variant twice — merge its quantities.",
+    );
+  }
+  const owned = await db
+    .select({ id: productVariants.id })
+    .from(productVariants)
+    .where(
+      and(
+        eq(productVariants.businessId, businessId),
+        inArray(productVariants.id, variantIds),
+      ),
+    );
+  if (owned.length !== variantIds.length) {
+    throw new NotFoundError(
+      "One or more bundle components do not exist in this business.",
+    );
+  }
+}
+
+async function replaceComponents(
+  businessId: number,
+  promotionId: number,
+  components: ComponentInput[],
+): Promise<void> {
+  await db
+    .delete(promotionBundleComponents)
+    .where(
+      and(
+        eq(promotionBundleComponents.promotionId, promotionId),
+        eq(promotionBundleComponents.businessId, businessId),
+      ),
+    );
+  if (components.length > 0) {
+    await db.insert(promotionBundleComponents).values(
+      components.map((c) => ({
+        businessId,
+        promotionId,
+        variantId: c.variantId,
+        quantity: c.quantity,
+      })),
+    );
+  }
+}
+
+async function loadComponents(
+  businessId: number,
+  promotionIds: number[],
+): Promise<Map<number, PromotionComponent[]>> {
+  const byPromo = new Map<number, PromotionComponent[]>();
+  if (promotionIds.length === 0) return byPromo;
+  const rows = await db
+    .select({
+      promotionId: promotionBundleComponents.promotionId,
+      variantId: promotionBundleComponents.variantId,
+      quantity: promotionBundleComponents.quantity,
+      sku: productVariants.sku,
+      productName: products.name,
+      sellingPrice: productVariants.sellingPrice,
+    })
+    .from(promotionBundleComponents)
+    .innerJoin(
+      productVariants,
+      and(
+        eq(productVariants.id, promotionBundleComponents.variantId),
+        eq(productVariants.businessId, promotionBundleComponents.businessId),
+      ),
+    )
+    .innerJoin(
+      products,
+      and(
+        eq(products.id, productVariants.productId),
+        eq(products.businessId, productVariants.businessId),
+      ),
+    )
+    .where(
+      and(
+        eq(promotionBundleComponents.businessId, businessId),
+        inArray(promotionBundleComponents.promotionId, promotionIds),
+      ),
+    );
+  for (const row of rows) {
+    const list = byPromo.get(row.promotionId) ?? [];
+    list.push({
+      variantId: row.variantId,
+      quantity: Number(row.quantity),
+      sku: row.sku,
+      productName: row.productName,
+      sellingPrice: Number(row.sellingPrice),
+    });
+    byPromo.set(row.promotionId, list);
+  }
+  return byPromo;
+}
+
+/** Normal total of a component list (display/savings preview; the engine
+ * prices from live cart lines at sale time). */
+function componentTotalOf(components: PromotionComponent[]): number {
+  return roundMoney(
+    components.reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0),
+  );
 }
 
 async function loadGroupEligibility(
@@ -135,6 +289,7 @@ export async function listPromotions(businessId: number) {
       categoryName: categories.name,
       productName: products.name,
       sku: productVariants.sku,
+      campaignName: promotionCampaigns.name,
     })
     .from(pricingPromotions)
     .leftJoin(
@@ -156,6 +311,13 @@ export async function listPromotions(businessId: number) {
       and(
         eq(productVariants.id, pricingPromotions.variantId),
         eq(productVariants.businessId, pricingPromotions.businessId),
+      ),
+    )
+    .leftJoin(
+      promotionCampaigns,
+      and(
+        eq(promotionCampaigns.id, pricingPromotions.campaignId),
+        eq(promotionCampaigns.businessId, pricingPromotions.businessId),
       ),
     )
     .where(eq(pricingPromotions.businessId, businessId))
@@ -190,17 +352,29 @@ export async function listPromotions(businessId: number) {
     list.push({ id: row.groupId, name: row.groupName });
     groupsByPromo.set(row.promotionId, list);
   }
-  return rows.map(({ promotion, categoryName, productName, sku }) => ({
-    ...promotion,
-    discountValue: Number(promotion.discountValue),
-    minOrderValue: Number(promotion.minOrderValue),
-    maxDiscountAmount:
-      promotion.maxDiscountAmount == null
-        ? null
-        : Number(promotion.maxDiscountAmount),
-    scopeLabel: scopeLabelOf({ ...promotion, categoryName, productName, sku }),
-    customerGroups: groupsByPromo.get(promotion.id) ?? [],
-  }));
+  const componentsByPromo = await loadComponents(
+    businessId,
+    rows.map((r) => r.promotion.id),
+  );
+  return rows.map(({ promotion, categoryName, productName, sku, campaignName }) => {
+    const components = componentsByPromo.get(promotion.id) ?? [];
+    return {
+      ...promotion,
+      discountValue: Number(promotion.discountValue),
+      minOrderValue: Number(promotion.minOrderValue),
+      maxDiscountAmount:
+        promotion.maxDiscountAmount == null
+          ? null
+          : Number(promotion.maxDiscountAmount),
+      scopeLabel: scopeLabelOf({ ...promotion, categoryName, productName, sku }),
+      campaignName: campaignName ?? null,
+      customerGroups: groupsByPromo.get(promotion.id) ?? [],
+      components,
+      ...(components.length > 0
+        ? { componentTotal: componentTotalOf(components) }
+        : {}),
+    };
+  });
 }
 
 /**
@@ -243,7 +417,15 @@ export async function createPromotion(
     maxDiscountAmount?: number | null | undefined;
     canStackWithGroupDiscount?: boolean | undefined;
     canStackWithCoupons?: boolean | undefined;
-    promoKind?: "discount" | "bogo" | "buy_x_get_y" | "mix_match" | "quantity_tier" | undefined;
+    promoKind?:
+      | "discount"
+      | "bogo"
+      | "buy_x_get_y"
+      | "mix_match"
+      | "quantity_tier"
+      | "bundle"
+      | "spend_get"
+      | undefined;
     rule?: Record<string, unknown> | null | undefined;
     daysOfWeek?: number[] | null | undefined;
     startTime?: string | null | undefined;
@@ -254,6 +436,8 @@ export async function createPromotion(
     priority?: number | undefined;
     isActive?: boolean | undefined;
     groupIds?: number[] | undefined;
+    components?: ComponentInput[] | undefined;
+    campaignId?: number | null | undefined;
   },
 ) {
   const scope = {
@@ -261,17 +445,35 @@ export async function createPromotion(
     productId: payload.productId ?? null,
     variantId: payload.variantId ?? null,
   };
+  const isBundle = (payload.promoKind as string | undefined) === "bundle";
+  // Rule-target kinds carry their pricing in `rule`; the generic discount
+  // columns are vestigial for them and normalized out of the payload.
+  const isRewardTargetKind =
+    isBundle || (payload.promoKind as string | undefined) === "spend_get";
+  if (payload.components !== undefined && !isBundle) {
+    throw new BadRequestError(
+      "Bundle components only apply to 'bundle' promotions.",
+    );
+  }
   await assertScopeOwnership(businessId, scope);
   const groupIds = payload.groupIds ?? [];
   await assertGroupsOwnership(businessId, groupIds);
+  await assertCampaignOwnership(businessId, payload.campaignId);
+  const discountType = isRewardTargetKind
+    ? ("fixed" as const)
+    : payload.discountType;
+  const discountValue = isRewardTargetKind ? 0 : payload.discountValue;
+  if (isBundle) {
+    await assertComponentsOwnership(businessId, payload.components ?? []);
+  }
   const [created] = await db
     .insert(pricingPromotions)
     .values({
       businessId,
       name: payload.name,
       ...scope,
-      discountType: payload.discountType,
-      discountValue: payload.discountValue,
+      discountType,
+      discountValue,
       startsAt: (await resolveDateBound(businessId, payload.startsAt, "start")) ?? null,
       endsAt: (await resolveDateBound(businessId, payload.endsAt, "end")) ?? null,
       minQuantity: payload.minQuantity ?? null,
@@ -288,18 +490,27 @@ export async function createPromotion(
       usageLimit: (payload.usageLimit as number | null | undefined) ?? null,
       perCustomerLimit: (payload.perCustomerLimit as number | null | undefined) ?? null,
       priority: (payload.priority as number | undefined) ?? 0,
+      campaignId: (payload.campaignId as number | null | undefined) ?? null,
       isActive: payload.isActive ?? true,
     })
     .returning();
   if (!created) throw new Error("Promotion insert returned no row.");
   await replaceGroupEligibility(businessId, created.id, groupIds);
+  if (isBundle) {
+    await replaceComponents(businessId, created.id, payload.components ?? []);
+  }
   recordAudit({
     businessId,
     actorUserId,
     action: "pricing.promotion.create",
     entityType: "pricing_promotion",
     entityId: created.id,
-    metadata: { name: created.name, discountType: created.discountType, value: created.discountValue },
+    metadata: {
+      name: created.name,
+      discountType: created.discountType,
+      value: created.discountValue,
+      ...(isBundle ? { promoKind: "bundle", components: payload.components ?? [] } : {}),
+    },
   });
   return { ...created, customerGroups: groupIds.map((id) => ({ id })) };
 }
@@ -308,7 +519,10 @@ export async function updatePromotion(
   businessId: number,
   actorUserId: number | null,
   promotionId: number,
-  payload: Record<string, unknown> & { groupIds?: number[] | undefined },
+  payload: Record<string, unknown> & {
+    groupIds?: number[] | undefined;
+    components?: ComponentInput[] | undefined;
+  },
 ) {
   const [existing] = await db
     .select()
@@ -399,8 +613,20 @@ export async function updatePromotion(
         ? (payload.perCustomerLimit as number | null)
         : (existing.perCustomerLimit ?? null),
     priority: (payload.priority as number | undefined) ?? existing.priority ?? 0,
+    campaignId:
+      payload.campaignId !== undefined
+        ? (payload.campaignId as number | null)
+        : (existing.campaignId ?? null),
     isActive: (payload.isActive as boolean | undefined) ?? existing.isActive,
   };
+  // Rule-target kinds carry their price in `rule`; normalize the vestigial
+  // discount columns after the merge so switching kinds cannot leave stale
+  // data.
+  const mergedIsBundle = merged.promoKind === "bundle";
+  if (mergedIsBundle || merged.promoKind === "spend_get") {
+    merged.discountType = "fixed";
+    merged.discountValue = 0;
+  }
   const parsed = promotionStrictSchema.safeParse(merged);
   if (!parsed.success) {
     throw new BadRequestError(
@@ -412,6 +638,14 @@ export async function updatePromotion(
   await assertScopeOwnership(businessId, merged);
   if (payload.groupIds !== undefined) {
     await assertGroupsOwnership(businessId, payload.groupIds);
+  }
+  if (payload.components !== undefined && !mergedIsBundle) {
+    throw new BadRequestError(
+      "Bundle components only apply to 'bundle' promotions.",
+    );
+  }
+  if (payload.components !== undefined) {
+    await assertComponentsOwnership(businessId, payload.components);
   }
   const [updated] = await db
     .update(pricingPromotions)
@@ -438,6 +672,7 @@ export async function updatePromotion(
       usageLimit: merged.usageLimit,
       perCustomerLimit: merged.perCustomerLimit,
       priority: merged.priority,
+      campaignId: merged.campaignId,
       isActive: merged.isActive,
       updatedAt: new Date(),
     })
@@ -451,17 +686,36 @@ export async function updatePromotion(
     await replaceGroupEligibility(businessId, promotionId, payload.groupIds);
     customerGroupsOut = payload.groupIds.map((id) => ({ id }));
   }
+  let componentsOut: PromotionComponent[] | undefined;
+  if (payload.components !== undefined) {
+    await replaceComponents(businessId, promotionId, payload.components);
+  } else if (!mergedIsBundle && (existing.promoKind as string | undefined) === "bundle") {
+    // Kind switched away from bundle — the component rows lose their
+    // meaning, so they are dropped instead of lingering.
+    await replaceComponents(businessId, promotionId, []);
+  }
+  if (mergedIsBundle) {
+    const loaded = await loadComponents(businessId, [promotionId]);
+    componentsOut = loaded.get(promotionId) ?? [];
+  }
   recordAudit({
     businessId,
     actorUserId,
     action: "pricing.promotion.update",
     entityType: "pricing_promotion",
     entityId: promotionId,
-    metadata: { name: updated.name, isActive: updated.isActive },
+    metadata: {
+      name: updated.name,
+      isActive: updated.isActive,
+      ...(payload.components !== undefined
+        ? { components: payload.components }
+        : {}),
+    },
   });
   return {
     ...updated,
     ...(customerGroupsOut ? { customerGroups: customerGroupsOut } : {}),
+    ...(componentsOut ? { components: componentsOut } : {}),
   };
 }
 
@@ -488,7 +742,188 @@ export async function getPromotion(businessId: number, promotionId: number) {
     .limit(1);
   if (!row) throw new NotFoundError("Promotion not found.");
   const groupIds = await loadGroupEligibility(businessId, promotionId);
-  return { ...row.promotion, customerGroups: groupIds.map((id) => ({ id })) };
+  const components = await loadComponents(businessId, [promotionId]);
+  const componentList = components.get(promotionId) ?? [];
+  let campaignName: string | null = null;
+  if (row.promotion.campaignId != null) {
+    const [campaign] = await db
+      .select({ name: promotionCampaigns.name })
+      .from(promotionCampaigns)
+      .where(
+        and(
+          eq(promotionCampaigns.id, row.promotion.campaignId),
+          eq(promotionCampaigns.businessId, businessId),
+        ),
+      )
+      .limit(1);
+    campaignName = campaign?.name ?? null;
+  }
+  return {
+    ...row.promotion,
+    customerGroups: groupIds.map((id) => ({ id })),
+    campaignName,
+    components: componentList,
+    ...(componentList.length > 0
+      ? { componentTotal: componentTotalOf(componentList) }
+      : {}),
+  };
+}
+
+/**
+ * POS-facing active bundles (Bundle & Combo Phase 2): the bundle-kind
+ * promotions that could apply RIGHT NOW, with their components so the POS
+ * can offer one-tap "add bundle" and complete-the-bundle actions. Gated
+ * pos.view (promotions are store configuration — cashiers never hold
+ * promotions.view). Mirrors the engine's window/location/usage filters
+ * (flash windows evaluated in Asia/Dhaka) so a card never advertises a
+ * bundle that cannot apply; cart-dependent conditions (minimums, group
+ * restrictions, stacking consent) stay the engine's job at quote time.
+ */
+export async function listActiveBundlePromotions(
+  businessId: number,
+  locationId: number | null,
+) {
+  const rows = await db
+    .select()
+    .from(pricingPromotions)
+    .where(
+      and(
+        eq(pricingPromotions.businessId, businessId),
+        eq(pricingPromotions.isActive, true),
+        eq(pricingPromotions.promoKind, "bundle"),
+      ),
+    );
+  if (rows.length === 0) return [];
+
+  const now = new Date();
+  const dhaka = dhakaNow(now);
+  // Campaign gating (Phase 4): bundles in inactive/expired/out-of-location
+  // campaigns are not advertised.
+  const bundleCampaignIds = [
+    ...new Set(
+      rows
+        .map((r) => r.campaignId)
+        .filter((id): id is number => typeof id === "number"),
+    ),
+  ];
+  const campaignsById = new Map<
+    number,
+    {
+      isActive: boolean;
+      startsAt: Date | null;
+      endsAt: Date | null;
+      locationId: number | null;
+    }
+  >();
+  if (bundleCampaignIds.length > 0) {
+    const campaignRows = await db
+      .select({
+        id: promotionCampaigns.id,
+        isActive: promotionCampaigns.isActive,
+        startsAt: promotionCampaigns.startsAt,
+        endsAt: promotionCampaigns.endsAt,
+        locationId: promotionCampaigns.locationId,
+      })
+      .from(promotionCampaigns)
+      .where(
+        and(
+          eq(promotionCampaigns.businessId, businessId),
+          inArray(promotionCampaigns.id, bundleCampaignIds),
+        ),
+      );
+    for (const c of campaignRows) {
+      campaignsById.set(c.id, {
+        isActive: c.isActive,
+        startsAt: c.startsAt,
+        endsAt: c.endsAt,
+        locationId: c.locationId ?? null,
+      });
+    }
+  }
+  const candidateIds: number[] = [];
+  for (const row of rows) {
+    if (row.startsAt && row.startsAt > now) continue;
+    if (row.endsAt && row.endsAt < now) continue;
+    if (row.locationId != null && row.locationId !== locationId) continue;
+    if (row.campaignId != null) {
+      const campaign = campaignsById.get(row.campaignId);
+      if (
+        !campaign ||
+        !campaign.isActive ||
+        (campaign.startsAt && campaign.startsAt > now) ||
+        (campaign.endsAt && campaign.endsAt < now) ||
+        (campaign.locationId != null && campaign.locationId !== locationId)
+      ) {
+        continue;
+      }
+    }
+    if (
+      row.daysOfWeek != null &&
+      Array.isArray(row.daysOfWeek) &&
+      row.daysOfWeek.length > 0 &&
+      !row.daysOfWeek.includes(dhaka.dayOfWeek)
+    ) {
+      continue;
+    }
+    if (row.startTime != null && row.endTime != null) {
+      const inWindow =
+        row.startTime <= row.endTime
+          ? dhaka.hhmm >= row.startTime && dhaka.hhmm <= row.endTime
+          : dhaka.hhmm >= row.startTime || dhaka.hhmm <= row.endTime; // overnight
+      if (!inWindow) continue;
+    }
+    candidateIds.push(row.id);
+  }
+  if (candidateIds.length === 0) return [];
+
+  // Fully redeemed bundles are not advertised (per-customer limits are
+  // cart/customer-dependent — the engine governs those at quote time).
+  const usageRows = await db
+    .select({
+      promotionId: promotionUsage.promotionId,
+      total: sql<string>`COUNT(*)`,
+    })
+    .from(promotionUsage)
+    .where(
+      and(
+        eq(promotionUsage.businessId, businessId),
+        inArray(promotionUsage.promotionId, candidateIds),
+      ),
+    )
+    .groupBy(promotionUsage.promotionId);
+  const usageTotals = new Map<number, number>();
+  for (const row of usageRows) usageTotals.set(row.promotionId, Number(row.total));
+
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const liveIds = candidateIds.filter((id) => {
+    const limit = byId.get(id)?.usageLimit;
+    return limit == null || (usageTotals.get(id) ?? 0) < limit;
+  });
+  if (liveIds.length === 0) return [];
+
+  const componentsByPromo = await loadComponents(businessId, liveIds);
+  const out: {
+    id: number;
+    name: string;
+    rule: Record<string, unknown> | null;
+    endsAt: Date | null;
+    components: PromotionComponent[];
+    normalTotal: number;
+  }[] = [];
+  for (const id of liveIds) {
+    const row = byId.get(id)!;
+    const components = componentsByPromo.get(id) ?? [];
+    if (components.length === 0) continue; // malformed config — never advertise
+    out.push({
+      id: row.id,
+      name: row.name,
+      rule: (row.rule ?? null) as Record<string, unknown> | null,
+      endsAt: row.endsAt,
+      components,
+      normalTotal: componentTotalOf(components),
+    });
+  }
+  return out;
 }
 
 export type { PromotionRow };

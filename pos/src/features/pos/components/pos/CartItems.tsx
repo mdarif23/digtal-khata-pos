@@ -10,6 +10,7 @@ import {
   useProductsQuery,
 } from "@/features/products/hooks/useProducts.js";
 import { useCartStore } from "@/features/pos/stores/useCartStore.js";
+import { BundleCompleteButton } from "./BundleCards.js";
 import type {
   CustomerDue,
   ShowCustomerInfoProps,
@@ -1075,9 +1076,12 @@ function CartTextModal({
       {"nearMisses" in totals && totals.nearMisses && totals.nearMisses.length > 0 && (
         <div className="grid gap-0.5 py-1">
           {totals.nearMisses.slice(0, 3).map((offer) => (
-            <div key={offer.id} className="flex justify-between text-xs text-warning">
+            <div key={offer.id} className="flex items-center justify-between gap-2 text-xs text-warning">
               <span className="font-medium">{offer.name}</span>
-              <span>{offer.reason}</span>
+              <span className="flex items-center gap-1.5">
+                <span>{offer.reason}</span>
+                <BundleCompleteButton promotionId={offer.id} />
+              </span>
             </div>
           ))}
         </div>

@@ -2358,6 +2358,13 @@ async function applySaleRefund(
       Math.max(0, roundMoney(Number(item.lineTotal) + delta * share)),
     );
   }
+  // F1 fix (Bundle & Combo Phase 5): composite lines consumed their
+  // COMPONENTS' stock rows at sale time (the parent is unstocked) — the
+  // BOM map drives symmetric component restores on refund/void below.
+  const bomByVariant = await getBomsForVariants(
+    businessId,
+    items.map((i) => i.variantId),
+  );
   // Per-line partial returns (UOM Phase 5): a ledger of previously
   // returned quantities per sale item replaces the once-only guard.
   const priorReturnedRows = await tx
@@ -2668,37 +2675,78 @@ async function applySaleRefund(
     if (options.disposition !== "restock") continue;
     restockedCost += Number(item.costAtSale) * returnedQuantity;
 
-    const [stock] = await tx
-      .select()
-      .from(inventoryStock)
-      .where(
-        and(
-          eq(inventoryStock.variantId, item.variantId),
-          eq(inventoryStock.businessId, businessId),
-          // Returns restock the sale's own location — never another store's.
-          ...(sale.locationId !== null
-            ? [eq(inventoryStock.locationId, sale.locationId)]
-            : []),
-        ),
-      )
-      .for("update");
-    if (!stock) {
-      throw new NotFoundError(
-        `No inventory record exists for variant ${item.variantId}`,
-      );
-    }
+    // F1 fix: composite lines never decremented the parent — restoring the
+    // parent's stock row here used to fabricate parent stock (and crash on
+    // assemble-on-sale parents with no row) while component rows drifted.
+    // Components are restored via the BOM below; the RETURN- fallback batch
+    // on the parent variant stays value-only.
+    const isComposite = bomByVariant.has(item.variantId);
+    // Location the restock lands at: the found stock row's own location for
+    // regular lines (the sale's own location — never another store's), the
+    // sale's location for composites (no parent row to look up).
+    let restockLocationId = sale.locationId;
+    if (isComposite) {
+      const components = bomByVariant.get(item.variantId)!;
+      const share =
+        Number(item.quantity) > 0
+          ? returnedQuantity / Number(item.quantity)
+          : 0;
+      for (const component of components) {
+        const required = roundMoney(
+          Number(item.quantity) * component.quantity * (1 + component.wastePercent / 100),
+        );
+        const restoreQty = roundMoney(required * share);
+        if (restoreQty <= 0) continue;
+        await tx
+          .update(inventoryStock)
+          .set({
+            quantity: sql`coalesce(${inventoryStock.quantity}, 0) + ${restoreQty}`,
+          })
+          .where(
+            and(
+              eq(inventoryStock.variantId, component.componentVariantId),
+              eq(inventoryStock.businessId, businessId),
+              // Restock the sale's own location — never another store's.
+              ...(sale.locationId !== null
+                ? [eq(inventoryStock.locationId, sale.locationId)]
+                : []),
+            ),
+          );
+      }
+    } else {
+      const [stock] = await tx
+        .select()
+        .from(inventoryStock)
+        .where(
+          and(
+            eq(inventoryStock.variantId, item.variantId),
+            eq(inventoryStock.businessId, businessId),
+            // Returns restock the sale's own location — never another store's.
+            ...(sale.locationId !== null
+              ? [eq(inventoryStock.locationId, sale.locationId)]
+              : []),
+          ),
+        )
+        .for("update");
+      if (!stock) {
+        throw new NotFoundError(
+          `No inventory record exists for variant ${item.variantId}`,
+        );
+      }
+      restockLocationId = stock.locationId;
 
-    await tx
-      .update(inventoryStock)
-      .set({
-        quantity: sql`coalesce(${inventoryStock.quantity}, 0) + ${returnedQuantity}`,
-      })
-      .where(
-        and(
-          eq(inventoryStock.id, stock.id),
-          eq(inventoryStock.businessId, businessId),
-        ),
-      );
+      await tx
+        .update(inventoryStock)
+        .set({
+          quantity: sql`coalesce(${inventoryStock.quantity}, 0) + ${returnedQuantity}`,
+        })
+        .where(
+          and(
+            eq(inventoryStock.id, stock.id),
+            eq(inventoryStock.businessId, businessId),
+          ),
+        );
+    }
 
     // P3 Phase 2 (F.6): restore the ORIGINAL batches the sale consumed
     // (sale_item_batch_consumptions provenance; serials carry their own
@@ -2875,7 +2923,7 @@ async function applySaleRefund(
         .values({
           businessId,
           variantId: item.variantId,
-          locationId: stock.locationId,
+          locationId: restockLocationId,
           batchNumber: `RETURN-${refund.id}-${item.id}`,
           purchasePrice: item.costAtSale,
           quantityReceived: fallbackQuantity,
@@ -2905,7 +2953,7 @@ async function applySaleRefund(
       await tx.insert(inventoryMovements).values({
         businessId,
         variantId: item.variantId,
-        locationId: stock.locationId,
+        locationId: restockLocationId,
         batchId: restored.batchId,
         movementType: "return",
         quantity: restored.quantity,
@@ -4484,11 +4532,17 @@ export async function cancelSale(
     // pairing batchIds with variants that never belonged together.
     const lotRestores: { batchId: number; quantity: number; variantId: number }[] = [];
     let fallbackQuantity = 0;
+    // F1 fix (Bundle & Combo Phase 5): composite lines consumed their
+    // COMPONENTS' stock rows at sale time — voiding used to fabricate
+    // parent stock and cap component-batch restores at the parent's unit
+    // count. Components restore via the BOM (symmetric with sale time);
+    // provenance batches restore in full.
+    const voidBomByVariant = await getBomsForVariants(
+      businessId,
+      items.map((i) => i.variantId),
+    );
+    let voidFallbackVariantId: number | null = null;
     for (const item of items) {
-      variantRestores.set(
-        item.variantId,
-        (variantRestores.get(item.variantId) ?? 0) + Number(item.quantity),
-      );
       const consumptionRows = await tx
         .select({
           batchId: saleItemBatchConsumptions.batchId,
@@ -4497,6 +4551,34 @@ export async function cancelSale(
         .from(saleItemBatchConsumptions)
         .where(eq(saleItemBatchConsumptions.saleItemId, item.id))
         .orderBy(desc(saleItemBatchConsumptions.quantity));
+      if (voidBomByVariant.has(item.variantId)) {
+        const components = voidBomByVariant.get(item.variantId)!;
+        for (const component of components) {
+          const required = roundMoney(
+            Number(item.quantity) * component.quantity * (1 + component.wastePercent / 100),
+          );
+          if (required <= 0) continue;
+          variantRestores.set(
+            component.componentVariantId,
+            (variantRestores.get(component.componentVariantId) ?? 0) + required,
+          );
+        }
+        // The provenance rows ARE the component consumption — restore every
+        // lot fully; nothing belongs in the VOID fallback batch.
+        for (const row of consumptionRows) {
+          lotRestores.push({
+            batchId: row.batchId,
+            quantity: Number(row.quantity),
+            variantId: item.variantId,
+          });
+        }
+        continue;
+      }
+      voidFallbackVariantId = item.variantId;
+      variantRestores.set(
+        item.variantId,
+        (variantRestores.get(item.variantId) ?? 0) + Number(item.quantity),
+      );
       let unallocated = Number(item.quantity);
       for (const row of consumptionRows) {
         if (unallocated <= 0) break;
@@ -4525,7 +4607,7 @@ export async function cancelSale(
         .insert(inventoryBatches)
         .values({
           businessId,
-          variantId: items[0]?.variantId ?? 0,
+          variantId: voidFallbackVariantId ?? items[0]?.variantId ?? 0,
           locationId,
           batchNumber: `VOID-${saleId}`,
           purchasePrice: 0,

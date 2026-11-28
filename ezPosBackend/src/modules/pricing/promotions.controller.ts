@@ -27,6 +27,27 @@ export async function listPromotions(req: Request, res: Response) {
   }
 }
 
+/**
+ * POS-facing active bundles (Bundle & Combo Phase 2): bundle-kind
+ * promotions that could apply right now, with components for one-tap add.
+ * Gated pos.view like the quote endpoint — cashiers never hold
+ * promotions.view. The active location scopes location-restricted bundles.
+ */
+export async function listActiveBundlePromotions(req: Request, res: Response) {
+  try {
+    const raw = req.query.locationId;
+    const parsed =
+      typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : null;
+    const rows = await promotionsService.listActiveBundlePromotions(
+      getBusinessId(req),
+      parsed,
+    );
+    return res.status(200).json({ success: true, data: rows });
+  } catch (err) {
+    return sendSafeError(res, err, "Unable to list the active bundles.");
+  }
+}
+
 export async function getPromotion(req: Request, res: Response) {
   try {
     const id = parseId(req.params.id);

@@ -13,6 +13,8 @@ import type {
   PricingRule,
   PricingRuleInput,
   PricingSettings,
+  Campaign,
+  CampaignInput,
   Promotion,
   PromotionInput,
   PromotionPerformanceRow,
@@ -135,6 +137,35 @@ export async function updatePromotionApi(
 
 export async function deletePromotionApi(id: number): Promise<void> {
   await api.delete(`/promotions/${id}`);
+}
+
+// --- Campaigns (Bundle & Combo Phase 4) -------------------------------------
+
+export async function listCampaignsApi(): Promise<Campaign[]> {
+  const res = await api.get<Envelope<Campaign[]>>("/campaigns");
+  return res.data.data;
+}
+
+export async function getCampaignApi(id: number): Promise<Campaign> {
+  const res = await api.get<Envelope<Campaign>>(`/campaigns/${id}`);
+  return res.data.data;
+}
+
+export async function createCampaignApi(payload: CampaignInput): Promise<Campaign> {
+  const res = await api.post<Envelope<Campaign>>("/campaigns", payload);
+  return res.data.data;
+}
+
+export async function updateCampaignApi(
+  id: number,
+  payload: Partial<CampaignInput>,
+): Promise<Campaign> {
+  const res = await api.patch<Envelope<Campaign>>(`/campaigns/${id}`, payload);
+  return res.data.data;
+}
+
+export async function deleteCampaignApi(id: number): Promise<void> {
+  await api.delete(`/campaigns/${id}`);
 }
 
 // --- Customer groups (Phase 4 endpoints, Phase 5-6 UI) --------------------------
